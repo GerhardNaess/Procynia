@@ -2,9 +2,11 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ActionDialog from '../../../Components/App/ActionDialog';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import { resolveWikiFindingSecondaryText } from './wikiQualityChecks';
+import { validateSourceFile } from './wikiSourceUpload';
 import {
     RUN_TIMELINE_STEPS,
     matchesFindingsLocalFilter,
@@ -1751,11 +1753,24 @@ function SourcesTab({
         navigateSources({ src_q: srcSearchInput });
     };
 
-    const fileInputRef = useRef(null);
     const uploadForm = useForm({
         file: null,
         owner_user_id: String(currentUser.id ?? ''),
     });
+    /**
+     * Whether the "what happens next" dialog is open.
+     *
+     * Upload starts the moment a file is chosen, so the document appears in the list without the
+     * user ever confirming anything — easy to read as "it is in the wiki now". It is not: nothing
+     * is ingested until "Lag Wiki" is pressed. A notice in the page can be scrolled past, and
+     * flash.success is a toast CustomerAppLayout clears after three seconds, so neither can
+     * establish that the user saw it. A dialog only its own button can close can.
+     *
+     * Component state is enough: Inertia keeps this component mounted across the redirect back, and
+     * nothing here needs to outlive the page view.
+     */
+    const [isUploadedDialogOpen, setIsUploadedDialogOpen] = useState(false);
+    const uploadedDialogConfirmRef = useRef(null);
     const [ingestingIds, setIngestingIds] = useState(new Set());
     const [decisionView, setDecisionView] = useState(null);
     const [ownerDrafts, setOwnerDrafts] = useState({});
@@ -1841,18 +1856,60 @@ function SourcesTab({
         router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, tabReturnParams(), { preserveScroll: true });
     };
 
-    const submitUpload = (event) => {
-        event.preventDefault();
-        if (!uploadForm.data.file || uploadForm.processing) return;
-        uploadForm.transform((data) => ({ ...data, ...tabReturnParams() }));
+    /**
+     * Upload starts as soon as a file is chosen — picking the document WAS the intent, and the
+     * separate "Last opp kilde" click only asked the user to confirm what they had just done.
+     *
+     * The File is passed down and applied through transform() rather than read back off form state.
+     * setData() is asynchronous, so a post() issued in the same tick would send the PREVIOUS value —
+     * null on the first upload. setData still runs, but only so the filename renders; the request
+     * carries the file this handler was given.
+     */
+    const startUpload = (file) => {
+        uploadForm.transform((data) => ({ ...data, file, ...tabReturnParams() }));
         uploadForm.post(sourcesStoreUrl, {
             forceFormData: true,
+            // Only a completed upload earns the notice. A failed request leaves it as it was and
+            // shows the existing field error instead.
             onSuccess: () => {
+                setIsUploadedDialogOpen(true);
                 uploadForm.reset();
                 uploadForm.setData('owner_user_id', String(currentUser.id ?? ''));
-                if (fileInputRef.current) fileInputRef.current.value = '';
             },
         });
+    };
+
+    const handleFileSelected = (event) => {
+        const input = event.target;
+        const file = input.files?.[0] ?? null;
+
+        // Cancelling the picker leaves nothing selected. Silence is the whole behaviour here: no
+        // request, no error, no change to what is already on screen.
+        if (file === null) {
+            return;
+        }
+
+        // Clear the native value immediately, so choosing the SAME file again still fires `change`.
+        // Without this, a failed upload could not be retried with the file that failed — the input
+        // would consider it unchanged. The File object above is already captured and unaffected.
+        input.value = '';
+
+        if (uploadForm.processing) {
+            return;
+        }
+
+        uploadForm.setData('file', file);
+
+        const error = validateSourceFile(file, tw);
+
+        if (error !== null) {
+            uploadForm.setError('file', error);
+
+            return;
+        }
+
+        uploadForm.clearErrors('file');
+        startUpload(file);
     };
 
     const sourceStatusLabel = (status) => ({
@@ -1877,16 +1934,17 @@ function SourcesTab({
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                        <form onSubmit={submitUpload} className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,20rem)_auto] lg:items-end">
+                        {/* No <form>: there is no submit step left to trigger, and a form with no
+                            button would still submit on Enter from the owner select. */}
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,20rem)] lg:items-end">
                             <div className="space-y-1.5">
                                 <div className="flex flex-wrap items-center gap-3">
                                     <input
-                                        ref={fileInputRef}
                                         id="wiki-source-file"
                                         type="file"
                                         accept=".pdf,.docx"
                                         disabled={uploadForm.processing}
-                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                        onChange={handleFileSelected}
                                         className="peer sr-only"
                                     />
                                     <label
@@ -1898,6 +1956,11 @@ function SourcesTab({
                                     <span className="min-w-0 break-all text-base text-slate-700">
                                         {uploadForm.data.file?.name ?? (tw.sources_no_file_selected ?? 'Ingen fil valgt')}
                                     </span>
+                                    {uploadForm.processing ? (
+                                        <span className="text-base font-semibold text-slate-500">
+                                            {tw.sources_uploading ?? 'Laster opp...'}
+                                        </span>
+                                    ) : null}
                                 </div>
                                 <p className="text-base text-slate-500">
                                     {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
@@ -1941,17 +2004,50 @@ function SourcesTab({
                                 </div>
                             )}
 
-                            <button
-                                type="submit"
-                                disabled={!uploadForm.data.file || uploadForm.processing}
-                                className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${PRIMARY_COLOURS}`}
-                            >
-                                {uploadForm.processing
-                                    ? (tw.sources_uploading ?? 'Laster opp...')
-                                    : (tw.sources_upload_button ?? 'Last opp kilde')}
-                            </button>
-                        </form>
+                        </div>
                     </div>
+
+                    {/* The step the user still has to take. A dialog rather than a notice in the
+                        page: this exists because the document appearing in the list below reads as
+                        "done", and only something the user has to dismiss can rule out their having
+                        missed it. closeDisabled blocks both Escape and backdrop click, so the
+                        confirm button is the single way out — and it only closes the dialog. */}
+                    <ActionDialog
+                        isOpen={isUploadedDialogOpen}
+                        onClose={() => setIsUploadedDialogOpen(false)}
+                        closeDisabled
+                        titleId="wiki-source-uploaded-title"
+                        initialFocusRef={uploadedDialogConfirmRef}
+                    >
+                        <h2 id="wiki-source-uploaded-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                            {tw.sources_uploaded_title ?? 'Kildedokumentet er lastet opp'}
+                        </h2>
+                        <p className="mt-2 text-base leading-6 text-slate-600">
+                            {/* The action is named from the button's own label, so the instruction
+                                cannot drift from what the button actually says. */}
+                            {(tw.sources_uploaded_next_step ?? 'For å ta dokumentet inn i wikien må du nå trykke «:action».')
+                                .split(':action')
+                                .flatMap((part, index) => (index === 0
+                                    ? [part]
+                                    : [
+                                        <strong key={`action-${index}`} className="font-semibold text-slate-800">
+                                            {tw.source_ingest_button ?? 'Lag Wiki'}
+                                        </strong>,
+                                        part,
+                                    ]))}
+                        </p>
+
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            <button
+                                ref={uploadedDialogConfirmRef}
+                                type="button"
+                                onClick={() => setIsUploadedDialogOpen(false)}
+                                className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition ${PRIMARY_COLOURS}`}
+                            >
+                                {tw.sources_uploaded_confirm ?? 'OK, jeg forstår'}
+                            </button>
+                        </div>
+                    </ActionDialog>
 
                     {/* Filter bar */}
                     <div className="flex flex-wrap items-end gap-2">
