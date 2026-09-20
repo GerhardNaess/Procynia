@@ -4228,7 +4228,7 @@ return [
         'graph_node_sources' => 'Kildereferanser',
         'graph_node_lint_errors' => 'Lint-feil',
         'graph_node_lint_warnings' => 'Lint-advarsler',
-        'graph_fit_view' => 'Zoom ut',
+        'graph_fit_view' => 'Tilpass visning',
         'graph_legend_title' => 'Tegnforklaring',
         'tab_pages' => 'Wiki-sider',
         'tab_sources' => 'Kildedokumenter',
