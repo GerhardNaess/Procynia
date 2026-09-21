@@ -16,8 +16,7 @@ class CustomerEnvironmentController extends Controller
 {
     public function __construct(
         private readonly CustomerContext $customerContext,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -103,9 +102,13 @@ class CustomerEnvironmentController extends Controller
         ];
 
         $validated = $request->validate([
-            'permission' => ['required', 'string', 'in:' . implode(',', $allowedPermissions)],
-            'roles' => ['required', 'array'],
-            'roles.*' => ['string', 'in:' . implode(',', $allowedRoles)],
+            'permission' => ['required', 'string', 'in:'.implode(',', $allowedPermissions)],
+            // 'present', not 'required': unticking the last box sends an empty array, and that is
+            // a legitimate instruction — take this permission away from everyone but System Owner,
+            // who keeps it unconditionally below. 'required' rejects an empty array, which made
+            // the final checkbox impossible to untick.
+            'roles' => ['present', 'array'],
+            'roles.*' => ['string', 'in:'.implode(',', $allowedRoles)],
         ]);
 
         $customer = Customer::findOrFail($customerId);
