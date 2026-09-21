@@ -222,8 +222,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         if (activeMainArea === 'wiki') {
             return [
-                // Ordered by the actual workflow: the knowledge base goes in first, the runs show
-                // what the system did with it, the pages are the result, and the graph is where
+                // Ordered by the actual workflow: the source documents go in first, the runs show
+                // what the system did with them, the pages are the result, and the graph is where
                 // the connections are explored. Display order only — the active item is resolved
                 // from the tab value below, and /app/wiki still opens on Wiki-sider.
                 { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
@@ -237,9 +237,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             const items = [];
             if (environmentHref) {
                 items.push({ key: 'env-settings', label: navigation.customer_environment ?? 'Kundemiljø', href: environmentHref });
-            }
-            if (user?.is_system_owner) {
-                items.push({ key: 'knowledge-base-settings', label: navigation.knowledge_base_settings ?? 'Kunnskapsbase', href: '/app/customer-environment/knowledge-base' });
             }
             if (user?.is_system_owner) {
                 items.push({ key: 'go-no-go-templates', label: translations.frontend?.go_no_go_templates_nav ?? 'Vurderingsmaler', href: '/app/go-no-go-templates' });
@@ -260,18 +257,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 return 'ai-overview';
             }
 
-            if (pathname.startsWith('/app/ai/knowledge-base/ai-usage')) {
-                return 'knowledge-ai-usage';
-            }
-
-            if (pathname.startsWith('/app/ai/knowledge-base')) {
-                return 'knowledge-docs';
-            }
-
-            if (pathname.startsWith('/app/ai/knowledge-vocabulary')) {
-                return 'knowledge-vocabulary';
-            }
-
             return 'ai-work';
         }
 
@@ -288,9 +273,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
 
         if (activeMainArea === 'environment') {
-            if (pathname.startsWith('/app/customer-environment/knowledge-base')) {
-                return 'knowledge-base-settings';
-            }
             if (pathname.startsWith('/app/go-no-go-templates')) {
                 return 'go-no-go-templates';
             }

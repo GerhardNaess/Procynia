@@ -182,7 +182,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
 
     /**
      * AI-to-Wiki consolidation: updateAnswerText() lets a user hand-edit an already-generated Wiki
-     * answer in place — mirrors RequirementAnswerDraftService::updateAnswerDraft().
+     * answer in place.
      */
     public function test_update_answer_text_persists_an_edit_to_an_existing_wiki_answer(): void
     {

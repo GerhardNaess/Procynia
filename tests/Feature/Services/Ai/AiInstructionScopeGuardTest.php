@@ -26,8 +26,6 @@ class AiInstructionScopeGuardTest extends TestCase
         'app/Services/Ai/Wiki/RequirementWikiAnswerAiClient.php',
         'app/Services/Ai/Wiki/RequirementWikiAssessmentService.php',
         'app/Services/Ai/Wiki/RequirementWikiAssessmentAiClient.php',
-        'app/Services/Ai/Requirements/RequirementAnswerDraftService.php',
-        'app/Services/RequirementAssessmentService.php',
     ];
 
     /**
@@ -51,7 +49,6 @@ class AiInstructionScopeGuardTest extends TestCase
         'app/Services/Ai/Wiki/RequirementWikiResearchService.php',
         'app/Services/Ai/Wiki/RequirementWikiResearchAiClient.php',
         'app/Services/Ai/Wiki/WikiQuestionAnswerAiClient.php',
-        'app/Services/Ai/Retrieval',
     ];
 
     public function test_only_the_answer_and_assessment_flows_consume_the_customer_ai_instruction(): void

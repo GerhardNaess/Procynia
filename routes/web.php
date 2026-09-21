@@ -9,10 +9,6 @@ use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\InfoCenterController;
-use App\Http\Controllers\App\KnowledgeBaseAiUsageController;
-use App\Http\Controllers\App\KnowledgeBaseController;
-use App\Http\Controllers\App\KnowledgeBaseSettingsController;
-use App\Http\Controllers\App\KnowledgeVocabularyController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
@@ -164,48 +160,8 @@ Route::prefix('app')
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
-        Route::prefix('/customer-environment/knowledge-base')->name('customer-environment.knowledge-base.')->group(function (): void {
-            Route::get('/', [KnowledgeBaseSettingsController::class, 'index'])->name('index');
-            Route::post('/categories', [KnowledgeBaseSettingsController::class, 'storeCategory'])->name('categories.store');
-            Route::patch('/categories/{category}', [KnowledgeBaseSettingsController::class, 'updateCategory'])->name('categories.update');
-            Route::delete('/categories/{category}', [KnowledgeBaseSettingsController::class, 'destroyCategory'])->name('categories.destroy');
-            Route::post('/topics', [KnowledgeBaseSettingsController::class, 'storeTopic'])->name('topics.store');
-            Route::patch('/topics/{topic}', [KnowledgeBaseSettingsController::class, 'updateTopic'])->name('topics.update');
-            Route::delete('/topics/{topic}', [KnowledgeBaseSettingsController::class, 'destroyTopic'])->name('topics.destroy');
-        });
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
-        Route::prefix('/ai/knowledge-vocabulary')->name('ai.knowledge-vocabulary.')->group(function (): void {
-            Route::get('/', [KnowledgeVocabularyController::class, 'index'])->name('index');
-            Route::post('/analysis-batches', [KnowledgeVocabularyController::class, 'storeBatch'])->name('analysis-batches.store');
-            Route::delete('/analysis-batches/{batch}', [KnowledgeVocabularyController::class, 'destroyBatch'])->name('analysis-batches.destroy');
-            Route::patch('/terms/{term}', [KnowledgeVocabularyController::class, 'updateTerm'])->name('terms.update');
-            Route::delete('/terms/{term}', [KnowledgeVocabularyController::class, 'destroyTerm'])->name('terms.destroy');
-            Route::patch('/suggestions/{suggestion}/approve', [KnowledgeVocabularyController::class, 'approveSuggestion'])->name('suggestions.approve');
-            Route::patch('/suggestions/{suggestion}/reject', [KnowledgeVocabularyController::class, 'rejectSuggestion'])->name('suggestions.reject');
-            Route::patch('/suggestions/{suggestion}/merge', [KnowledgeVocabularyController::class, 'mergeSuggestion'])->name('suggestions.merge');
-            Route::patch('/suggestions/{suggestion}/edit-and-approve', [KnowledgeVocabularyController::class, 'editAndApproveSuggestion'])->name('suggestions.edit-and-approve');
-        });
-        Route::prefix('/ai/knowledge-base')->name('ai.knowledge-base.')->group(function (): void {
-            Route::get('/', [KnowledgeBaseController::class, 'index'])->name('index');
-            Route::get('/create', [KnowledgeBaseController::class, 'create'])->name('create');
-            Route::post('/', [KnowledgeBaseController::class, 'store'])->name('store');
-            Route::get('/ai-usage', [KnowledgeBaseAiUsageController::class, 'index'])->name('ai-usage');
-            Route::get('/{knowledgeItem}', [KnowledgeBaseController::class, 'show'])->name('show');
-            Route::patch('/{knowledgeItem}/summary', [KnowledgeBaseController::class, 'updateSummary'])->name('summary.update');
-            Route::patch('/{knowledgeItem}/chunks/{chunk}/review-status', [KnowledgeBaseController::class, 'updateChunkReviewStatus'])
-                ->name('chunks.review-status.update');
-            Route::patch('/{knowledgeItem}/chunks/{chunk}/metadata', [KnowledgeBaseController::class, 'updateChunkMetadata'])
-                ->name('chunks.metadata.update');
-            Route::get('/{knowledgeItem}/chunks/{chunk}/image', [KnowledgeBaseController::class, 'showChunkImage'])
-                ->name('chunks.image');
-            Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
-            Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
-            Route::post('/{knowledgeItem}/file', [KnowledgeBaseController::class, 'replaceFile'])->name('file.replace');
-            Route::post('/{knowledgeItem}/versions/{version}/approve', [KnowledgeBaseController::class, 'approveVersion'])->name('versions.approve');
-            Route::post('/{knowledgeItem}/versions/{version}/reject', [KnowledgeBaseController::class, 'rejectVersion'])->name('versions.reject');
-            Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
-        });
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');
         Route::get('/ai/{savedNotice}/instructions', [AiController::class, 'instructions'])->name('ai.instructions.show');
         Route::patch('/ai/{savedNotice}/instructions', [AiController::class, 'updateAiInstructions'])
@@ -243,20 +199,12 @@ Route::prefix('app')
             ->name('ai.requirements.work.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/answer-basis', [AiController::class, 'syncRequirementAnswerBasisSelection'])
             ->name('ai.requirements.answer-basis.sync');
-        Route::post('/ai/{savedNotice}/requirements/{requirement}/answer-draft', [AiController::class, 'generateRequirementAnswerDraft'])
-            ->name('ai.requirements.answer-draft.generate');
-        Route::patch('/ai/{savedNotice}/requirements/{requirement}/answer-draft', [AiController::class, 'updateRequirementAnswerDraft'])
-            ->name('ai.requirements.answer-draft.update');
         Route::post('/ai/{savedNotice}/requirements/{requirement}/wiki-answer', [AiController::class, 'generateRequirementWikiAnswer'])
             ->name('ai.requirements.wiki-answer.generate');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/wiki-answer', [AiController::class, 'updateRequirementWikiAnswer'])
             ->name('ai.requirements.wiki-answer.update');
-        Route::post('/ai/{savedNotice}/evidence/refresh', [AiController::class, 'refreshEvidence'])
-            ->name('ai.evidence.refresh');
         Route::post('/ai/{savedNotice}/assessments/refresh', [AiController::class, 'refreshAssessments'])
             ->name('ai.requirements.assessment.refresh');
-        Route::patch('/ai/{savedNotice}/evidence/{evidence}/selection-status', [AiController::class, 'updateEvidenceSelectionStatus'])
-            ->name('ai.evidence.selection-status.update');
         Route::patch('/notifications/read-all', [UserNotificationController::class, 'markAllRead'])->name('notifications.read-all');
         Route::patch('/notifications/{userNotification}/read', [UserNotificationController::class, 'markRead'])->name('notifications.read');
         Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');

@@ -375,7 +375,6 @@ class ContainerRuntimeContractTest extends TestCase
 
         foreach ([
             'Http/Controllers/App/WikiSourceController.php',
-            'Http/Controllers/App/KnowledgeBaseController.php',
         ] as $relative) {
             $source = file_get_contents(app_path($relative));
 
