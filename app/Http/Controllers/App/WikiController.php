@@ -197,23 +197,36 @@ class WikiController extends Controller
 
         $paginator = $query->paginate(25);
 
-        $pages = collect($paginator->items())->map(fn (EnterpriseWikiPage $page) => [
-            'id' => $page->id,
-            'title' => $page->title,
-            'slug' => $page->slug,
-            'page_type' => $page->page_type,
-            'status' => $page->status,
-            'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
-            // Current-version claims only — matches the scope EnterpriseWikiRunFindingsService
-            // already uses for the Kjøringer "Funn" count (both filter to is_current page
-            // versions). Previously this was withCount('claims'), a raw historical total across
-            // every version the page ever had, which could show e.g. "12 påstander" here while
-            // the run that produced the *current* version reported far fewer findings — two
-            // silently different universes for what a user reads as "the same claims". No new
-            // query: currentVersion.claims is already eager-loaded above for sourceReferences.
-            'claims_count' => $page->currentVersion?->claims->count() ?? 0,
-            'updated_at' => $page->updated_at,
-        ]);
+        $pages = collect($paginator->items())->map(function (EnterpriseWikiPage $page): array {
+            $claims = $page->currentVersion?->claims ?? collect();
+
+            return [
+                'id' => $page->id,
+                'title' => $page->title,
+                'slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'status' => $page->status,
+                'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
+                // Current-version claims only — matches the scope EnterpriseWikiRunFindingsService
+                // already uses for the Kjøringer "Funn" count (both filter to is_current page
+                // versions). Previously this was withCount('claims'), a raw historical total across
+                // every version the page ever had, which could show e.g. "12 påstander" here while
+                // the run that produced the *current* version reported far fewer findings — two
+                // silently different universes for what a user reads as "the same claims". No new
+                // query: currentVersion.claims is already eager-loaded above for sourceReferences.
+                //
+                // Both numbers come from that same collection, so the denominator can never count a
+                // version the numerator does not. Counted in PHP rather than with withCount() for the
+                // same reason: a subquery would have to repeat the is_current join and could drift
+                // from it.
+                'claims_count' => $claims->count(),
+                'claims_approved_count' => $claims->where(
+                    'approval_status',
+                    EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+                )->count(),
+                'updated_at' => $page->updated_at,
+            ];
+        });
 
         return [
             'pages' => $pages,

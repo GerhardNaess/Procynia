@@ -3719,6 +3719,8 @@ return [
         'status_rejected' => 'Rejected',
         'status_archived' => 'Archived',
         'claims' => 'claims',
+        'claims_approved_column' => 'Claims approved',
+        'claims_approved_of_total' => ':approved of :total',
         'updated' => 'Updated',
         'open' => 'Open',
         'empty_title' => 'No wiki pages yet',

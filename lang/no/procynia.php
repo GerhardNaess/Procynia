@@ -3719,6 +3719,8 @@ return [
         'status_rejected' => 'Avvist',
         'status_archived' => 'Arkivert',
         'claims' => 'påstander',
+        'claims_approved_column' => 'Påstander godkjent',
+        'claims_approved_of_total' => ':approved av :total',
         'updated' => 'Oppdatert',
         'open' => 'Åpne',
         'empty_title' => 'Ingen wiki-sider ennå',

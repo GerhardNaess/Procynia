@@ -1640,7 +1640,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                         <th className="px-6 py-4">Type</th>
                                         <th className="px-6 py-4">Status</th>
                                         <th className="px-6 py-4">{tw.document_owner_column ?? 'Dokumenteier'}</th>
-                                        <th className="px-6 py-4">{tw.claims ?? 'Påstander'}</th>
+                                        <th className="px-6 py-4">{tw.claims_approved_column ?? 'Påstander godkjent'}</th>
                                         <th className="px-6 py-4">{tw.updated ?? 'Oppdatert'}</th>
                                         <th className="px-6 py-4"></th>
                                     </tr>
@@ -1663,7 +1663,14 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                                     fallbackLabel={tw.document_owner_sync_pending ?? 'Avventer synkronisering'}
                                                 />
                                             </td>
-                                            <td className="px-6 py-4 text-slate-500">{page.claims_count}</td>
+                                            {/* Approved out of total, both counted from the same
+                                                (current) version — a bare total said nothing about
+                                                how much of it anyone had actually checked. */}
+                                            <td className="px-6 py-4 text-slate-500">
+                                                {(tw.claims_approved_of_total ?? ':approved av :total')
+                                                    .replace(':approved', page.claims_approved_count ?? 0)
+                                                    .replace(':total', page.claims_count ?? 0)}
+                                            </td>
                                             <td className="px-6 py-4 text-slate-500">{formatDate(page.updated_at, locale)}</td>
                                             <td className="px-6 py-4">
                                                 <Link

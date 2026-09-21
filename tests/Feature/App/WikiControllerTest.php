@@ -20,6 +20,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -199,6 +200,113 @@ class WikiControllerTest extends TestCase
 
             return $row !== null && $row['claims_count'] === 1;
         });
+    }
+
+    /**
+     * The Pages tab shows "approved of total", so both numbers have to come from the same version.
+     * A bare total said how much there was to check and nothing about how much had been checked.
+     *
+     * @dataProvider claimApprovalProgress
+     */
+    #[DataProvider('claimApprovalProgress')]
+    public function test_index_reports_approved_claims_out_of_the_total(int $total, int $approved): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side med påstander');
+        $version = $this->createVersion($page, true);
+
+        for ($i = 0; $i < $total; $i++) {
+            $this->createClaim($page, $version, "Påstand {$i}", $i, [
+                'approval_status' => $i < $approved
+                    ? EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED
+                    : EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            ]);
+        }
+
+        $row = $this->pageRow($user, $page);
+
+        $this->assertSame($total, $row['claims_count']);
+        $this->assertSame($approved, $row['claims_approved_count']);
+    }
+
+    /** @return array<string, array{int, int}> */
+    public static function claimApprovalProgress(): array
+    {
+        return [
+            'nothing to check' => [0, 0],
+            'none checked yet' => [10, 0],
+            'part way' => [10, 2],
+            'all checked' => [10, 10],
+        ];
+    }
+
+    /** Only the one status the approve action writes counts; the others are not "approved yet". */
+    public function test_index_counts_only_actually_approved_claims(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side med blandede statuser');
+        $version = $this->createVersion($page, true);
+
+        $statuses = [
+            EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+        ];
+
+        foreach ($statuses as $index => $status) {
+            $this->createClaim($page, $version, "Påstand {$index}", $index, ['approval_status' => $status]);
+        }
+
+        $row = $this->pageRow($user, $page);
+
+        $this->assertSame(3, $row['claims_count']);
+        $this->assertSame(1, $row['claims_approved_count'], 'pending and rejected are not approved');
+    }
+
+    /**
+     * The denominator must not reach a version the numerator cannot. An approved claim left on a
+     * superseded version would otherwise report progress against work that is no longer on screen.
+     */
+    public function test_index_ignores_approved_claims_on_older_versions(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side med historikk');
+
+        $oldVersion = $this->createVersion($page, false);
+        $this->createClaim($page, $oldVersion, 'Gammel godkjent', 0, [
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        $currentVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => '# '.$page->title,
+        ]);
+        $this->createClaim($page, $currentVersion, 'Gjeldende ugodkjent', 0);
+
+        $row = $this->pageRow($user, $page);
+
+        $this->assertSame(1, $row['claims_count']);
+        $this->assertSame(0, $row['claims_approved_count']);
+    }
+
+    /** @return array<string, mixed> */
+    private function pageRow(User $user, EnterpriseWikiPage $page): array
+    {
+        $props = $this->actingAs($user)
+            ->get('/app/wiki')
+            ->assertOk()
+            ->viewData('page')['props'];
+
+        $row = collect($props['pages'])->firstWhere('id', $page->id);
+
+        $this->assertNotNull($row, 'the page must be listed');
+
+        return $row;
     }
 
     // =========================================================================
