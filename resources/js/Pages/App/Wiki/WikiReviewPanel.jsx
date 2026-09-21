@@ -353,10 +353,13 @@ export default function WikiReviewPanel({
                     </>
                 )}
 
+                {/* Naming the permission and where it lives, because the old wording stated the
+                    problem without saying it was solvable — and the permission it refers to is one
+                    row below "Godkjenne Wiki-påstander", which is the one people grant by mistake. */}
                 {canSubmit && eligibleReviewers.length === 0 && (
-                    <p className="text-sm text-slate-600">
+                    <p className="text-base leading-6 text-slate-600">
                         {tw.review_no_eligible_reviewers
-                            ?? 'Ingen andre har rettighet til å godkjenne Wiki-sider ennå, så siden kan ikke sendes videre.'}
+                            ?? 'Ingen andre brukere kan godkjenne Wiki-siden. Gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.'}
                     </p>
                 )}
 

@@ -26,6 +26,15 @@ class Customer extends Model
      */
     public const PERMISSION_APPROVE_WIKI_PAGES = 'approve_wiki_pages';
 
+    /**
+     * Supplemental capabilities a user carries alongside their bid_role, not instead of it. They
+     * appear as their own columns in the access matrix so a permission can be granted to "whoever
+     * holds this capability" without touching anyone's ordinary role.
+     */
+    public const ROLE_QA = 'qa';
+
+    public const ROLE_WIKI_APPROVER = 'wiki_approver';
+
     public const PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER = 'be_enterprise_wiki_document_owner';
 
     public const PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER = 'assign_enterprise_wiki_document_owner';
@@ -34,10 +43,12 @@ class Customer extends Model
         self::PERMISSION_CREATE_DEPARTMENTS => ['system_owner'],
         self::PERMISSION_CREATE_USERS => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_VIEW_ALL_CASES => ['system_owner', 'bid_manager', 'contributor'],
-        self::PERMISSION_APPROVE_WIKI_CLAIMS => ['system_owner', 'qa'],
-        // Defaults to System Owner alone, which is exactly who could approve before this capability
-        // existed — so introducing it changes nobody's access until a customer widens it.
-        self::PERMISSION_APPROVE_WIKI_PAGES => ['system_owner'],
+        // The two Wiki decisions default to the two capabilities named after them, and neither
+        // spills into the other: QA vouches for a claim against its source, a Wiki approver
+        // publishes the page. Nobody is a Wiki approver until someone is made one, so this default
+        // grants no access on its own.
+        self::PERMISSION_APPROVE_WIKI_CLAIMS => ['system_owner', self::ROLE_QA],
+        self::PERMISSION_APPROVE_WIKI_PAGES => ['system_owner', self::ROLE_WIKI_APPROVER],
         self::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER => ['system_owner', 'bid_manager'],
     ];
@@ -154,13 +165,21 @@ class Customer extends Model
     }
 
     /**
-     * QA is not a mutually-exclusive bid_role — it is an additive capability a user can hold
-     * alongside their ordinary role (see User::isQa()). $isQa therefore is a separate flag, not
-     * a value $bidRole can take, and only matters when the permission's roles list contains the
-     * "qa" column.
+     * Neither QA nor Wiki approver is a mutually-exclusive bid_role — each is an additive capability
+     * a user holds alongside their ordinary role (User::isQa(), User::isWikiApprover()). They are
+     * therefore separate flags rather than values $bidRole can take, matched in addition to the bid
+     * role and never instead of it.
+     *
+     * Each stands alone: holding QA says nothing about being a Wiki approver, and the reverse. That
+     * separation is the point — vouching for a claim against its source and publishing a page are
+     * different decisions.
      */
-    public function roleHasPermission(string $bidRole, string $permission, bool $isQa = false): bool
-    {
+    public function roleHasPermission(
+        string $bidRole,
+        string $permission,
+        bool $isQa = false,
+        bool $isWikiApprover = false,
+    ): bool {
         if ($bidRole === 'system_owner') {
             return true;
         }
@@ -169,7 +188,8 @@ class Customer extends Model
 
         return in_array($bidRole, $roles, true)
             || in_array('all', $roles, true)
-            || ($isQa && in_array('qa', $roles, true));
+            || ($isQa && in_array(self::ROLE_QA, $roles, true))
+            || ($isWikiApprover && in_array(self::ROLE_WIKI_APPROVER, $roles, true));
     }
 
     public function users(): HasMany

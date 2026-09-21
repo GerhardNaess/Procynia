@@ -30,6 +30,7 @@ export default function UsersEdit({
         name: user.name,
         bid_role: user.bid_role_value,
         is_qa: user.is_qa ?? false,
+        is_wiki_approver: user.is_wiki_approver ?? false,
         bid_manager_scope: user.bid_manager_scope_value ?? (bidManagerScopeOptions[0]?.value ?? 'company'),
         primary_affiliation_scope: user.primary_affiliation_scope_value ?? (primaryAffiliationScopeOptions[0]?.value ?? 'company'),
         primary_department_id: user.primary_department_id ?? '',
@@ -233,17 +234,46 @@ export default function UsersEdit({
                                             <InfoHint
                                                 size="sm"
                                                 label="Vis forklaring for QA"
-                                                text={usersFormText.hint_is_qa ?? 'QA er en tilleggsfunksjon som legges til brukerens ordinære rolle. Den erstatter ikke rollen, og gir kun tilgang til å godkjenne Wiki-påstander (i tillegg til det rollen og «Alle» allerede gir).'}
+                                                text={usersFormText.hint_is_qa ?? 'Kan gå gjennom og godkjenne enkeltpåstander mot kildegrunnlaget. Gir ikke rett til å publisere Wiki-sider.'}
                                             />
                                         </span>
                                     </label>
                                     {errors.is_qa ? <p className="text-sm text-rose-600">{errors.is_qa}</p> : null}
+
+                                    {/* Its own capability, not a second meaning for QA: vouching for
+                                        a claim against its source and publishing a page are
+                                        different decisions, and a user may hold either or both. */}
+                                    <input type="hidden" name="is_wiki_approver" value={form.data.is_wiki_approver ? '1' : '0'} />
+                                    <label className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.data.is_wiki_approver}
+                                            onChange={(event) => form.setData('is_wiki_approver', event.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                                        />
+                                        <span className="inline-flex items-center gap-1.5">
+                                            {usersFormText.field_is_wiki_approver ?? 'Wiki-godkjenner'}
+                                            <InfoHint
+                                                size="sm"
+                                                label="Vis forklaring for Wiki-godkjenner"
+                                                text={usersFormText.hint_is_wiki_approver ?? 'Kan gjennomgå, godkjenne og publisere Wiki-sider som er sendt til gjennomgang.'}
+                                            />
+                                        </span>
+                                    </label>
+                                    {errors.is_wiki_approver ? <p className="text-sm text-rose-600">{errors.is_wiki_approver}</p> : null}
                                 </div>
-                            ) : user.is_qa ? (
-                                <div className="space-y-2 md:col-span-2">
-                                    <span className="inline-flex rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
-                                        QA
-                                    </span>
+                            ) : (user.is_qa || user.is_wiki_approver) ? (
+                                <div className="flex flex-wrap gap-2 md:col-span-2">
+                                    {user.is_qa ? (
+                                        <span className="inline-flex rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+                                            QA
+                                        </span>
+                                    ) : null}
+                                    {user.is_wiki_approver ? (
+                                        <span className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                                            {usersFormText.field_is_wiki_approver ?? 'Wiki-godkjenner'}
+                                        </span>
+                                    ) : null}
                                 </div>
                             ) : null}
 

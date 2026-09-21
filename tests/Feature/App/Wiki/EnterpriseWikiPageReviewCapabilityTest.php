@@ -68,11 +68,16 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
 
     public function test_the_default_grants_it_to_nobody_but_system_owner(): void
     {
-        // Introducing the capability must not widen anyone's access on deploy.
-        $this->assertSame(
-            ['system_owner'],
-            Customer::DEFAULT_PERMISSION_SETTINGS[Customer::PERMISSION_APPROVE_WIKI_PAGES],
-        );
+        // Introducing the capability must not widen anyone's access on deploy. The default names
+        // the Wiki approver capability, which nobody holds until an administrator grants it — so it
+        // still reaches nobody, and notably not QA.
+        $default = Customer::DEFAULT_PERMISSION_SETTINGS[Customer::PERMISSION_APPROVE_WIKI_PAGES];
+
+        $this->assertSame(['system_owner', Customer::ROLE_WIKI_APPROVER], $default);
+        $this->assertNotContains(Customer::ROLE_QA, $default);
+        $this->assertNotContains('bid_manager', $default);
+        $this->assertNotContains('contributor', $default);
+        $this->assertNotContains('all', $default);
 
         [$customer, $page] = $this->pendingPage();
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
@@ -221,7 +226,7 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
                 'permissionSettings.permission_rows',
                 fn ($rows) => collect($rows)->contains(
                     fn ($row) => $row['key'] === Customer::PERMISSION_APPROVE_WIKI_PAGES
-                        && $row['label'] === 'Godkjenne Wiki-sider',
+                        && $row['label'] === 'Godkjenne og publisere Wiki-sider',
                 ),
             ));
     }

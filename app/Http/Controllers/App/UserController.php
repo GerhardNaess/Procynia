@@ -26,8 +26,7 @@ class UserController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly BillingEntitlementService $billingEntitlementService,
         private readonly BillingService $billingService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -162,6 +161,7 @@ class UserController extends Controller
                 'role' => User::customerRoleForBidRole($targetBidRole),
                 'bid_role' => $targetBidRole,
                 'is_qa' => $actor->isSystemOwner() ? (bool) ($validated['is_qa'] ?? false) : false,
+                'is_wiki_approver' => $actor->isSystemOwner() ? (bool) ($validated['is_wiki_approver'] ?? false) : false,
                 'bid_manager_scope' => $bidManagerScope,
                 'primary_affiliation_scope' => $primaryAffiliationScope,
                 'primary_department_id' => $primaryDepartmentId,
@@ -254,6 +254,7 @@ class UserController extends Controller
                 'role' => $nextRole,
                 'bid_role' => $nextBidRole,
                 'is_qa' => $this->canEditBidRole($actor, $record) ? (bool) ($validated['is_qa'] ?? false) : $record->is_qa,
+                'is_wiki_approver' => $this->canEditBidRole($actor, $record) ? (bool) ($validated['is_wiki_approver'] ?? false) : $record->is_wiki_approver,
                 'bid_manager_scope' => $bidManagerScope,
                 'primary_affiliation_scope' => $primaryAffiliationScope,
                 'primary_department_id' => $primaryDepartmentId,
@@ -436,8 +437,7 @@ class UserController extends Controller
         int $customerId,
         array $selectedDepartmentIds = [],
         bool $allowSelfScopeRecovery = false,
-    ): array
-    {
+    ): array {
         $query = Department::query()
             ->where('customer_id', $customerId)
             ->where(function ($query) use ($selectedDepartmentIds): void {
@@ -477,8 +477,7 @@ class UserController extends Controller
         int $customerId,
         array $selectedDepartmentIds = [],
         bool $allowSelfScopeRecovery = false,
-    ): array
-    {
+    ): array {
         $query = Department::query()
             ->where('customer_id', $customerId)
             ->where(function ($query) use ($selectedDepartmentIds): void {
@@ -543,6 +542,7 @@ class UserController extends Controller
             'bid_role' => $user->bid_role_label,
             'bid_role_value' => $user->resolvedBidRole(),
             'is_qa' => (bool) $user->is_qa,
+            'is_wiki_approver' => (bool) $user->is_wiki_approver,
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
@@ -586,6 +586,7 @@ class UserController extends Controller
             'bid_role_value' => $user->resolvedBidRole(),
             'bid_role_label' => $user->bid_role_label,
             'is_qa' => (bool) $user->is_qa,
+            'is_wiki_approver' => (bool) $user->is_wiki_approver,
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
@@ -635,8 +636,7 @@ class UserController extends Controller
         ?User $record = null,
         ?string $targetBidRole = null,
         bool $allowSelfScopeRecovery = false,
-    ): array
-    {
+    ): array {
         $submittedIds = collect($validated['department_ids'] ?? [])
             ->merge(isset($validated['department_id']) ? [$validated['department_id']] : [])
             ->filter(fn (mixed $value): bool => $value !== null && $value !== '')
@@ -762,8 +762,7 @@ class UserController extends Controller
         array $validated,
         ?User $record = null,
         bool $allowSelfScopeRecovery = false,
-    ): array
-    {
+    ): array {
         if (($validated['bid_role'] ?? null) !== User::BID_ROLE_BID_MANAGER) {
             return [null, []];
         }
@@ -1096,6 +1095,9 @@ class UserController extends Controller
             'is_qa' => $actor->isSystemOwner()
                 ? ['nullable', 'boolean']
                 : ['prohibited'],
+            'is_wiki_approver' => $actor->isSystemOwner()
+                ? ['nullable', 'boolean']
+                : ['prohibited'],
             'bid_manager_scope' => $actor->isSystemOwner()
                 ? ['nullable', 'string', Rule::in(User::BID_MANAGER_SCOPES)]
                 : ['prohibited'],
@@ -1130,6 +1132,9 @@ class UserController extends Controller
             'is_qa' => $this->canEditBidRole($actor, $record)
                 ? ['nullable', 'boolean']
                 : ['prohibited'],
+            'is_wiki_approver' => $this->canEditBidRole($actor, $record)
+                ? ['nullable', 'boolean']
+                : ['prohibited'],
             'bid_manager_scope' => $this->canEditBidManagerScope($actor, $record)
                 ? ['nullable', 'string', Rule::in(User::BID_MANAGER_SCOPES)]
                 : ['prohibited'],
@@ -1162,6 +1167,7 @@ class UserController extends Controller
         $protectedFields = [
             'bid_role',
             'is_qa',
+            'is_wiki_approver',
             'bid_manager_scope',
             'managed_department_ids',
         ];

@@ -29,6 +29,7 @@ export default function UsersCreate({
         password_confirmation: '',
         bid_role: 'contributor',
         is_qa: false,
+        is_wiki_approver: false,
         bid_manager_scope: bidManagerScopeOptions[0]?.value ?? 'company',
         primary_affiliation_scope: primaryAffiliationScopeOptions[0]?.value ?? 'company',
         primary_department_id: '',
@@ -309,11 +310,31 @@ export default function UsersCreate({
                                             <InfoHint
                                                 size="sm"
                                                 label="Vis forklaring for QA"
-                                                text={usersFormText.hint_is_qa ?? 'QA er en tilleggsfunksjon som legges til brukerens ordinære rolle. Den erstatter ikke rollen, og gir kun tilgang til å godkjenne Wiki-påstander (i tillegg til det rollen og «Alle» allerede gir).'}
+                                                text={usersFormText.hint_is_qa ?? 'Kan gå gjennom og godkjenne enkeltpåstander mot kildegrunnlaget. Gir ikke rett til å publisere Wiki-sider.'}
                                             />
                                         </span>
                                     </label>
                                     {errors.is_qa ? <p className="text-sm text-rose-600">{errors.is_qa}</p> : null}
+
+                                    {/* Separate from QA on purpose — see the edit page. */}
+                                    <input type="hidden" name="is_wiki_approver" value={form.data.is_wiki_approver ? '1' : '0'} />
+                                    <label className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.data.is_wiki_approver}
+                                            onChange={(event) => form.setData('is_wiki_approver', event.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                                        />
+                                        <span className="inline-flex items-center gap-1.5">
+                                            {usersFormText.field_is_wiki_approver ?? 'Wiki-godkjenner'}
+                                            <InfoHint
+                                                size="sm"
+                                                label="Vis forklaring for Wiki-godkjenner"
+                                                text={usersFormText.hint_is_wiki_approver ?? 'Kan gjennomgå, godkjenne og publisere Wiki-sider som er sendt til gjennomgang.'}
+                                            />
+                                        </span>
+                                    </label>
+                                    {errors.is_wiki_approver ? <p className="text-sm text-rose-600">{errors.is_wiki_approver}</p> : null}
                                 </div>
                             ) : null}
 

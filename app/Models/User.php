@@ -23,6 +23,7 @@ use Illuminate\Notifications\Notifiable;
     'role',
     'bid_role',
     'is_qa',
+    'is_wiki_approver',
     'bid_manager_scope',
     'primary_affiliation_scope',
     'primary_department_id',
@@ -106,6 +107,7 @@ class User extends Authenticatable implements FilamentUser
             'password' => 'hashed',
             'is_active' => 'boolean',
             'is_qa' => 'boolean',
+            'is_wiki_approver' => 'boolean',
         ];
     }
 
@@ -268,7 +270,7 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        if (! $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_CREATE_USERS, $this->isQa())) {
+        if (! $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_CREATE_USERS, $this->isQa(), $this->isWikiApprover())) {
             return false;
         }
 
@@ -300,7 +302,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_VIEW_ALL_CASES, $this->isQa());
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_VIEW_ALL_CASES, $this->isQa(), $this->isWikiApprover());
     }
 
     /**
@@ -318,7 +320,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $this->isQa());
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $this->isQa(), $this->isWikiApprover());
     }
 
     /**
@@ -337,7 +339,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_PAGES, $this->isQa());
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_PAGES, $this->isQa(), $this->isWikiApprover());
     }
 
     /**
@@ -414,7 +416,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa());
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa(), $this->isWikiApprover());
     }
 
     public function canAssignEnterpriseWikiDocumentOwner(): bool
@@ -426,7 +428,7 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa());
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa(), $this->isWikiApprover());
     }
 
     /**
@@ -513,6 +515,16 @@ class User extends Authenticatable implements FilamentUser
     public function isQa(): bool
     {
         return (bool) $this->is_qa;
+    }
+
+    /**
+     * Wiki approver: may review, approve and publish whole Wiki pages once the access matrix grants
+     * that capability the permission. Layered on top of bid_role exactly as QA is, and deliberately
+     * independent of it — a user can hold either, both or neither.
+     */
+    public function isWikiApprover(): bool
+    {
+        return (bool) $this->is_wiki_approver;
     }
 
     public function resolvedBidManagerScope(): ?string

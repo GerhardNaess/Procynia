@@ -825,8 +825,15 @@ export default function CustomerEnvironmentIndex({
                                     <tbody className="divide-y divide-slate-100">
                                         {permissionSettings.permission_rows.map((row) => (
                                             <tr key={row.key}>
-                                                <td className="py-4 pr-6 font-medium text-slate-900">
-                                                    {row.label}
+                                                <td className="py-4 pr-6 text-slate-900">
+                                                    <span className="font-medium">{row.label}</span>
+                                                    {/* Only the rows that are genuinely easy to
+                                                        confuse carry one; the rest read fine alone. */}
+                                                    {row.description ? (
+                                                        <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-500">
+                                                            {row.description}
+                                                        </span>
+                                                    ) : null}
                                                 </td>
                                                 {permissionSettings.role_columns.map((col) => {
                                                     const checked = row.roles.includes(col.value);

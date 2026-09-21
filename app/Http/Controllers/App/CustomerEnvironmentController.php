@@ -90,7 +90,7 @@ class CustomerEnvironmentController extends Controller
             403,
         );
 
-        $allowedRoles = ['system_owner', 'bid_manager', 'contributor', 'qa', 'all'];
+        $allowedRoles = ['system_owner', 'bid_manager', 'contributor', Customer::ROLE_QA, Customer::ROLE_WIKI_APPROVER, 'all'];
         $allowedPermissions = [
             Customer::PERMISSION_CREATE_DEPARTMENTS,
             Customer::PERMISSION_CREATE_USERS,
@@ -134,7 +134,10 @@ class CustomerEnvironmentController extends Controller
             ['value' => 'system_owner', 'label' => 'System Owner', 'locked' => true],
             ['value' => 'bid_manager', 'label' => 'Bid Manager', 'locked' => false],
             ['value' => 'contributor', 'label' => 'Contributor', 'locked' => false],
-            ['value' => 'qa', 'label' => 'QA', 'locked' => false],
+            ['value' => Customer::ROLE_QA, 'label' => 'QA', 'locked' => false],
+            // Its own column rather than a second meaning for QA: a customer has to be able to say
+            // who publishes pages without also saying who vouches for claims.
+            ['value' => Customer::ROLE_WIKI_APPROVER, 'label' => __('procynia.wiki.role_wiki_approver'), 'locked' => false],
             ['value' => 'all', 'label' => 'Alle', 'locked' => false],
         ];
 
@@ -154,16 +157,20 @@ class CustomerEnvironmentController extends Controller
                 'label' => 'Se alle saker',
                 'roles' => $settings[Customer::PERMISSION_VIEW_ALL_CASES],
             ],
+            // The two Wiki approval rows sit together and used to read almost identically —
+            // "Godkjenne Wiki-påstander" and "Godkjenne Wiki-sider" — which is exactly how an
+            // administrator ends up granting QA and expecting it to cover publishing. They now say
+            // what each one actually decides, and carry a line of help to keep them apart.
             [
                 'key' => Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
-                'label' => 'Godkjenne Wiki-påstander',
+                'label' => __('procynia.wiki.permission_approve_wiki_claims'),
+                'description' => __('procynia.wiki.permission_approve_wiki_claims_help'),
                 'roles' => $settings[Customer::PERMISSION_APPROVE_WIKI_CLAIMS],
             ],
             [
-                // Sits next to "Godkjenne Wiki-påstander" so the two are read as different things:
-                // a claim decision vouches for one statement, a page decision publishes the page.
                 'key' => Customer::PERMISSION_APPROVE_WIKI_PAGES,
-                'label' => 'Godkjenne Wiki-sider',
+                'label' => __('procynia.wiki.permission_approve_wiki_pages'),
+                'description' => __('procynia.wiki.permission_approve_wiki_pages_help'),
                 'roles' => $settings[Customer::PERMISSION_APPROVE_WIKI_PAGES],
             ],
             [
