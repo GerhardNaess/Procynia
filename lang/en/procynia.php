@@ -2001,6 +2001,7 @@ return [
         'field_name' => 'Name',
         'field_email' => 'Email',
         'field_role' => 'Role',
+        'bid_role_commercial_owner' => 'Commercial owner',
         'field_is_qa' => 'QA (quality assurance)',
         'hint_is_qa' => 'Can review and approve individual claims against their sources. Does not grant the right to publish Wiki pages.',
         'hint_is_wiki_approver' => 'Can review, approve, and publish Wiki pages submitted for review.',

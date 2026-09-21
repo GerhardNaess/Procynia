@@ -49,6 +49,19 @@ class User extends Authenticatable implements FilamentUser
 
     public const BID_ROLE_BID_MANAGER = 'bid_manager';
 
+    /**
+     * Carries the commercial responsibility: prioritisation, price and go/no-go.
+     *
+     * A main role, not a supplemental capability like QA — a user is a commercial owner instead of
+     * being a Bid Manager or Contributor, not in addition to it. The role says the person does this
+     * work in the organisation; saved_notices.opportunity_owner_user_id says which of them carries
+     * a particular case. Bid Manager is modelled the same way, and the two now read alike.
+     *
+     * The role grants nothing on its own. What a commercial owner may do comes from the access
+     * matrix, exactly as for every other main role.
+     */
+    public const BID_ROLE_COMMERCIAL_OWNER = 'commercial_owner';
+
     public const BID_ROLE_CONTRIBUTOR = 'contributor';
 
     public const BID_ROLE_VIEWER = 'viewer';
@@ -56,6 +69,7 @@ class User extends Authenticatable implements FilamentUser
     public const BID_ROLES = [
         self::BID_ROLE_SYSTEM_OWNER,
         self::BID_ROLE_BID_MANAGER,
+        self::BID_ROLE_COMMERCIAL_OWNER,
         self::BID_ROLE_CONTRIBUTOR,
         self::BID_ROLE_VIEWER,
     ];
@@ -81,6 +95,7 @@ class User extends Authenticatable implements FilamentUser
     public const BID_ROLE_LABELS = [
         self::BID_ROLE_SYSTEM_OWNER => 'System Owner',
         self::BID_ROLE_BID_MANAGER => 'Bid Manager',
+        self::BID_ROLE_COMMERCIAL_OWNER => 'Kommersiell eier',
         self::BID_ROLE_CONTRIBUTOR => 'Contributor',
         self::BID_ROLE_VIEWER => 'Viewer',
     ];
@@ -214,9 +229,25 @@ class User extends Authenticatable implements FilamentUser
         return $this->belongsTo(Language::class, 'preferred_language_id');
     }
 
+    /**
+     * The main roles as a user sees them. BID_ROLE_LABELS holds the product names, which are the
+     * same in both languages for the roles that have always been written in English; a role with a
+     * translation key uses it, so "Kommersiell eier" reads as "Commercial owner" in English.
+     *
+     * @return array<string, string>
+     */
     public static function bidRoleOptions(): array
     {
-        return self::BID_ROLE_LABELS;
+        $labels = [];
+
+        foreach (self::BID_ROLE_LABELS as $role => $fallback) {
+            $key = "procynia.users_form.bid_role_{$role}";
+            $translated = __($key);
+
+            $labels[$role] = is_string($translated) && $translated !== $key ? $translated : $fallback;
+        }
+
+        return $labels;
     }
 
     public static function bidManagerScopeOptions(): array
@@ -278,7 +309,16 @@ class User extends Authenticatable implements FilamentUser
             return true;
         }
 
-        return $this->resolvedBidManagerScope() !== null || $this->resolvedBidRole() === self::BID_ROLE_CONTRIBUTOR;
+        // The matrix has already said this role may create users; what is left is the scope
+        // question. A Bid Manager manages users inside their own area, so they need one configured.
+        // The roles below carry no departmental scope at all, so there is nothing further to check.
+        // Viewer is absent on purpose: read-only access must not become user administration however
+        // the matrix is configured.
+        if (in_array($this->resolvedBidRole(), [self::BID_ROLE_CONTRIBUTOR, self::BID_ROLE_COMMERCIAL_OWNER], true)) {
+            return true;
+        }
+
+        return $this->resolvedBidManagerScope() !== null;
     }
 
     public function canManageCustomerBilling(): bool
@@ -522,6 +562,16 @@ class User extends Authenticatable implements FilamentUser
      * that capability the permission. Layered on top of bid_role exactly as QA is, and deliberately
      * independent of it — a user can hold either, both or neither.
      */
+    /**
+     * Does this user do commercial ownership work? Says nothing about any particular case — that is
+     * saved_notices.opportunity_owner_user_id — and nothing about what they may do, which comes
+     * from the access matrix.
+     */
+    public function isCommercialOwner(): bool
+    {
+        return $this->resolvedBidRole() === self::BID_ROLE_COMMERCIAL_OWNER;
+    }
+
     public function isWikiApprover(): bool
     {
         return (bool) $this->is_wiki_approver;

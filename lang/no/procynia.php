@@ -2001,6 +2001,7 @@ return [
         'field_name' => 'Navn',
         'field_email' => 'E-post',
         'field_role' => 'Rolle',
+        'bid_role_commercial_owner' => 'Kommersiell eier',
         'field_is_qa' => 'QA (kvalitetssikring)',
         'hint_is_wiki_approver' => 'Kan gjennomgå, godkjenne og publisere Wiki-sider som er sendt til gjennomgang.',
         'field_is_wiki_approver' => 'Wiki-godkjenner',

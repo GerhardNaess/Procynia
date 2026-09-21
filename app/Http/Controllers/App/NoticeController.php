@@ -1160,6 +1160,14 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
+        $record = $this->customerSavedNoticeManageableQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        // A NEW commercial owner has to hold the role. Re-saving the person already on the case
+        // does not: cases were assigned before the role existed, and refusing to save an unrelated
+        // field on such a case would make it unusable. The current holder is therefore accepted as
+        // themselves and nobody else.
         $validated = $request->validate([
             'opportunity_owner_user_id' => [
                 'nullable',
@@ -1167,12 +1175,19 @@ class NoticeController extends Controller
                 Rule::exists(User::class, 'id')->where(fn ($query) => $query
                     ->where('customer_id', $customerId)
                     ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])),
+                function (string $attribute, mixed $value, callable $fail) use ($record): void {
+                    if ($value === null || (int) $value === (int) $record->opportunity_owner_user_id) {
+                        return;
+                    }
+
+                    $candidate = User::query()->find((int) $value);
+
+                    if (! $candidate instanceof User || ! $candidate->isCommercialOwner()) {
+                        $fail('Kommersiell eier må være en bruker med rollen Kommersiell eier.');
+                    }
+                },
             ],
         ]);
-
-        $record = $this->customerSavedNoticeManageableQuery($user)
-            ->whereKey($savedNotice->id)
-            ->firstOrFail();
 
         $record->fill([
             'opportunity_owner_user_id' => isset($validated['opportunity_owner_user_id']) && $validated['opportunity_owner_user_id'] !== null
@@ -1672,7 +1687,10 @@ class NoticeController extends Controller
                     ])
                     ->values()
                     ->all(),
-                'owner_options' => $this->customerOpportunityOwnerOptions((int) $notice->customer_id),
+                'owner_options' => $this->customerOpportunityOwnerOptions(
+                    (int) $notice->customer_id,
+                    $notice->opportunity_owner_user_id !== null ? (int) $notice->opportunity_owner_user_id : null,
+                ),
                 'items' => $notice->infoItems
                     ->map(fn (SavedNoticeInfoItem $infoItem): array => [
                         'id' => $infoItem->id,
@@ -1803,7 +1821,10 @@ class NoticeController extends Controller
                     ? route('app.notices.saved.opportunity-owner.update', ['savedNotice' => $notice->id])
                     : null,
                 'opportunity_owner_options' => $canManageCase
-                    ? $this->customerOpportunityOwnerOptions((int) $notice->customer_id)
+                    ? $this->customerOpportunityOwnerOptions(
+                        (int) $notice->customer_id,
+                        $notice->opportunity_owner_user_id !== null ? (int) $notice->opportunity_owner_user_id : null,
+                    )
                     : [],
                 'update_bid_manager_url' => $canManageCase
                     ? route('app.notices.saved.bid-manager.update', ['savedNotice' => $notice->id])
@@ -2024,16 +2045,33 @@ class NoticeController extends Controller
         };
     }
 
-    private function customerOpportunityOwnerOptions(int $customerId): array
+    /**
+     * Who may be picked as the commercial owner of a case: the customer's users who hold that main
+     * role — the same rule customerBidManagerOptions() applies to Bid Manager.
+     *
+     * $currentOwnerId keeps whoever is already assigned in the list even if they do not hold the
+     * role. Cases were assigned before the role existed, and a select whose current value is not
+     * among its options renders as empty and silently clears the field on the next save. Such a
+     * person stays visible on the case they already have and is not offered anywhere else.
+     */
+    private function customerOpportunityOwnerOptions(int $customerId, ?int $currentOwnerId = null): array
     {
         return User::query()
             ->where('customer_id', $customerId)
             ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
+            ->where(function ($query) use ($currentOwnerId): void {
+                $query->where('bid_role', User::BID_ROLE_COMMERCIAL_OWNER);
+
+                if ($currentOwnerId !== null) {
+                    $query->orWhere('id', $currentOwnerId);
+                }
+            })
             ->orderByDesc('is_active')
             ->orderBy('name')
             ->get(['id', 'name', 'is_active', 'bid_role'])
             ->map(function (User $user): array {
                 $bidRoleLabel = match ($user->resolvedBidRole()) {
+                    User::BID_ROLE_COMMERCIAL_OWNER => 'Kommersiell eier',
                     User::BID_ROLE_BID_MANAGER => 'Bid-manager',
                     User::BID_ROLE_VIEWER => 'Lesetilgang',
                     default => 'Bid-bidragsyter',

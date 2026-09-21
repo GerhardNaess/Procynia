@@ -59,9 +59,9 @@ class AdvaniaLocalDevSeeder extends Seeder
                 nationality: $nationality,
                 name: 'Gerhard Næss',
                 email: 'gerhard@advania.no',
-                // "Kommersiell eier" exists as a persona in the app, but not as a valid bid_role.
-                // Local dev therefore maps Gerhard to the nearest supported role.
-                bidRole: User::BID_ROLE_CONTRIBUTOR,
+                // The commercial owner persona now has a role of its own, so local dev seeds it
+                // rather than the nearest approximation it used to settle for.
+                bidRole: User::BID_ROLE_COMMERCIAL_OWNER,
             );
             $this->seedCustomerUser(
                 customer: $customer,

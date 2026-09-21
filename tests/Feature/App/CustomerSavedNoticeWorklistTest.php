@@ -4302,9 +4302,13 @@ class CustomerSavedNoticeWorklistTest extends TestCase
     public function test_customer_can_update_opportunity_owner_for_own_saved_notice(): void
     {
         $context = $this->customerAdminContext();
+
+        // The commercial owner OF a case is now picked from users who hold that role, the same way
+        // the bid manager of a case is picked from Bid Managers. This fixture used a Bid Manager
+        // back when any customer user qualified.
         $opportunityOwner = User::factory()->create([
             'role' => User::ROLE_USER,
-            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_role' => User::BID_ROLE_COMMERCIAL_OWNER,
             'customer_id' => $context['customer']->id,
             'is_active' => true,
         ]);

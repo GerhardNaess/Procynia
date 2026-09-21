@@ -90,7 +90,15 @@ class CustomerEnvironmentController extends Controller
             403,
         );
 
-        $allowedRoles = ['system_owner', 'bid_manager', 'contributor', Customer::ROLE_QA, Customer::ROLE_WIKI_APPROVER, 'all'];
+        $allowedRoles = [
+            'system_owner',
+            'bid_manager',
+            User::BID_ROLE_COMMERCIAL_OWNER,
+            'contributor',
+            Customer::ROLE_QA,
+            Customer::ROLE_WIKI_APPROVER,
+            'all',
+        ];
         $allowedPermissions = [
             Customer::PERMISSION_CREATE_DEPARTMENTS,
             Customer::PERMISSION_CREATE_USERS,
@@ -133,6 +141,10 @@ class CustomerEnvironmentController extends Controller
         $roleColumns = [
             ['value' => 'system_owner', 'label' => 'System Owner', 'locked' => true],
             ['value' => 'bid_manager', 'label' => 'Bid Manager', 'locked' => false],
+            // A main role beside Bid Manager, so it sits with the other main roles rather than with
+            // the supplemental capabilities further right. It starts with nothing ticked: the role
+            // says what a person does, the matrix says what they may do.
+            ['value' => User::BID_ROLE_COMMERCIAL_OWNER, 'label' => User::BID_ROLE_LABELS[User::BID_ROLE_COMMERCIAL_OWNER], 'locked' => false],
             ['value' => 'contributor', 'label' => 'Contributor', 'locked' => false],
             ['value' => Customer::ROLE_QA, 'label' => 'QA', 'locked' => false],
             // Its own column rather than a second meaning for QA: a customer has to be able to say
