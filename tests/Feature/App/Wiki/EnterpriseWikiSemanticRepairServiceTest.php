@@ -73,7 +73,8 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun(
             $customer,
-            sourceType: EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            // Archived source type from the decommissioned Knowledge Base.
+            sourceType: 'knowledge_item_version',
         );
 
         $diagnosis = $this->failingAiResult(action: 'targeted_revision');

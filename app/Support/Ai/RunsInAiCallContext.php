@@ -7,7 +7,6 @@ use App\Exceptions\Ai\AiCostControlException;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
-use App\Models\KnowledgeItem;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
 use App\Models\SavedNotice;
@@ -110,19 +109,6 @@ trait RunsInAiCallContext
             is_numeric($savedNoticeId) ? (int) $savedNoticeId : null,
             $operation,
             $runId,
-        );
-    }
-
-    protected function knowledgeItemAiCallContext(int $knowledgeItemId, string $operation): AiCallContext
-    {
-        $customerId = KnowledgeItem::query()->whereKey($knowledgeItemId)->value('customer_id');
-
-        return new AiCallContext(
-            customerId: is_numeric($customerId) ? (int) $customerId : null,
-            feature: 'knowledge',
-            operation: $operation,
-            resourceType: 'knowledge_item',
-            resourceId: $knowledgeItemId,
         );
     }
 

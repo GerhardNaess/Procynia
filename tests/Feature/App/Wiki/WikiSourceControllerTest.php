@@ -15,7 +15,6 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
-use App\Models\KnowledgeItem;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
@@ -1577,24 +1576,6 @@ class WikiSourceControllerTest extends TestCase
 
         $this->assertNotNull($approval);
         $this->assertSame([$supportingDocument->id], $approval->source_document_ids);
-    }
-
-    // ─── No knowledge_* models touched ───────────────────────────────────────
-
-    public function test_no_knowledge_item_rows_are_created_during_upload(): void
-    {
-        Storage::fake('local');
-        $this->mockExtractorReturning('Innhold.');
-
-        $customer = $this->createCustomer();
-        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-
-        $this->actingAs($user)->post('/app/wiki/sources', [
-            'file' => UploadedFile::fake()->create('isolation.pdf', 64, 'application/pdf'),
-            'tab' => 'sources',
-        ]);
-
-        $this->assertSame(0, KnowledgeItem::query()->where('customer_id', $customer->id)->count());
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

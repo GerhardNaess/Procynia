@@ -101,18 +101,10 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
                 return;
             }
 
-            if ($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
-                $document = $ingestService->resolveDocumentForIngest($run->customer_id, $run->source_id);
-                $allSections = $parser->splitIntoSections((string) $document->extracted_text);
-                $sourceLabel = $document->original_filename ?? sprintf('enterprise_wiki_document:%d', $document->id);
-                $refSourceType = EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT;
-            } else {
-                // knowledge_item_version path (legacy/bootstrap — Kunnskapsbase-import)
-                $version = $ingestService->resolveApprovedVersion($run->customer_id, $run->source_id);
-                $allSections = $parser->splitIntoSections((string) $version->extracted_text);
-                $sourceLabel = $version->original_filename ?? sprintf('knowledge_item_version:%d', $version->id);
-                $refSourceType = EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION;
-            }
+            $document = $ingestService->resolveDocumentForIngest($run->customer_id, $run->source_id);
+            $allSections = $parser->splitIntoSections((string) $document->extracted_text);
+            $sourceLabel = $document->original_filename ?? sprintf('enterprise_wiki_document:%d', $document->id);
+            $refSourceType = EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT;
 
             $sectionData = $allSections[$section->section_index] ?? null;
 

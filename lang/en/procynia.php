@@ -3525,7 +3525,6 @@ return [
         'approval_comment_placeholder' => 'Optional comment',
         'approved_by_at' => 'Approved by :name on :date',
         'source_type_enterprise_wiki_document' => 'Enterprise Wiki source document',
-        'source_type_knowledge_item_version' => 'Knowledge base version',
         'source_type_saved_notice_document' => 'Saved notice document',
         'source_type_doffin_notice' => 'Doffin notice',
         'source_type_manual' => 'Manual source',

@@ -11,8 +11,6 @@ use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
-use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
@@ -41,7 +39,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_job_stores_claim_and_source_reference_from_ai_response(): void
     {
-        ['run' => $run, 'section' => $section] = $this->createScaffold();
+        ['run' => $run, 'section' => $section] = $this->createDocumentScaffold();
 
         $aiClient = $this->mockAiClient([
             ['text' => 'Vi er ISO 9001-sertifisert.', 'confidence' => 'high', 'excerpt' => 'ISO 9001-sertifisert siden 2015.'],
@@ -61,9 +59,9 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
         $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
         $this->assertDatabaseHas('enterprise_wiki_source_references', [
             'enterprise_wiki_claim_id' => $claim->id,
-            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $run->source_id,
-            'source_label' => 'kompetanse.docx',
+            'source_label' => 'kompetanse.pdf',
             'excerpt' => 'ISO 9001-sertifisert siden 2015.',
         ]);
     }
@@ -74,7 +72,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_claim_without_text_is_rejected(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         $aiClient = $this->mockAiClient([
             ['text' => '', 'confidence' => 'medium', 'excerpt' => 'Noe innhold.'],
@@ -92,7 +90,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_claim_without_excerpt_is_rejected(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         // No 'excerpt' key → parser sets excerpt='' → job filters it out.
         $aiClient = $this->mockAiClient([
@@ -111,7 +109,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_excerpt_is_trimmed_to_500_characters(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         $aiClient = $this->mockAiClient([
             ['text' => 'Et gyldig krav.', 'confidence' => 'medium', 'excerpt' => str_repeat('X', 600)],
@@ -130,7 +128,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_conflict_note_sets_conflict_flag_true(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         $aiClient = $this->mockAiClient([
             [
@@ -155,7 +153,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_section_is_marked_completed_on_success(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         $aiClient = $this->mockAiClient([
             ['text' => 'Et gyldig krav.', 'confidence' => 'high', 'excerpt' => 'Kildesetning.'],
@@ -173,7 +171,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_section_is_marked_failed_when_ai_client_throws(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         /** @var WikiSectionAiClient&MockInterface $mock */
         $mock = $this->mock(WikiSectionAiClient::class);
@@ -200,7 +198,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
     public function test_rerun_of_completed_section_does_not_create_duplicates(): void
     {
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         $section->update(['status' => EnterpriseWikiIngestSection::STATUS_COMPLETED]);
 
@@ -225,7 +223,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
         // WikiSectionAiClient::fetchClaims() throws RuntimeException("not implemented")
         // in production. If the real class were called, this test would fail with that
         // exception. The mock returning a valid response proves the job only uses the mock.
-        ['section' => $section] = $this->createScaffold();
+        ['section' => $section] = $this->createDocumentScaffold();
 
         /** @var WikiSectionAiClient&MockInterface $mock */
         $mock = $this->mock(WikiSectionAiClient::class);
@@ -242,45 +240,9 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
     // Test 10: Job does not modify KnowledgeBase/RAG tables
     // -------------------------------------------------------------------------
 
-    public function test_job_does_not_modify_rag_tables(): void
-    {
-        ['version' => $version, 'section' => $section] = $this->createScaffold();
-
-        $originalText = $version->extracted_text;
-        $originalApproval = $version->approval_status;
-        $countVersionsBefore = KnowledgeItemVersion::query()->count();
-
-        $aiClient = $this->mockAiClient([
-            ['text' => 'Et krav.', 'confidence' => 'high', 'excerpt' => 'Kildesetning.'],
-        ]);
-
-        $this->runSection($section, $aiClient);
-
-        $version->refresh();
-        $this->assertSame($originalText, $version->extracted_text);
-        $this->assertSame($originalApproval, $version->approval_status);
-        $this->assertSame($countVersionsBefore, KnowledgeItemVersion::query()->count());
-        $this->assertDatabaseCount('knowledge_item_chunks', 0);
-    }
-
     // =========================================================================
     // Helpers
     // =========================================================================
-
-    /**
-     * @return array{customer: Customer, item: KnowledgeItem, version: KnowledgeItemVersion, run: EnterpriseWikiIngestRun, page: EnterpriseWikiPage, pageVersion: EnterpriseWikiPageVersion, section: EnterpriseWikiIngestSection}
-     */
-    private function createScaffold(array $versionOverrides = [], array $sectionOverrides = []): array
-    {
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, $versionOverrides);
-        $run = $this->createRun($customer, $version);
-        [$page, $pageVersion] = $this->createDraftPage($customer, $run);
-        $section = $this->createSection($run, $sectionOverrides);
-
-        return compact('customer', 'item', 'version', 'run', 'page', 'pageVersion', 'section');
-    }
 
     private function runSection(EnterpriseWikiIngestSection $section, WikiSectionAiClient&MockInterface $aiClient): void
     {
@@ -314,48 +276,11 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
         return Customer::query()->create([
             'name' => $name,
-            'slug' => Str::slug($name) . '-' . Str::lower(Str::random(6)),
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
             'is_active' => true,
-        ]);
-    }
-
-    private function createKnowledgeItem(Customer $customer): KnowledgeItem
-    {
-        return KnowledgeItem::query()->create([
-            'customer_id' => $customer->id,
-            'title' => 'Test Document',
-            'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY,
-            'ai_usage_enabled' => true,
-        ]);
-    }
-
-    private function createVersion(KnowledgeItem $item, Customer $customer, array $overrides = []): KnowledgeItemVersion
-    {
-        return KnowledgeItemVersion::query()->create(array_merge([
-            'knowledge_item_id' => $item->id,
-            'customer_id' => $customer->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'extracted_text' => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
-            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
-            'file_hash_sha256' => str_pad('abc123', 64, '0'),
-            'original_filename' => 'kompetanse.docx',
-        ], $overrides));
-    }
-
-    private function createRun(Customer $customer, KnowledgeItemVersion $version): EnterpriseWikiIngestRun
-    {
-        return EnterpriseWikiIngestRun::query()->create([
-            'uuid' => (string) Str::uuid(),
-            'customer_id' => $customer->id,
-            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
-            'source_id' => $version->id,
-            'source_hash' => str_pad('hash', 64, '0'),
-            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'status' => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
         ]);
     }
 
@@ -366,7 +291,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
     {
         $page = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
-            'slug' => 'wiki-draft-' . $run->id,
+            'slug' => 'wiki-draft-'.$run->id,
             'title' => 'Test Document',
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
@@ -414,24 +339,9 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
         $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
         $this->assertDatabaseHas('enterprise_wiki_source_references', [
             'enterprise_wiki_claim_id' => $claim->id,
-            'source_type'              => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                => $run->source_id,
-            'source_label'             => 'kompetanse.pdf',
-        ]);
-    }
-
-    public function test_document_path_does_not_create_knowledge_item_version_source_references(): void
-    {
-        ['section' => $section] = $this->createDocumentScaffold();
-
-        $aiClient = $this->mockAiClient([
-            ['text' => 'Et krav.', 'confidence' => 'medium', 'excerpt' => 'Kildeutdrag.'],
-        ]);
-
-        $this->runSection($section, $aiClient);
-
-        $this->assertDatabaseMissing('enterprise_wiki_source_references', [
-            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $run->source_id,
+            'source_label' => 'kompetanse.pdf',
         ]);
     }
 
@@ -440,10 +350,10 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
     /**
      * @return array{customer: Customer, document: EnterpriseWikiDocument, run: EnterpriseWikiIngestRun, page: EnterpriseWikiPage, pageVersion: EnterpriseWikiPageVersion, section: EnterpriseWikiIngestSection}
      */
-    private function createDocumentScaffold(array $sectionOverrides = []): array
+    private function createDocumentScaffold(array $sectionOverrides = [], array $documentOverrides = []): array
     {
         $customer = $this->createCustomer();
-        $document = $this->createDocumentRecord($customer);
+        $document = $this->createDocumentRecord($customer, $documentOverrides);
         $run = $this->createDocumentRun($customer, $document);
         [$page, $pageVersion] = $this->createDraftPage($customer, $run);
         $section = $this->createSection($run, $sectionOverrides);
@@ -454,25 +364,25 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
     private function createDocumentRecord(Customer $customer, array $overrides = []): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create(array_merge([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'kompetanse.pdf',
-            'file_path'         => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
-            'file_hash_sha256'  => hash('sha256', Str::random(32)),
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
-            'extracted_text'    => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'extracted_text' => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
         ], $overrides));
     }
 
     private function createDocumentRun(Customer $customer, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
     {
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'         => (string) Str::uuid(),
-            'customer_id'  => $customer->id,
-            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'    => $document->id,
-            'source_hash'  => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'status'       => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+            'status' => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
         ]);
     }
 }

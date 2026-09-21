@@ -7,7 +7,6 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
-use App\Models\KnowledgeItem;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageOwnerService;
@@ -77,24 +76,10 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
         }
 
         try {
-            if ($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
-                $document = $service->resolveDocumentForIngest($run->customer_id, $run->source_id);
-                $service->validateExtractedTextSize((string) $document->extracted_text);
-                $sections = $parser->splitIntoSections((string) $document->extracted_text);
-                $pageTitle = pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Wiki-side';
-            } else {
-                // knowledge_item_version path (legacy/bootstrap — Kunnskapsbase-import)
-                $version = $service->resolveApprovedVersion($run->customer_id, $run->source_id);
-                $service->validateExtractedTextSize((string) $version->extracted_text);
-                $sections = $parser->splitIntoSections((string) $version->extracted_text);
-
-                $knowledgeItem = KnowledgeItem::query()
-                    ->where('id', $version->knowledge_item_id)
-                    ->select(['id', 'title'])
-                    ->first();
-
-                $pageTitle = $knowledgeItem?->title ?? 'Wiki-side';
-            }
+            $document = $service->resolveDocumentForIngest($run->customer_id, $run->source_id);
+            $service->validateExtractedTextSize((string) $document->extracted_text);
+            $sections = $parser->splitIntoSections((string) $document->extracted_text);
+            $pageTitle = pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Wiki-side';
 
             if (empty($sections)) {
                 $run->update([

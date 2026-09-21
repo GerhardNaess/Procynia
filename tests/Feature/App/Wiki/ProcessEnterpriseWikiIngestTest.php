@@ -10,8 +10,6 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
-use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
@@ -37,11 +35,10 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_transitions_run_from_queued_to_sections_planned(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, [
+        $document = $this->createExtractedDocument($customer, [
             'extracted_text' => "## Seksjon 1\nNoe innhold.\n\n## Seksjon 2\nMer innhold.",
         ]);
-        $run = $this->createQueuedRun($customer, $version);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -54,11 +51,10 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_creates_section_rows_matching_text_headings(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, [
+        $document = $this->createExtractedDocument($customer, [
             'extracted_text' => "## Kompetanse\nVi har bred kompetanse.\n\n## Referanser\nSe vedlegg.",
         ]);
-        $run = $this->createQueuedRun($customer, $version);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -78,11 +74,10 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_dispatches_one_section_job_per_section(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, [
+        $document = $this->createExtractedDocument($customer, [
             'extracted_text' => "## Seksjon A\nInnhold A.\n\n## Seksjon B\nInnhold B.",
         ]);
-        $run = $this->createQueuedRun($customer, $version);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -92,9 +87,8 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_creates_draft_wiki_page_and_version(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
+        $document = $this->createExtractedDocument($customer);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -110,9 +104,8 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $text = str_repeat('Tekst uten overskrift. ', 200);
 
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, ['extracted_text' => $text]);
-        $run = $this->createQueuedRun($customer, $version);
+        $document = $this->createExtractedDocument($customer, ['extracted_text' => $text]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -132,9 +125,8 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_creates_page_with_article_page_type(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
+        $document = $this->createExtractedDocument($customer);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -148,49 +140,24 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_creates_ingest_run_page_pivot_row_with_created_action(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $this->runJob($run);
-
-        $run->refresh();
-        $this->assertDatabaseHas('enterprise_wiki_ingest_run_pages', [
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $run->enterprise_wiki_page_id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
-        ]);
-    }
-
-    public function test_document_ingest_also_creates_article_page_type_and_pivot_row(): void
-    {
-        $customer = $this->createCustomer();
-        $document = $this->createExtractedDocument($customer, [
-            'original_filename' => 'selskapsinfo.docx',
-            'extracted_text'    => "## Om oss\nVi er et selskap.",
-        ]);
+        $document = $this->createExtractedDocument($customer);
         $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
         $run->refresh();
-        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
-
-        $this->assertNotNull($page);
-        $this->assertSame(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $page->page_type);
         $this->assertDatabaseHas('enterprise_wiki_ingest_run_pages', [
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $page->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'enterprise_wiki_page_id' => $run->enterprise_wiki_page_id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
         ]);
     }
 
     public function test_ingest_run_pages_relation_returns_created_page(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
+        $document = $this->createExtractedDocument($customer);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
@@ -205,9 +172,8 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     public function test_job_returns_early_when_run_is_not_queued(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
+        $document = $this->createExtractedDocument($customer);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_RUNNING]);
 
@@ -220,88 +186,20 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
 
     // --- Failure paths ---
 
-    public function test_job_marks_run_failed_when_version_not_found_for_customer(): void
+    public function test_job_marks_run_failed_when_document_has_no_extracted_text(): void
     {
         $customer = $this->createCustomer();
-        $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid' => (string) Str::uuid(),
-            'customer_id' => $customer->id,
-            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
-            'source_id' => 99999,
-            'source_hash' => 'nonexistent',
-            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
-        ]);
+        $document = $this->createExtractedDocument($customer, ['extracted_text' => null]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
         $this->assertNotEmpty($run->error_message);
-        $this->assertDatabaseCount('enterprise_wiki_ingest_sections', 0);
-    }
-
-    public function test_job_marks_run_failed_when_version_has_no_extracted_text(): void
-    {
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, ['extracted_text' => null]);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $this->runJob($run);
-
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
-        $this->assertNotEmpty($run->error_message);
-    }
-
-    public function test_job_marks_run_failed_when_version_is_not_approved(): void
-    {
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, [
-            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW,
-        ]);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $this->runJob($run);
-
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
     }
 
     // --- RAG read-only ---
-
-    public function test_job_does_not_modify_knowledge_item_versions(): void
-    {
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $originalText = $version->extracted_text;
-        $originalApprovalStatus = $version->approval_status;
-
-        $this->runJob($run);
-
-        $version->refresh();
-        $this->assertSame($originalText, $version->extracted_text);
-        $this->assertSame($originalApprovalStatus, $version->approval_status);
-    }
-
-    public function test_job_does_not_create_or_delete_knowledge_item_versions(): void
-    {
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $countBefore = KnowledgeItemVersion::query()->count();
-
-        $this->runJob($run);
-
-        $this->assertSame($countBefore, KnowledgeItemVersion::query()->count());
-    }
 
     // --- Helpers ---
 
@@ -332,42 +230,6 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
             'is_active' => true,
-        ]);
-    }
-
-    private function createKnowledgeItem(Customer $customer, bool $aiUsageEnabled = true): KnowledgeItem
-    {
-        return KnowledgeItem::query()->create([
-            'customer_id' => $customer->id,
-            'title' => 'Test Document',
-            'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY,
-            'ai_usage_enabled' => $aiUsageEnabled,
-        ]);
-    }
-
-    private function createVersion(KnowledgeItem $item, Customer $customer, array $overrides = []): KnowledgeItemVersion
-    {
-        return KnowledgeItemVersion::query()->create(array_merge([
-            'knowledge_item_id' => $item->id,
-            'customer_id' => $customer->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'extracted_text' => "## Seksjon A\nNoe innhold.\n\n## Seksjon B\nMer innhold.",
-            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
-            'file_hash_sha256' => str_pad('abc123', 64, '0'),
-        ], $overrides));
-    }
-
-    private function createQueuedRun(Customer $customer, KnowledgeItemVersion $version): EnterpriseWikiIngestRun
-    {
-        return EnterpriseWikiIngestRun::query()->create([
-            'uuid' => (string) Str::uuid(),
-            'customer_id' => $customer->id,
-            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
-            'source_id' => $version->id,
-            'source_hash' => str_pad('hash', 64, '0'),
-            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
         ]);
     }
 
@@ -406,14 +268,14 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
             'original_filename' => 'selskapsinfo.pdf',
-            'extracted_text'    => "## Om oss\nVi er et selskap.",
+            'extracted_text' => "## Om oss\nVi er et selskap.",
         ]);
         $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
         $run->refresh();
-        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
 
         $this->assertNotNull($page);
         $this->assertSame('selskapsinfo', $page->title);
@@ -424,14 +286,14 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
             'original_filename' => 'Masterdata Prosjekt.docx',
-            'extracted_text'    => "## Innledning\nKortfattet innhold.",
+            'extracted_text' => "## Innledning\nKortfattet innhold.",
         ]);
         $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
         $run->refresh();
-        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
 
         $this->assertNotNull($page);
         $this->assertSame('Masterdata Prosjekt', $page->title);
@@ -442,14 +304,14 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
             'original_filename' => 'kompetanse.docx',
-            'extracted_text'    => "## Kompetanse\nVi leverer.",
+            'extracted_text' => "## Kompetanse\nVi leverer.",
         ]);
         $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
         $run->refresh();
-        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
 
         $this->assertNotNull($page);
         $this->assertStringNotContainsString('wiki-draft-', $page->slug);
@@ -460,14 +322,14 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
             'original_filename' => 'kompetanse.docx',
-            'extracted_text'    => "## Kompetanse\nVi leverer.",
+            'extracted_text' => "## Kompetanse\nVi leverer.",
         ]);
         $run = $this->createQueuedRunForDocument($customer, $document);
 
         $this->runJob($run);
 
         $run->refresh();
-        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
 
         $this->assertNotNull($page);
         $this->assertStringStartsWith('kompetanse-', $page->slug);
@@ -478,7 +340,7 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
             'original_filename' => 'kompetanse.docx',
-            'extracted_text'    => "## Kompetanse\nVi leverer.",
+            'extracted_text' => "## Kompetanse\nVi leverer.",
         ]);
 
         $run1 = $this->createQueuedRunForDocument($customer, $document);
@@ -490,8 +352,8 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $run1->refresh();
         $run2->refresh();
 
-        $page1 = \App\Models\EnterpriseWikiPage::query()->find($run1->enterprise_wiki_page_id);
-        $page2 = \App\Models\EnterpriseWikiPage::query()->find($run2->enterprise_wiki_page_id);
+        $page1 = EnterpriseWikiPage::query()->find($run1->enterprise_wiki_page_id);
+        $page2 = EnterpriseWikiPage::query()->find($run2->enterprise_wiki_page_id);
 
         $this->assertNotNull($page1);
         $this->assertNotNull($page2);
@@ -502,13 +364,13 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     {
         $customer = $this->createCustomer();
         $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid'         => (string) Str::uuid(),
-            'customer_id'  => $customer->id,
-            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'    => 99999,
-            'source_hash'  => 'nonexistent',
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 99999,
+            'source_hash' => 'nonexistent',
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'status'       => EnterpriseWikiIngestRun::STATUS_QUEUED,
+            'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
         ]);
 
         $this->runJob($run);
@@ -524,7 +386,7 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
             'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING,
-            'extracted_text'  => null,
+            'extracted_text' => null,
         ]);
         $run = $this->createQueuedRunForDocument($customer, $document);
 
@@ -540,25 +402,25 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
     private function createExtractedDocument(Customer $customer, array $overrides = []): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create(array_merge([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'test.pdf',
-            'file_path'         => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
-            'file_hash_sha256'  => hash('sha256', Str::random(32)),
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
-            'extracted_text'    => "## Seksjon A\nNoe innhold.\n\n## Seksjon B\nMer innhold.",
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'extracted_text' => "## Seksjon A\nNoe innhold.\n\n## Seksjon B\nMer innhold.",
         ], $overrides));
     }
 
     private function createQueuedRunForDocument(Customer $customer, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
     {
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'         => (string) Str::uuid(),
-            'customer_id'  => $customer->id,
-            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'    => $document->id,
-            'source_hash'  => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'status'       => EnterpriseWikiIngestRun::STATUS_QUEUED,
+            'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
         ]);
     }
 }

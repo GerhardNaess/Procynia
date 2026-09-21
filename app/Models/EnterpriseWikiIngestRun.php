@@ -114,12 +114,9 @@ class EnterpriseWikiIngestRun extends Model
         self::TRIGGER_TYPE_SOURCE_CHANGE,
     ];
 
-    public const SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION = 'knowledge_item_version';
-
     public const SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT = 'enterprise_wiki_document';
 
     public const SOURCE_TYPES = [
-        self::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
         self::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
     ];
 

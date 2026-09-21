@@ -35,10 +35,8 @@ use RuntimeException;
  * of whether the answer itself is good or complete. A 'none' coverage answer is still a fully
  * usable expert draft; answer_text is never forced to null because of coverage_status alone.
  *
- * Deliberately a fully separate flow from the existing answer-draft engine
- * (RequirementAnswerDraftService): no new requirement extraction, no parallel requirement table,
- * no dependency on KnowledgeItem/KnowledgeItemChunk, no reuse of the existing Knowledge Base/RAG
- * retrieval, and no writes to answer_draft_* — every Wiki answer is persisted on its own
+ * The sole answer engine for requirement work: no new requirement extraction, no parallel
+ * requirement table, and no writes to answer_draft_* — every Wiki answer is persisted on its own
  * SavedNoticeAiRequirementWikiAnswer row.
  *
  * Claims/source references keep their original role (see EnterpriseWikiClaim/
@@ -122,63 +120,63 @@ class RequirementWikiAnswerService
             savedNoticeId: $requirement->saved_notice_id,
             commercialCredit: true,
         ), function () use ($requirement, $customerId, $languageCode, $userId, $caseInstructions, $requirementUserPrompt): SavedNoticeAiRequirementWikiAnswer {
-        $context = $this->researchService->research($requirement, $customerId, $languageCode);
+            $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
-        $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
-        $pagesForAi = $this->pagesForAi($context['pages'], $claimTextsByPageId);
+            $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
+            $pagesForAi = $this->pagesForAi($context['pages'], $claimTextsByPageId);
 
-        $answer = $this->answerAiClient->generateAnswer(
-            (string) ($requirement->requirement_identifier ?? ''),
-            (string) $requirement->requirement_text,
-            $pagesForAi,
-            $languageCode,
-            $caseInstructions,
-            $requirementUserPrompt,
-        );
-        $answerSections = $answer['answer_sections'];
-
-        $alignmentBefore = $context['pages'] === []
-            ? $this->deterministicBestPracticeAlignment($answerSections)
-            : $this->alignmentAiClient->assessAlignment(
+            $answer = $this->answerAiClient->generateAnswer(
                 (string) ($requirement->requirement_identifier ?? ''),
                 (string) $requirement->requirement_text,
-                $answerSections,
                 $pagesForAi,
+                $languageCode,
+                $caseInstructions,
+                $requirementUserPrompt,
+            );
+            $answerSections = $answer['answer_sections'];
+
+            $alignmentBefore = $context['pages'] === []
+                ? $this->deterministicBestPracticeAlignment($answerSections)
+                : $this->alignmentAiClient->assessAlignment(
+                    (string) ($requirement->requirement_identifier ?? ''),
+                    (string) $requirement->requirement_text,
+                    $answerSections,
+                    $pagesForAi,
+                    $languageCode,
+                );
+
+            [$answerSections, $alignmentFinal, $revisionInfo] = $this->reviseConflictingSectionsOnce(
+                $requirement,
+                $answerSections,
+                $alignmentBefore,
+                $pagesForAi,
+                $context,
                 $languageCode,
             );
 
-        [$answerSections, $alignmentFinal, $revisionInfo] = $this->reviseConflictingSectionsOnce(
-            $requirement,
-            $answerSections,
-            $alignmentBefore,
-            $pagesForAi,
-            $context,
-            $languageCode,
-        );
+            $coverageStatus = $this->computeCoverageStatus($alignmentFinal);
+            $hasPossibleConflict = $this->hasPossibleConflict($alignmentFinal);
+            $missingSummary = $this->computeMissingSummary($alignmentFinal, $coverageStatus, $context);
+            $usedPageIds = $this->unionUsedPageIds($answerSections);
+            $answerText = implode("\n\n", array_column($answerSections, 'text'));
+            $answerFigures = $this->answerFigures($answerSections, $pagesForAi);
+            $provenanceBySectionKey = $this->computeSectionsProvenance($answerSections, $pagesForAi);
 
-        $coverageStatus = $this->computeCoverageStatus($alignmentFinal);
-        $hasPossibleConflict = $this->hasPossibleConflict($alignmentFinal);
-        $missingSummary = $this->computeMissingSummary($alignmentFinal, $coverageStatus, $context);
-        $usedPageIds = $this->unionUsedPageIds($answerSections);
-        $answerText = implode("\n\n", array_column($answerSections, 'text'));
-        $answerFigures = $this->answerFigures($answerSections, $pagesForAi);
-        $provenanceBySectionKey = $this->computeSectionsProvenance($answerSections, $pagesForAi);
-
-        return $this->persist($requirement, [
-            'coverage_status' => $coverageStatus,
-            'answer_text' => $answerText,
-            'answer_figures' => $answerFigures,
-            'missing_summary' => $missingSummary,
-            'sources' => $this->sourcesPayload($context['pages'], $usedPageIds),
-            'model' => 'gpt-4.1-mini',
-            'research_trace' => ['research' => $context, 'answer' => ['answer_sections' => $answerSections]],
-            'alignment_trace' => $this->buildAlignmentTrace($answerSections, $alignmentBefore, $alignmentFinal, $revisionInfo, $coverageStatus, $hasPossibleConflict, $provenanceBySectionKey),
-            'has_possible_conflict' => $hasPossibleConflict,
-            'engine_version' => self::ENGINE_VERSION,
-            'stale_at' => null,
-            'stale_reason' => null,
-            'stale_context' => null,
-        ], $userId);
+            return $this->persist($requirement, [
+                'coverage_status' => $coverageStatus,
+                'answer_text' => $answerText,
+                'answer_figures' => $answerFigures,
+                'missing_summary' => $missingSummary,
+                'sources' => $this->sourcesPayload($context['pages'], $usedPageIds),
+                'model' => 'gpt-4.1-mini',
+                'research_trace' => ['research' => $context, 'answer' => ['answer_sections' => $answerSections]],
+                'alignment_trace' => $this->buildAlignmentTrace($answerSections, $alignmentBefore, $alignmentFinal, $revisionInfo, $coverageStatus, $hasPossibleConflict, $provenanceBySectionKey),
+                'has_possible_conflict' => $hasPossibleConflict,
+                'engine_version' => self::ENGINE_VERSION,
+                'stale_at' => null,
+                'stale_reason' => null,
+                'stale_context' => null,
+            ], $userId);
         });
     }
 

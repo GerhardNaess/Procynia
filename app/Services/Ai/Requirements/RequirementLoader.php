@@ -34,9 +34,6 @@ class RequirementLoader
                 'chunk',
                 'assignedUser',
                 'assessment.assessedBy',
-                'evidence.knowledgeItem',
-                'evidence.knowledgeItemChunk',
-                'evidence.knowledgeItemVersion',
                 'answerBasisItems',
                 'wikiAnswer',
                 'revisions.changedBy',
@@ -46,7 +43,7 @@ class RequirementLoader
     }
 
     /**
-     * Purpose: Load only approved requirements for downstream evidence and assessment refreshes.
+     * Purpose: Load only approved requirements for downstream assessment refreshes.
      * Inputs: The visible saved notice identifier.
      * Returns: A deterministic collection of approved requirement rows.
      * Side effects: None.
@@ -72,9 +69,6 @@ class RequirementLoader
                 'chunk',
                 'assignedUser',
                 'assessment.assessedBy',
-                'evidence.knowledgeItem',
-                'evidence.knowledgeItemChunk',
-                'evidence.knowledgeItemVersion',
                 'answerBasisItems',
                 'wikiAnswer',
             ])

@@ -3524,7 +3524,6 @@ return [
         'approval_comment_placeholder' => 'Valgfri kommentar',
         'approved_by_at' => 'Godkjent av :name den :date',
         'source_type_enterprise_wiki_document' => 'Enterprise Wiki-kildedokument',
-        'source_type_knowledge_item_version' => 'Kunnskapsbaseversjon',
         'source_type_saved_notice_document' => 'Lagret kunngjøringsdokument',
         'source_type_doffin_notice' => 'Doffin-kunngjøring',
         'source_type_manual' => 'Manuell kilde',

@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * A Wiki-based answer for one SavedNoticeAiRequirement, generated exclusively from approved,
  * customer-scoped Enterprise Wiki content (see RequirementWikiAnswerService). Stored in its own
- * table, entirely separate from the requirement's existing answer_draft_* columns — generating or
- * regenerating a Wiki answer never reads from or writes to the existing answer-draft flow.
+ * table — generating or regenerating a Wiki answer never touches the answer_draft_* columns left
+ * over from the decommissioned Knowledge Base flow.
  */
 class SavedNoticeAiRequirementWikiAnswer extends Model
 {

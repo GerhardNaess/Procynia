@@ -1,5 +1,9 @@
 # "Vurdering" (assessment) consolidation — Enterprise Wiki as sole knowledge source
 
+> **Historisk (avsluttet).** Fasen beskrevet her er gjennomført, og `RequirementAssessmentService`
+> med tilhørende `SavedNoticeAiEvidence`-flyt er siden fjernet helt. `RequirementWikiAssessmentService`
+> er eneste vurderingsmotor. Teksten er bevart som historikk.
+
 Branch: `refactor/ai-to-wiki-consolidation`. Final functional consolidation phase: moves the last
 active Knowledge Base AI consumer ("Vurdering") onto Enterprise Wiki, closing the loop opened by
 the two prior phases (answer-draft engine, then the answer-engine-as-sole-engine phase).

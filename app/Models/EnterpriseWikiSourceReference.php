@@ -7,8 +7,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EnterpriseWikiSourceReference extends Model
 {
-    public const SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION = 'knowledge_item_version';
-
     public const SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT = 'enterprise_wiki_document';
 
     public const SOURCE_TYPE_SAVED_NOTICE_DOCUMENT = 'saved_notice_document';
@@ -36,7 +34,6 @@ class EnterpriseWikiSourceReference extends Model
     ];
 
     public const SOURCE_TYPES = [
-        self::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
         self::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
         self::SOURCE_TYPE_SAVED_NOTICE_DOCUMENT,
         self::SOURCE_TYPE_DOFFIN_NOTICE,

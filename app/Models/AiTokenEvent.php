@@ -62,9 +62,4 @@ class AiTokenEvent extends Model
     {
         return $this->belongsTo(SavedNotice::class);
     }
-
-    public function knowledgeItem(): BelongsTo
-    {
-        return $this->belongsTo(KnowledgeItem::class);
-    }
 }

@@ -222,13 +222,10 @@ faktisk har akseptert ville gjort feltet usant, hvilket er verre enn at det er t
 | `source_type` | Eier utledes | Hvordan |
 |---|---|---|
 | `enterprise_wiki_document` | Ja | `enterprise_wiki_documents.owner_user_id`, kundescopet |
-| `knowledge_item_version` | **Nei** | Se ÅPENT nedenfor |
 
-**ÅPENT — `knowledge_item_version`.** `KnowledgeItemVersion` har ingen eier. Forelderen
-`KnowledgeItem` har `owner_user_id`, så en kjede finnes teknisk — men det er et produktspørsmål om
-eierskap i AI-kunnskapsbasen skal gi helhetsansvar for en Wiki-side. Det er et annet ansvar, med
-egne permissions (`be_enterprise_wiki_document_owner` gjelder kun Wiki-dokumenter). Ingen kjøringer
-bruker denne kildetypen i dag. Sider fra en slik kjøring får derfor NULL eier, og det er bevisst.
+**LUKKET — `knowledge_item_version`.** Kildetypen kom fra den gamle Kunnskapsbasen og er nå
+dekommisjonert: ingen kjøring kan lenger opprettes med den. Historiske rader kan fortsatt bære
+verdien, og de gir bevisst NULL eier — en Wiki-side får ikke en eier som ingen har akseptert.
 
 **Backfill (gjennomført).** `php artisan enterprise-wiki:backfill-page-owners` (`--dry-run`,
 `--customer=`). Kommando, ikke migrasjon: å tildele ansvar til navngitte personer bør være noe noen

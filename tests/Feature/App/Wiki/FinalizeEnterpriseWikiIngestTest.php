@@ -6,13 +6,12 @@ use App\Jobs\Ai\Wiki\FinalizeEnterpriseWikiIngest;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
-use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
@@ -183,9 +182,8 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     public function test_section_job_dispatches_finalize_after_completed_section(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createRun($customer, $version);
+        $document = $this->createDocument($customer);
+        $run = $this->createRun($customer, $document);
         $this->createDraftPage($customer, $run);
 
         $section = EnterpriseWikiIngestSection::query()->create([
@@ -217,9 +215,8 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     public function test_section_job_dispatches_finalize_after_failed_section(): void
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createRun($customer, $version);
+        $document = $this->createDocument($customer);
+        $run = $this->createRun($customer, $document);
         $this->createDraftPage($customer, $run);
 
         $section = EnterpriseWikiIngestSection::query()->create([
@@ -269,26 +266,6 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     // -------------------------------------------------------------------------
     // Test 10: Finalize does not modify KnowledgeBase/RAG tables
     // -------------------------------------------------------------------------
-
-    public function test_finalize_does_not_modify_rag_tables(): void
-    {
-        ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion, 'version' => $version]
-            = $this->createScaffold(['completed']);
-        $this->createClaim($page, $pageVersion, $run);
-        $this->mockArticleClient();
-
-        $originalText = $version->extracted_text;
-        $originalApproval = $version->approval_status;
-        $countBefore = KnowledgeItemVersion::query()->count();
-
-        $this->runFinalize($run);
-
-        $version->refresh();
-        $this->assertSame($originalText, $version->extracted_text);
-        $this->assertSame($originalApproval, $version->approval_status);
-        $this->assertSame($countBefore, KnowledgeItemVersion::query()->count());
-        $this->assertDatabaseCount('knowledge_item_chunks', 0);
-    }
 
     // -------------------------------------------------------------------------
     // Test 11: Disabled AI flag → run fails cleanly, no external call, claims intact
@@ -391,14 +368,13 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
 
     /**
      * @param  string[]  $sectionStatuses  Status for each section to create (determines which sections exist and their status)
-     * @return array{customer: Customer, item: KnowledgeItem, version: KnowledgeItemVersion, run: EnterpriseWikiIngestRun, page: EnterpriseWikiPage, pageVersion: EnterpriseWikiPageVersion, sections: EnterpriseWikiIngestSection[]}
+     * @return array{customer: Customer, document: EnterpriseWikiDocument, run: EnterpriseWikiIngestRun, page: EnterpriseWikiPage, pageVersion: EnterpriseWikiPageVersion, sections: EnterpriseWikiIngestSection[]}
      */
     private function createScaffold(array $sectionStatuses = ['completed']): array
     {
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createRun($customer, $version);
+        $document = $this->createDocument($customer);
+        $run = $this->createRun($customer, $document);
         [$page, $pageVersion] = $this->createDraftPage($customer, $run);
 
         $sections = [];
@@ -412,7 +388,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
             ]);
         }
 
-        return compact('customer', 'item', 'version', 'run', 'page', 'pageVersion', 'sections');
+        return compact('customer', 'document', 'run', 'page', 'pageVersion', 'sections');
     }
 
     private function createClaim(
@@ -435,9 +411,9 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
 
         EnterpriseWikiSourceReference::query()->create([
             'enterprise_wiki_claim_id' => $claim->id,
-            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $run->source_id,
-            'source_label' => 'kompetanse.docx',
+            'source_label' => 'kompetanse.pdf',
             'source_hash' => $run->source_hash ?? '',
             'excerpt' => $excerpt,
         ]);
@@ -467,38 +443,26 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         ]);
     }
 
-    private function createKnowledgeItem(Customer $customer): KnowledgeItem
+    private function createDocument(Customer $customer, array $overrides = []): EnterpriseWikiDocument
     {
-        return KnowledgeItem::query()->create([
+        return EnterpriseWikiDocument::query()->create(array_merge([
             'customer_id' => $customer->id,
-            'title' => 'Test Document',
-            'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY,
-            'ai_usage_enabled' => true,
-        ]);
-    }
-
-    private function createVersion(KnowledgeItem $item, Customer $customer, array $overrides = []): KnowledgeItemVersion
-    {
-        return KnowledgeItemVersion::query()->create(array_merge([
-            'knowledge_item_id' => $item->id,
-            'customer_id' => $customer->id,
-            'version_no' => 1,
-            'is_current' => true,
+            'original_filename' => 'kompetanse.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
             'extracted_text' => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
-            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
-            'file_hash_sha256' => str_pad('abc123', 64, '0'),
-            'original_filename' => 'kompetanse.docx',
         ], $overrides));
     }
 
-    private function createRun(Customer $customer, KnowledgeItemVersion $version): EnterpriseWikiIngestRun
+    private function createRun(Customer $customer, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
     {
         return EnterpriseWikiIngestRun::query()->create([
             'uuid' => (string) Str::uuid(),
             'customer_id' => $customer->id,
-            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
-            'source_id' => $version->id,
-            'source_hash' => str_pad('hash', 64, '0'),
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'status' => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
         ]);

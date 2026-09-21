@@ -245,28 +245,6 @@ class SavedNoticeAiRequirement extends Model
     }
 
     /**
-     * Purpose: Resolve the persisted evidence rows for this requirement candidate.
-     * Inputs: None.
-     * Returns: The related evidence collection query.
-     * Side effects: None.
-     */
-    public function evidence(): HasMany
-    {
-        return $this->hasMany(SavedNoticeAiEvidence::class, 'saved_notice_ai_requirement_id')
-            ->orderByRaw("
-                CASE selection_status
-                    WHEN 'selected' THEN 0
-                    WHEN 'suggested' THEN 1
-                    WHEN 'rejected' THEN 2
-                    ELSE 3
-                END
-            ")
-            ->orderByDesc('is_primary')
-            ->orderBy('match_rank')
-            ->orderBy('id');
-    }
-
-    /**
      * Purpose: Resolve the selected answer basis items for this requirement candidate.
      * Inputs: None.
      * Returns: The selected answer basis item relation.

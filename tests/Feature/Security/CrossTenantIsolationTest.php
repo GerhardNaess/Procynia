@@ -3,8 +3,6 @@
 namespace Tests\Feature\Security;
 
 use App\Models\Customer;
-use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
@@ -23,7 +21,7 @@ use Tests\TestCase;
  * The customer frontend does use implicit route model binding, but it never trusts the bound
  * instance. Every action re-derives the record from the tenant before using it:
  *
- *     $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+ *     $record = $this->visibleAiSavedNotice($request, $savedNotice);
  *
  * The bound model supplies an id and nothing more. Another customer's record therefore cannot be
  * reached: the scoped query returns nothing and the request 404s rather than 403s. A Policy would
@@ -77,131 +75,9 @@ class CrossTenantIsolationTest extends TestCase
         ];
     }
 
-    /**
-     * A fully valid, openable document — not a stub.
-     *
-     * The controller only considers a document that has a current version with a stored file, so a
-     * bare KnowledgeItem would 404 for its own owner too and the isolation assertions would pass for
-     * the wrong reason.
-     */
-    private function knowledgeItemFor(Customer $customer, User $user): KnowledgeItem
-    {
-        $item = KnowledgeItem::query()->create([
-            'customer_id' => $customer->id,
-            'title' => 'Kildedokument for '.$customer->name,
-            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
-            'is_active' => true,
-            'created_by' => $user->id,
-        ]);
-
-        KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $item->id,
-            'customer_id' => $customer->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'original_filename' => 'kilde.docx',
-            'storage_path' => 'knowledge/'.$customer->id.'/'.$item->id.'/kilde.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
-            'extraction_status' => 'completed',
-            'approval_status' => 'approved',
-            'uploaded_by_user_id' => $user->id,
-            'uploaded_at' => now(),
-        ]);
-
-        return $item;
-    }
-
     // -----------------------------------------------------------------------
     // Behavioural isolation
     // -----------------------------------------------------------------------
-
-    public function test_a_customer_can_open_its_own_knowledge_document(): void
-    {
-        $a = $this->tenant('Alfa AS');
-        $item = $this->knowledgeItemFor($a['customer'], $a['owner']);
-
-        $this->actingAs($a['owner'])
-            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $item->id]))
-            ->assertOk();
-    }
-
-    public function test_a_customer_cannot_read_another_customers_knowledge_document(): void
-    {
-        $a = $this->tenant('Alfa AS');
-        $b = $this->tenant('Beta AS');
-
-        $foreign = $this->knowledgeItemFor($b['customer'], $b['owner']);
-
-        // 404, not 403: the record is not merely forbidden, it is invisible. The lookup is scoped to
-        // the caller's customer, so there is nothing to deny.
-        $this->actingAs($a['owner'])
-            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $foreign->id]))
-            ->assertNotFound();
-    }
-
-    public function test_a_customer_cannot_update_another_customers_knowledge_document(): void
-    {
-        $a = $this->tenant('Alfa AS');
-        $b = $this->tenant('Beta AS');
-
-        $foreign = $this->knowledgeItemFor($b['customer'], $b['owner']);
-
-        $this->actingAs($a['owner'])
-            ->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $foreign->id]), [
-                'title' => 'Overtatt av Alfa',
-                'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
-                'is_active' => true,
-            ])
-            ->assertNotFound();
-
-        $this->assertSame(
-            'Kildedokument for Beta AS',
-            $foreign->fresh()->title,
-            'The foreign record must be untouched.',
-        );
-    }
-
-    public function test_a_customer_cannot_delete_another_customers_knowledge_document(): void
-    {
-        $a = $this->tenant('Alfa AS');
-        $b = $this->tenant('Beta AS');
-
-        $foreign = $this->knowledgeItemFor($b['customer'], $b['owner']);
-
-        $this->actingAs($a['owner'])
-            ->delete(route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $foreign->id]))
-            ->assertNotFound();
-
-        $this->assertNotNull($foreign->fresh(), 'The foreign record must still exist.');
-    }
-
-    public function test_a_plain_member_is_isolated_the_same_way_as_an_owner(): void
-    {
-        // Isolation must not depend on bid_role. A contributor is still bounded by their customer.
-        $a = $this->tenant('Alfa AS');
-        $b = $this->tenant('Beta AS');
-
-        $foreign = $this->knowledgeItemFor($b['customer'], $b['owner']);
-
-        $this->actingAs($a['member'])
-            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $foreign->id]))
-            ->assertNotFound();
-    }
-
-    public function test_the_knowledge_index_lists_only_the_callers_own_documents(): void
-    {
-        $a = $this->tenant('Alfa AS');
-        $b = $this->tenant('Beta AS');
-
-        $this->knowledgeItemFor($a['customer'], $a['owner']);
-        $this->knowledgeItemFor($b['customer'], $b['owner']);
-
-        $this->actingAs($a['owner'])
-            ->get(route('app.ai.knowledge-base.index'))
-            ->assertOk()
-            ->assertDontSee('Kildedokument for Beta AS');
-    }
 
     public function test_saved_notices_are_isolated_between_customers(): void
     {

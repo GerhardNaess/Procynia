@@ -96,10 +96,11 @@ class EnterpriseWikiSemanticQaServiceTest extends TestCase
         $this->assertSame('article_version_not_found', $result['reason']);
     }
 
-    public function test_skips_for_knowledge_item_version_source_type(): void
+    /** An archived source type from the decommissioned Knowledge Base; historical rows still carry it. */
+    public function test_skips_for_an_archived_source_type(): void
     {
         $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer, sourceType: EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION);
+        $run = $this->createAppliedRun($customer, sourceType: 'knowledge_item_version');
 
         $result = $this->semanticQaService()->review($run);
 

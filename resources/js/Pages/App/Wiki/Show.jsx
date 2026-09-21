@@ -1281,7 +1281,6 @@ export default function WikiShow({
 
     const sourceTypeLabel = (type) => ({
         enterprise_wiki_document: tw.source_type_enterprise_wiki_document ?? 'Kildedokument',
-        knowledge_item_version: tw.source_type_knowledge_item_version ?? 'Kunnskapsbaseversjon',
         saved_notice_document: tw.source_type_saved_notice_document ?? 'Lagret kunngjøringsdokument',
         doffin_notice: tw.source_type_doffin_notice ?? 'Doffin-kunngjøring',
         manual: tw.source_type_manual ?? 'Manuell kilde',

@@ -16,6 +16,8 @@ Informasjon skal:
 
 Enterprise Wiki er ikke en ren dokumentdump, ikke en claim-liste og ikke et alternativt navn for tradisjonell RAG.
 
+Enterprise Wiki er den eneste kunnskapsarkitekturen i Procynia. Den tidligere Kunnskapsbasen (`KnowledgeItem`, Standardvokabular, dokumentkategorier og temaer) er dekommisjonert: ingen runtime-kode leser den lenger, og tabellene ligger igjen kun som historiske data. Veien er Wiki-kildedokumenter → Enterprise Wiki → Spør Wiki og tilbudsarbeid.
+
 ## B. Core Architecture
 
 ### Ingest and maintenance

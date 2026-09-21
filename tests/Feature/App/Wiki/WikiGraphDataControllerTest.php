@@ -1390,7 +1390,7 @@ class WikiGraphDataControllerTest extends TestCase
     {
         return EnterpriseWikiSourceReference::query()->create([
             'enterprise_wiki_claim_id' => $claim->id,
-            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => 1,
             'source_label' => $label,
             'source_hash' => str_pad('h', 64, '0'),

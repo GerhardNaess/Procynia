@@ -46,7 +46,7 @@ Alle nye sider, tekster og funksjoner vurderes mot denne posisjoneringen før im
 
 ## What is Procynia
 
-Procynia is a Norwegian public procurement (Doffin) bid management system. It pulls tender notices from the Doffin API, routes them to customer departments via watch profiles, and provides an AI-supported bid execution layer — extracting requirements from tender documents, matching them against a customer knowledge base, and generating grounded answer drafts.
+Procynia is a Norwegian public procurement (Doffin) bid management system. It pulls tender notices from the Doffin API, routes them to customer departments via watch profiles, and provides an AI-supported bid execution layer — extracting requirements from tender documents, matching them against the customer's Enterprise Wiki, and generating grounded answers.
 
 Core principle: AI supports structure, it does not replace it. All AI output must be grounded in sources and traceable to documents. See `docs/readme-ai.md` for the full AI product strategy.
 
@@ -57,7 +57,7 @@ Typical users are bid managers, sellers, presales resources, technical contribut
 - **Backend**: Laravel 13, PHP 8.4 (`docker/php/Dockerfile` builds on `php:8.4-fpm-bookworm`; the running container reports 8.4.23. `composer.json` still allows `^8.3`, but no supported runtime uses it.)
 - **Frontend**: Inertia.js + React 19 + Tailwind CSS 4
 - **Admin panel**: Filament 5 (internal admin only, at `/admin`)
-- **Database**: PostgreSQL 16 (`pgvector/pgvector:0.8.2-pg16` in `docker-compose.yml`). pgvector **is** installed and in use: `database/migrations/2026_05_21_000001_add_pgvector_embedding_column_to_knowledge_item_chunks_table.php` creates the `vector` extension and adds `knowledge_item_chunks.embedding_vector_pgvector vector(1536)` with an ivfflat index. The older `json` column `embedding_vector` still exists alongside it. In Azure the extension must be allowlisted server-side via `azure.extensions=VECTOR` before the migration can create it — see `infra/README.md`.
+- **Database**: PostgreSQL 16 (`pgvector/pgvector:0.8.2-pg16` in `docker-compose.yml`). The `vector` extension is created by `database/migrations/2026_05_21_000001_add_pgvector_embedding_column_to_knowledge_item_chunks_table.php`. That column belonged to the decommissioned Knowledge Base and is no longer read, but the extension itself stays: in Azure it must be allowlisted server-side via `azure.extensions=VECTOR` before the migration can create it — see `infra/README.md`.
 - **AI**: OpenAI API via `app/Services/OpenAi/OpenAiClient.php`. Model split: `gpt-4.1-mini` for extraction/metadata/classification, `gpt-5` for answer draft generation.
 - **Queue**: Nine named queues, each with a dedicated worker in `docker-compose.yml`: `default`, `supplier-harvests`, `supplier-lookups`, `ai-requirements`, `enterprise-wiki`, `enterprise-wiki-reconciliation`, `enterprise-wiki-claim-verification`, `enterprise-wiki-maintainer-batches`, `enterprise-wiki-pages`. Each worker sets its own `REDIS_QUEUE_RETRY_AFTER`, which is why they cannot be consolidated. `tests/Feature/Azure/QueueTopologyContractTest.php` keeps the job classes, Compose and the Azure IaC in agreement.
 
@@ -133,11 +133,12 @@ Users have two separate role fields:
 
 The AI layer (`app/Services/Ai/`) is organized into three subdirectories:
 
-- **`Requirements/`** — extracts requirements from uploaded tender documents using an AI pipeline: `DocumentSplitPlanner` decides whether to process full-document or split by segments, `RequirementExtractionPipeline` orchestrates the extraction call, `RequirementAnswerDraftService` generates grounded answer drafts, `RequirementAnswerBasisService` retrieves supporting knowledge chunks.
-- **`Knowledge/`** — manages the customer knowledge base: chunking documents (H1/H2 structural boundaries, AI returns only topic split points not text), generating embeddings, metadata tagging, and vocabulary extraction.
-- **`Retrieval/`** — retrieves relevant knowledge chunks for a given requirement using metadata-based retrieval plans before falling back to semantic search.
+- **`Requirements/`** — extracts requirements from uploaded tender documents using an AI pipeline: `DocumentSplitPlanner` decides whether to process full-document or split by segments, `RequirementExtractionPipeline` orchestrates the extraction call, `RequirementAnswerBasisService` manages the per-case answer basis.
+- **`Wiki/`** — the knowledge side: Enterprise Wiki ingest, semantic retrieval, and `RequirementWikiAnswerService`/`RequirementWikiAssessmentService`, which are the only engines that answer and assess a requirement.
 
-AI jobs run on the `ai-requirements` queue. See `app/Jobs/Ai/` and `app/Jobs/GenerateKnowledgeChunk*.php`.
+The older Knowledge Base (`KnowledgeItem`, chunking, embeddings, metadata vocabulary) was decommissioned once Enterprise Wiki replaced it; its tables remain in the database but no runtime code reads them.
+
+AI jobs run on the `ai-requirements` queue. See `app/Jobs/Ai/`.
 
 ### Answering strategy (three scenarios)
 
@@ -154,7 +155,7 @@ Defined in `docs/chunking-strategy.md`. H1/H2 headings are hard structural bound
 
 ### Key models
 
-`SavedNotice` (bid case), `SavedNoticeAiDocument`, `SavedNoticeAiDocumentChunk`, `SavedNoticeAiRequirement`, `SavedNoticeAiRequirementAssessment`, `KnowledgeItem`, `KnowledgeItemChunk`, `KnowledgeMetadataTerm`, `Notice`, `Customer`, `Department`, `WatchProfile`.
+`SavedNotice` (bid case), `SavedNoticeAiDocument`, `SavedNoticeAiDocumentChunk`, `SavedNoticeAiRequirement`, `SavedNoticeAiRequirementAssessment`, `EnterpriseWikiDocument`, `EnterpriseWikiPage`, `EnterpriseWikiPageVersion`, `EnterpriseWikiClaim`, `Notice`, `Customer`, `Department`, `WatchProfile`.
 
 ### Customer permission settings
 
@@ -181,15 +182,15 @@ Contributors with user management permission automatically get access to all cus
 
 QA is administered in the existing "Brukere" tab (`UserController::store()`/`update()`) using the same authorization as editing `bid_role` (System Owner only, never on oneself) — no new admin capability was introduced.
 
-### Knowledge base document support
+### Wiki source document support
 
-Upload validation accepts `docx`, `xlsx`, `pdf` (max 20 MB). Quality differs by format:
+Source documents are uploaded under Wiki → Kildedokumenter (`WikiSourceController`, `EnterpriseWikiDocument`). Upload validation accepts `docx`, `xlsx`, `pdf` (max 20 MB). Quality differs by format:
 
-- **`.docx`** — full structured extraction: text, tables, images, H1/H2-based chunking with AI topic splitting
+- **`.docx`** — full structured extraction: text, tables, images, H1/H2-based structure
 - **`.pdf`** — extracted via `pdftotext` binary (path in `config/services.php` → `services.pdftotext.binary`); structural heuristics applied, but no table/image extraction
 - **`.xlsx`** — uses `extractStructuredFallbackText`; degraded compared to docx
 
-Typical knowledge base content: service descriptions, standard texts, policies, CVs, references, and other reusable tender material.
+Typical source content: service descriptions, standard texts, policies, CVs, references, and other reusable tender material.
 
 ### Internationalisation (i18n)
 

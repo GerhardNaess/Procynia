@@ -232,7 +232,7 @@ Rekkefølgen er bevisst: web sist av de trafikkbærende, scheduler helt sist.
 | 9.1 | Logg inn i UI | Sesjon opprettes, ingen redirect-loop | Loop → `SESSION_SECURE_COOKIE`/`APP_URL` |
 | 9.2 | Last opp en PDF som Wiki-kilde | Lagret, tekst ekstrahert | Ingen tekst → R6 |
 | 9.3 | Last opp en DOCX | Samme | R6 |
-| 9.4 | Last opp en XLSX i Kunnskapsbase | Samme | R6 |
+| 9.4 | Last opp en XLSX som Wiki-kilde | Samme | R6 |
 | 9.5 | **Last opp en fil rett under 20 MB** | Går gjennom | 413 → dokumenter Container Apps ingress-grensen |
 | 9.6 | Last opp en fil over 20 MB | Valideringsmelding, **ikke** rå 413 | Rå 413 → grensekjeden er feil |
 | 9.7 | `az containerapp exec` inn i en **worker**: bekreft at filen fra 9.2 er lesbar på samme sti | Fil funnet | Ikke funnet → R5 |

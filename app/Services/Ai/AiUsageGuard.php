@@ -25,13 +25,16 @@ class AiUsageGuard
 
     public const OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD = 'saved_notice_documents_upload';
 
-    public const OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT = 'saved_notice_requirement_answer_draft';
-
     public const OPERATION_SAVED_NOTICE_REQUIREMENT_WIKI_ANSWER = 'saved_notice_requirement_wiki_answer';
 
-    public const OPERATION_SAVED_NOTICE_EVIDENCE_REFRESH = 'saved_notice_evidence_refresh';
-
     public const OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH = 'saved_notice_assessment_refresh';
+
+    // Historical operation keys. Nothing writes these any more — the Knowledge Base they belonged to
+    // was decommissioned in favour of Enterprise Wiki. They are kept so the AI-usage ledger rows
+    // already recorded under them still resolve to a readable label in the usage reports.
+    public const OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT = 'saved_notice_requirement_answer_draft';
+
+    public const OPERATION_SAVED_NOTICE_EVIDENCE_REFRESH = 'saved_notice_evidence_refresh';
 
     public const OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD = 'knowledge_document_upload';
 

@@ -22,9 +22,8 @@ use Illuminate\Support\Facades\DB;
  * responsibility, not a mirror of the document's current owner. See
  * docs/enterprise-wiki-approval-model.md §3.1.
  *
- * Only `enterprise_wiki_document` sources can confer ownership today. A run sourced from a
- * `knowledge_item_version` leaves the page unowned rather than reaching for a substitute — see
- * ownerUserIdForRun().
+ * Only `enterprise_wiki_document` sources can confer ownership. Any other source leaves the page
+ * unowned rather than reaching for a substitute — see ownerUserIdForRun().
  */
 class EnterpriseWikiPageOwnerService
 {

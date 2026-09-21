@@ -1,5 +1,9 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
+> **Statusnotat.** Bootstrap-importen fra Kunnskapsbase (`KnowledgeItemVersion`) som denne planen
+> beskriver som midlertidig, er nå fjernet. `enterprise_wiki_document` er eneste kildetype for ingest.
+> Avsnitt som omtaler Kunnskapsbase som en mulig kilde er historiske.
+
 For stabile Enterprise Wiki-invariants og agentregler, se [`docs/enterprise-wiki-architecture.md`](/Applications/XAMPP/xamppfiles/htdocs/procynia/docs/enterprise-wiki-architecture.md) og repoets faste agentinstruksjoner.
 
 Versjon: 0.26

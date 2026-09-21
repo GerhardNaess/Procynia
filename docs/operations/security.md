@@ -811,7 +811,7 @@ Kundefrontenden bruker route model binding, men stoler aldri på den bundne inst
 re-deriverer posten fra tenanten:
 
 ```php
-$record = $this->scopedDocument($customerId, $knowledgeItem->id);
+$record = $this->visibleAiSavedNotice($request, $savedNotice);
 ```
 
 Den bundne modellen leverer en id. En annen kundes post gir **404, ikke 403** — den er usynlig, ikke

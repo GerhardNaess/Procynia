@@ -7,13 +7,12 @@ use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
-use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
@@ -56,27 +55,22 @@ class EnterpriseWikiIngestFlowTest extends TestCase
     {
         // ─── Stage 0: Seed domain objects ────────────────────────────────────
         $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
 
         // Two H2 headings → two sections → two section jobs → two claims.
-        $version = $this->createVersion($item, $customer, [
+        $document = $this->createDocument($customer, [
             'extracted_text' => implode("\n\n", [
                 "## Kompetanse\nVi leverer ISO 9001-sertifisert service til norske virksomheter.",
                 "## Referanser\nVi har levert til Statsbygg, NAV og Equinor.",
             ]),
-            'original_filename' => 'selskapsinfo.docx',
         ]);
-
-        $knowledgeItemVersionCountBefore = KnowledgeItemVersion::query()->count();
-        $originalExtractedText = $version->extracted_text;
 
         // Intercept all queue dispatches so jobs run only when we choose.
         Queue::fake();
 
         // ─── Stage 1: Run the wiki:ingest command ────────────────────────────
-        $this->artisan('wiki:ingest', [
+        $this->artisan('wiki:ingest-document', [
             '--customer' => (string) $customer->id,
-            '--version-id' => (string) $version->id,
+            '--document-id' => (string) $document->id,
         ])->assertSuccessful();
 
         // Command must create exactly one queued run and dispatch the orchestrator.
@@ -84,12 +78,12 @@ class EnterpriseWikiIngestFlowTest extends TestCase
 
         $run = EnterpriseWikiIngestRun::query()
             ->where('customer_id', $customer->id)
-            ->where('source_id', $version->id)
+            ->where('source_id', $document->id)
             ->first();
 
         $this->assertNotNull($run, 'Ingest run must be created by the command.');
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_QUEUED, $run->status);
-        $this->assertSame(EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION, $run->source_type);
+        $this->assertSame(EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, $run->source_type);
 
         // ─── Stage 2: Run orchestrator ───────────────────────────────────────
         (new ProcessEnterpriseWikiIngest($run->id))->handle(
@@ -170,12 +164,12 @@ class EnterpriseWikiIngestFlowTest extends TestCase
             $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $claim->approval_status);
         }
 
-        // Source references must point to the correct knowledge item version.
+        // Source references must point to the correct wiki source document.
         $refs = EnterpriseWikiSourceReference::query()->orderBy('id')->get();
         foreach ($refs as $ref) {
-            $this->assertSame(EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION, $ref->source_type);
-            $this->assertSame($version->id, $ref->source_id);
-            $this->assertSame('selskapsinfo.docx', $ref->source_label);
+            $this->assertSame(EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, $ref->source_type);
+            $this->assertSame($document->id, $ref->source_id);
+            $this->assertSame('selskapsinfo.pdf', $ref->source_label);
             $this->assertNotEmpty($ref->excerpt);
         }
 
@@ -219,77 +213,6 @@ class EnterpriseWikiIngestFlowTest extends TestCase
         }
     }
 
-    /**
-     * Verifies that the ingest pipeline is completely isolated from the
-     * KnowledgeBase/RAG layer: no KnowledgeItemVersion rows are created,
-     * modified, or deleted; no KnowledgeItemChunk rows are created.
-     */
-    public function test_ingest_flow_does_not_modify_rag_tables(): void
-    {
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-
-        $originalText = $version->extracted_text;
-        $originalApproval = $version->approval_status;
-        $countBefore = KnowledgeItemVersion::query()->count();
-
-        Queue::fake();
-
-        $this->artisan('wiki:ingest', [
-            '--customer' => (string) $customer->id,
-            '--version-id' => (string) $version->id,
-        ])->assertSuccessful();
-
-        $run = EnterpriseWikiIngestRun::query()->where('source_id', $version->id)->first();
-
-        // Orchestrator
-        (new ProcessEnterpriseWikiIngest($run->id))->handle(
-            app(EnterpriseWikiIngestService::class),
-            app(EnterpriseWikiSectionParser::class),
-        );
-
-        // Section jobs
-        /** @var WikiSectionAiClient&MockInterface $aiMock */
-        $aiMock = $this->mock(WikiSectionAiClient::class);
-        $aiMock->shouldReceive('fetchClaims')->andReturn(['claims' => [
-            ['text' => 'Test krav.', 'confidence' => 'medium', 'excerpt' => 'Kildesetning.'],
-        ]]);
-
-        $sections = EnterpriseWikiIngestSection::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->get();
-
-        foreach ($sections as $section) {
-            (new ProcessEnterpriseWikiSection($section->id))->handle(
-                app(EnterpriseWikiIngestService::class),
-                app(EnterpriseWikiSectionParser::class),
-                $aiMock,
-            );
-        }
-
-        // Finalize
-        $articleMock = $this->mock(WikiArticleAiClient::class);
-        $articleMock->shouldReceive('generateArticle')->once()->andReturn("## Test\n\nInnhold.");
-
-        (new FinalizeEnterpriseWikiIngest($run->id))->handle(
-            app(EnterpriseWikiIngestService::class),
-            $articleMock,
-            app(EnterpriseWikiDocumentWikiAnswerStalenessService::class),
-        );
-
-        // KnowledgeItemVersion unchanged
-        $version->refresh();
-        $this->assertSame($originalText, $version->extracted_text);
-        $this->assertSame($originalApproval, $version->approval_status);
-
-        // No KnowledgeItemVersion rows added or removed
-        $this->assertSame($countBefore, KnowledgeItemVersion::query()->count());
-
-        // No KnowledgeItemChunk rows created
-        $this->assertDatabaseCount('knowledge_item_chunks', 0);
-    }
-
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -316,27 +239,15 @@ class EnterpriseWikiIngestFlowTest extends TestCase
         ]);
     }
 
-    private function createKnowledgeItem(Customer $customer): KnowledgeItem
+    private function createDocument(Customer $customer, array $overrides = []): EnterpriseWikiDocument
     {
-        return KnowledgeItem::query()->create([
+        return EnterpriseWikiDocument::query()->create(array_merge([
             'customer_id' => $customer->id,
-            'title' => 'Selskapsinfo',
-            'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY,
-            'ai_usage_enabled' => true,
-        ]);
-    }
-
-    private function createVersion(KnowledgeItem $item, Customer $customer, array $overrides = []): KnowledgeItemVersion
-    {
-        return KnowledgeItemVersion::query()->create(array_merge([
-            'knowledge_item_id' => $item->id,
-            'customer_id' => $customer->id,
-            'version_no' => 1,
-            'is_current' => true,
+            'original_filename' => 'selskapsinfo.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
             'extracted_text' => "## Kompetanse\nVi leverer sertifisert service.",
-            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
-            'file_hash_sha256' => str_pad('abc123', 64, '0'),
-            'original_filename' => 'selskapsinfo.docx',
         ], $overrides));
     }
 }

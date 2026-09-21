@@ -14,8 +14,6 @@ use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\ExchangeRate;
-use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
@@ -150,20 +148,19 @@ class AiOperationalQueueSchedulerTest extends TestCase
     private function wikiSectionScaffold(): array
     {
         $customer = $this->customer();
-        $item = KnowledgeItem::query()->create([
-            'customer_id' => $customer->id, 'title' => 'Test Document',
-            'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY, 'ai_usage_enabled' => true,
-        ]);
-        $version = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $item->id, 'customer_id' => $customer->id, 'version_no' => 1,
-            'is_current' => true, 'extracted_text' => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
-            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
-            'file_hash_sha256' => str_pad('abc123', 64, '0'), 'original_filename' => 'kompetanse.docx',
+        $document = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'kompetanse.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'extracted_text' => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
         ]);
         $run = EnterpriseWikiIngestRun::query()->create([
             'uuid' => (string) Str::uuid(), 'customer_id' => $customer->id,
-            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
-            'source_id' => $version->id, 'source_hash' => str_pad('hash', 64, '0'),
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'status' => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
         ]);

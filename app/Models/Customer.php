@@ -232,21 +232,6 @@ class Customer extends Model
         return $this->hasMany(NoticeAttention::class);
     }
 
-    public function knowledgeItems(): HasMany
-    {
-        return $this->hasMany(KnowledgeItem::class);
-    }
-
-    public function knowledgeDocumentCategories(): HasMany
-    {
-        return $this->hasMany(KnowledgeDocumentCategory::class);
-    }
-
-    public function knowledgeDocumentTopics(): HasMany
-    {
-        return $this->hasMany(KnowledgeDocumentTopic::class);
-    }
-
     /**
      * Purpose: Resolve the AI case usage ledger rows for this customer.
      * Inputs: None.

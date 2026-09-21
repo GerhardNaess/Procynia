@@ -166,7 +166,7 @@ class EnterpriseWikiPageOwnerTest extends TestCase
                 EnterpriseWikiIngestRunPage::ACTION_CREATED,
             ),
             'non_document_source' => $this->pivot(
-                $this->ingestRun($customer, null, EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION),
+                $this->ingestRun($customer, null, 'knowledge_item_version'),
                 $page,
                 EnterpriseWikiIngestRunPage::ACTION_CREATED,
             ),
@@ -187,19 +187,19 @@ class EnterpriseWikiPageOwnerTest extends TestCase
             'only an updated row' => ['no_created_row'],
             'two created rows' => ['multiple_created_rows'],
             'the document has no owner' => ['document_without_owner'],
-            'the source is a knowledge item version' => ['non_document_source'],
+            'the source is an archived non-document type' => ['non_document_source'],
         ];
     }
 
-    // I. the knowledge-item path is refused explicitly, not filled in from somewhere else
-    public function test_a_knowledge_item_version_source_confers_no_owner(): void
+    // I. a non-document source is refused explicitly, not filled in from somewhere else
+    public function test_an_archived_non_document_source_confers_no_owner(): void
     {
         $customer = $this->customer();
-        $run = $this->ingestRun($customer, null, EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION);
+        $run = $this->ingestRun($customer, null, 'knowledge_item_version');
 
         $this->assertNull(
             $this->owners->ownerUserIdForRun($run),
-            'knowledge item ownership is a different responsibility and is not borrowed here',
+            'an archived non-document source names no owner, and none is borrowed from elsewhere',
         );
     }
 

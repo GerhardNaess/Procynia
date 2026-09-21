@@ -1,5 +1,11 @@
 # AI → Enterprise Wiki consolidation analysis
 
+> **Historisk (avsluttet).** Dette dokumentet beskriver en faseinndelt migrering som nå er gjennomført.
+> Den gamle Kunnskapsbasen (`KnowledgeItem`, `KnowledgeItemVersion`, `KnowledgeItemChunk`,
+> Standardvokabular, dokumentkategorier og temaer) er fjernet fra runtime. Enterprise Wiki er dagens
+> kunnskapsarkitektur: Wiki-kildedokumenter → Enterprise Wiki → Spør Wiki / tilbudsarbeid. Teksten er
+> bevart som historikk over hvorfor og hvordan, ikke som beskrivelse av dagens kode.
+
 Branch: `refactor/ai-to-wiki-consolidation`. Status: living document for a phased architecture change — Enterprise Wiki becomes Procynia's primary, shared knowledge layer; AI-instrukser stays a separate governance layer for *how* AI uses that knowledge, never an alternative fact store.
 
 Target state, in one sentence: **Enterprise Wiki = hva Procynia vet. AI-instrukser = hvordan AI skal bruke det Procynia vet.**

@@ -188,7 +188,8 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
             'uuid' => Str::uuid()->toString(),
             'customer_id' => $customer->id,
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            // Archived source type: no runtime creates these any more, but historical rows carry it.
+            'source_type' => 'knowledge_item_version',
             'source_id' => 1,
             'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,

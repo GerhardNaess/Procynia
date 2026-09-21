@@ -1,5 +1,9 @@
 # AI answer engine consolidation — Enterprise Wiki as the sole answer engine
 
+> **Historisk (avsluttet).** Fasen beskrevet her er gjennomført, og den gamle Kunnskapsbase-baserte
+> svarmotoren er siden fjernet helt — ikke bare deprekert. `RequirementWikiAnswerService` er eneste
+> svarmotor. Teksten er bevart som historikk.
+
 Branch: `refactor/ai-to-wiki-consolidation` (continuation of the AI-to-Wiki consolidation work in `docs/ai-wiki-consolidation-analysis.md`). Product direction confirmed: **the Enterprise Wiki answer engine becomes the only answer engine in "I arbeid"** — the Knowledge Base-grounded `RequirementAnswerDraftService` flow is retired from the UI and deprecated at the route level, not rebuilt to read from Wiki.
 
 ## Phase 1 — comparing the two operative flows (as they existed before this phase)
