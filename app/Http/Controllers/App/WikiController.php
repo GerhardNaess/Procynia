@@ -25,6 +25,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
@@ -74,6 +75,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
         private readonly EnterpriseWikiMaintainerDecisionFailureRecoveryService $maintainerDecisionRecoveryService,
+        private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
     ) {}
 
     public function index(Request $request): Response
@@ -143,6 +145,11 @@ class WikiController extends Controller
             ->with([
                 'currentVersion.claims.sourceReferences',
                 'currentVersion.documentOwnerApprovals.documentOwner',
+                // Named so a row can say who it is waiting for rather than just "waiting". One
+                // extra query for the whole page, not one per row.
+                'currentVersion.reviewer',
+                // Needed to tell "published" from "published, and newer work is waiting".
+                'publishedVersion',
             ]);
 
         if ($search !== '') {
@@ -200,13 +207,23 @@ class WikiController extends Controller
         $pages = collect($paginator->items())->map(function (EnterpriseWikiPage $page): array {
             $claims = $page->currentVersion?->claims ?? collect();
 
+            $documentOwnerSummary = $this->documentOwnerSummaryForPage($page);
+
             return [
                 'id' => $page->id,
                 'title' => $page->title,
                 'slug' => $page->slug,
                 'page_type' => $page->page_type,
                 'status' => $page->status,
-                'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
+                'document_owner_summary' => $documentOwnerSummary,
+                // Same presenter the page detail uses, so a row and the page it opens can never
+                // describe the same state differently. No reviewer-specific action is computed
+                // here: the list does not know whose turn it is without a query per row.
+                'publication' => $this->publicationStatus->forPage(
+                    $page,
+                    $page->currentVersion,
+                    $documentOwnerSummary,
+                ),
                 // Current-version claims only — matches the scope EnterpriseWikiRunFindingsService
                 // already uses for the Kjøringer "Funn" count (both filter to is_current page
                 // versions). Previously this was withCount('claims'), a raw historical total across
@@ -230,6 +247,12 @@ class WikiController extends Controller
 
         return [
             'pages' => $pages,
+            // Counted over every visible page rather than the current filter or result page: the
+            // question "is our Wiki in use yet" cannot be answered by a filtered subset.
+            'publication_summary' => $this->publicationStatus->summaryForCustomer(
+                $customerId,
+                $this->visibleStatuses($user),
+            ),
             'pages_meta' => [
                 'current_page' => $paginator->currentPage(),
                 'per_page' => $paginator->perPage(),
@@ -1388,7 +1411,9 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        $currentVersion = $page->currentVersion()->first();
+        // reviewer/submittedBy are read further down for the review payload anyway; loading them
+        // with the version turns two lazy lookups into one eager pair.
+        $currentVersion = $page->currentVersion()->with(['reviewer', 'submittedBy'])->first();
         $canApproveWikiClaims = $user?->isSystemOwner() || $user?->canApproveWikiClaims();
 
         // Read access is not gated by page status: any authorized user of this customer's
@@ -1764,6 +1789,32 @@ class WikiController extends Controller
                     : 'no_working_version',
                 'changes_requested' => $this->changesRequestedPayload($page, $currentVersion),
             ],
+            // Where the page stands and what has to happen next, in one place. Built from the same
+            // presenter the page list uses, but given what only the detail view knows — whether
+            // this viewer may submit, whether a reviewer can even be chosen, and whether it is
+            // their turn — so the next step names a real action rather than a generic wait.
+            'publication' => $this->publicationStatus->forPage(
+                $page,
+                $currentVersion,
+                $currentVersion !== null
+                    ? $this->documentOwnerSummaryForVersion($currentVersion)
+                    : [],
+                [
+                    'can_submit' => $user->canSubmitEnterpriseWikiPage($page),
+                    'eligible_reviewer_count' => count($this->eligibleReviewerOptions($page, $user)),
+                    'final_approval_blocker' => $currentVersion !== null
+                        ? $this->finalApprovalBlocker($page, $currentVersion, $user)
+                        : 'no_working_version',
+                    'is_assigned_reviewer' => $currentVersion !== null
+                        && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
+                ],
+                [
+                    'total' => $claimCollection->count(),
+                    'approved' => $claimCollection
+                        ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED)
+                        ->count(),
+                ],
+            ),
             'current_version' => $currentVersion !== null ? [
                 'id' => $currentVersion->id,
                 'version_number' => $currentVersion->version_number,

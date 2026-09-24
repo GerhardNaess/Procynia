@@ -824,6 +824,7 @@ export default function WikiShow({
     related_entities: relatedEntities = [],
     backlinks = [],
     review_assignment: reviewAssignment = null,
+    publication = null,
 }) {
     const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -2430,6 +2431,7 @@ export default function WikiShow({
                     page={page}
                     currentVersion={current_version}
                     reviewAssignment={reviewAssignment}
+                    publication={publication}
                     tw={tw}
                     isSystemOwner={isSystemOwner}
                     currentUserId={auth.user?.id ?? null}

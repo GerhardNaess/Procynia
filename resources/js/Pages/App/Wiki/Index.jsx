@@ -1443,7 +1443,84 @@ function DecisionModal({ run, tw, onClose }) {
 
 const SELECT_CLS = 'h-9 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
-function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = [], tw, locale }) {
+/**
+ * How far the Wiki has come, in one line, plus the one thing worth saying when it has not started.
+ *
+ * Counted by the backend over every visible page, not the current filter — a filtered count would
+ * answer a different question than the one a reader of this strip is asking.
+ */
+function PublicationSummary({ summary, tw }) {
+    if (! summary || (summary.total ?? 0) === 0) {
+        return null;
+    }
+
+    const parts = [
+        [summary.total, tw.publication_summary_total ?? 'sider'],
+        [summary.published, tw.publication_summary_published ?? 'publisert'],
+        [summary.in_review, tw.publication_summary_in_review ?? 'til gjennomgang'],
+        [summary.draft, tw.publication_summary_draft ?? 'utkast'],
+        // Only when they exist: a zero here would read as a problem rather than an absence.
+        ...((summary.changes_requested ?? 0) > 0
+            ? [[summary.changes_requested, tw.publication_summary_changes_requested ?? 'endringer kreves']]
+            : []),
+        ...((summary.unpublished_changes ?? 0) > 0
+            ? [[summary.unpublished_changes, tw.publication_summary_unpublished_changes ?? 'med upubliserte endringer']]
+            : []),
+    ];
+
+    return (
+        <div className="space-y-3">
+            <div
+                className="flex flex-wrap items-baseline gap-x-5 gap-y-1 rounded-2xl border border-slate-200 bg-white px-5 py-4"
+                data-testid="wiki-publication-summary"
+            >
+                <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {tw.publication_summary_heading ?? 'Wiki-status'}
+                </span>
+                {parts.map(([value, label]) => (
+                    <span key={label} className="text-base text-slate-600">
+                        <span className="font-semibold text-slate-950">{value ?? 0}</span> {label}
+                    </span>
+                ))}
+            </div>
+
+            {/* Deliberately about tender drafting only. Spør Wiki grounds in the current working
+                versions, so saying "the Wiki cannot be used" would be false. */}
+            {(summary.published ?? 0) === 0 && (
+                <div
+                    className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4"
+                    data-testid="wiki-none-published-notice"
+                >
+                    <p className="text-base font-semibold text-amber-900">
+                        {tw.publication_none_published_title ?? 'Ingen Wiki-sider er publisert ennå.'}
+                    </p>
+                    <p className="mt-1 text-base text-amber-900">
+                        {tw.publication_none_published_body
+                            ?? 'Tilbudsgenerering bruker publiserte Wiki-sider som kunnskapsgrunnlag. Spør Wiki bruker gjeldende arbeidsversjoner og påvirkes ikke.'}
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** The one sentence that says what has to happen to this page next, and what is stopping it. */
+function PageNextStep({ publication, tw }) {
+    if (! publication || publication.next_step === 'none') {
+        return null;
+    }
+
+    return (
+        <div className="mt-1 space-y-0.5" data-testid="wiki-page-next-step">
+            <div className="text-sm text-slate-500">{publication.next_step_label}</div>
+            {(publication.blocking_reasons ?? []).map((reason) => (
+                <div key={reason} className="text-sm text-amber-700">{reason}</div>
+            ))}
+        </div>
+    );
+}
+
+function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = [], publicationSummary = null, tw, locale }) {
     const filters = pagesFilters ?? {};
     const meta = pagesMeta ?? { current_page: 1, last_page: 1, total: 0, per_page: 25 };
 
@@ -1487,6 +1564,8 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
 
     return (
         <div className="space-y-4">
+            <PublicationSummary summary={publicationSummary} tw={tw} />
+
             {/* Filter bar */}
             <div className="flex flex-wrap items-end gap-2">
                 <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
@@ -1619,6 +1698,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                             {page.claims_count} {tw.claims ?? 'påstander'}
                                         </span>
                                     </div>
+                                    <PageNextStep publication={page.publication} tw={tw} />
                                     <Link
                                         href={`/app/wiki/${page.slug}`}
                                         className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
@@ -1656,6 +1736,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                             </td>
                                             <td className="px-6 py-4">
                                                 <StatusBadge status={page.status} label={statusLabel(page.status)} />
+                                                <PageNextStep publication={page.publication} tw={tw} />
                                             </td>
                                             <td className="px-6 py-4">
                                                 <DocumentOwnerSummaryBadge
@@ -3364,6 +3445,7 @@ export default function WikiIndex({
     pages_meta: pagesMeta = null,
     pages_filters: pagesFilters = null,
     pages_document_owner_options: pagesDocumentOwnerOptions = [],
+    publication_summary: publicationSummary = null,
     sources = [],
     sources_filters: sourcesFilters = null,
     document_owner_options: documentOwnerOptions = [],
@@ -3455,6 +3537,7 @@ export default function WikiIndex({
                         pagesMeta={pagesMeta}
                         pagesFilters={pagesFilters}
                         pagesDocumentOwnerOptions={pagesDocumentOwnerOptions}
+                        publicationSummary={publicationSummary}
                         tw={tw}
                         locale={locale}
                     />

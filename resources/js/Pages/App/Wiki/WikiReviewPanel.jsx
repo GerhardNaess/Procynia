@@ -84,10 +84,87 @@ function articleEditUnavailableText(reason, tw) {
     return null;
 }
 
+const PUBLICATION_STATE_CLS = {
+    draft: 'bg-slate-100 text-slate-700',
+    in_review: 'bg-amber-100 text-amber-800',
+    published: 'bg-emerald-100 text-emerald-700',
+    published_with_changes: 'bg-sky-100 text-sky-800',
+    changes_requested: 'bg-rose-100 text-rose-700',
+    archived: 'bg-slate-100 text-slate-500',
+    no_version: 'bg-slate-100 text-slate-500',
+};
+
+/**
+ * Where this page stands, and the one thing that has to happen next.
+ *
+ * Everything here comes from EnterpriseWikiPublicationStatusService, which reads the same gates
+ * submit() and approve() enforce. Nothing is recomputed in the client — a second opinion about
+ * whether a page can be published is exactly what this block exists to prevent.
+ *
+ * Claims appear under "Kvalitetsstatus" and never among the blockers: the domain does not gate
+ * publication on them, so presenting them as a blocker would invent a rule.
+ */
+function PublicationBlock({ publication, tw }) {
+    if (! publication) {
+        return null;
+    }
+
+    const blockers = publication.blocking_reasons ?? [];
+
+    return (
+        <div className="space-y-3 border-b border-slate-100 pb-4" data-testid="wiki-publication-block">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {tw.publication_heading ?? 'Publisering'}
+                </span>
+                <span
+                    className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${
+                        PUBLICATION_STATE_CLS[publication.state] ?? 'bg-slate-100 text-slate-700'
+                    }`}
+                >
+                    {publication.state_label}
+                </span>
+            </div>
+
+            <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                {publication.claims_total > 0 && (
+                    <div>
+                        <dt className="text-sm text-slate-500">{tw.publication_quality_heading ?? 'Kvalitetsstatus'}</dt>
+                        <dd className="text-base text-slate-900" data-testid="wiki-publication-claims">
+                            {(tw.publication_claims_quality ?? ':approved av :total påstander godkjent')
+                                .replace(':approved', publication.claims_approved ?? 0)
+                                .replace(':total', publication.claims_total ?? 0)}
+                        </dd>
+                    </div>
+                )}
+
+                <div>
+                    <dt className="text-sm text-slate-500">{tw.publication_next_label ?? 'Neste steg'}</dt>
+                    <dd className="text-base text-slate-900" data-testid="wiki-publication-next-step">
+                        {publication.next_step_label}
+                    </dd>
+                </div>
+            </dl>
+
+            {blockers.length > 0 && (
+                <div data-testid="wiki-publication-blockers">
+                    <p className="text-sm text-slate-500">{tw.publication_blocking_heading ?? 'Gjenstår'}</p>
+                    <ul className="mt-1 space-y-1">
+                        {blockers.map((reason) => (
+                            <li key={reason} className="text-base text-amber-800">• {reason}</li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function WikiReviewPanel({
     page,
     currentVersion,
     reviewAssignment,
+    publication = null,
     tw = {},
     isSystemOwner = false,
     currentUserId = null,
@@ -127,7 +204,10 @@ export default function WikiReviewPanel({
     const showsArticleEdit = Boolean(onEditArticle)
         && workingVersionEdit?.unavailable_reason !== 'not_authorized'
         && (canEditArticle || editUnavailableText !== null);
-    const showsAnything = canSubmit || canReopen || isInReview || isReturned || requirements.length > 0 || showsArticleEdit;
+    // A published page with nothing outstanding used to render nothing at all, which left the most
+    // important fact about it — that it is published — the one thing the page never said.
+    const showsAnything = canSubmit || canReopen || isInReview || isReturned || requirements.length > 0
+        || showsArticleEdit || publication !== null;
 
     if (! showsAnything) {
         return null;
@@ -171,6 +251,8 @@ export default function WikiReviewPanel({
 
     return (
         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+            <PublicationBlock publication={publication} tw={tw} />
+
             {/* What readers get versus what is being worked on. The single most misread thing on
                 this page, so it comes first and is stated plainly. */}
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
