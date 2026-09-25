@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react';
+
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
@@ -65,6 +67,44 @@ function notificationContextLabel(notification) {
     return EVENT_DOMAIN_LABELS[eventType.split('.')[0]] ?? 'Varsel';
 }
 
+/**
+ * How much room the panel has, measured rather than assumed.
+ *
+ * A static cap cannot know where the panel starts: the bell sits at the top of a wide screen and a
+ * long way down a narrow one, where the app header wraps. Subtracting a fixed offset from the
+ * viewport therefore overflows on exactly the screens with least room to spare. This reads the
+ * panel's own position instead and gives it whatever is left below it.
+ *
+ * Presentation only — it measures and sets a height, and touches nothing about notifications.
+ */
+function useAvailableHeight(ref, isOpen) {
+    const [maxHeight, setMaxHeight] = useState(null);
+
+    useEffect(() => {
+        if (! isOpen) {
+            return undefined;
+        }
+
+        const measure = () => {
+            const element = ref.current;
+
+            if (! element) {
+                return;
+            }
+
+            // A floor, so a cramped viewport leaves a usable panel rather than a sliver.
+            setMaxHeight(Math.max(240, window.innerHeight - element.getBoundingClientRect().top - 16));
+        };
+
+        measure();
+        window.addEventListener('resize', measure);
+
+        return () => window.removeEventListener('resize', measure);
+    }, [ref, isOpen]);
+
+    return maxHeight;
+}
+
 export default function NotificationBell({
     menuRef,
     isOpen,
@@ -76,6 +116,8 @@ export default function NotificationBell({
     onDeleteNotification,
     onDeleteAllUnread,
 }) {
+    const panelRef = useRef(null);
+    const panelMaxHeight = useAvailableHeight(panelRef, isOpen);
     const items = Array.isArray(notifications?.items) ? notifications.items : [];
     const unreadCount = Number(notifications?.unread_count ?? 0);
     const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -123,15 +165,18 @@ export default function NotificationBell({
 
             {isOpen ? (
                 <div
+                    ref={panelRef}
                     id="app-notifications-panel"
-                    className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[24rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
+                    // The Tailwind cap is the first paint, before the measurement lands.
+                    style={panelMaxHeight !== null ? { maxHeight: `${panelMaxHeight}px` } : undefined}
+                    className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] flex max-h-[calc(100dvh-6rem)] w-[24rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
                 >
-                    <div className="border-b border-slate-200 px-4 py-4">
+                    {/* Stays put while the list moves under it: the actions are about the whole
+                        list, so scrolling them away would put them out of reach exactly when there
+                        is enough to scroll. */}
+                    <div className="shrink-0 border-b border-slate-200 px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <div className="text-base font-semibold text-slate-950">Varsler</div>
-                                <div className="text-sm text-slate-600">Siste varsler for deg</div>
-                            </div>
+                            <div className="text-base font-semibold text-slate-950">Varsler</div>
                             {/* Two different intents, so two buttons and no shared wording:
                                 marking read keeps the messages and clears the badge, deleting
                                 removes them. Neither touches the work in Infosenter. */}
@@ -157,7 +202,7 @@ export default function NotificationBell({
                         </div>
                     </div>
 
-                    <div className="max-h-[70vh] overflow-y-auto p-2">
+                    <div className="min-h-0 flex-1 overflow-y-auto p-2">
                         {items.length === 0 ? (
                             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
                                 <div className="text-base font-semibold text-slate-900">Ingen varsler ennå</div>

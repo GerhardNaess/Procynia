@@ -150,3 +150,58 @@ describe('internal event names stay internal', () => {
         }
     });
 });
+
+/**
+ * The panel is a fixed header over a scrolling list.
+ *
+ * The list used to cap itself at 70vh while the panel had no bound at all, so header plus list
+ * could run past the bottom of the screen — and on a short viewport the last notifications, and
+ * anything below them, were simply unreachable.
+ */
+describe('the alert panel fits the screen', () => {
+    test('the panel bounds itself against the viewport', () => {
+        // Measured, not assumed: the bell sits at the top of a wide screen and a long way down a
+        // narrow one, so a fixed offset overflows on exactly the screens with least room.
+        assert.match(bell, /window\.innerHeight - element\.getBoundingClientRect\(\)\.top - 16/);
+        assert.match(bell, /Math\.max\(240,/, 'with a floor, so a cramped viewport keeps a usable panel');
+        assert.match(bell, /max-h-\[calc\(100dvh-6rem\)\]/, 'and a CSS cap for the first paint');
+        assert.match(bell, /flex[\s\S]{0,140}flex-col/, 'and lays its two parts out in a column');
+    });
+
+    test('the measurement follows a resize and stops when the panel closes', () => {
+        assert.match(bell, /window\.addEventListener\('resize', measure\)/);
+        assert.match(bell, /return \(\) => window\.removeEventListener\('resize', measure\)/);
+        assert.match(bell, /if \(! isOpen\) \{\s*\n\s*return undefined;/);
+    });
+
+    test('measuring touches nothing about notifications', () => {
+        const start = bell.indexOf('function useAvailableHeight');
+        const hook = bell.slice(start, bell.indexOf('export default function NotificationBell'));
+        assert.ok(!/notification|unread|axios|mark|delete/i.test(hook), 'layout only');
+    });
+
+    test('the header stays put', () => {
+        assert.match(bell, /className="shrink-0 border-b border-slate-200 px-4 py-4"/);
+    });
+
+    test('the list takes what is left and scrolls', () => {
+        // min-h-0 is what lets a flex child shrink below its content instead of overflowing.
+        assert.match(bell, /className="min-h-0 flex-1 overflow-y-auto p-2"/);
+        assert.ok(!bell.includes('max-h-[70vh]'), 'the list no longer sets its own height');
+    });
+
+    test('the scrollbar is the browser\'s own', () => {
+        assert.ok(!/scrollbar-|::-webkit-scrollbar/.test(bell), 'nothing custom');
+    });
+
+    test('the actions are still in the header, within reach of a long list', () => {
+        const header = bell.slice(bell.indexOf('shrink-0 border-b'), bell.indexOf('min-h-0 flex-1'));
+        assert.match(header, /Marker alle som lest/);
+        assert.match(header, /Slett alle uleste/);
+    });
+
+    test('the heading is not restated below itself', () => {
+        assert.match(bell, /<div className="text-base font-semibold text-slate-950">Varsler<\/div>/);
+        assert.ok(!bell.includes('Siste varsler for deg'));
+    });
+});
