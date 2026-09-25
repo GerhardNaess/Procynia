@@ -443,3 +443,44 @@ describe('the edit action belongs to the article', () => {
         assert.match(show, /showsArticleEdit && !isEditingArticle && \(/);
     });
 });
+
+/**
+ * Quality assurance is work on claims, so a version with none offers nobody anything to do.
+ * "Send til QA" was showing beside "Ingen påstander å kvalitetssikre" — an invitation to ask
+ * somebody to check nothing.
+ */
+describe('the QA action appears only when there is quality work', () => {
+    test('nothing to check means no action', () => {
+        assert.match(panel, /const hasClaims = \(claims\.total \?\? 0\) > 0;/);
+        assert.match(panel, /const canAssign = hasClaims\s*\n\s*&& qaAssignment\.can_assign/);
+    });
+
+    test('the claim count comes from the payload, not from a second rule', () => {
+        // claims.total is what the backend already sends for the current version.
+        assert.match(panel, /const claims = qaAssignment\.claims \?\? \{ total: 0/);
+        assert.ok(!panel.includes('currentVersion.claims'), 'no parallel source of truth');
+    });
+
+    test('the empty state says only why, with no leftover assignment line', () => {
+        assert.match(panel, /\{\(hasClaims \|\| assignee\) && \(/);
+        assert.match(panel, /qa_no_claims \?\? 'Ingen påstander å kvalitetssikre'/);
+    });
+
+    test('an existing assignee is still named even if the claims went', () => {
+        // Somebody was asked; that remains a fact worth showing.
+        assert.match(panel, /hasClaims \|\| assignee/);
+    });
+
+    test('when there is work, the action sits beside the progress it acts on', () => {
+        const start = panel.indexOf('data-testid="wiki-qa-progress"');
+        const row = panel.slice(start, start + 1400);
+        assert.match(row, /data-testid="wiki-qa-assign"/, 'same row as the claim progress');
+        assert.ok(!/ml-auto/.test(row), 'no longer pushed to the far edge');
+    });
+
+    test('assigning itself is untouched', () => {
+        assert.match(panel, /qa_assign_button \?\? 'Send til QA'/);
+        assert.match(panel, /qa_change_button \?\? 'Endre QA'/);
+        assert.match(panel, /\/qa-assignment`, \{ qa_user_id: Number\(qaUserId\) \}/);
+    });
+});

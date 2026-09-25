@@ -243,10 +243,16 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
 
     const claims = qaAssignment.claims ?? { total: 0, approved: 0, rejected: 0, pending: 0 };
     const assignee = qaAssignment.assignee;
-    const canAssign = qaAssignment.can_assign && (qaAssignment.eligible_qa_users ?? []).length > 0;
+    const hasClaims = (claims.total ?? 0) > 0;
+    // Quality assurance is work on claims. A version that has none offers nobody anything to do,
+    // so asking somebody to check it would be an empty request — the count the backend already
+    // sends is what decides, rather than a second rule invented here.
+    const canAssign = hasClaims
+        && qaAssignment.can_assign
+        && (qaAssignment.eligible_qa_users ?? []).length > 0;
 
     // Nothing to say: no claims to check and nobody asked to check them.
-    if (claims.total === 0 && ! assignee && ! qaAssignment.can_assign) {
+    if (! hasClaims && ! assignee && ! qaAssignment.can_assign) {
         return null;
     }
 
@@ -256,11 +262,32 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                 <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
                     {tw.qa_heading ?? 'Kvalitetssikring'}
                 </span>
-                <span className="text-base text-slate-900" data-testid="wiki-qa-assignee">
-                    {assignee
-                        ? assignee.name
-                        : (tw.qa_unassigned ?? 'Ikke tildelt')}
-                </span>
+                {/* Who is on it — but "Ikke tildelt" is only worth saying when there is something
+                    to be tildelt. With no claims the next line already says why nobody is. */}
+                {(hasClaims || assignee) && (
+                    <span className="text-base text-slate-900" data-testid="wiki-qa-assignee">
+                        {assignee
+                            ? assignee.name
+                            : (tw.qa_unassigned ?? 'Ikke tildelt')}
+                    </span>
+                )}
+            </div>
+
+            {/* The action belongs with the thing it acts on, so it sits beside the claim progress
+                rather than pushed to the far edge of the card away from it. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <p className="text-base text-slate-600" data-testid="wiki-qa-progress">
+                    {! hasClaims
+                        ? (tw.qa_no_claims ?? 'Ingen påstander å kvalitetssikre')
+                        : (tw.qa_claims_progress ?? ':approved av :total påstander godkjent')
+                            .replace(':approved', claims.approved ?? 0)
+                            .replace(':total', claims.total ?? 0)}
+                    {claims.rejected > 0 && (
+                        <span className="ml-2 text-amber-700">
+                            {(tw.qa_claims_rejected ?? ':count avvist').replace(':count', claims.rejected)}
+                        </span>
+                    )}
+                </p>
 
                 {canAssign && (
                     <button
@@ -268,25 +295,13 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                         type="button"
                         disabled={busy}
                         onClick={onOpen}
-                        className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                        data-testid="wiki-qa-assign"
+                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {assignee ? (tw.qa_change_button ?? 'Endre QA') : (tw.qa_assign_button ?? 'Send til QA')}
                     </button>
                 )}
             </div>
-
-            <p className="text-base text-slate-600" data-testid="wiki-qa-progress">
-                {claims.total === 0
-                    ? (tw.qa_no_claims ?? 'Ingen påstander å kvalitetssikre')
-                    : (tw.qa_claims_progress ?? ':approved av :total påstander godkjent')
-                        .replace(':approved', claims.approved ?? 0)
-                        .replace(':total', claims.total ?? 0)}
-                {claims.rejected > 0 && (
-                    <span className="ml-2 text-amber-700">
-                        {(tw.qa_claims_rejected ?? ':count avvist').replace(':count', claims.rejected)}
-                    </span>
-                )}
-            </p>
         </div>
     );
 }
