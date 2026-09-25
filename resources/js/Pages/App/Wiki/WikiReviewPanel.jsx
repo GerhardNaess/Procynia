@@ -138,7 +138,7 @@ const REQUIREMENT_STATUS = {
  * null on purpose: someone who may not edit should simply not see the action, while someone who
  * may edit but currently cannot deserves to know why rather than find the button missing.
  */
-function articleEditUnavailableText(reason, tw) {
+export function articleEditUnavailableText(reason, tw) {
     // Deliberately no AI-related reason: manual editing does not use AI, so whether it is enabled
     // has nothing to say about whether the page owner may write.
     if (reason === 'no_editable_version') {
@@ -300,10 +300,6 @@ export default function WikiReviewPanel({
     tw = {},
     isSystemOwner = false,
     currentUserId = null,
-    workingVersionEdit = null,
-    canEditArticle = false,
-    isEditingArticle = false,
-    onEditArticle = null,
 }) {
     const [processing, setProcessing] = useState(null);
     const [actionError, setActionError] = useState(null);
@@ -351,16 +347,12 @@ export default function WikiReviewPanel({
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
     const blocker = blockerMessage(reviewAssignment.final_approval_blocker, gate, tw);
-    // The Rediger action lives here, next to the working version it edits — so the panel must also
-    // render when editing is the only thing on offer.
-    const editUnavailableText = articleEditUnavailableText(workingVersionEdit?.unavailable_reason, tw);
-    const showsArticleEdit = Boolean(onEditArticle)
-        && workingVersionEdit?.unavailable_reason !== 'not_authorized'
-        && (canEditArticle || editUnavailableText !== null);
+    // Editing lives with the article text it changes, not here: this card is about where the page
+    // stands, and a writing action in among the review decisions read as one of them.
     // A published page with nothing outstanding used to render nothing at all, which left the most
     // important fact about it — that it is published — the one thing the page never said.
     const showsAnything = canSubmit || canReopen || isInReview || isReturned || canPublishDraft || requirements.length > 0
-        || showsArticleEdit || publication !== null;
+        || publication !== null;
 
     if (! showsAnything) {
         return null;
@@ -454,23 +446,7 @@ export default function WikiReviewPanel({
                         <span className="font-semibold text-slate-900">v{currentVersion.version_number}</span>
                     </span>
                 )}
-
-                {showsArticleEdit && !isEditingArticle && (
-                    <button
-                        type="button"
-                        onClick={onEditArticle}
-                        disabled={!canEditArticle}
-                        title={canEditArticle ? undefined : (editUnavailableText ?? undefined)}
-                        className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        {tw.article_edit_button ?? 'Rediger'}
-                    </button>
-                )}
             </div>
-
-            {showsArticleEdit && !canEditArticle && editUnavailableText !== null && (
-                <p className="text-sm text-slate-500">{editUnavailableText}</p>
-            )}
 
             {reviewAssignment.published_version_id && currentVersion
                 && reviewAssignment.published_version_id !== currentVersion.id && (

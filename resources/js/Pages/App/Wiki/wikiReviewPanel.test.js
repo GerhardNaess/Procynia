@@ -387,3 +387,59 @@ describe('a draft can be published directly', () => {
         assert.match(panel, /tw\.submit_button \?\? 'Send til gjennomgang'/);
     });
 });
+
+/**
+ * Editing sits with the text it changes.
+ *
+ * It used to live in the publication card, in among the review decisions — which is where a reader
+ * looks to find out where the page stands, not to start writing. On that row it read as one more
+ * decision about the page rather than an action on the article.
+ */
+describe('the edit action belongs to the article', () => {
+    test('the publication card no longer edits anything', () => {
+        assert.ok(!panel.includes('onEditArticle'), 'the panel has no edit action');
+        assert.ok(!panel.includes('showsArticleEdit'));
+        assert.ok(!panel.includes('canEditArticle'));
+    });
+
+    test('it renders on the article heading row, right-aligned', () => {
+        assert.match(show, /data-testid="wiki-article-edit"/);
+        const start = show.indexOf("{tw.article_heading ?? 'Artikkelutkast'}");
+        const row = show.slice(start, start + 1600);
+        assert.match(row, /article_ai_label \?\? 'AI-generert'/, 'the badge stays beside the heading');
+        assert.match(row, /data-testid="wiki-article-edit"/, 'and the action is on the same row');
+        assert.match(row, /className="ml-auto inline-flex/, 'pushed to the right');
+    });
+
+    test('it is secondary, not a primary action', () => {
+        const start = show.indexOf('data-testid="wiki-article-edit"');
+        const button = show.slice(start, start + 700);
+        assert.match(button, /border-slate-200 bg-white/, 'white with a light border');
+        assert.match(button, /text-slate-700/, 'dark text');
+        assert.match(button, /hover:bg-slate-50/, 'discreet hover');
+        assert.ok(!/violet/.test(button), 'never the violet primary style');
+    });
+
+    test('it calls the same handler as before', () => {
+        assert.match(show, /onClick=\{startArticleEditing\}/);
+        assert.match(show, /const startArticleEditing = \(\) => \{/);
+    });
+
+    test('the rule for offering it is unchanged, and read from one place', () => {
+        assert.match(show, /import WikiReviewPanel, \{ articleEditUnavailableText \} from '\.\/WikiReviewPanel';/);
+        assert.match(show, /workingVersionEdit\?\.unavailable_reason !== 'not_authorized'/);
+        assert.match(show, /\(canEditArticle \|\| articleEditUnavailable !== null\)/);
+    });
+
+    /**
+     * A published page has no "Artikkelutkast" heading, but editing one is a supported route.
+     * Hanging the action on the heading alone would have removed it there without anybody asking.
+     */
+    test('an approved page still gets the action even without the heading', () => {
+        assert.match(show, /\{\(!isApproved \|\| \(showsArticleEdit && !isEditingArticle\)\) && \(/);
+    });
+
+    test('the action disappears while editing is in progress', () => {
+        assert.match(show, /showsArticleEdit && !isEditingArticle && \(/);
+    });
+});

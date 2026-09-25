@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
-import WikiReviewPanel from './WikiReviewPanel';
+import WikiReviewPanel, { articleEditUnavailableText } from './WikiReviewPanel';
 import {
     getWikiQualityCheckCopy,
     groupWikiFindingsByCode,
@@ -2240,6 +2240,11 @@ export default function WikiShow({
         && block.block_key !== '';
     const editableArticleBlocks = contentBlocks.filter(isEditableArticleBlock);
     const canEditArticle = Boolean(workingVersionEdit?.can_edit) && editableArticleBlocks.length > 0;
+    // Editing belongs to the article, so the action sits on the article's own heading row. The
+    // rule for whether it is offered is unchanged and still read from the same payload.
+    const articleEditUnavailable = articleEditUnavailableText(workingVersionEdit?.unavailable_reason, tw);
+    const showsArticleEdit = workingVersionEdit?.unavailable_reason !== 'not_authorized'
+        && (canEditArticle || articleEditUnavailable !== null);
 
     const startArticleEditing = () => {
         const drafts = {};
@@ -2437,10 +2442,6 @@ export default function WikiShow({
                     tw={tw}
                     isSystemOwner={isSystemOwner}
                     currentUserId={auth.user?.id ?? null}
-                    workingVersionEdit={workingVersionEdit}
-                    canEditArticle={canEditArticle}
-                    isEditingArticle={isEditingArticle}
-                    onEditArticle={startArticleEditing}
                 />
 
                 {(reviewReference || hasStructureFinding) && (
@@ -2506,15 +2507,36 @@ export default function WikiShow({
 
                 {/* Article — primary content */}
                 <section className="space-y-4">
-                    {!isApproved && (
-                        <div className="flex items-center gap-3">
-                            <h2 className="text-base font-semibold text-slate-700">
-                                {tw.article_heading ?? 'Artikkelutkast'}
-                            </h2>
-                            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                                {tw.article_ai_label ?? 'AI-generert'}
-                            </span>
+                    {(!isApproved || (showsArticleEdit && !isEditingArticle)) && (
+                        <div className="flex flex-wrap items-center gap-3">
+                            {!isApproved && (
+                                <>
+                                    <h2 className="text-base font-semibold text-slate-700">
+                                        {tw.article_heading ?? 'Artikkelutkast'}
+                                    </h2>
+                                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                        {tw.article_ai_label ?? 'AI-generert'}
+                                    </span>
+                                </>
+                            )}
+
+                            {showsArticleEdit && !isEditingArticle && (
+                                <button
+                                    type="button"
+                                    onClick={startArticleEditing}
+                                    disabled={!canEditArticle}
+                                    title={canEditArticle ? undefined : (articleEditUnavailable ?? undefined)}
+                                    data-testid="wiki-article-edit"
+                                    className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {tw.article_edit_button ?? 'Rediger artikkel'}
+                                </button>
+                            )}
                         </div>
+                    )}
+
+                    {showsArticleEdit && !canEditArticle && articleEditUnavailable !== null && (
+                        <p className="text-sm text-slate-500">{articleEditUnavailable}</p>
                     )}
 
                     {hasArticle ? (
