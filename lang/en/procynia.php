@@ -3344,8 +3344,6 @@ return [
         'decision_reason_label' => 'Reason',
         'decision_no_items' => 'None',
         'decision_status_pending' => 'Pending',
-        'draft_notice' => 'This is an AI-generated draft.',
-        'pending_review_draft_notice' => 'This page is under review. The content is AI-generated.',
         'review_reference_superseded' => 'The suggestion applies to an older page version (version :version) and is no longer relevant to the current content.',
         'review_reference_block_missing' => 'The text could not be located on the Wiki page.',
         'review_reference_not_found' => 'The text could not be located on the Wiki page.',

@@ -484,3 +484,34 @@ describe('the QA action appears only when there is quality work', () => {
         assert.match(panel, /\/qa-assignment`, \{ qa_user_id: Number\(qaUserId\) \}/);
     });
 });
+
+/**
+ * Amber is this page's warning colour, and a draft is not a problem.
+ *
+ * The banner restated what the status badge and the publication card already say, in the styling
+ * reserved for things that need attention — so an ordinary unfinished page looked like one with
+ * something wrong with it.
+ */
+describe('an unfinished page is not dressed as a warning', () => {
+    test('the amber draft notice is gone', () => {
+        assert.ok(!show.includes('draft_notice'), 'no draft banner');
+        assert.ok(!show.includes('pending_review_draft_notice'), 'and none for review either');
+        assert.ok(!show.includes('{/* Draft / pending notice */}'));
+    });
+
+    test('its flags went with it rather than lingering unused', () => {
+        assert.ok(!/const isDraft = /.test(show));
+        assert.ok(!/const isPendingReview = /.test(show));
+    });
+
+    test('where the page stands is still said, where it belongs', () => {
+        // The status badge on the page, and the publication card's own state line.
+        assert.match(show, /PAGE_STATUS_STYLES\[page\.status\]/);
+        assert.match(panel, /PUBLICATION_STATE_CLS/);
+    });
+
+    test('the discreet AI marking on the article stays', () => {
+        assert.match(show, /article_ai_label \?\? 'AI-generert'/);
+        assert.match(show, /bg-amber-100 px-2\.5 py-0\.5 text-xs font-semibold text-amber-700/);
+    });
+});

@@ -3343,8 +3343,6 @@ return [
         'decision_reason_label' => 'Begrunnelse',
         'decision_no_items' => 'Ingen',
         'decision_status_pending' => 'Venter',
-        'draft_notice' => 'Dette er et AI-generert utkast.',
-        'pending_review_draft_notice' => 'Denne siden er til gjennomgang. Innholdet er AI-generert.',
         'review_reference_superseded' => 'Forslaget gjelder en eldre sideversjon (versjon :version) og er ikke lenger aktuelt for gjeldende innhold.',
         'review_reference_block_missing' => 'Teksten kunne ikke lokaliseres på Wiki-siden.',
         'review_reference_not_found' => 'Teksten kunne ikke lokaliseres på Wiki-siden.',

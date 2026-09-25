@@ -2201,8 +2201,6 @@ export default function WikiShow({
         .filter((approval) => approval.approval_status === 'pending')
         .map((approval) => approval.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier'));
 
-    const isDraft = page.status === 'draft';
-    const isPendingReview = page.status === 'pending_review';
     const isApproved = page.status === 'approved';
 
     // rendered_markdown has [[wikilinks]] pre-transformed into clickable internal links;
@@ -2419,18 +2417,6 @@ export default function WikiShow({
                         </p>
                     )}
                 </section>
-
-                {/* Draft / pending notice */}
-                {(isDraft || isPendingReview) && (
-                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <p className="text-sm text-amber-800">
-                            {isPendingReview
-                                ? (tw.pending_review_draft_notice ?? 'Denne siden er til gjennomgang. Innholdet er AI-generert.')
-                                : (tw.draft_notice ?? 'Dette er et AI-generert utkast.')}
-                        </p>
-                    </div>
-                )}
 
                 {/* Approval actions */}
                 <WikiReviewPanel
