@@ -211,6 +211,12 @@ class EnterpriseWikiPublicationStatusService
             return ['awaiting_owner', []];
         }
 
+        // Somebody who can publish this draft outright is not waiting to send it anywhere. Saying
+        // "ready to be sent for review" would name the longer of two routes as the only one.
+        if (($reviewContext['can_publish_draft'] ?? false) === true) {
+            return ['publish', []];
+        }
+
         // submit() refuses a reviewer who is the submitter, so a customer with nobody else able to
         // approve Wiki pages cannot move any page forward. That is worth saying out loud rather
         // than leaving an action that always fails.

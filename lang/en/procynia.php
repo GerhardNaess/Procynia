@@ -3125,6 +3125,7 @@ return [
         'publication_state_no_version' => 'No content',
         'publication_next_label' => 'Next step',
         'publication_next_submit' => 'The page is ready to be sent for review.',
+        'publication_next_publish' => 'The page can be published, or sent for review first.',
         'publication_next_awaiting_review' => 'Waiting for review.',
         'publication_next_awaiting_review_named' => 'Waiting for review by :name.',
         'publication_next_awaiting_owner' => 'The page owner must send the page for review.',

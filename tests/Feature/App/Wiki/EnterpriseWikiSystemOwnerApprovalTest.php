@@ -98,6 +98,153 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $this->assertNotNull($version->submitted_at);
     }
 
+    // ── Straight from draft ─────────────────────────────────────────────────
+
+    /**
+     * Review is a way of getting a second pair of eyes, not a toll every page has to pay. Sending a
+     * page to somebody whose decision you could overrule anyway is paperwork, so a System Owner
+     * publishes their own draft in one step.
+     */
+    public function test_a_system_owner_publishes_a_draft_without_sending_it_anywhere(): void
+    {
+        $case = $this->draftPage();
+
+        $this->assertTrue($this->reviewAssignmentSeenBy($case['owner'], $case['page'])['can_approve_final']);
+
+        $this->actingAs($case['owner'])
+            ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertRedirect(route('app.wiki.show', $case['page']->slug));
+
+        $page = $case['page']->fresh();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
+        $this->assertSame((int) $case['version']->id, (int) $page->published_version_id);
+        $this->assertSame((int) $case['owner']->id, (int) $page->reviewed_by_user_id);
+    }
+
+    /**
+     * Nothing is invented on the way. No reviewer is named, no submission is recorded, and the page
+     * does not pass through pending_review — a handover that never happened must not be written as
+     * though it did.
+     */
+    public function test_publishing_a_draft_fabricates_no_handover(): void
+    {
+        $case = $this->draftPage();
+
+        $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+
+        $version = $case['version']->fresh();
+
+        $this->assertNull($version->reviewer_user_id);
+        $this->assertNull($version->submitted_by_user_id);
+        $this->assertNull($version->submitted_at);
+    }
+
+    /** The longer route stays open; it is a choice, not a requirement. */
+    public function test_sending_a_draft_for_review_still_works(): void
+    {
+        $case = $this->draftPage();
+        $reviewer = $this->approver($case['customer']);
+
+        $this->actingAs($case['owner'])
+            ->patch("/app/wiki/{$case['page']->slug}/submit", ['reviewer_user_id' => $reviewer->id])
+            ->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
+        $this->assertSame((int) $reviewer->id, (int) $case['version']->fresh()->reviewer_user_id);
+    }
+
+    /** The page stops saying that sending it onward is the only way forward. */
+    public function test_the_next_step_offers_publishing_rather_than_only_review(): void
+    {
+        $case = $this->draftPage();
+
+        $response = $this->actingAs($case['owner'])->get("/app/wiki/{$case['page']->slug}");
+        $response->assertOk();
+
+        $this->assertSame('publish', $response->viewData('page')['props']['publication']['next_step']);
+    }
+
+    /** Direct publication is the System Owner's, not every Wiki approver's. */
+    public function test_a_wiki_approver_cannot_publish_a_draft(): void
+    {
+        $case = $this->draftPage();
+        $approver = $this->approver($case['customer']);
+
+        $this->assertFalse($this->reviewAssignmentSeenBy($approver, $case['page'])['can_approve_final']);
+
+        $this->actingAs($approver)
+            ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertStatus(422);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $case['page']->fresh()->status);
+    }
+
+    public function test_qa_and_contributors_cannot_publish_a_draft(): void
+    {
+        $case = $this->draftPage();
+        $qa = $this->user($case['customer'], User::BID_ROLE_CONTRIBUTOR);
+        $qa->forceFill(['is_qa' => true])->save();
+        $contributor = $this->user($case['customer'], User::BID_ROLE_CONTRIBUTOR);
+
+        // Refused for different reasons — one lacks the capability entirely, the other is stopped
+        // by the page not being in review — so what is asserted is that neither gets through.
+        foreach ([$qa->fresh(), $contributor] as $actor) {
+            $response = $this->actingAs($actor)->patch("/app/wiki/{$case['page']->slug}/approve");
+            $this->assertTrue($response->status() >= 400, 'publication is refused');
+        }
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $case['page']->fresh()->status);
+    }
+
+    /** Somebody else's judgement on their own material still stops a draft from being published. */
+    public function test_another_owners_signoff_still_blocks_a_draft(): void
+    {
+        $case = $this->draftPage(withSourceOwnedBy: 'other');
+
+        $payload = $this->reviewAssignmentSeenBy($case['owner'], $case['page']);
+        $this->assertFalse($payload['can_approve_final']);
+        $this->assertSame('source_owners_pending', $payload['final_approval_blocker']);
+
+        $this->actingAs($case['owner'])
+            ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertStatus(409);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $case['page']->fresh()->status);
+    }
+
+    /** Their own outstanding row is settled by publishing, exactly as it is from review. */
+    public function test_their_own_signoff_is_settled_when_publishing_a_draft(): void
+    {
+        $case = $this->draftPage(withSourceOwnedBy: 'self');
+
+        $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
+        $approval = $this->approvalFor($case['version'], $case['owner']);
+        $this->assertTrue($approval->isApproved());
+        $this->assertFalse((bool) $approval->is_override);
+    }
+
+    /** Pending claims are quality work, never a publication gate. */
+    public function test_pending_claims_do_not_block_a_draft(): void
+    {
+        $case = $this->draftPage();
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $case['page']->id,
+            'enterprise_wiki_page_version_id' => $case['version']->id,
+            'claim_text' => 'Påstand uten kilde.',
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
+    }
+
     // ── Who is still refused ────────────────────────────────────────────────
 
     /** The line this whole change had to avoid crossing. */
@@ -282,7 +429,18 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
      *
      * @return array<string, mixed>
      */
-    private function pageOutForReview(?string $withSourceOwnedBy = null): array
+    /**
+     * The same page, left in draft. `withSourceOwnedBy` picks whose sign-off is outstanding:
+     * another person, or the System Owner who owns the page.
+     *
+     * @return array<string, mixed>
+     */
+    private function draftPage(?string $withSourceOwnedBy = null): array
+    {
+        return $this->pageOutForReview($withSourceOwnedBy, submit: false);
+    }
+
+    private function pageOutForReview(?string $withSourceOwnedBy = null, bool $submit = true): array
     {
         $customer = $this->customer();
         $owner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -313,6 +471,7 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         if ($withSourceOwnedBy !== null) {
             $documentOwner = match ($withSourceOwnedBy) {
                 'reviewer' => $reviewer,
+                'self' => $owner,
                 'system_owner', 'both' => $this->user($customer, User::BID_ROLE_SYSTEM_OWNER),
                 default => $this->user($customer, User::BID_ROLE_CONTRIBUTOR),
             };
@@ -325,9 +484,11 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
             }
         }
 
-        $this->actingAs($owner)
-            ->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])
-            ->assertRedirect();
+        if ($submit) {
+            $this->actingAs($owner)
+                ->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])
+                ->assertRedirect();
+        }
 
         return [
             'customer' => $customer,

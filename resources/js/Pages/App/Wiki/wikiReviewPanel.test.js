@@ -120,7 +120,9 @@ describe('final approval says what it does', () => {
     });
 
     test('it is offered only when the backend says it is available', () => {
-        assert.match(panel, /isInReview && reviewAssignment\.can_approve_final/);
+        // One flag decides, for a draft and for a page in review alike — the backend works out
+        // which of those the actor may publish.
+        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(/);
     });
 
     test('a System Owner stepping into somebody else\'s assignment is labelled as such', () => {
@@ -306,7 +308,7 @@ describe('the reviewer can act on the page', () => {
     });
 
     test('publishing and returning render on their own conditions', () => {
-        assert.match(panel, /\{isInReview && reviewAssignment\.can_approve_final && \(\s*\n\s*<button/);
+        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(\s*\n\s*<button/);
         assert.match(panel, /\{canSendBack && \(\s*\n\s*<button/);
         // The old single branch that hid both together must be gone.
         assert.ok(!panel.includes('{isInReview && reviewAssignment.can_approve_final && (\n                    <>'));
@@ -366,5 +368,22 @@ describe('stepping in reads differently from being asked', () => {
     test('an outstanding source owner is still explained rather than silently blocking', () => {
         assert.match(panel, /\{isInReview && ! reviewAssignment\.can_approve_final && blocker && \(/);
         assert.match(panel, /source_owners_pending/);
+    });
+});
+
+/** A System Owner's draft offers both routes; review is the voluntary one. */
+describe('a draft can be published directly', () => {
+    test('publishing is no longer gated on the page being in review', () => {
+        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(\s*\n\s*<button/);
+        assert.match(panel, /const canPublishDraft = page\.status === 'draft' && reviewAssignment\.can_approve_final === true;/);
+    });
+
+    test('the panel renders for a draft that can be published', () => {
+        assert.match(panel, /showsAnything = canSubmit \|\| canReopen \|\| isInReview \|\| isReturned \|\| canPublishDraft/);
+    });
+
+    test('sending it for review remains on offer beside it', () => {
+        assert.match(panel, /\{canSubmit && \(/);
+        assert.match(panel, /tw\.submit_button \?\? 'Send til gjennomgang'/);
     });
 });

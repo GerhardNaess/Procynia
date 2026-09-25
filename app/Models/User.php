@@ -484,12 +484,17 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        if ($version->reviewer_user_id === null) {
-            return false;
-        }
-
+        // The customer's final authority, over a page in their own Wiki. Neither the assignment
+        // nor the four-eyes rule constrains them, and a draft they never sent anywhere is still
+        // theirs to publish.
         if ($this->isSystemOwner()) {
             return true;
+        }
+
+        // For everybody else there has to be a handover, because being able to approve Wiki pages
+        // is not the same as having been asked to approve this one.
+        if ($version->reviewer_user_id === null) {
+            return false;
         }
 
         return (int) $version->reviewer_user_id === (int) $this->id

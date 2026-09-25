@@ -1827,6 +1827,10 @@ class WikiController extends Controller
                         : 'no_working_version',
                     'is_assigned_reviewer' => $currentVersion !== null
                         && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
+                    // So the next step names the shorter route when there is one.
+                    'can_publish_draft' => $page->status === EnterpriseWikiPage::STATUS_DRAFT
+                        && $currentVersion !== null
+                        && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
                 ],
                 [
                     'total' => $claimCollection->count(),
@@ -2730,7 +2734,6 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        $this->assertPendingReview($page);
         $this->assertMayFinalApprove($user, $page);
 
         // Everything above is a fast pre-check for a good error message. The decision itself is made
@@ -2743,7 +2746,6 @@ class WikiController extends Controller
                 ->lockForUpdate()
                 ->first();
 
-            $this->assertPendingReview($locked);
             $this->assertMayFinalApprove($user, $locked);
 
             $workingVersion = $locked->currentVersion()->first();
@@ -3066,11 +3068,21 @@ class WikiController extends Controller
      */
     private function finalApprovalBlocker(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, User $user): ?string
     {
+        // A System Owner may publish a draft outright. Review is a way of getting a second pair of
+        // eyes, not a toll every page has to pay: sending a page to yourself, or to somebody whose
+        // approval you can overrule anyway, is paperwork rather than control. Everyone else still
+        // has to be handed the page.
+        $directPublish = $page->status === EnterpriseWikiPage::STATUS_DRAFT && $user->isSystemOwner();
+
         return match (true) {
-            $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
-            $version->reviewer_user_id === null
-                || $version->submitted_by_user_id === null
-                || $version->submitted_at === null => 'missing_assignment',
+            ! $directPublish
+                && $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
+            // A draft has no handover to be stale against; the check is about a version that moved
+            // after somebody was asked to look at it.
+            ! $directPublish
+                && ($version->reviewer_user_id === null
+                    || $version->submitted_by_user_id === null
+                    || $version->submitted_at === null) => 'missing_assignment',
             ! $user->canApproveWikiPages() => 'missing_capability',
             // Reported separately from not_assigned because the two need different sentences: one
             // is "somebody else is holding this", the other is "you cannot sign off your own work".

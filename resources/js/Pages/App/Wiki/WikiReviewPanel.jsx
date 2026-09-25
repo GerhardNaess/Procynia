@@ -337,6 +337,9 @@ export default function WikiReviewPanel({
     // back waits for neither, and is the way out of both. Gating them on one flag hid the only
     // action a blocked reviewer still had.
     const canSendBack = isInReview && reviewAssignment.can_send_back === true;
+    // A System Owner can publish a draft without sending it anywhere first. Review stays on offer
+    // beside it as the voluntary thing it is, rather than as the only way forward.
+    const canPublishDraft = page.status === 'draft' && reviewAssignment.can_approve_final === true;
     // Being able to decide a page is not the same as having been asked to. A System Owner can
     // finish any page in their customer's Wiki, and telling them it is waiting on them would be
     // false — somebody else was named, and is presumably working on it.
@@ -356,7 +359,7 @@ export default function WikiReviewPanel({
         && (canEditArticle || editUnavailableText !== null);
     // A published page with nothing outstanding used to render nothing at all, which left the most
     // important fact about it — that it is published — the one thing the page never said.
-    const showsAnything = canSubmit || canReopen || isInReview || isReturned || requirements.length > 0
+    const showsAnything = canSubmit || canReopen || isInReview || isReturned || canPublishDraft || requirements.length > 0
         || showsArticleEdit || publication !== null;
 
     if (! showsAnything) {
@@ -690,7 +693,7 @@ export default function WikiReviewPanel({
                     </button>
                 )}
 
-                {isInReview && reviewAssignment.can_approve_final && (
+                {reviewAssignment.can_approve_final && (
                     <button
                         type="button"
                         disabled={busy}

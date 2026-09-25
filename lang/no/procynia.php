@@ -3124,6 +3124,7 @@ return [
         'publication_state_no_version' => 'Uten innhold',
         'publication_next_label' => 'Neste steg',
         'publication_next_submit' => 'Siden er klar til å sendes til gjennomgang.',
+        'publication_next_publish' => 'Siden kan publiseres, eller sendes til gjennomgang først.',
         'publication_next_awaiting_review' => 'Venter på gjennomgang.',
         'publication_next_awaiting_review_named' => 'Venter på gjennomgang hos :name.',
         'publication_next_awaiting_owner' => 'Sideeier må sende siden til gjennomgang.',
