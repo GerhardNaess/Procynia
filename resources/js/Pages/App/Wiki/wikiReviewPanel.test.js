@@ -239,7 +239,8 @@ describe('the handover says what happened', () => {
         assert.match(panel, /onError: \(errors\) => setActionError\(/);
         assert.match(panel, /onHttpException: \(response\) => \{/, 'aborts arrive outside onError');
         // Returning false suppresses Inertia's raw overlay in favour of the panel's own message.
-        assert.match(panel, /setActionError\(httpErrorMessage\(response\?\.status, tw\)\);\s*\n\s*\n\s*return false;/);
+        assert.match(panel, /httpErrorMessage\(status, tw\)/);
+        assert.match(panel, /return false;\s*\n\s*\},/);
     });
 
     test('each refusal is explained in terms of the work, not the status code', () => {
@@ -569,5 +570,55 @@ describe('a click always leaves the panel usable', () => {
 
     test('a request in flight says so, rather than only greying out', () => {
         assert.match(panel, /processing === 'submit'\s*\n\s*\? \(tw\.review_sending \?\? 'Sender …'\)/);
+    });
+});
+
+/**
+ * A view of the page that has gone out of date must correct itself.
+ *
+ * 409 and 422 both mean the same thing to the person holding the screen: the page moved on while
+ * this view of it stood still. Somebody else acted, or the tab has been open since before the
+ * change. Leaving the dialog up then keeps offering an action the server will refuse every time,
+ * against a page that no longer looks the way the screen says it does — a click that appears to do
+ * nothing, on a page that appears not to have been sent.
+ */
+describe('a stale view corrects itself', () => {
+    test('a moved-on page re-reads itself from the server', () => {
+        // The rule itself lives in wikiReviewRefusal.js and is unit-tested there; this only holds
+        // that the panel acts on it rather than on a bare status code.
+        assert.match(panel, /const isStale = isStaleStateRefusal\(status, response\?\.data\);/);
+        assert.match(panel, /router\.reload\(\{ preserveScroll: true \}\)/);
+    });
+
+    test('and closes the dialog whose action no longer applies', () => {
+        const start = panel.indexOf('if (! isStale) {');
+        const branch = panel.slice(start, start + 900);
+        assert.match(branch, /setIsSubmitOpen\(false\)/);
+        assert.match(branch, /setChangesTarget\(null\)/);
+    });
+
+    /** The case that must not reload: a field the person can fix in the dialog they are in. */
+    test('a validation failure keeps the dialog and shows the field message', () => {
+        assert.match(panel, /if \(! isStale\) \{\s*\n\s*return false;\s*\n\s*\}/);
+        assert.match(panel, /firstError\(response\?\.data\?\.errors\) \?\? httpErrorMessage\(status, tw\)/);
+    });
+
+    test('the state is re-read, never guessed at locally', () => {
+        // Nothing here writes an optimistic status; the server's props are the only source.
+        const start = panel.indexOf('onHttpException:');
+        const handler = panel.slice(start, start + 900);
+        assert.ok(!/setPage|page\.status =|status: 'pending_review'/.test(handler));
+    });
+
+    test('the message says what just happened, not what to go and do', () => {
+        assert.match(panel, /Siden er oppdatert med gjeldende status/);
+        assert.ok(!panel.includes('Last siden på nytt for å se gjeldende status'));
+    });
+
+    /** 403 and 419 are about the person or the session, not the page — the dialog stays. */
+    test('an authorization or session failure leaves the dialog up', () => {
+        // Neither is stale state, so both fall through the early return above.
+        assert.match(panel, /review_error_expired/);
+        assert.match(panel, /review_error_forbidden/);
     });
 });

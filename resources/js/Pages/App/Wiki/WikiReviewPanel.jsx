@@ -1,6 +1,7 @@
 import { router } from '@inertiajs/react';
 import { useRef, useState } from 'react';
 import ActionDialog from '../../../Components/App/ActionDialog';
+import { isStaleStateRefusal } from './wikiReviewRefusal';
 import InfoHint from '../../../Components/App/InfoHint';
 import {
     DISCLOSURE_INLINE,
@@ -62,13 +63,13 @@ function httpErrorMessage(status, tw) {
                 ?? 'Du har ikke tilgang til å gjøre dette. Kontakt System Owner hvis dette er feil.';
         case 409:
             return tw.review_error_conflict
-                ?? 'Noen andre har allerede sendt denne versjonen til gjennomgang. Last siden på nytt for å se hvem.';
+                ?? 'Noen andre har allerede handlet på denne versjonen. Siden er oppdatert med gjeldende status.';
         case 419:
             return tw.review_error_expired
                 ?? 'Økten din er utløpt. Last siden på nytt og logg inn igjen.';
         case 422:
             return tw.review_error_state
-                ?? 'Siden er ikke lenger i en tilstand som tillater dette. Last siden på nytt for å se gjeldende status.';
+                ?? 'Siden er ikke lenger i en tilstand som tillater dette. Siden er oppdatert med gjeldende status.';
         default:
             return tw.review_action_failed ?? FALLBACK_ERROR;
     }
@@ -367,7 +368,30 @@ export default function WikiReviewPanel({
                 // in the dialog they are standing in, in language about the work rather than the
                 // protocol.
                 onHttpException: (response) => {
-                    setActionError(httpErrorMessage(response?.status, tw));
+                    const status = response?.status;
+                    const isStale = isStaleStateRefusal(status, response?.data);
+
+                    setActionError(isStale
+                        ? httpErrorMessage(status, tw)
+                        : (firstError(response?.data?.errors) ?? httpErrorMessage(status, tw)));
+
+                    if (! isStale) {
+                        return false;
+                    }
+
+                    // The page moved on while this view of it stood still — somebody else acted, or
+                    // the tab has been open since before the change. Leaving the dialog up would
+                    // keep offering an action the server will refuse every time, against a page
+                    // that no longer looks the way the screen says it does.
+                    //
+                    // So the page is re-read from the server rather than patched locally: the panel
+                    // then shows what is actually true, and the message explains why the action
+                    // went away. Nothing is assumed about what the new state is.
+                    setIsSubmitOpen(false);
+                    setIsQaOpen(false);
+                    setChangesTarget(null);
+                    setReason('');
+                    router.reload({ preserveScroll: true });
 
                     return false;
                 },
