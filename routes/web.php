@@ -210,6 +210,9 @@ Route::prefix('app')
         Route::get('/notifications', [UserNotificationController::class, 'index'])->name('notifications.index');
         Route::patch('/notifications/read-all', [UserNotificationController::class, 'markAllRead'])->name('notifications.read-all');
         Route::patch('/notifications/{userNotification}/read', [UserNotificationController::class, 'markRead'])->name('notifications.read');
+        // Before the {userNotification} route, or "unread" would be read as an id.
+        Route::delete('/notifications/unread', [UserNotificationController::class, 'destroyUnread'])->name('notifications.destroy-unread');
+        Route::delete('/notifications/{userNotification}', [UserNotificationController::class, 'destroy'])->name('notifications.destroy');
         Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');
         Route::get('/messages/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');
 

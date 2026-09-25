@@ -61,6 +61,51 @@ class UserNotificationController extends Controller
         ]);
     }
 
+    /**
+     * Remove one message from this person's bell.
+     *
+     * Scoped exactly as markRead() is, and for the same reason: the id in the URL is the caller's
+     * claim, not a fact. A row belonging to another user, or to another customer, is not refused —
+     * it is not found, which is the honest answer to "does this exist for you".
+     *
+     * A message is not the work it announced. Nothing here reads a Wiki assignment, a QA assignment
+     * or a case, so an outstanding task stays outstanding and stays on the Info Center list.
+     */
+    public function destroy(Request $request, UserNotification $userNotification): JsonResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+
+        abort_unless(
+            (int) $userNotification->user_id === (int) $user->id
+            && (int) $userNotification->customer_id === (int) $customerId,
+            404,
+        );
+
+        $this->notificationService->delete($userNotification);
+
+        return response()->json([
+            'notifications' => $this->notificationService->panelPayload($user),
+        ]);
+    }
+
+    /**
+     * Clear everything this person has not read yet.
+     *
+     * Read messages stay. Deleting nothing is a success: an already-empty bell is the state the
+     * caller asked for, and reporting it as a failure would only invite a retry that does the same.
+     */
+    public function destroyUnread(Request $request): JsonResponse
+    {
+        [$user] = $this->frontendContext($request);
+
+        $deleted = $this->notificationService->deleteAllUnread($user);
+
+        return response()->json([
+            'deleted' => $deleted,
+            'notifications' => $this->notificationService->panelPayload($user),
+        ]);
+    }
+
     private function frontendContext(Request $request): array
     {
         /** @var User|null $user */

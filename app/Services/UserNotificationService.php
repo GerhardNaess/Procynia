@@ -47,6 +47,7 @@ class UserNotificationService
             // Where the bell re-reads itself from while the person stays on one page.
             'refresh_url' => route('app.notifications.index'),
             'mark_all_read_url' => route('app.notifications.read-all'),
+            'delete_unread_url' => route('app.notifications.destroy-unread'),
             'items' => $notifications
                 ->map(fn (UserNotification $notification): array => $this->notificationPayload($notification, $customerId))
                 ->values()
@@ -108,6 +109,46 @@ class UserNotificationService
             ]);
     }
 
+    /**
+     * Remove one message from the bell.
+     *
+     * A message, and only a message. Whether the work it announced is still outstanding is written
+     * in the domain — a Wiki review assignment, a QA assignment, a case's own state — and nothing
+     * here reads or touches any of it. Deleting "Wiki-side til gjennomgang" clears the alert; the
+     * review stays on the reviewer's list until they approve or send the page back.
+     *
+     * Idempotent by construction: a row that is already gone deletes to nothing, which is the right
+     * answer for two clicks or two tabs.
+     */
+    public function delete(UserNotification $notification): void
+    {
+        $notification->delete();
+    }
+
+    /**
+     * Clear every unread message for this person.
+     *
+     * Read messages are deliberately kept: the person has seen those and may still want them, and
+     * "clear what I have not got to" is a different intent from "delete my history". Returns how
+     * many went, so an empty bell is a successful no-op rather than an error.
+     */
+    public function deleteAllUnread(User $user): int
+    {
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if (! $user->canAccessCustomerFrontend() || $customerId === null) {
+            return 0;
+        }
+
+        if (! Schema::hasTable('user_notifications')) {
+            return 0;
+        }
+
+        return $this->visibleQuery($user, $customerId)
+            ->where('is_read', false)
+            ->delete();
+    }
+
     private function visibleQuery(User $user, int $customerId): Builder
     {
         return UserNotification::query()
@@ -142,6 +183,7 @@ class UserNotificationService
             'created_at' => optional($notification->created_at)?->toIso8601String(),
             'updated_at' => optional($notification->updated_at)?->toIso8601String(),
             'mark_read_url' => route('app.notifications.read', ['userNotification' => $notification->id]),
+            'delete_url' => route('app.notifications.destroy', ['userNotification' => $notification->id]),
             'saved_notice' => $savedNotice instanceof SavedNotice && (int) $savedNotice->customer_id === $customerId ? [
                 'id' => $savedNotice->id,
                 'title' => $savedNotice->title,
@@ -157,6 +199,7 @@ class UserNotificationService
             'limit' => $limit,
             'refresh_url' => route('app.notifications.index'),
             'mark_all_read_url' => route('app.notifications.read-all'),
+            'delete_unread_url' => route('app.notifications.destroy-unread'),
             'items' => [],
         ];
     }

@@ -1,5 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
+import ActionDialog from '../Components/App/ActionDialog';
 import NotificationBell from '../Components/App/NotificationBell';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 
@@ -70,6 +71,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+    const [isDeleteUnreadOpen, setIsDeleteUnreadOpen] = useState(false);
     const [notificationState, setNotificationState] = useState(page.props.notifications ?? emptyNotificationsState());
     const userMenuRef = useRef(null);
     const notificationsMenuRef = useRef(null);
@@ -441,6 +443,47 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
     };
 
+    /**
+     * Remove one message. Only the message: whatever work it announced is recorded in the domain
+     * and is unaffected, so an open Wiki review or QA assignment stays on the Info Center list.
+     *
+     * The server returns the whole panel afterwards, so the card disappearing and the unread badge
+     * dropping are the same fact rather than two guesses that could disagree.
+     */
+    const deleteNotification = async (notification) => {
+        if (!notification?.delete_url) {
+            return;
+        }
+
+        try {
+            const response = await window.axios.delete(notification.delete_url);
+
+            if (response?.data?.notifications) {
+                setNotificationState(response.data.notifications);
+            }
+        } catch (error) {
+            // A message that is already gone is the state the click asked for; leave the panel be.
+        }
+    };
+
+    const deleteAllUnreadNotifications = async () => {
+        setIsDeleteUnreadOpen(false);
+
+        if (!notificationState?.delete_unread_url) {
+            return;
+        }
+
+        try {
+            const response = await window.axios.delete(notificationState.delete_unread_url);
+
+            if (response?.data?.notifications) {
+                setNotificationState(response.data.notifications);
+            }
+        } catch (error) {
+            // Same: nothing to clear is not a failure worth interrupting anybody over.
+        }
+    };
+
     const markAllNotificationsAsRead = async () => {
         if (!notificationState?.mark_all_read_url) {
             return;
@@ -534,6 +577,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     onToggle={toggleNotifications}
                                     onMarkNotification={markNotificationAsRead}
                                     onMarkAllRead={markAllNotificationsAsRead}
+                                    onDeleteNotification={deleteNotification}
+                                    onDeleteAllUnread={() => setIsDeleteUnreadOpen(true)}
                                 />
 
                                 <div ref={userMenuRef} className="relative">
@@ -723,6 +768,44 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     </div>
                 </footer>
             </div>
+
+            {/* Bulk delete is asked about; a single one is not. Deleting many messages at once is
+                worth a moment's pause, and the sentence says the one thing people worry about —
+                that clearing the bell might also clear their work. It does not. */}
+            <ActionDialog
+                isOpen={isDeleteUnreadOpen}
+                onClose={() => setIsDeleteUnreadOpen(false)}
+                titleId="notifications-delete-unread-title"
+            >
+                <h2
+                    id="notifications-delete-unread-title"
+                    className="text-xl font-semibold tracking-tight text-slate-950"
+                >
+                    Slett alle uleste varsler?
+                </h2>
+                <p className="mt-2 text-base leading-6 text-slate-600">
+                    Dette fjerner alle uleste varsler fra listen. Leste varsler beholdes, og
+                    eventuelle oppgaver i Infosenter påvirkes ikke.
+                </p>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                        type="button"
+                        onClick={deleteAllUnreadNotifications}
+                        data-testid="notification-delete-unread-confirm"
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                    >
+                        Slett varsler
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsDeleteUnreadOpen(false)}
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                        Avbryt
+                    </button>
+                </div>
+            </ActionDialog>
         </>
     );
 }

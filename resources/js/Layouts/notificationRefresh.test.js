@@ -64,3 +64,89 @@ describe('unread can be cleared without clearing the work', () => {
         assert.match(bell, /\{unreadCount > 0 \? \(/);
     });
 });
+
+/**
+ * Clearing the bell without clearing the work.
+ *
+ * The bell holds messages; Infosenter holds work. Every control here removes messages and nothing
+ * else — no request touches an assignment, a claim or a case, which is what keeps "I tidied my
+ * inbox" from ever meaning "I finished my review".
+ */
+describe('the bell can be tidied', () => {
+    test('each message carries its own dismiss', () => {
+        assert.match(bell, /data-testid="notification-delete"/);
+        assert.match(bell, /onClick=\{\(\) => onDeleteNotification\(notification\)\}/);
+        assert.match(bell, /aria-label=\{`Slett varsel: \$\{notification\.title\}`\}/);
+    });
+
+    test('dismiss is its own control, not nested inside the opening action', () => {
+        // A <button> inside a <button> is invalid markup and the browser would not deliver the
+        // click, so the card is a container with two siblings.
+        const cardStart = bell.indexOf('{items.map((notification) => (');
+        const card = bell.slice(cardStart, bell.indexOf('))}', cardStart));
+        assert.match(card, /<div\n\s+key=\{notification\.id\}/, 'the card itself is a container');
+        // The opening button closes before the dismiss button opens.
+        assert.ok(
+            card.indexOf('</button>') < card.indexOf('data-testid="notification-delete"'),
+            'dismiss is a sibling of the opening action, not nested inside it',
+        );
+    });
+
+    test('both bulk actions are offered, and they are different actions', () => {
+        assert.match(bell, /Marker alle som lest/);
+        assert.match(bell, /data-testid="notification-delete-unread"/);
+        assert.match(bell, /Slett alle uleste/);
+        assert.match(bell, /onClick=\{onDeleteAllUnread\}/);
+    });
+
+    test('bulk delete is confirmed first, with the house dialog', () => {
+        assert.match(layout, /import ActionDialog from '\.\.\/Components\/App\/ActionDialog';/);
+        assert.match(layout, /onDeleteAllUnread=\{\(\) => setIsDeleteUnreadOpen\(true\)\}/);
+        assert.match(layout, /Slett alle uleste varsler\?/);
+        assert.match(layout, /data-testid="notification-delete-unread-confirm"/);
+        // The sentence people need: their work is not part of this.
+        assert.match(layout, /oppgaver i Infosenter påvirkes ikke/);
+    });
+
+    test('a single dismiss is not put behind a dialog', () => {
+        assert.match(layout, /const deleteNotification = async \(notification\) => \{/);
+        // Its own body goes straight to the request; only the bulk action opens a dialog.
+        const start = layout.indexOf('const deleteNotification = async');
+        const body = layout.slice(start, layout.indexOf('const deleteAllUnreadNotifications', start));
+        assert.ok(!body.includes('setIsDeleteUnreadOpen'), 'no confirmation step for one message');
+        assert.match(body, /window\.axios\.delete\(notification\.delete_url\)/);
+    });
+
+    test('the panel is re-read from the server after either delete', () => {
+        // The card disappearing and the badge dropping are one fact, not two guesses.
+        assert.match(layout, /await window\.axios\.delete\(notification\.delete_url\)/);
+        assert.match(layout, /await window\.axios\.delete\(notificationState\.delete_unread_url\)/);
+        assert.ok((layout.match(/setNotificationState\(response\.data\.notifications\)/g) ?? []).length >= 2);
+    });
+
+    test('a delete that finds nothing is not raised at the person', () => {
+        assert.match(layout, /\} catch \(error\) \{\s*\n\s*\/\/ A message that is already gone/);
+    });
+});
+
+/**
+ * event_type is an internal identifier. It was reaching the screen as "Wiki.page Published"
+ * whenever a type had no entry in the label map — which is every type except one.
+ */
+describe('internal event names stay internal', () => {
+    test('an unnamed event falls back to its area, never to its own identifier', () => {
+        assert.match(bell, /const EVENT_DOMAIN_LABELS = \{/);
+        assert.match(bell, /return EVENT_DOMAIN_LABELS\[eventType\.split\('\.'\)\[0\]\] \?\? 'Varsel';/);
+    });
+
+    test('the old prettifier is gone', () => {
+        assert.ok(!bell.includes(".split('_')"), 'splitting the raw type is what produced the leak');
+        assert.ok(!bell.includes('part.charAt(0).toUpperCase()'));
+    });
+
+    test('the domains that exist are named', () => {
+        for (const domain of ['wiki', 'bid', 'watch_profile']) {
+            assert.match(bell, new RegExp(`${domain}: '`), `${domain} has a human name`);
+        }
+    });
+});
