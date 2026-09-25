@@ -34,7 +34,6 @@ describe('the page reads what the backend actually sends', () => {
         // Empty bodies would 422: submit needs a reviewer, a return needs a reason.
         assert.match(panel, /\/submit`, \{ reviewer_user_id: Number\(reviewerId\) \}/);
         assert.match(panel, /\/reject`, \{ reason: trimmed \}/);
-        assert.match(panel, /\/reject`, \{ comment: trimmed \}/);
     });
 });
 
@@ -91,29 +90,6 @@ describe('submitting names a reviewer explicitly', () => {
     });
 });
 
-describe('the source-owner gate is not final approval', () => {
-    test('its actions are worded as vouching for source content', () => {
-        assert.match(panel, /review_approve_source/);
-        assert.match(panel, /Godkjenn kildeinnhold/);
-    });
-
-    test('only the owner of a requirement is offered its actions', () => {
-        assert.match(panel, /requirement\.can_decide && requirement\.status === 'pending'/);
-    });
-
-    test('each requirement shows who it belongs to and how many documents it covers', () => {
-        assert.match(panel, /requirement\.owner\?\.name/);
-        assert.match(panel, /requirement\.source_document_ids/);
-    });
-
-    test('status is carried by a word, not only by colour', () => {
-        assert.match(panel, /REQUIREMENT_STATUS/);
-        assert.match(panel, /label: 'Venter'/);
-        assert.match(panel, /label: 'Godkjent'/);
-        assert.match(panel, /label: 'Endringer kreves'/);
-    });
-});
-
 describe('final approval says what it does', () => {
     test('the primary action names publication', () => {
         assert.match(panel, /Godkjenn og publiser/);
@@ -133,7 +109,7 @@ describe('final approval says what it does', () => {
 
 describe('blockers are explained in words', () => {
     test('every raw key is mapped, and none is rendered', () => {
-        for (const key of ['source_owners_pending', 'own_submission', 'not_assigned', 'missing_assignment']) {
+        for (const key of ['own_submission', 'not_assigned', 'missing_assignment']) {
             assert.ok(panel.includes(`'${key}'`), `${key} is handled`);
         }
 
@@ -141,13 +117,9 @@ describe('blockers are explained in words', () => {
         // component itself rather than the file's first `return (`, which is whichever small
         // helper happens to be declared at the top.
         const rendered = panel.slice(panel.indexOf('export default function WikiReviewPanel'));
-        for (const key of ['source_owners_pending', 'missing_capability', 'not_in_review']) {
+        for (const key of ['missing_capability', 'not_in_review']) {
             assert.ok(!rendered.includes(key), `${key} must not be shown to a user`);
         }
-    });
-
-    test('the pending case names who is being waited on', () => {
-        assert.match(panel, /waitingFor\.join\(', '\)/);
     });
 
     test('blockers that are not the reader\'s problem stay silent', () => {
@@ -178,7 +150,6 @@ describe('changes requested is easy to find and act on', () => {
 
     test('the dialog says the published version is untouched', () => {
         assert.match(panel, /review_request_changes_page/);
-        assert.match(panel, /review_request_changes_source/);
         assert.match(panel, /Den publiserte versjonen berøres ikke/);
     });
 });
@@ -223,12 +194,12 @@ describe('accessibility', () => {
 });
 
 describe('responsive', () => {
-    test('a requirement row stacks on a narrow screen', () => {
-        assert.match(panel, /flex flex-col gap-2 .*sm:flex-row/);
+    test('the action rows wrap rather than overflow', () => {
+        assert.match(panel, /flex flex-wrap items-center gap-2/);
     });
 
     test('nothing relies on a wide table', () => {
-        assert.ok(!panel.includes('<table'), 'requirements are a list, not a table');
+        assert.ok(!panel.includes('<table'), 'the panel is prose and actions, not a table');
     });
 });
 
@@ -314,11 +285,8 @@ describe('the reviewer can act on the page', () => {
         assert.ok(!panel.includes('{isInReview && reviewAssignment.can_approve_final && (\n                    <>'));
     });
 
-    test('the return is named for what it does, not for the requirement action beside it', () => {
-        // "Be om endringer" is the document owner's objection to their own source. A reviewer
-        // sending the whole page back is a different act and reads as one.
+    test('the return is named for what it does', () => {
         assert.match(panel, /review_send_back \?\? 'Send tilbake'/);
-        assert.match(panel, /const isPageReturn = changesTarget === 'page';/);
         assert.match(panel, /review_comment \?\? 'Kommentar'/);
     });
 
@@ -365,9 +333,8 @@ describe('stepping in reads differently from being asked', () => {
         assert.match(panel, /reviewAssignment\.reviewer\?\.name/);
     });
 
-    test('an outstanding source owner is still explained rather than silently blocking', () => {
+    test('a blocked approval is still explained rather than silently missing', () => {
         assert.match(panel, /\{isInReview && ! reviewAssignment\.can_approve_final && blocker && \(/);
-        assert.match(panel, /source_owners_pending/);
     });
 });
 
@@ -531,5 +498,51 @@ describe('the publication card explains what happens next, not what the page is'
         assert.match(panel, /data-testid="wiki-publication-blockers"/);
         assert.match(panel, /data-testid="wiki-publication-claims"/);
         assert.match(panel, /publication_heading \?\? 'Publisering'/);
+    });
+});
+
+/**
+ * A source document is where content came from, not a level of approval it has to clear.
+ *
+ * The Wiki page is the thing being approved. Making the source an extra approval meant a finished
+ * article could sit unpublished waiting on somebody who had no view on the article at all.
+ */
+describe('source approval is not part of publishing', () => {
+    test('the panel no longer reads a source-owner gate', () => {
+        assert.ok(!panel.includes('source_owner_gate'));
+        assert.ok(!panel.includes('source_owners_pending'));
+        assert.ok(!panel.includes('REQUIREMENT_STATUS'));
+    });
+
+    test('no requirement can be decided from the Wiki page', () => {
+        assert.ok(!panel.includes('document-owner-approvals'), 'the panel calls no such endpoint');
+        assert.ok(!show.includes('document-owner-approvals'));
+        assert.ok(!panel.includes('review_approve_source'), '"Godkjenn kildeinnhold" is gone');
+    });
+
+    test('the document owner panel is gone from the page', () => {
+        assert.ok(!show.includes('Dokumenteiergodkjenning'));
+        assert.ok(!show.includes('documentOwnerApprovals'));
+        assert.ok(!show.includes('documentOwnerApprovalSummary'));
+    });
+
+    test('sending the page back is now the dialog\'s only caller', () => {
+        assert.ok(!panel.includes('isPageReturn'), 'no branch for a second caller');
+        assert.match(panel, /run\('reject', `\/app\/wiki\/\$\{page\.slug\}\/reject`, \{ reason: trimmed \}\)/);
+        assert.match(panel, /review_send_back \?\? 'Send tilbake'/);
+    });
+
+    test('the remaining blockers are about who may decide, not about sources', () => {
+        assert.match(panel, /function blockerMessage\(blocker, tw\)/);
+        for (const key of ['own_submission', 'not_assigned', 'missing_assignment']) {
+            assert.match(panel, new RegExp(`case '${key}':`));
+        }
+    });
+
+    test('what the page is now about: editing, QA, review, publishing', () => {
+        assert.match(show, /data-testid="wiki-article-edit"/);
+        assert.match(panel, /data-testid="wiki-qa-assignment"/);
+        assert.match(panel, /review_approve_and_publish \?\? 'Godkjenn og publiser'/);
+        assert.match(panel, /submit_button \?\? 'Send til gjennomgang'/);
     });
 });

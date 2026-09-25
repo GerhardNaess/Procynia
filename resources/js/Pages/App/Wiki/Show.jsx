@@ -809,8 +809,6 @@ export default function WikiShow({
     claim_summary: claimSummary = null,
     can_handle_wiki_claims: canHandleWikiClaims = false,
     source_documents: sourceDocuments = [],
-    document_owner_approvals: documentOwnerApprovals = [],
-    document_owner_approval_summary: documentOwnerApprovalSummary = null,
     document_owner_summary: documentOwnerSummary = null,
     lint_findings: lintFindings = [],
     lint_summary: lintSummary = null,
@@ -877,8 +875,6 @@ export default function WikiShow({
     const [isEditingArticle, setIsEditingArticle] = useState(false);
     const [articleDrafts, setArticleDrafts] = useState({});
     const [isSavingArticle, setIsSavingArticle] = useState(false);
-    const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
-    const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
@@ -1247,26 +1243,6 @@ export default function WikiShow({
                 back_url: reviewReference?.back_url ?? undefined,
             },
             { onFinish: () => setClaimProcessing(null) },
-        );
-    };
-
-    const approveDocumentOwnerApproval = (approval) => {
-        if (documentOwnerApprovalProcessing) return;
-        setDocumentOwnerApprovalProcessing(approval.id);
-        router.patch(
-            `/app/wiki/${page.slug}/document-owner-approvals/${approval.id}/approve`,
-            { comment: documentOwnerApprovalComments[approval.id] || undefined },
-            { onFinish: () => setDocumentOwnerApprovalProcessing(null) },
-        );
-    };
-
-    const rejectDocumentOwnerApproval = (approval) => {
-        if (documentOwnerApprovalProcessing) return;
-        setDocumentOwnerApprovalProcessing(approval.id);
-        router.patch(
-            `/app/wiki/${page.slug}/document-owner-approvals/${approval.id}/reject`,
-            { comment: documentOwnerApprovalComments[approval.id] || undefined },
-            { onFinish: () => setDocumentOwnerApprovalProcessing(null) },
         );
     };
 
@@ -2188,19 +2164,6 @@ export default function WikiShow({
         );
     };
 
-    const documentOwnerApprovalCardClass = (status, isOverride) => ({
-        approved: isOverride
-            ? 'border-fuchsia-200 bg-fuchsia-50'
-            : 'border-emerald-200 bg-emerald-50',
-        rejected: 'border-rose-200 bg-rose-50',
-        pending: 'border-amber-200 bg-amber-50',
-    }[status] ?? 'border-slate-200 bg-slate-50');
-
-    const documentOwnerApprovalSentence = (approval) => approval.summary_text ?? '';
-    const pendingDocumentOwnerNames = documentOwnerApprovals
-        .filter((approval) => approval.approval_status === 'pending')
-        .map((approval) => approval.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier'));
-
     const isApproved = page.status === 'approved';
 
     // rendered_markdown has [[wikilinks]] pre-transformed into clickable internal links;
@@ -2804,134 +2767,6 @@ export default function WikiShow({
                                 </li>
                             ))}
                         </ul>
-                    </section>
-                )}
-
-                {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'qa_review_open' && (
-                    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-medium text-slate-700">
-                            {tw.document_owner_qa_review_open_message ?? 'Wiki-siden er tilgjengelig og kan brukes. Systemet har notert noen faglige punkter til frivillig QA-gjennomgang.'}
-                        </p>
-                    </section>
-                )}
-
-                {current_version && documentOwnerApprovals.length > 0 && (
-                    <section className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <h2 className="text-base font-semibold text-slate-700">
-                                Dokumenteiergodkjenning
-                            </h2>
-                        </div>
-
-                        {documentOwnerApprovalSummary?.summary_text && (
-                            <p className={`text-sm font-medium ${documentOwnerApprovalSummary.ready ? 'text-emerald-700' : 'text-slate-600'}`}>
-                                {documentOwnerApprovalSummary.summary_text}
-                            </p>
-                        )}
-
-                        {documentOwnerApprovalSummary?.total > 0 && (
-                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-600">
-                                <p>
-                                    {(tw.document_owner_approval_received_count ?? ':approved av :total godkjenninger mottatt')
-                                        .replace(':approved', documentOwnerApprovalSummary.approved ?? 0)
-                                        .replace(':total', documentOwnerApprovalSummary.total ?? 0)}
-                                </p>
-                                {pendingDocumentOwnerNames.length > 0 && (
-                                    <p>
-                                        {(tw.document_owner_approval_missing_prefix ?? 'Mangler')}:{' '}
-                                        {pendingDocumentOwnerNames.join(', ')}
-                                    </p>
-                                )}
-                            </div>
-                        )}
-
-                        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                            {documentOwnerApprovals.map((approval) => (
-                                <article key={approval.id} className={`rounded-xl border p-4 ${documentOwnerApprovalCardClass(approval.approval_status, approval.is_override)}`}>
-                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                        <div className="space-y-2">
-                                            <p className="text-sm font-semibold text-slate-900">
-                                                {documentOwnerApprovalSentence(approval)}
-                                            </p>
-
-                                            <div className="space-y-1.5 text-xs text-slate-600">
-                                                <p>
-                                                    {tw.document_owner_label ?? 'Dokumenteier'}: {approval.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
-                                                    {approval.document_owner_email ? <span className="text-slate-500"> · {approval.document_owner_email}</span> : null}
-                                                </p>
-
-                                                {approval.source_documents?.length > 1 && (
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {approval.source_documents.map((doc) => (
-                                                            <span key={doc.id} className="rounded-full bg-white px-2.5 py-0.5 font-medium text-slate-600 ring-1 ring-slate-200">
-                                                                {doc.original_filename}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                )}
-
-                                                {approval.decided_at && (
-                                                    <p>
-                                                        {tw.document_owner_decision_date ?? 'Beslutningsdato'}: {new Date(approval.decided_at).toLocaleString(locale, {
-                                                            dateStyle: 'medium',
-                                                            timeStyle: 'short',
-                                                        })}
-                                                    </p>
-                                                )}
-
-                                                {approval.decided_by_name && approval.decided_by_name !== approval.document_owner_name && (
-                                                    <p>
-                                                        {approval.is_override
-                                                            ? (tw.document_owner_overridden_by ?? 'Overstyrt av')
-                                                            : (tw.document_owner_decided_by ?? 'Beslutning tatt av')}{' '}
-                                                        {approval.decided_by_name}
-                                                    </p>
-                                                )}
-
-                                                {approval.approval_comment && (
-                                                    <p>{approval.approval_comment}</p>
-                                                )}
-
-                                                {approval.override_reason && (
-                                                    <p>{tw.document_owner_override_reason ?? 'Overstyringsgrunn'}: {approval.override_reason}</p>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {approval.can_decide && approval.approval_status === 'pending' && (
-                                            <div className="flex flex-wrap gap-2">
-                                                <input
-                                                    type="text"
-                                                    maxLength={2000}
-                                                    placeholder="Valgfri kommentar"
-                                                    value={documentOwnerApprovalComments[approval.id] ?? ''}
-                                                    onChange={(e) => setDocumentOwnerApprovalComments((prev) => ({ ...prev, [approval.id]: e.target.value }))}
-                                                    className="min-w-56 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 focus:border-violet-300 focus:outline-none"
-                                                />
-                                                <button
-                                                    type="button"
-                                                    disabled={documentOwnerApprovalProcessing === approval.id}
-                                                    onClick={() => approveDocumentOwnerApproval(approval)}
-                                                    className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                                                >
-                                                    {documentOwnerApprovalProcessing === approval.id
-                                                        ? 'Behandler...'
-                                                        : (tw.document_owner_approval_approve_button ?? 'Godkjenn dokument')}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    disabled={documentOwnerApprovalProcessing === approval.id}
-                                                    onClick={() => rejectDocumentOwnerApproval(approval)}
-                                                    className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
-                                                >
-                                                    Avvis
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                </article>
-                            ))}
-                        </div>
                     </section>
                 )}
 

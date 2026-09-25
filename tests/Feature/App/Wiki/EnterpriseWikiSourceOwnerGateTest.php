@@ -19,11 +19,16 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Document-owner approval is a quality gate before final Wiki review, not a form of publication.
+ * Document-owner approval is provenance, and no longer a gate on anything.
  *
  * Each active row is one owner saying "the content drawn from MY documents is represented
- * correctly" — nothing about the page as a whole. That judgement stays with the assigned reviewer,
- * who still has to act; clearing the gate never publishes anything by itself.
+ * correctly" — a statement about their material, never about the page. It used to have to be
+ * settled before the page could be published, which meant a finished article could sit unpublished
+ * waiting on somebody who had no view on the article at all. The page is the thing being approved;
+ * the source document is where its content came from.
+ *
+ * So what is asserted here is the mechanism — who may decide a requirement, how the set is derived,
+ * and that it survives — together with the fact that none of it decides publication.
  *
  * Three rights are involved and none implies another: approve_wiki_claims (one statement against its
  * source), document-owner approval (my documents are represented correctly), and approve_wiki_pages
@@ -134,20 +139,26 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
     }
 
     // I. a pending requirement blocks final approval
-    public function test_a_pending_requirement_blocks_final_approval(): void
+    public function test_a_pending_requirement_does_not_block_final_approval(): void
     {
         [$customer, $page, $version] = $this->submittedPage(1);
 
         $this->actingAs($this->reviewerOf($page))
             ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertStatus(409);
+            ->assertRedirect();
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
-        $this->assertNull($page->fresh()->published_version_id);
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+        $this->assertSame((int) $version->id, (int) $page->fresh()->published_version_id);
+        // And publishing did not answer on the owner's behalf.
+        $this->assertTrue($this->activeRequirements($version)->first()->isPending());
     }
 
     // H. a rejection blocks it outright
-    public function test_a_rejected_requirement_blocks_final_approval(): void
+    /**
+     * Not the gate: reject() returns the version to its owner whoever asked for changes, and a page
+     * that has left review has nothing to approve.
+     */
+    public function test_a_rejected_requirement_returns_the_page_to_its_owner(): void
     {
         [$customer, $page, $version, $owners] = $this->submittedPage(1);
         $requirement = $this->activeRequirements($version)->first();
@@ -166,7 +177,8 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
     }
 
     // J + K. cleared gate lets the reviewer act — and only the reviewer publishes
-    public function test_the_reviewer_can_approve_once_every_owner_has_signed_off(): void
+    /** Signed off or not, the reviewer's own decision is what publishes the page. */
+    public function test_the_reviewer_can_approve_after_every_owner_has_signed_off(): void
     {
         [$customer, $page, $version, $owners] = $this->submittedPage(2);
         $this->clearGate($page, $version, $owners);
@@ -207,16 +219,18 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
     }
 
     // L. no bypass of the gate
-    public function test_a_system_owner_cannot_skip_the_gate(): void
+    /** There is no gate to skip; the requirement simply has nothing to say about publishing. */
+    public function test_a_system_owner_publishes_regardless_of_the_requirement(): void
     {
-        [$customer, $page] = $this->submittedPage(1);
+        [$customer, $page, $version] = $this->submittedPage(1);
         $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertStatus(409);
+            ->assertRedirect();
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+        $this->assertTrue($this->activeRequirements($version)->first()->isPending());
     }
 
     public function test_a_system_owner_may_decide_an_owners_requirement_and_it_is_marked_as_an_override(): void
@@ -298,20 +312,24 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
     }
 
-    public function test_the_payload_explains_why_final_approval_is_blocked(): void
+    /**
+     * The Wiki page no longer carries the gate at all — not as a blocker, and not as a payload
+     * somebody could quietly re-wire it from. The rows themselves are untouched in the database.
+     */
+    public function test_the_page_no_longer_carries_the_gate(): void
     {
-        [$customer, $page] = $this->submittedPage(1);
+        [$customer, $page, $version] = $this->submittedPage(1);
 
         $this->actingAs($this->reviewerOf($page))
             ->get("/app/wiki/{$page->slug}")
             ->assertSuccessful()
             ->assertInertia(fn ($inertia) => $inertia
-                ->where('review_assignment.source_owner_gate.ready', false)
-                ->where('review_assignment.source_owner_gate.blocking_reason', 'pending')
-                ->where(
-                    'review_assignment.source_owner_gate.requirements',
-                    fn ($rows) => count($rows) === 1 && $rows[0]['status'] === 'pending',
-                ));
+                ->missing('review_assignment.source_owner_gate')
+                ->missing('document_owner_approvals')
+                ->where('review_assignment.can_approve_final', true)
+                ->where('review_assignment.final_approval_blocker', null));
+
+        $this->assertCount(1, $this->activeRequirements($version), 'the requirement still exists');
     }
 
     // =========================================================================

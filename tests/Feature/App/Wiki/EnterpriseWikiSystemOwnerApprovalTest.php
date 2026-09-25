@@ -197,33 +197,21 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $case['page']->fresh()->status);
     }
 
-    /** Somebody else's judgement on their own material still stops a draft from being published. */
-    public function test_another_owners_signoff_still_blocks_a_draft(): void
+    /** A draft with an unsigned source publishes too — same rule, same reason. */
+    public function test_an_unsigned_source_does_not_block_a_draft(): void
     {
         $case = $this->draftPage(withSourceOwnedBy: 'other');
 
         $payload = $this->reviewAssignmentSeenBy($case['owner'], $case['page']);
-        $this->assertFalse($payload['can_approve_final']);
-        $this->assertSame('source_owners_pending', $payload['final_approval_blocker']);
+        $this->assertTrue($payload['can_approve_final']);
+        $this->assertNull($payload['final_approval_blocker']);
 
         $this->actingAs($case['owner'])
             ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertStatus(409);
-
-        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $case['page']->fresh()->status);
-    }
-
-    /** Their own outstanding row is settled by publishing, exactly as it is from review. */
-    public function test_their_own_signoff_is_settled_when_publishing_a_draft(): void
-    {
-        $case = $this->draftPage(withSourceOwnedBy: 'self');
-
-        $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+            ->assertRedirect();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
-        $approval = $this->approvalFor($case['version'], $case['owner']);
-        $this->assertTrue($approval->isApproved());
-        $this->assertFalse((bool) $approval->is_override);
+        $this->assertTrue($this->approvalFor($case['version'], $case['documentOwner'])->isPending());
     }
 
     /** Pending claims are quality work, never a publication gate. */
@@ -295,86 +283,104 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
     }
 
-    // ── The document-owner gate ─────────────────────────────────────────────
+    // ── Source documents are provenance, not approval ───────────────────────
 
     /**
-     * Another person's judgement on their own material. Final authority over the Wiki is not
-     * authority to sign in somebody else's name, so this still stops the page.
+     * The decoupling, asserted from both directions.
+     *
+     * A document owner vouching for their own material is traceability: it says where the content
+     * came from and who stands behind it. The Wiki page is the thing being approved, and making the
+     * source an extra level of approval meant a finished page could sit unpublished waiting on
+     * somebody who had no view on the page at all.
      */
-    public function test_another_owners_outstanding_signoff_still_blocks_a_system_owner(): void
+    public function test_an_unsigned_source_no_longer_blocks_a_reviewer(): void
+    {
+        $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
+
+        $payload = $this->reviewAssignmentSeenBy($case['reviewer'], $case['page']);
+        $this->assertTrue($payload['can_approve_final']);
+        $this->assertNull($payload['final_approval_blocker']);
+
+        $this->actingAs($case['reviewer'])
+            ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
+    }
+
+    public function test_an_unsigned_source_no_longer_blocks_a_system_owner(): void
     {
         $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
         $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
-
-        $payload = $this->reviewAssignmentSeenBy($systemOwner, $case['page']);
-
-        $this->assertFalse($payload['can_approve_final']);
-        $this->assertSame('source_owners_pending', $payload['final_approval_blocker']);
-
-        $this->actingAs($systemOwner)
-            ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertStatus(409);
-
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
-        $this->assertTrue(
-            $this->approvalFor($case['version'], $case['documentOwner'])->isPending(),
-            'and nobody signed on their behalf',
-        );
-    }
-
-    /**
-     * Their own outstanding row is not somebody they are waiting for — it is their own second
-     * click, on the same version, for the same judgement. Publishing carries it.
-     */
-    public function test_a_system_owners_own_signoff_is_settled_by_publishing(): void
-    {
-        $case = $this->pageOutForReview(withSourceOwnedBy: 'system_owner');
-        $systemOwner = $case['documentOwner'];
-
-        $payload = $this->reviewAssignmentSeenBy($systemOwner, $case['page']);
-        $this->assertTrue($payload['can_approve_final'], 'not reported as waiting on themselves');
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$case['page']->slug}/approve")
             ->assertRedirect();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
+    }
 
-        $approval = $this->approvalFor($case['version'], $systemOwner);
-        $this->assertTrue($approval->isApproved());
-        $this->assertSame((int) $systemOwner->id, (int) $approval->decided_by_user_id);
-        // Their own decision on their own document. Overriding is what you do to someone else.
-        $this->assertFalse((bool) $approval->is_override);
+    /** The 409 that used to mean "a document owner has not signed" is gone. */
+    public function test_publishing_is_never_refused_over_a_source_signoff(): void
+    {
+        $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
+
+        $response = $this->actingAs($case['reviewer'])->patch("/app/wiki/{$case['page']->slug}/approve");
+
+        $this->assertNotSame(409, $response->status());
     }
 
     /**
-     * Both at once, which is the case that decides whether the shortcut is safe: their own row
-     * clears, the other person's does not, and the page does not publish.
+     * Publishing signs nothing. The two were deliberately uncoupled in both directions: a page
+     * being published says nothing about whether anybody has vouched for its sources, and pretending
+     * otherwise would put a decision in somebody's name that they never made.
      */
-    public function test_their_own_row_clears_while_another_owners_still_stops_the_page(): void
+    public function test_publishing_does_not_sign_anybodys_source_off(): void
     {
-        $case = $this->pageOutForReview(withSourceOwnedBy: 'both');
-        $systemOwner = $case['documentOwner'];
+        $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
+        $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
 
-        $this->actingAs($systemOwner)
-            ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertStatus(409);
+        $this->actingAs($systemOwner)->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
-        $this->assertTrue($this->approvalFor($case['version'], $case['otherOwner'])->isPending());
-        // The gate refused before anything was written, so their own row is untouched too.
-        $this->assertTrue($this->approvalFor($case['version'], $systemOwner)->isPending());
+        $this->assertTrue(
+            $this->approvalFor($case['version'], $case['documentOwner'])->isPending(),
+            'their sign-off is still theirs to give',
+        );
     }
 
-    /** An ordinary reviewer gets no such shortcut; only their own sign-off would be theirs to give. */
-    public function test_an_ordinary_reviewer_is_not_given_the_shortcut(): void
+    /** Not even the actor's own row, which publishing used to settle for them. */
+    public function test_publishing_does_not_sign_the_actors_own_source_off(): void
     {
-        $case = $this->pageOutForReview(withSourceOwnedBy: 'reviewer');
+        $case = $this->pageOutForReview(withSourceOwnedBy: 'self');
 
-        $payload = $this->reviewAssignmentSeenBy($case['reviewer'], $case['page']);
+        $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
 
-        $this->assertFalse($payload['can_approve_final']);
-        $this->assertSame('source_owners_pending', $payload['final_approval_blocker']);
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
+        $this->assertTrue($this->approvalFor($case['version'], $case['owner'])->isPending());
+    }
+
+    /**
+     * What is kept. The link from the page to the document it drew on, and the record of who owns
+     * that document, are the reason any of this exists — they are just no longer a gate.
+     */
+    public function test_the_link_to_the_source_and_its_owner_survives(): void
+    {
+        $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
+
+        $this->actingAs($case['reviewer'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+
+        $approval = $this->approvalFor($case['version'], $case['documentOwner']);
+        $this->assertSame((int) $case['documentOwner']->id, (int) $approval->document_owner_user_id);
+        $this->assertSame((int) $case['version']->id, (int) $approval->enterprise_wiki_page_version_id);
+
+        $claim = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $case['version']->id)
+            ->sole();
+        $this->assertSame(
+            1,
+            EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->count(),
+            'provenance is untouched',
+        );
     }
 
     // ── The task list ───────────────────────────────────────────────────────

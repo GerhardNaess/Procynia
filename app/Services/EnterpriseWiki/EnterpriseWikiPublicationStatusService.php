@@ -50,7 +50,6 @@ class EnterpriseWikiPublicationStatusService
     public const STATE_NO_VERSION = 'no_version';
 
     /**
-     * @param  array<string, mixed>  $documentOwnerSummary  as built by WikiController::documentOwnerSummaryForVersion()
      * @param  array{
      *     can_submit?: bool,
      *     eligible_reviewer_count?: int,
@@ -77,7 +76,6 @@ class EnterpriseWikiPublicationStatusService
     public function forPage(
         EnterpriseWikiPage $page,
         ?EnterpriseWikiPageVersion $currentVersion,
-        array $documentOwnerSummary = [],
         array $reviewContext = [],
         ?array $claimCounts = null,
     ): array {
@@ -100,7 +98,7 @@ class EnterpriseWikiPublicationStatusService
             : null;
 
         $state = $this->resolveState($page, $currentVersionId, $hasPublishedVersion, $hasUnpublishedChanges);
-        [$nextStep, $blockingReasons] = $this->resolveNextStep($state, $page, $currentVersion, $documentOwnerSummary, $reviewContext);
+        [$nextStep, $blockingReasons] = $this->resolveNextStep($state, $page, $currentVersion, $reviewContext);
 
         return [
             'state' => $state,
@@ -156,7 +154,6 @@ class EnterpriseWikiPublicationStatusService
     }
 
     /**
-     * @param  array<string, mixed>  $documentOwnerSummary
      * @param  array<string, mixed>  $reviewContext
      * @return array{0: string, 1: list<string>}
      */
@@ -164,7 +161,6 @@ class EnterpriseWikiPublicationStatusService
         string $state,
         EnterpriseWikiPage $page,
         ?EnterpriseWikiPageVersion $currentVersion,
-        array $documentOwnerSummary,
         array $reviewContext,
     ): array {
         if ($state === self::STATE_NO_VERSION) {
@@ -180,7 +176,7 @@ class EnterpriseWikiPublicationStatusService
         }
 
         if ($state === self::STATE_IN_REVIEW) {
-            return $this->reviewNextStep($documentOwnerSummary, $reviewContext);
+            return $this->reviewNextStep($reviewContext);
         }
 
         // Draft, with or without an older published version behind it. The only case that cannot
@@ -229,39 +225,19 @@ class EnterpriseWikiPublicationStatusService
     }
 
     /**
-     * @param  array<string, mixed>  $documentOwnerSummary
      * @param  array<string, mixed>  $reviewContext
      * @return array{0: string, 1: list<string>}
      */
-    private function reviewNextStep(array $documentOwnerSummary, array $reviewContext): array
+    private function reviewNextStep(array $reviewContext): array
     {
+        // Source sign-off is deliberately absent. A document owner vouching for their own material
+        // is provenance, recorded and visible on the source document — it is not a level of
+        // approval the Wiki page has to clear, so it is not a reason the page cannot be published.
         $reasons = [];
-        $rejected = (int) ($documentOwnerSummary['rejected_count'] ?? 0);
-        $pending = (int) ($documentOwnerSummary['pending_count'] ?? 0);
-        $missingOwner = (int) ($documentOwnerSummary['missing_owner_count'] ?? 0);
-
-        // assertSourceOwnersHaveSignedOff() aborts on any approval that is not settled, so these
-        // three are real gates in review — unlike in draft, where the rows do not exist yet.
-        if ($rejected > 0) {
-            $reasons[] = __('procynia.wiki.publication_blocker_owner_rejected', ['count' => $rejected]);
-        }
-
-        if ($missingOwner > 0) {
-            $reasons[] = __('procynia.wiki.publication_blocker_owner_missing', ['count' => $missingOwner]);
-        }
-
-        if ($pending > 0) {
-            $reasons[] = __('procynia.wiki.publication_blocker_owner_pending', ['count' => $pending]);
-        }
-
         $blocker = $reviewContext['final_approval_blocker'] ?? null;
 
         if ($blocker === 'missing_assignment') {
             $reasons[] = __('procynia.wiki.publication_blocker_version_changed');
-        }
-
-        if ($reasons !== []) {
-            return ['awaiting_document_owner', $reasons];
         }
 
         // Only the person whose turn it is gets an action; everyone else is told who they are

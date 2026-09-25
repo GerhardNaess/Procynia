@@ -260,64 +260,6 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * The same gate, but read from the point of view of somebody who can settle part of it.
-     *
-     * A System Owner who is themselves one of the outstanding document owners is not actually
-     * waiting for anyone on that row — they are waiting for their own second click. Publishing
-     * settles it in the same action, so it is not reported as a reason they cannot publish.
-     *
-     * This reaches only their OWN row. Another owner's pending or rejected sign-off is somebody
-     * else's judgement on their own material and still stops the page, System Owner or not — that
-     * is the difference between finishing your own work and signing on another person's behalf.
-     *
-     * @return array{ready: bool, pending: list<array<string, mixed>>, rejected: list<array<string, mixed>>, self_settles: list<int>}
-     */
-    public function sourceOwnerGateAsSettledBy(EnterpriseWikiPageVersion $version, User $actor): array
-    {
-        $gate = $this->sourceOwnerGateForVersion($version);
-        $gate['self_settles'] = [];
-
-        if (! $actor->isSystemOwner()) {
-            return $gate;
-        }
-
-        $ownIds = $this->pendingApprovalIdsOwnedBy($version, $actor);
-
-        if ($ownIds === []) {
-            return $gate;
-        }
-
-        $gate['self_settles'] = $ownIds;
-        $gate['pending'] = array_values(array_filter(
-            $gate['pending'],
-            static fn (array $entry): bool => ! in_array((int) $entry['approval_id'], $ownIds, true),
-        ));
-        $gate['ready'] = $gate['pending'] === [] && $gate['rejected'] === [];
-
-        return $gate;
-    }
-
-    /**
-     * The outstanding rows on this version that belong to this user personally.
-     *
-     * Read straight from the table rather than re-syncing: the caller has already read the gate,
-     * and syncing twice inside one request would be work for nothing.
-     *
-     * @return list<int>
-     */
-    public function pendingApprovalIdsOwnedBy(EnterpriseWikiPageVersion $version, User $user): array
-    {
-        return EnterpriseWikiPageVersionDocumentOwnerApproval::query()
-            ->where('enterprise_wiki_page_version_id', $version->id)
-            ->whereNull('superseded_at')
-            ->where('document_owner_user_id', $user->id)
-            ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
-            ->pluck('id')
-            ->map(static fn ($id): int => (int) $id)
-            ->all();
-    }
-
-    /**
      * Apply an approval or rejection decision to the concrete approval row.
      */
     public function decide(

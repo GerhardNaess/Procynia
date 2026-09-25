@@ -41,25 +41,25 @@ class EnterpriseWikiSendBackAvailabilityTest extends TestCase
         $this->withoutMiddleware(ValidateCsrfToken::class);
     }
 
-    // ── The case that was broken ────────────────────────────────────────────
+    // ── Publishing and returning have different conditions ──────────────────
 
     /**
-     * An open document-owner gate blocks publication and nothing else. This is the exact state the
-     * reviewer was left in with no action at all.
+     * A page with unsigned source material is now blocked by nothing: the source document is
+     * provenance, not a level of approval. Both decisions are on offer.
      */
-    public function test_an_open_document_owner_gate_blocks_approval_but_not_the_return(): void
+    public function test_unsigned_source_material_blocks_neither_decision(): void
     {
         $case = $this->pageOutForReview(withSourceDocument: true);
 
         $payload = $this->reviewAssignmentSeenBy($case['reviewer'], $case['page']);
 
-        $this->assertFalse($payload['can_approve_final'], 'the premise: publication is blocked');
-        $this->assertSame('source_owners_pending', $payload['final_approval_blocker']);
-        $this->assertTrue($payload['can_send_back'], 'and the way out is still offered');
+        $this->assertTrue($payload['can_approve_final']);
+        $this->assertNull($payload['final_approval_blocker']);
+        $this->assertTrue($payload['can_send_back']);
     }
 
     /** And the endpoint agrees — which is what makes the offer honest. */
-    public function test_the_return_really_is_accepted_while_the_gate_is_open(): void
+    public function test_the_return_is_accepted_on_a_page_with_source_material(): void
     {
         $case = $this->pageOutForReview(withSourceDocument: true);
 
@@ -95,7 +95,7 @@ class EnterpriseWikiSendBackAvailabilityTest extends TestCase
 
     // ── The ordinary case still works ───────────────────────────────────────
 
-    public function test_an_unblocked_reviewer_is_offered_both_decisions(): void
+    public function test_a_reviewer_is_offered_both_decisions(): void
     {
         $case = $this->pageOutForReview();
 

@@ -90,18 +90,8 @@ const MIN_REASON = 10;
 const MAX_REASON = 2000;
 
 /** Why final approval is unavailable, in words the person reading them can act on. */
-function blockerMessage(blocker, gate, tw) {
+function blockerMessage(blocker, tw) {
     switch (blocker) {
-        case 'source_owners_pending': {
-            const waitingFor = (gate?.requirements ?? [])
-                .filter((requirement) => requirement.status === 'pending')
-                .map((requirement) => requirement.owner?.name)
-                .filter(Boolean);
-
-            return waitingFor.length > 0
-                ? `${tw.review_waiting_for_owners ?? 'Venter på dokumenteiergodkjenning fra'} ${waitingFor.join(', ')}.`
-                : (tw.review_waiting_for_owners_generic ?? 'Venter på dokumenteiergodkjenning.');
-        }
         case 'own_submission':
             return tw.review_blocked_own_submission ?? 'Du kan ikke godkjenne en versjon du selv har sendt inn.';
         case 'not_assigned':
@@ -126,12 +116,6 @@ function OwnerLine({ label, name }) {
         </span>
     );
 }
-
-const REQUIREMENT_STATUS = {
-    pending: { label: 'Venter', cls: 'bg-amber-100 text-amber-800' },
-    approved: { label: 'Godkjent', cls: 'bg-emerald-100 text-emerald-700' },
-    rejected: { label: 'Endringer kreves', cls: 'bg-rose-100 text-rose-700' },
-};
 
 /**
  * Why manual editing is unavailable, in words the page owner can act on. `not_authorized` returns
@@ -320,10 +304,8 @@ export default function WikiReviewPanel({
         return null;
     }
 
-    const gate = reviewAssignment.source_owner_gate;
     const changes = reviewAssignment.changes_requested ?? { is_returned: false, latest: null, history: [] };
     const eligibleReviewers = reviewAssignment.eligible_reviewers ?? [];
-    const requirements = gate?.requirements ?? [];
 
     const isReturned = page.status === 'rejected';
     const isInReview = page.status === 'pending_review';
@@ -345,12 +327,12 @@ export default function WikiReviewPanel({
         && (canSendBack || reviewAssignment.can_approve_final);
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
-    const blocker = blockerMessage(reviewAssignment.final_approval_blocker, gate, tw);
+    const blocker = blockerMessage(reviewAssignment.final_approval_blocker, tw);
     // Editing lives with the article text it changes, not here: this card is about where the page
     // stands, and a writing action in among the review decisions read as one of them.
     // A published page with nothing outstanding used to render nothing at all, which left the most
     // important fact about it — that it is published — the one thing the page never said.
-    const showsAnything = canSubmit || canReopen || isInReview || isReturned || canPublishDraft || requirements.length > 0
+    const showsAnything = canSubmit || canReopen || isInReview || isReturned || canPublishDraft
         || publication !== null;
 
     if (! showsAnything) {
@@ -388,25 +370,16 @@ export default function WikiReviewPanel({
     const reopen = () => run('reopen', `/app/wiki/${page.slug}/submit`);
     const assignQa = () => run('qa', `/app/wiki/${page.slug}/qa-assignment`, { qa_user_id: Number(qaUserId) });
     const approve = () => run('approve', `/app/wiki/${page.slug}/approve`);
-    const approveRequirement = (id) => run(`req-${id}`, `/app/wiki/${page.slug}/document-owner-approvals/${id}/approve`);
-
     const requestChanges = () => {
         const trimmed = reason.trim();
 
         if (trimmed.length < MIN_REASON) return;
 
-        if (changesTarget === 'page') {
-            run('reject', `/app/wiki/${page.slug}/reject`, { reason: trimmed });
-
-            return;
-        }
-
-        run(`req-${changesTarget}`, `/app/wiki/${page.slug}/document-owner-approvals/${changesTarget}/reject`, { comment: trimmed });
+        run('reject', `/app/wiki/${page.slug}/reject`, { reason: trimmed });
     };
 
     const busy = processing !== null;
     const reasonTooShort = reason.trim().length < MIN_REASON;
-    const isPageReturn = changesTarget === 'page';
 
     return (
         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
@@ -514,65 +487,6 @@ export default function WikiReviewPanel({
                             </ul>
                         </>
                     )}
-                </div>
-            )}
-
-            {/* Who still has to vouch for their own source documents. Not final approval — the
-                wording and the placement both keep that distinction. */}
-            {isInReview && requirements.length > 0 && (
-                <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">
-                        {tw.review_source_owner_heading ?? 'Kildegrunnlag'}
-                    </p>
-
-                    <ul className="space-y-2">
-                        {requirements.map((requirement) => {
-                            const status = REQUIREMENT_STATUS[requirement.status] ?? REQUIREMENT_STATUS.pending;
-
-                            return (
-                                <li
-                                    key={requirement.id}
-                                    className="flex flex-col gap-2 rounded-xl border border-slate-200 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                                >
-                                    <div className="min-w-0 text-sm">
-                                        <span className="font-medium text-slate-900">
-                                            {requirement.owner?.name ?? (tw.review_owner_missing ?? 'Mangler dokumenteier')}
-                                        </span>
-                                        <span className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${status.cls}`}>
-                                            {status.label}
-                                        </span>
-                                        <span className="mt-0.5 block text-xs text-slate-500">
-                                            {(requirement.source_document_ids ?? []).length === 1
-                                                ? (tw.review_one_document ?? '1 kildedokument')
-                                                : `${(requirement.source_document_ids ?? []).length} ${tw.review_documents ?? 'kildedokumenter'}`}
-                                            {requirement.decided_by ? ` · ${requirement.decided_by}` : ''}
-                                        </span>
-                                    </div>
-
-                                    {requirement.can_decide && requirement.status === 'pending' && (
-                                        <div className="flex shrink-0 flex-wrap gap-2">
-                                            <button
-                                                type="button"
-                                                disabled={busy}
-                                                onClick={() => approveRequirement(requirement.id)}
-                                                className={`${PRIMARY_ACTION} min-h-9 px-3 py-1.5 text-sm`}
-                                            >
-                                                {tw.review_approve_source ?? 'Godkjenn kildeinnhold'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                disabled={busy}
-                                                onClick={() => { setChangesTarget(requirement.id); setReason(''); }}
-                                                className={`${WARNING_ACTION} min-h-9 px-3 py-1.5 text-sm`}
-                                            >
-                                                {tw.review_request_changes ?? 'Be om endringer'}
-                                            </button>
-                                        </div>
-                                    )}
-                                </li>
-                            );
-                        })}
-                    </ul>
                 </div>
             )}
 
@@ -791,10 +705,8 @@ export default function WikiReviewPanel({
                 </div>
             </ActionDialog>
 
-            {/* Asking for changes. The reason is what the owner works from, so it is required.
-                Two callers, deliberately worded apart: a reviewer sends the whole page back, a
-                document owner objects to how their own source was used. Same dialog, because the
-                thing being written is the same — a short sentence the owner has to act on. */}
+            {/* Sending the page back. One caller now: the reviewer returning the whole article.
+                The comment is what the owner works from, so it is required. */}
             <ActionDialog
                 isOpen={changesTarget !== null}
                 onClose={() => { setChangesTarget(null); setActionError(null); }}
@@ -803,19 +715,15 @@ export default function WikiReviewPanel({
                 initialFocusRef={reasonRef}
             >
                 <h2 id="wiki-changes-title" className="text-xl font-semibold tracking-tight text-slate-950">
-                    {isPageReturn
-                        ? (tw.review_send_back ?? 'Send tilbake')
-                        : (tw.review_request_changes ?? 'Be om endringer')}
+                    {tw.review_send_back ?? 'Send tilbake'}
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">
-                    {changesTarget === 'page'
-                        ? (tw.review_request_changes_page ?? 'Siden sendes tilbake til sideeier. Den publiserte versjonen berøres ikke.')
-                        : (tw.review_request_changes_source ?? 'Kildegrunnlaget avvises og siden sendes tilbake til sideeier. Den publiserte versjonen berøres ikke.')}
+                    {tw.review_request_changes_page ?? 'Siden sendes tilbake til sideeier. Den publiserte versjonen berøres ikke.'}
                 </p>
 
                 <label className="mt-4 block space-y-1.5" htmlFor="wiki-change-reason">
                     <span className="text-base font-medium text-slate-800">
-                        {isPageReturn ? (tw.review_comment ?? 'Kommentar') : (tw.review_reason ?? 'Begrunnelse')}
+                        {tw.review_comment ?? 'Kommentar'}
                     </span>
                     <textarea
                         ref={reasonRef}
@@ -828,9 +736,7 @@ export default function WikiReviewPanel({
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                     />
                     <span id="wiki-change-reason-help" className="block text-sm text-slate-500">
-                        {isPageReturn
-                            ? (tw.review_comment_help ?? 'Forklar hva sideeier må endre før siden kan sendes inn på nytt.')
-                            : (tw.review_reason_help ?? 'Beskriv hva som må rettes.')}
+                        {tw.review_comment_help ?? 'Forklar hva sideeier må endre før siden kan sendes inn på nytt.'}
                         {' '}{reason.trim().length}/{MAX_REASON}
                     </span>
                 </label>
@@ -843,9 +749,7 @@ export default function WikiReviewPanel({
 
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" disabled={busy || reasonTooShort} onClick={requestChanges} className={WARNING_ACTION}>
-                        {isPageReturn
-                            ? (tw.review_send_back ?? 'Send tilbake')
-                            : (tw.review_request_changes ?? 'Be om endringer')}
+                        {tw.review_send_back ?? 'Send tilbake'}
                     </button>
                     <button type="button" disabled={busy} onClick={() => { setChangesTarget(null); setActionError(null); }} className={SECONDARY_ACTION}>
                         {tw.cancel ?? 'Avbryt'}

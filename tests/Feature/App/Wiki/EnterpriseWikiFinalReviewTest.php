@@ -103,19 +103,24 @@ class EnterpriseWikiFinalReviewTest extends TestCase
         $this->assertSame($v1->id, (int) $page->published_version_id, 'readers keep v1 while v2 is judged');
     }
 
-    // D + E. the source-owner gate holds
-    public function test_a_pending_document_owner_blocks_final_approval(): void
+    // D + E. the source document is provenance, not a level of approval
+    public function test_a_pending_document_owner_does_not_block_final_approval(): void
     {
         $case = $this->submittedPage();
 
         $this->actingAs($case['reviewer'])
             ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertStatus(409);
+            ->assertRedirect();
 
-        $this->assertNull($case['page']->fresh()->published_version_id);
+        $this->assertSame((int) $case['version']->id, (int) $case['page']->fresh()->published_version_id);
     }
 
-    public function test_a_rejecting_document_owner_blocks_final_approval(): void
+    /**
+     * A document owner refusing still sends the page back — not because their sign-off gates
+     * publication, but because reject() returns the version to its owner whoever asked. Once it has
+     * left review there is nothing to approve.
+     */
+    public function test_a_rejecting_document_owner_returns_the_page_to_its_owner(): void
     {
         $case = $this->submittedPage();
         $requirement = $this->activeRequirements($case['version'])->first();
@@ -288,21 +293,23 @@ class EnterpriseWikiFinalReviewTest extends TestCase
     {
         $case = $this->submittedPage();
 
+        // An outstanding source sign-off is no longer among the reasons, so the assigned reviewer
+        // is clear to publish from the moment the page reaches them.
         $this->actingAs($case['reviewer'])
             ->get("/app/wiki/{$case['page']->slug}")
             ->assertSuccessful()
             ->assertInertia(fn ($inertia) => $inertia
-                ->where('review_assignment.can_approve_final', false)
-                ->where('review_assignment.final_approval_blocker', 'source_owners_pending')
+                ->where('review_assignment.can_approve_final', true)
+                ->where('review_assignment.final_approval_blocker', null)
                 ->where('review_assignment.working_version_id', $case['version']->id));
 
-        $this->clearSourceOwnerGate($case['page'], $case['version'], $case['documentOwners']);
-
-        $this->actingAs($case['reviewer'])
+        // Somebody who was not asked still cannot, and is told why — the page owner in this
+        // fixture does not hold the capability at all.
+        $this->actingAs(User::query()->findOrFail($case['page']->owner_user_id))
             ->get("/app/wiki/{$case['page']->slug}")
             ->assertInertia(fn ($inertia) => $inertia
-                ->where('review_assignment.can_approve_final', true)
-                ->where('review_assignment.final_approval_blocker', null));
+                ->where('review_assignment.can_approve_final', false)
+                ->where('review_assignment.final_approval_blocker', 'missing_capability'));
     }
 
     public function test_the_payload_tells_a_submitter_why_they_cannot_approve(): void

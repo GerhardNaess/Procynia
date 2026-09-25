@@ -222,7 +222,6 @@ class WikiController extends Controller
                 'publication' => $this->publicationStatus->forPage(
                     $page,
                     $page->currentVersion,
-                    $documentOwnerSummary,
                 ),
                 // Current-version claims only — matches the scope EnterpriseWikiRunFindingsService
                 // already uses for the Kjøringer "Funn" count (both filter to is_current page
@@ -578,89 +577,6 @@ class WikiController extends Controller
             'missing_owner_count' => 0,
             'has_override' => false,
         ];
-    }
-
-    /**
-     * Cross-run "Sider" detail (Kjøringer tab, Del 1-9): resolve the understandable Document
-     * Owner status for the SPECIFIC version this run produced/applied — never just the run's
-     * overall status, and never the page's current version if a later run has since replaced it.
-     */
-    private function documentOwnerSummaryForRunPageVersion(EnterpriseWikiPageVersion $version, bool $isCurrent): array
-    {
-        if (! $isCurrent) {
-            return $this->documentOwnerSummarySuperseded();
-        }
-
-        return $this->documentOwnerSummaryForVersion($version);
-    }
-
-    private function documentOwnerApprovalSummaryText(Collection $approvalRows): string
-    {
-        $totalSourceDocuments = $approvalRows
-            ->flatMap(function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): array {
-                return is_array($approval->source_document_ids) ? $approval->source_document_ids : [];
-            })
-            ->map(static fn (mixed $value): int => (int) $value)
-            ->filter(static fn (int $value): bool => $value > 0)
-            ->unique()
-            ->count();
-
-        if ($totalSourceDocuments === 0) {
-            return '';
-        }
-
-        $countForStatus = static function (Collection $rows, string $status): int {
-            return $rows
-                ->where('approval_status', $status)
-                ->sum(static function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): int {
-                    return is_array($approval->source_document_ids) ? count($approval->source_document_ids) : 0;
-                });
-        };
-
-        $approvedCount = $countForStatus($approvalRows, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
-        $pendingCount = $countForStatus($approvalRows, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
-        $rejectedCount = $countForStatus($approvalRows, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED);
-        $missingOwnerCount = $approvalRows
-            ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
-            ->whereNull('document_owner_user_id')
-            ->sum(static function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): int {
-                return is_array($approval->source_document_ids) ? count($approval->source_document_ids) : 0;
-            });
-
-        if ($approvedCount === 0 && $pendingCount === 0 && $rejectedCount === 0 && $missingOwnerCount > 0) {
-            return trans_choice('procynia.wiki.document_owner_summary_missing_owner', $missingOwnerCount, [
-                'count' => $missingOwnerCount,
-            ]);
-        }
-
-        $parts = [];
-
-        if ($approvedCount > 0) {
-            $parts[] = trans_choice('procynia.wiki.document_owner_summary_approved', $approvedCount, [
-                'approved' => $approvedCount,
-                'total' => $totalSourceDocuments,
-            ]);
-        }
-
-        if ($pendingCount > 0) {
-            $parts[] = trans_choice('procynia.wiki.document_owner_summary_pending', $pendingCount, [
-                'count' => $pendingCount,
-            ]);
-        }
-
-        if ($rejectedCount > 0) {
-            $parts[] = trans_choice('procynia.wiki.document_owner_summary_rejected', $rejectedCount, [
-                'count' => $rejectedCount,
-            ]);
-        }
-
-        if ($missingOwnerCount > 0) {
-            $parts[] = trans_choice('procynia.wiki.document_owner_summary_missing_owner', $missingOwnerCount, [
-                'count' => $missingOwnerCount,
-            ]);
-        }
-
-        return implode(' · ', $parts);
     }
 
     private function documentOwnerApprovalSentence(
@@ -1440,91 +1356,12 @@ class WikiController extends Controller
             ))
         );
 
-        $documentOwnerApprovals = [];
-        $documentOwnerApprovalSummary = [
-            'total' => 0,
-            'pending' => 0,
-            'approved' => 0,
-            'rejected' => 0,
-            'missing_owner' => 0,
-            'ready' => true,
-            'message' => null,
-        ];
-
+        // The requirement rows are still kept current — they record which source documents this
+        // version drew on and who owns them, which is provenance worth having. What they no longer
+        // do is decide anything: the per-requirement payload and its summary went with the panel
+        // that rendered them, because a source document is not a level of approval the page clears.
         if ($currentVersion !== null) {
-            $approvalRows = $this->documentOwnerApprovalService->syncForPageVersion($currentVersion);
-
-            $sourceDocumentIds = $approvalRows
-                ->flatMap(fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval) => is_array($approval->source_document_ids) ? $approval->source_document_ids : [])
-                ->map(static fn (mixed $value): int => (int) $value)
-                ->filter(static fn (int $value): bool => $value > 0)
-                ->unique()
-                ->values();
-
-            $sourceDocuments = $sourceDocumentIds->isNotEmpty()
-                ? EnterpriseWikiDocument::query()
-                    ->where('customer_id', $customerId)
-                    ->whereIn('id', $sourceDocumentIds)
-                    ->with('owner:id,name,email,is_active')
-                    ->get()
-                    ->keyBy('id')
-                : collect();
-
-            $documentOwnerApprovals = $approvalRows->map(function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval) use ($sourceDocuments, $user): array {
-                $documentIds = is_array($approval->source_document_ids) ? $approval->source_document_ids : [];
-                $documents = collect($documentIds)
-                    ->map(fn (mixed $id): array => [
-                        'id' => (int) $id,
-                        'original_filename' => $sourceDocuments->get((int) $id)?->original_filename,
-                        'owner_name' => $sourceDocuments->get((int) $id)?->owner?->name,
-                        'owner_user_id' => $sourceDocuments->get((int) $id)?->owner_user_id,
-                    ])
-                    ->values()
-                    ->all();
-
-                return [
-                    'id' => $approval->id,
-                    'approval_status' => $approval->approval_status,
-                    'summary_text' => $this->documentOwnerApprovalSentence($approval, $sourceDocuments),
-                    'approval_comment' => $approval->approval_comment,
-                    'decided_at' => $approval->decided_at,
-                    'decided_by_name' => $approval->decidedBy?->name,
-                    'is_override' => $approval->is_override,
-                    'override_reason' => $approval->override_reason,
-                    'document_owner_user_id' => $approval->document_owner_user_id,
-                    'document_owner_name' => $approval->documentOwner?->name,
-                    'document_owner_email' => $approval->documentOwner?->email,
-                    'document_owner_is_active' => $approval->documentOwner?->is_active,
-                    'source_document_ids' => $documentIds,
-                    'source_documents' => $documents,
-                    'can_decide' => $user instanceof User && $this->documentOwnerApprovalService->canDecide($approval, $user),
-                ];
-            })->all();
-
-            $documentOwnerApprovalSummary = [
-                'total' => $approvalRows->count(),
-                'pending' => $approvalRows->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)->count(),
-                'approved' => $approvalRows->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED)->count(),
-                'rejected' => $approvalRows->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED)->count(),
-                'missing_owner' => $approvalRows
-                    ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
-                    ->whereNull('document_owner_user_id')
-                    ->count(),
-                'ready' => $approvalRows->whereIn('approval_status', [
-                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
-                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
-                ])->isEmpty(),
-                'summary_text' => $this->documentOwnerApprovalSummaryText($approvalRows),
-                'message' => null,
-            ];
-
-            if (! $documentOwnerApprovalSummary['ready']) {
-                $documentOwnerApprovalSummary['message'] = $documentOwnerApprovalSummary['missing_owner'] > 0
-                    ? 'Kildedokument mangler Dokumenteier'
-                    : ($documentOwnerApprovalSummary['rejected'] > 0
-                        ? 'Avvist av Dokumenteier'
-                        : 'Avventer godkjenning fra Dokumenteier');
-            }
+            $this->documentOwnerApprovalService->syncForPageVersion($currentVersion);
         }
 
         $claimSummary = [
@@ -1778,11 +1615,6 @@ class WikiController extends Controller
                 // approver to "grant someone the role" when they already have it sends them to the
                 // access screen to fix something that is not broken.
                 'actor_can_approve_wiki_pages' => $user->canApproveWikiPages(),
-                // Why final approval is or is not available yet. Read-only: computed from the
-                // requirement rows that already exist, never by deciding anything.
-                'source_owner_gate' => $currentVersion !== null
-                    ? $this->sourceOwnerGatePayload($currentVersion, $user)
-                    : null,
                 'published_version_id' => $page->published_version_id !== null ? (int) $page->published_version_id : null,
                 // The number, not just the id: the page says "Publisert versjon v3", and looking it
                 // up in the client would mean shipping every version just to render one label.
@@ -1816,9 +1648,6 @@ class WikiController extends Controller
             'publication' => $this->publicationStatus->forPage(
                 $page,
                 $currentVersion,
-                $currentVersion !== null
-                    ? $this->documentOwnerSummaryForVersion($currentVersion)
-                    : [],
                 [
                     'can_submit' => $user->canSubmitEnterpriseWikiPage($page),
                     'eligible_reviewer_count' => count($this->eligibleReviewerOptions($page, $user)),
@@ -1870,8 +1699,8 @@ class WikiController extends Controller
             'manual_block_edit' => $manualBlockEdit,
             'working_version_edit' => $this->workingVersionEditContext($page, $currentVersion, $customerId, $user),
             'source_documents' => $sourceDocuments,
-            'document_owner_approvals' => $documentOwnerApprovals,
-            'document_owner_approval_summary' => $documentOwnerApprovalSummary,
+            // Kept: the best-practice marking reads whether the page version is finally approved.
+            // The per-requirement rows and their summary went with the panel that rendered them.
             'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
         ]);
     }
@@ -2756,9 +2585,6 @@ class WikiController extends Controller
                 abort(422, 'Siden har ingen arbeidsversjon å godkjenne.');
             }
 
-            // Inside the lock, so the row the gate was read against is the row that gets settled.
-            $this->settleOwnSourceApprovals($workingVersion, $user);
-
             // Status and publication move together, in one write. The previously published version
             // stays in the table untouched — it simply stops being the one the page points at.
             $locked->forceFill([
@@ -3017,49 +2843,6 @@ class WikiController extends Controller
     }
 
     /**
-     * What the source-owner gate looks like right now, and what this user can do about it.
-     *
-     * @return array{ready: bool, blocking_reason: ?string, requirements: list<array<string, mixed>>}
-     */
-    private function sourceOwnerGatePayload(EnterpriseWikiPageVersion $version, User $user): array
-    {
-        $approvals = $version->relationLoaded('documentOwnerApprovals')
-            ? $version->documentOwnerApprovals
-            : $version->documentOwnerApprovals()->with('documentOwner', 'decidedBy')->get();
-
-        $active = $approvals->filter(
-            static fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): bool => ! $approval->isSuperseded(),
-        );
-
-        $pending = $active->filter(static fn ($approval): bool => $approval->isPending());
-        $rejected = $active->filter(static fn ($approval): bool => $approval->isRejected());
-
-        return [
-            'ready' => $pending->isEmpty() && $rejected->isEmpty(),
-            'blocking_reason' => match (true) {
-                $rejected->isNotEmpty() => 'rejected',
-                $pending->isNotEmpty() => 'pending',
-                default => null,
-            },
-            'requirements' => $active
-                ->map(fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): array => [
-                    'id' => (int) $approval->id,
-                    'owner' => $approval->documentOwner !== null
-                        ? ['id' => (int) $approval->documentOwner->id, 'name' => $approval->documentOwner->name]
-                        : null,
-                    'source_document_ids' => is_array($approval->source_document_ids) ? $approval->source_document_ids : [],
-                    'status' => $approval->approval_status,
-                    'decided_at' => $approval->decided_at,
-                    'decided_by' => $approval->decidedBy?->name,
-                    'is_override' => (bool) $approval->is_override,
-                    'can_decide' => $this->documentOwnerApprovalService->canDecide($approval, $user),
-                ])
-                ->values()
-                ->all(),
-        ];
-    }
-
-    /**
      * Why this user cannot give final approval right now, or null when they can.
      *
      * Read-only and deliberately ordered the way a person would ask: is it even out for review, may
@@ -3090,9 +2873,9 @@ class WikiController extends Controller
             ! $user->isSystemOwner()
                 && (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
             ! $user->canFinalApproveEnterpriseWikiVersion($version, $page) => 'not_assigned',
-            // Read as this actor would settle it: a System Owner is not waiting on their own
-            // outstanding sign-off, because publishing settles it in the same action.
-            ! $this->documentOwnerApprovalService->sourceOwnerGateAsSettledBy($version, $user)['ready'] => 'source_owners_pending',
+            // Source documents are provenance, not a level of approval. Whether a document owner
+            // has vouched for their own material is recorded and visible, and it no longer decides
+            // whether the Wiki page may be published — the page is the thing being approved.
             default => null,
         };
     }
@@ -3221,13 +3004,6 @@ class WikiController extends Controller
             return;
         }
 
-        // Named owners rather than a generic refusal: whoever is blocked has to know who to ask.
-        if ($blocker === 'source_owners_pending') {
-            abort(409, $this->sourceOwnerGateMessage(
-                $this->documentOwnerApprovalService->sourceOwnerGateAsSettledBy($version, $user),
-            ));
-        }
-
         abort(match ($blocker) {
             'missing_assignment' => 409,
             'not_in_review' => 422,
@@ -3239,54 +3015,6 @@ class WikiController extends Controller
             'not_in_review' => 'Versjonen er ikke sendt til gjennomgang.',
             default => 'Du er ikke tildelt som kontrollør for denne versjonen.',
         });
-    }
-
-    /**
-     * Settle the actor's OWN outstanding source sign-off as part of publishing.
-     *
-     * A System Owner who owns one of the source documents was being asked to click twice for the
-     * same judgement: once to vouch for their own document, once to publish the page. Publishing is
-     * the stronger statement and it is the same person on the same version, so it carries the other.
-     *
-     * Recorded through the ordinary decide(), which marks it as their own decision and not an
-     * override — because it is not one. Rows belonging to anyone else are untouched, and the gate
-     * has already refused the request if any of those were outstanding.
-     */
-    private function settleOwnSourceApprovals(EnterpriseWikiPageVersion $version, User $user): void
-    {
-        if (! $user->isSystemOwner()) {
-            return;
-        }
-
-        $ids = $this->documentOwnerApprovalService->pendingApprovalIdsOwnedBy($version, $user);
-
-        if ($ids === []) {
-            return;
-        }
-
-        foreach (EnterpriseWikiPageVersionDocumentOwnerApproval::query()->whereIn('id', $ids)->get() as $approval) {
-            $this->documentOwnerApprovalService->decide(
-                $approval,
-                $user,
-                EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED,
-            );
-        }
-    }
-
-    /**
-     * @param  array{pending: list<array<string, mixed>>, rejected: list<array<string, mixed>>}  $gate
-     */
-    private function sourceOwnerGateMessage(array $gate): string
-    {
-        if ($gate['rejected'] !== []) {
-            $owners = implode(', ', array_column($gate['rejected'], 'owner_label'));
-
-            return "Siden kan ikke godkjennes: kildegrunnlaget er avvist av {$owners}.";
-        }
-
-        $owners = implode(', ', array_column($gate['pending'], 'owner_label'));
-
-        return "Siden kan ikke godkjennes ennå: venter på godkjenning fra {$owners}.";
     }
 
     /**
