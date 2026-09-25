@@ -205,6 +205,9 @@ Route::prefix('app')
             ->name('ai.requirements.wiki-answer.update');
         Route::post('/ai/{savedNotice}/assessments/refresh', [AiController::class, 'refreshAssessments'])
             ->name('ai.requirements.assessment.refresh');
+        // Polled by the bell while the person sits still, so a notification that arrives during a
+        // long session is not invisible until they happen to navigate.
+        Route::get('/notifications', [UserNotificationController::class, 'index'])->name('notifications.index');
         Route::patch('/notifications/read-all', [UserNotificationController::class, 'markAllRead'])->name('notifications.read-all');
         Route::patch('/notifications/{userNotification}/read', [UserNotificationController::class, 'markRead'])->name('notifications.read');
         Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');

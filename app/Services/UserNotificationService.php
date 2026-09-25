@@ -2,12 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\SavedNotice;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
 
 class UserNotificationService
@@ -16,8 +15,7 @@ class UserNotificationService
 
     public function __construct(
         private readonly CustomerContext $customerContext,
-    ) {
-    }
+    ) {}
 
     public function panelPayload(?User $user, int $limit = self::DEFAULT_LIMIT): array
     {
@@ -46,6 +44,8 @@ class UserNotificationService
         return [
             'unread_count' => $this->unreadCount($user, $customerId),
             'limit' => $limit,
+            // Where the bell re-reads itself from while the person stays on one page.
+            'refresh_url' => route('app.notifications.index'),
             'mark_all_read_url' => route('app.notifications.read-all'),
             'items' => $notifications
                 ->map(fn (UserNotification $notification): array => $this->notificationPayload($notification, $customerId))
@@ -142,7 +142,7 @@ class UserNotificationService
             'created_at' => optional($notification->created_at)?->toIso8601String(),
             'updated_at' => optional($notification->updated_at)?->toIso8601String(),
             'mark_read_url' => route('app.notifications.read', ['userNotification' => $notification->id]),
-            'saved_notice' => $savedNotice instanceof \App\Models\SavedNotice && (int) $savedNotice->customer_id === $customerId ? [
+            'saved_notice' => $savedNotice instanceof SavedNotice && (int) $savedNotice->customer_id === $customerId ? [
                 'id' => $savedNotice->id,
                 'title' => $savedNotice->title,
                 'reference_number' => $savedNotice->reference_number,
@@ -155,6 +155,7 @@ class UserNotificationService
         return [
             'unread_count' => 0,
             'limit' => $limit,
+            'refresh_url' => route('app.notifications.index'),
             'mark_all_read_url' => route('app.notifications.read-all'),
             'items' => [],
         ];

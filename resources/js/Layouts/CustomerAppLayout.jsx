@@ -46,10 +46,21 @@ function emptyNotificationsState() {
     return {
         unread_count: 0,
         limit: 10,
+        refresh_url: null,
         mark_all_read_url: null,
         items: [],
     };
 }
+
+/**
+ * How often the bell re-reads itself while the person stays on one page.
+ *
+ * Notifications are shared on every Inertia visit, so navigating already refreshes them — this is
+ * only for the person who is reading, writing or thinking and not clicking anything. A minute is
+ * slow enough to cost nothing and fast enough that "somebody sent you a page to review" does not
+ * wait for their next navigation.
+ */
+const NOTIFICATION_POLL_MS = 60000;
 
 export default function CustomerAppLayout({ children, title, showPageTitle = true }) {
     const page = usePage();
@@ -316,6 +327,46 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     useEffect(() => {
         setNotificationState(page.props.notifications ?? emptyNotificationsState());
     }, [page.props.notifications]);
+
+    // Re-read the bell on a timer and whenever the tab comes back to the front. Read-only, and
+    // never while the tab is hidden: a backgrounded session should cost nothing, and a poll must
+    // never be what marks something as read.
+    useEffect(() => {
+        const refreshUrl = notificationState?.refresh_url;
+
+        if (! refreshUrl) {
+            return undefined;
+        }
+
+        let cancelled = false;
+
+        const refresh = async () => {
+            if (document.visibilityState === 'hidden') {
+                return;
+            }
+
+            try {
+                const response = await window.axios.get(refreshUrl);
+
+                if (! cancelled && response?.data?.notifications) {
+                    setNotificationState(response.data.notifications);
+                }
+            } catch {
+                // A failed poll is not worth interrupting anybody over; the next one will do.
+            }
+        };
+
+        const timer = window.setInterval(refresh, NOTIFICATION_POLL_MS);
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', refresh);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', refresh);
+        };
+    }, [notificationState?.refresh_url]);
 
     useEffect(() => {
         if (currentAiCaseId === null || currentAiCaseId === undefined) {

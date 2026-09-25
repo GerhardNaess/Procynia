@@ -15,7 +15,22 @@ class UserNotificationController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly UserNotificationService $notificationService,
-    ) {
+    ) {}
+
+    /**
+     * The current panel, for the bell to re-read without a page load.
+     *
+     * The same payload the layout is given on every Inertia visit, so a poll and a navigation put
+     * the bell in exactly the same state. Read-only: polling must never mark anything as read, or
+     * simply leaving a tab open would quietly empty the unread count.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        [$user] = $this->frontendContext($request);
+
+        return response()->json([
+            'notifications' => $this->notificationService->panelPayload($user),
+        ]);
     }
 
     public function markRead(Request $request, UserNotification $userNotification): JsonResponse
