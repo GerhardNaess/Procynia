@@ -370,6 +370,31 @@ class User extends Authenticatable implements FilamentUser
      * source, approving a page publishes it. System Owner still passes — roleHasPermission()
      * short-circuits — but as an override, not because the workflow names them the approver.
      */
+    /**
+     * Everything a capability check reads, for queries that hydrate a partial User.
+     *
+     * roleHasPermission() answers from the main role AND the supplemental capabilities, so a select
+     * that omits one of them does not return "no" — it returns a confident, wrong "no" for every
+     * user who holds only that capability. A Contributor who is a Wiki approver disappeared from
+     * the reviewer list this way, and the list then reported that nobody could approve at all.
+     *
+     * Naming the set here rather than repeating it keeps the next query correct by default: a new
+     * capability column is added once, and every list that asks about capabilities gets it.
+     *
+     * @var list<string>
+     */
+    public const CAPABILITY_COLUMNS = [
+        'id',
+        'name',
+        'role',
+        'bid_role',
+        'bid_manager_scope',
+        'is_qa',
+        'is_wiki_approver',
+        'customer_id',
+        'is_active',
+    ];
+
     public function canApproveWikiPages(): bool
     {
         if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {

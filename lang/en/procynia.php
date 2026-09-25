@@ -3248,6 +3248,7 @@ return [
         'role_wiki_approver' => 'Wiki approver',
         'permission_approve_wiki_pages_help' => 'Can review, approve, and publish Wiki pages submitted for review.',
         'review_no_eligible_reviewers' => 'No other user can approve this Wiki page. Give at least one other user the “Wiki approver” role under Tilganger.',
+        'review_only_approver_is_you' => 'You are the only person who can approve Wiki pages. A page must be reviewed by someone other than the person submitting it, so give at least one other user the Wiki approver role under Tilganger.',
         'permission_can_be_document_owner' => 'Can be Document owner',
         'permission_assign_document_owner' => 'Assign and change Document owner',
         'source_ingest_button' => 'Create Wiki',

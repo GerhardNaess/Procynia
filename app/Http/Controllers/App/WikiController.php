@@ -1772,6 +1772,12 @@ class WikiController extends Controller
                 'can_review' => $currentVersion !== null
                     && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
                 'eligible_reviewers' => $this->eligibleReviewerOptions($page, $user),
+                // An empty list means two different things, and the page has to say which: nobody
+                // at this customer can approve a Wiki page, or the only person who can is the one
+                // reading — and submit() refuses a reviewer who is the submitter. Telling a lone
+                // approver to "grant someone the role" when they already have it sends them to the
+                // access screen to fix something that is not broken.
+                'actor_can_approve_wiki_pages' => $user->canApproveWikiPages(),
                 // Why final approval is or is not available yet. Read-only: computed from the
                 // requirement rows that already exist, never by deciding anything.
                 'source_owner_gate' => $currentVersion !== null
@@ -2836,7 +2842,7 @@ class WikiController extends Controller
             ->where('is_active', true)
             ->whereKeyNot($actor->id)
             ->orderBy('name')
-            ->get(['id', 'name', 'role', 'bid_role', 'is_qa', 'customer_id', 'is_active'])
+            ->get(User::CAPABILITY_COLUMNS)
             ->filter(fn (User $candidate): bool => $candidate->canBeEnterpriseWikiReviewerFor($page, $actor->id))
             ->map(static fn (User $candidate): array => ['id' => (int) $candidate->id, 'name' => $candidate->name])
             ->values()
@@ -3140,7 +3146,7 @@ class WikiController extends Controller
             ->where('is_active', true)
             ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
             ->with('customer:id,permission_settings')
-            ->get(['id', 'name', 'email', 'role', 'bid_role', 'is_qa', 'customer_id', 'is_active'])
+            ->get([...User::CAPABILITY_COLUMNS, 'email'])
             ->filter(fn (User $user): bool => $user->canBeEnterpriseWikiDocumentOwner())
             ->sortBy([
                 ['name', 'asc'],

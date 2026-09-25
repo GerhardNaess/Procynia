@@ -437,11 +437,18 @@ export default function WikiReviewPanel({
 
                 {/* Naming the permission and where it lives, because the old wording stated the
                     problem without saying it was solvable — and the permission it refers to is one
-                    row below "Godkjenne Wiki-påstander", which is the one people grant by mistake. */}
+                    row below "Godkjenne Wiki-påstander", which is the one people grant by mistake.
+
+                    An empty list has two causes and they need different sentences. Telling a lone
+                    approver that "nobody can approve" sends them to the access screen to grant a
+                    role they already hold; what they actually need is a second person. */}
                 {canSubmit && eligibleReviewers.length === 0 && (
                     <p className="text-base leading-6 text-slate-600">
-                        {tw.review_no_eligible_reviewers
-                            ?? 'Ingen andre brukere kan godkjenne Wiki-siden. Gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.'}
+                        {reviewAssignment.actor_can_approve_wiki_pages
+                            ? (tw.review_only_approver_is_you
+                                ?? 'Du er den eneste som kan godkjenne Wiki-sider. En side må kontrolleres av en annen enn den som sender den inn, så gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.')
+                            : (tw.review_no_eligible_reviewers
+                                ?? 'Ingen andre brukere kan godkjenne Wiki-siden. Gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.')}
                     </p>
                 )}
 

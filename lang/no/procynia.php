@@ -3247,6 +3247,7 @@ return [
         'role_wiki_approver' => 'Wiki-godkjenner',
         'permission_approve_wiki_pages_help' => 'Kan gjennomgå, godkjenne og publisere Wiki-sider som er sendt til gjennomgang.',
         'review_no_eligible_reviewers' => 'Ingen andre brukere kan godkjenne Wiki-siden. Gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.',
+        'review_only_approver_is_you' => 'Du er den eneste som kan godkjenne Wiki-sider. En side må kontrolleres av en annen enn den som sender den inn, så gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.',
         'permission_can_be_document_owner' => 'Kan være Dokumenteier',
         'permission_assign_document_owner' => 'Tilordne og endre Dokumenteier',
         'source_ingest_button' => 'Lag Wiki',
