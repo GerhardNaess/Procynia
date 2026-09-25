@@ -149,16 +149,6 @@ export function articleEditUnavailableText(reason, tw) {
     return null;
 }
 
-const PUBLICATION_STATE_CLS = {
-    draft: 'bg-slate-100 text-slate-700',
-    in_review: 'bg-amber-100 text-amber-800',
-    published: 'bg-emerald-100 text-emerald-700',
-    published_with_changes: 'bg-sky-100 text-sky-800',
-    changes_requested: 'bg-rose-100 text-rose-700',
-    archived: 'bg-slate-100 text-slate-500',
-    no_version: 'bg-slate-100 text-slate-500',
-};
-
 /**
  * Where this page stands, and the one thing that has to happen next.
  *
@@ -178,18 +168,12 @@ function PublicationBlock({ publication, tw }) {
 
     return (
         <div className="space-y-3 border-b border-slate-100 pb-4" data-testid="wiki-publication-block">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                    {tw.publication_heading ?? 'Publisering'}
-                </span>
-                <span
-                    className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${
-                        PUBLICATION_STATE_CLS[publication.state] ?? 'bg-slate-100 text-slate-700'
-                    }`}
-                >
-                    {publication.state_label}
-                </span>
-            </div>
+            {/* The heading only. Where the page stands is stated once, beside the page title;
+                repeating it here said the same word twice on one screen and invited the two to
+                disagree. This card is for what happens next, not for what the page is. */}
+            <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                {tw.publication_heading ?? 'Publisering'}
+            </span>
 
             <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
                 {publication.claims_total > 0 && (

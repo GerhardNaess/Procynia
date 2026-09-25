@@ -505,13 +505,31 @@ describe('an unfinished page is not dressed as a warning', () => {
     });
 
     test('where the page stands is still said, where it belongs', () => {
-        // The status badge on the page, and the publication card's own state line.
+        // Once, beside the page title.
         assert.match(show, /PAGE_STATUS_STYLES\[page\.status\]/);
-        assert.match(panel, /PUBLICATION_STATE_CLS/);
     });
 
     test('the discreet AI marking on the article stays', () => {
         assert.match(show, /article_ai_label \?\? 'AI-generert'/);
         assert.match(show, /bg-amber-100 px-2\.5 py-0\.5 text-xs font-semibold text-amber-700/);
+    });
+});
+
+/** Status is stated once. Two copies on one screen is one copy that can go stale. */
+describe('the publication card explains what happens next, not what the page is', () => {
+    test('it carries no status badge of its own', () => {
+        assert.ok(!panel.includes('PUBLICATION_STATE_CLS'), 'the style map went with its only reader');
+        assert.ok(!panel.includes('publication.state_label'));
+    });
+
+    test('the page title still carries the status', () => {
+        assert.match(show, /PAGE_STATUS_STYLES\[page\.status\]/);
+    });
+
+    test('what the card is actually for is untouched', () => {
+        assert.match(panel, /data-testid="wiki-publication-next-step"/);
+        assert.match(panel, /data-testid="wiki-publication-blockers"/);
+        assert.match(panel, /data-testid="wiki-publication-claims"/);
+        assert.match(panel, /publication_heading \?\? 'Publisering'/);
     });
 });
