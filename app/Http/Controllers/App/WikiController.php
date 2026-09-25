@@ -2051,7 +2051,7 @@ class WikiController extends Controller
         $normalizedBlocks = $this->validatedManualMixedBlockEditBlocks($submittedBlocks, $currentVersion);
 
         try {
-            $this->claimContentRepairService->applyWorkingVersionBlockEdits(
+            $result = $this->claimContentRepairService->applyWorkingVersionBlockEdits(
                 $page,
                 $currentVersion,
                 $normalizedBlocks,
@@ -2084,9 +2084,14 @@ class WikiController extends Controller
                 ->with('error', $this->workingVersionEditFailureMessage($e));
         }
 
+        // The two outcomes are genuinely different things to have done, so they are not reported
+        // with one message: an approver has just changed what readers and tender drafting get,
+        // while everyone else has produced something that still needs approving.
         return redirect()
             ->route('app.wiki.show', ['slug' => $page->slug])
-            ->with('success', 'Endringene er lagret i en ny arbeidsversjon.');
+            ->with('success', ($result['published_directly'] ?? false)
+                ? 'Endringene er lagret og publisert.'
+                : 'Endringene er lagret i en ny arbeidsversjon.');
     }
 
     /**

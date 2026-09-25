@@ -227,6 +227,8 @@ class EnterpriseWikiClaimContentRepairService
                 ->where('generated_page_version_id', $current->id)
                 ->update(['generated_page_version_id' => $newVersion->id]);
 
+            $published = $this->settlePublicationAfterManualEdit($page, $newVersion, $actor);
+
             Log::info('[PROCYNIA][WIKI_WORKING_VERSION_EDIT] Manual edit saved.', [
                 'page_id' => (int) $page->id,
                 'previous_page_version_id' => (int) $current->id,
@@ -236,6 +238,7 @@ class EnterpriseWikiClaimContentRepairService
                 'copied_claims' => count($copiedClaimIds),
                 'dropped_claims' => count($droppedClaimIds),
                 'edited_by_user_id' => (int) $actor->id,
+                'published_directly' => $published,
             ]);
 
             return [
@@ -244,8 +247,69 @@ class EnterpriseWikiClaimContentRepairService
                 'changed_content_block_keys' => array_values($changedBlockKeys),
                 'copied_claim_ids' => $copiedClaimIds,
                 'dropped_claim_ids' => $droppedClaimIds,
+                'published_directly' => $published,
             ];
         });
+    }
+
+    /**
+     * What a manual edit does to the page's publication, once the new version exists.
+     *
+     * Two cases, and the difference is authority over the whole article — canApproveWikiPages(),
+     * the same check approve() uses. Nothing new is introduced: QA and document ownership answer
+     * different questions (claims, and one source document) and neither confers it.
+     *
+     * AUTHORITATIVE. A Wiki approver editing an article that is already published has nobody above
+     * them to hand it to. Requiring them to submit it to themselves is impossible anyway — submit()
+     * refuses a reviewer who is the submitter — so their save IS the approval, and the page keeps
+     * serving current text instead of quietly reverting readers to the older published version.
+     *
+     * EVERYONE ELSE. The previously published version keeps serving, and the new one has to go
+     * through review. The page is returned to draft to make that possible: submit() only accepts a
+     * draft page, so an approved page left as-is could be edited but never resubmitted — the
+     * working version had no route forward at all.
+     *
+     * Deliberately narrow:
+     * - A page that was never published is untouched. First publication follows the ordinary flow
+     *   however senior the editor is; "saving is approval" only makes sense for an article that has
+     *   already been through it once.
+     * - Only a page at rest (approved) is affected. A page in review has a named reviewer holding
+     *   an open handover, and neither publishing under them nor cancelling it belongs here.
+     * - Only this manual-edit path. Automated repair and ingest reach the writer by other routes
+     *   and keep going through review.
+     */
+    private function settlePublicationAfterManualEdit(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $newVersion,
+        User $actor,
+    ): bool {
+        // Re-read rather than trust the instance the request loaded: writeNewCurrentVersion() holds
+        // the page row lock for the rest of this transaction, so this sees the settled state.
+        $locked = EnterpriseWikiPage::query()->whereKey($page->id)->first();
+
+        if (! $locked instanceof EnterpriseWikiPage
+            || $locked->published_version_id === null
+            || $locked->status !== EnterpriseWikiPage::STATUS_APPROVED) {
+            return false;
+        }
+
+        if (! $actor->canApproveWikiPages()) {
+            // published_version_id is left alone on purpose: the approved version keeps serving
+            // readers and tender drafting until someone approves this one.
+            $locked->forceFill(['status' => EnterpriseWikiPage::STATUS_DRAFT])->save();
+
+            return false;
+        }
+
+        // Status stays approved; the pointer moves. Earlier versions are untouched, and the page
+        // records who published this one and when, which is the same trail approve() leaves.
+        $locked->forceFill([
+            'published_version_id' => $newVersion->id,
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => $actor->id,
+        ])->save();
+
+        return true;
     }
 
     /**
