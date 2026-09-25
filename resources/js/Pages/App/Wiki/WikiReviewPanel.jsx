@@ -160,11 +160,78 @@ function PublicationBlock({ publication, tw }) {
     );
 }
 
+/**
+ * Who was asked to quality assure this version, and how far that work has got.
+ *
+ * Kept visibly apart from the publication block above it, because the two answer different
+ * questions and conflating them is the mistake the whole role model exists to prevent: QA
+ * contributes to quality, the Wiki approver decides whether the page is published. An unassigned
+ * page is an ordinary page — QA is support, never a step the page is waiting on.
+ *
+ * Progress is the claims themselves. A version with no claims has nothing to quality assure, and
+ * says so rather than offering work that does not exist.
+ */
+function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
+    if (! qaAssignment) {
+        return null;
+    }
+
+    const claims = qaAssignment.claims ?? { total: 0, approved: 0, rejected: 0, pending: 0 };
+    const assignee = qaAssignment.assignee;
+    const canAssign = qaAssignment.can_assign && (qaAssignment.eligible_qa_users ?? []).length > 0;
+
+    // Nothing to say: no claims to check and nobody asked to check them.
+    if (claims.total === 0 && ! assignee && ! qaAssignment.can_assign) {
+        return null;
+    }
+
+    return (
+        <div className="space-y-2 border-b border-slate-100 pb-4" data-testid="wiki-qa-assignment">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {tw.qa_heading ?? 'Kvalitetssikring'}
+                </span>
+                <span className="text-base text-slate-900" data-testid="wiki-qa-assignee">
+                    {assignee
+                        ? assignee.name
+                        : (tw.qa_unassigned ?? 'Ikke tildelt')}
+                </span>
+
+                {canAssign && (
+                    <button
+                        ref={triggerRef}
+                        type="button"
+                        disabled={busy}
+                        onClick={onOpen}
+                        className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {assignee ? (tw.qa_change_button ?? 'Endre QA') : (tw.qa_assign_button ?? 'Send til QA')}
+                    </button>
+                )}
+            </div>
+
+            <p className="text-base text-slate-600" data-testid="wiki-qa-progress">
+                {claims.total === 0
+                    ? (tw.qa_no_claims ?? 'Ingen påstander å kvalitetssikre')
+                    : (tw.qa_claims_progress ?? ':approved av :total påstander godkjent')
+                        .replace(':approved', claims.approved ?? 0)
+                        .replace(':total', claims.total ?? 0)}
+                {claims.rejected > 0 && (
+                    <span className="ml-2 text-amber-700">
+                        {(tw.qa_claims_rejected ?? ':count avvist').replace(':count', claims.rejected)}
+                    </span>
+                )}
+            </p>
+        </div>
+    );
+}
+
 export default function WikiReviewPanel({
     page,
     currentVersion,
     reviewAssignment,
     publication = null,
+    qaAssignment = null,
     tw = {},
     isSystemOwner = false,
     currentUserId = null,
@@ -175,13 +242,17 @@ export default function WikiReviewPanel({
 }) {
     const [processing, setProcessing] = useState(null);
     const [isSubmitOpen, setIsSubmitOpen] = useState(false);
+    const [isQaOpen, setIsQaOpen] = useState(false);
     const [reviewerId, setReviewerId] = useState('');
+    const [qaUserId, setQaUserId] = useState('');
     const [changesTarget, setChangesTarget] = useState(null);
     const [reason, setReason] = useState('');
     const [showHistory, setShowHistory] = useState(false);
 
     const submitTriggerRef = useRef(null);
     const reviewerSelectRef = useRef(null);
+    const qaTriggerRef = useRef(null);
+    const qaSelectRef = useRef(null);
     const reasonRef = useRef(null);
 
     if (! reviewAssignment) {
@@ -221,6 +292,7 @@ export default function WikiReviewPanel({
             onFinish: () => setProcessing(null),
             onSuccess: () => {
                 setIsSubmitOpen(false);
+                setIsQaOpen(false);
                 setChangesTarget(null);
                 setReason('');
             },
@@ -229,6 +301,7 @@ export default function WikiReviewPanel({
 
     const submit = () => run('submit', `/app/wiki/${page.slug}/submit`, { reviewer_user_id: Number(reviewerId) });
     const reopen = () => run('reopen', `/app/wiki/${page.slug}/submit`);
+    const assignQa = () => run('qa', `/app/wiki/${page.slug}/qa-assignment`, { qa_user_id: Number(qaUserId) });
     const approve = () => run('approve', `/app/wiki/${page.slug}/approve`);
     const approveRequirement = (id) => run(`req-${id}`, `/app/wiki/${page.slug}/document-owner-approvals/${id}/approve`);
 
@@ -252,6 +325,17 @@ export default function WikiReviewPanel({
     return (
         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
             <PublicationBlock publication={publication} tw={tw} />
+
+            <QaAssignmentBlock
+                qaAssignment={qaAssignment}
+                tw={tw}
+                busy={busy}
+                triggerRef={qaTriggerRef}
+                onOpen={() => {
+                    setQaUserId(qaAssignment?.assignee?.id ? String(qaAssignment.assignee.id) : '');
+                    setIsQaOpen(true);
+                }}
+            />
 
             {/* What readers get versus what is being worked on. The single most misread thing on
                 this page, so it comes first and is stated plainly. */}
@@ -493,6 +577,48 @@ export default function WikiReviewPanel({
             )}
 
             {/* Choosing who takes over. Never implicit, even when only one person is possible. */}
+            <ActionDialog
+                isOpen={isQaOpen}
+                onClose={() => setIsQaOpen(false)}
+                closeDisabled={busy}
+                titleId="wiki-qa-title"
+                initialFocusRef={qaSelectRef}
+                returnFocusRef={qaTriggerRef}
+            >
+                <h2 id="wiki-qa-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                    {tw.qa_assign_button ?? 'Send til QA'}
+                </h2>
+                <p className="mt-2 text-base leading-6 text-slate-600">
+                    {tw.qa_assign_description
+                        ?? 'Velg hvem som skal kvalitetssikre påstandene i denne versjonen. Vedkommende får beskjed. Kvalitetssikring er støtte i arbeidet og kreves ikke for å publisere siden.'}
+                </p>
+
+                <label className="mt-4 block space-y-1.5" htmlFor="wiki-qa-user">
+                    <span className="text-base font-medium text-slate-800">{tw.qa_heading ?? 'Kvalitetssikring'}</span>
+                    <select
+                        ref={qaSelectRef}
+                        id="wiki-qa-user"
+                        value={qaUserId}
+                        onChange={(event) => setQaUserId(event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                    >
+                        <option value="">{tw.qa_choose_user ?? 'Velg kvalitetssikrer'}</option>
+                        {(qaAssignment?.eligible_qa_users ?? []).map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+                        ))}
+                    </select>
+                </label>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                    <button type="button" disabled={busy || qaUserId === ''} onClick={assignQa} className={PRIMARY_ACTION}>
+                        {tw.qa_send_button ?? 'Send'}
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => setIsQaOpen(false)} className={SECONDARY_ACTION}>
+                        {tw.cancel ?? 'Avbryt'}
+                    </button>
+                </div>
+            </ActionDialog>
+
             <ActionDialog
                 isOpen={isSubmitOpen}
                 onClose={() => setIsSubmitOpen(false)}

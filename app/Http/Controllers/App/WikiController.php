@@ -1413,7 +1413,7 @@ class WikiController extends Controller
 
         // reviewer/submittedBy are read further down for the review payload anyway; loading them
         // with the version turns two lazy lookups into one eager pair.
-        $currentVersion = $page->currentVersion()->with(['reviewer', 'submittedBy'])->first();
+        $currentVersion = $page->currentVersion()->with(['reviewer', 'submittedBy', 'qaAssignee', 'qaAssignedBy'])->first();
         $canApproveWikiClaims = $user?->isSystemOwner() || $user?->canApproveWikiClaims();
 
         // Read access is not gated by page status: any authorized user of this customer's
@@ -1795,6 +1795,10 @@ class WikiController extends Controller
                     : 'no_working_version',
                 'changes_requested' => $this->changesRequestedPayload($page, $currentVersion),
             ],
+            // Who was asked to quality assure this version, separate from who reviews the page.
+            // QA contributes to quality; the Wiki approver decides. Keeping them apart in the
+            // payload is what keeps them apart on the page.
+            'qa_assignment' => $this->qaAssignmentPayload($page, $currentVersion, $user, $claimCollection),
             // Where the page stands and what has to happen next, in one place. Built from the same
             // presenter the page list uses, but given what only the detail view knows — whether
             // this viewer may submit, whether a reviewer can even be chosen, and whether it is
@@ -2822,6 +2826,156 @@ class WikiController extends Controller
         $page->refresh();
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
+    }
+
+    /**
+     * Ask somebody to quality assure this version's claims.
+     *
+     * QA has always been a capability — you may approve and reject claims on a page you can open —
+     * and never a request. Nothing could say "this one is yours", so nothing ever told a QA user
+     * there was work waiting. This is that request, and it is the whole feature: the quality work
+     * itself already exists on the claims.
+     *
+     * Authorised by canSubmitEnterpriseWikiPage(), the same authority that decides who may hand the
+     * page to a reviewer. Asking for help with a page is the same kind of act as sending it onward,
+     * and it did not need a permission of its own.
+     *
+     * Emphatically NOT a publication gate. Nothing here touches reviewer_user_id, submitted_at,
+     * status or published_version_id, and submit()/approve() do not read these columns. A page with
+     * no QA assignment publishes exactly as it did before.
+     */
+    public function updateQaAssignment(Request $request, string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        if (! $user?->canSubmitEnterpriseWikiPage($page)) {
+            abort(403);
+        }
+
+        $version = $page->currentVersion()->first();
+
+        if (! $version instanceof EnterpriseWikiPageVersion) {
+            abort(422, 'Siden har ingen arbeidsversjon å kvalitetssikre.');
+        }
+
+        $assigneeId = (int) $request->validate([
+            'qa_user_id' => ['required', 'integer'],
+        ])['qa_user_id'];
+
+        $assignee = User::query()->find($assigneeId);
+
+        if (! $assignee instanceof User || ! $this->isEligibleQaUser($assignee, $page)) {
+            return redirect()->route('app.wiki.show', $page->slug)
+                ->with('error', 'Velg en gyldig kvalitetssikrer: en aktiv bruker hos samme kunde som kan godkjenne Wiki-påstander.');
+        }
+
+        // Re-assigning to the same person is a no-op rather than a second request. Rewriting the
+        // timestamp would make the dedupe key change and send them the same message again.
+        if ((int) $version->qa_user_id === $assignee->id) {
+            return redirect()->route('app.wiki.show', $page->slug)
+                ->with('success', sprintf('%s er allerede satt som kvalitetssikrer.', $assignee->name));
+        }
+
+        DB::transaction(function () use ($version, $assignee, $user, $page): void {
+            // Claims already approved or rejected keep their actor and timestamp. A handover changes
+            // who is asked next, never what somebody already decided.
+            $version->forceFill([
+                'qa_user_id' => $assignee->id,
+                'qa_assigned_at' => now(),
+                'qa_assigned_by_user_id' => $user->id,
+            ])->save();
+
+            $this->reviewNotifications->qaAssigned($page, $version->fresh(), $assignee, $user);
+        });
+
+        return redirect()->route('app.wiki.show', $page->slug)
+            ->with('success', sprintf('%s er satt som kvalitetssikrer.', $assignee->name));
+    }
+
+    /**
+     * Whether this person may be asked to quality assure the page.
+     *
+     * canApproveWikiClaims() is the authority, not is_qa on its own: the permission matrix is what
+     * decides, and it grants the claim permission to System Owner plus the QA capability by
+     * default. A Contributor who is QA therefore qualifies, which is the ordinary case.
+     */
+    private function isEligibleQaUser(User $candidate, EnterpriseWikiPage $page): bool
+    {
+        return $candidate->is_active
+            && (int) $candidate->customer_id === (int) $page->customer_id
+            && $candidate->canApproveWikiClaims();
+    }
+
+    /**
+     * The people who could be asked to quality assure this page.
+     *
+     * The actor is NOT excluded. Unlike page review — where submit() refuses a reviewer who is the
+     * submitter, because approving your own submission defeats the check — QA is contribution, not
+     * authority. A lone QA user recording that the work is theirs is a true statement about who is
+     * doing it, and forbidding it would leave a one-person quality function unable to say anything.
+     *
+     * CAPABILITY_COLUMNS rather than a hand-written list: canApproveWikiClaims() reads the main
+     * role AND both supplemental capabilities, and a select that forgets one returns a confident
+     * wrong "no" — exactly the defect that hid every Wiki approver from the reviewer list.
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    private function eligibleQaUserOptions(EnterpriseWikiPage $page): array
+    {
+        return User::query()
+            ->where('customer_id', $page->customer_id)
+            ->where('is_active', true)
+            ->with('customer:id,permission_settings')
+            ->orderBy('name')
+            ->get(User::CAPABILITY_COLUMNS)
+            ->filter(fn (User $candidate): bool => $this->isEligibleQaUser($candidate, $page))
+            ->map(static fn (User $candidate): array => ['id' => (int) $candidate->id, 'name' => $candidate->name])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Who was asked to quality assure this version, and how far the work has got.
+     *
+     * Progress is derived from the claims rather than stored: pending, approved and rejected are
+     * already the record of what a QA user did, and a qa_status column would be a second copy of
+     * that truth, free to drift from it. Rejected is reported separately rather than folded into
+     * "done", because a rejected claim is an outcome somebody has to act on.
+     *
+     * @param  Collection<int, EnterpriseWikiClaim>  $claims
+     * @return array<string, mixed>
+     */
+    private function qaAssignmentPayload(
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $version,
+        User $user,
+        Collection $claims,
+    ): array {
+        $assignee = $version?->qaAssignee;
+        $assignedBy = $version?->qaAssignedBy;
+
+        return [
+            'assignee' => $assignee !== null ? ['id' => (int) $assignee->id, 'name' => $assignee->name] : null,
+            'assigned_at' => optional($version?->qa_assigned_at)?->toIso8601String(),
+            'assigned_by' => $assignedBy !== null ? ['id' => (int) $assignedBy->id, 'name' => $assignedBy->name] : null,
+            'can_assign' => $version !== null && $user->canSubmitEnterpriseWikiPage($page),
+            'assign_url' => route('app.wiki.qa-assignment.update', ['slug' => $page->slug], false),
+            'eligible_qa_users' => $version !== null && $user->canSubmitEnterpriseWikiPage($page)
+                ? $this->eligibleQaUserOptions($page)
+                : [],
+            'claims' => [
+                'total' => $claims->count(),
+                'approved' => $claims->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED)->count(),
+                'rejected' => $claims->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED)->count(),
+                'pending' => $claims->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)->count(),
+            ],
+        ];
     }
 
     /**

@@ -32,6 +32,9 @@ class EnterpriseWikiPageVersion extends Model
         'submitted_by_user_id',
         'submitted_at',
         'reviewer_user_id',
+        'qa_user_id',
+        'qa_assigned_at',
+        'qa_assigned_by_user_id',
     ];
 
     protected function casts(): array
@@ -46,6 +49,9 @@ class EnterpriseWikiPageVersion extends Model
             'submitted_by_user_id' => 'integer',
             'submitted_at' => 'datetime',
             'reviewer_user_id' => 'integer',
+            'qa_user_id' => 'integer',
+            'qa_assigned_at' => 'datetime',
+            'qa_assigned_by_user_id' => 'integer',
         ];
     }
 
@@ -64,6 +70,21 @@ class EnterpriseWikiPageVersion extends Model
     public function isAwaitingReview(): bool
     {
         return $this->reviewer_user_id !== null;
+    }
+
+    /**
+     * Who was asked to quality assure this version's claims. Null is the ordinary state: QA is
+     * support, not a step, and most versions are never handed to anyone.
+     */
+    public function qaAssignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'qa_user_id');
+    }
+
+    /** Who asked them. Kept so the notification can say who, and the page can show it. */
+    public function qaAssignedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'qa_assigned_by_user_id');
     }
 
     public function page(): BelongsTo

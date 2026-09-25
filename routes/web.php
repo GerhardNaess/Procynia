@@ -309,6 +309,9 @@ Route::prefix('app')
             Route::patch('/{slug}/working-version', [WikiController::class, 'updateWorkingVersion'])->name('working-version.update');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
+            // Asking for quality assurance, which is separate from handing the page to a
+            // reviewer: QA contributes, the Wiki approver decides.
+            Route::patch('/{slug}/qa-assignment', [WikiController::class, 'updateQaAssignment'])->name('qa-assignment.update');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');
             Route::patch('/{slug}/reject', [WikiController::class, 'reject'])->name('reject');
             Route::patch('/{slug}/document-owner-approvals/{approval}/approve', [WikiDocumentOwnerApprovalController::class, 'approve'])->name('document-owner-approvals.approve');

@@ -37,6 +37,8 @@ class EnterpriseWikiReviewNotificationService
 
     public const EVENT_PAGE_PUBLISHED = 'wiki.page_published';
 
+    public const EVENT_QA_ASSIGNED = 'wiki.qa_assigned';
+
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovals,
     ) {}
@@ -71,6 +73,43 @@ class EnterpriseWikiReviewNotificationService
         }
 
         $this->notifyOutstandingDocumentOwners($page, $version, $submitter);
+    }
+
+    /**
+     * Somebody has been asked to quality assure this version's claims.
+     *
+     * The QA capability only ever said a person COULD do this work. Nothing said they should, so
+     * nobody was ever told — a quality step that depended on someone happening to look. This is the
+     * message that was missing.
+     *
+     * The assignment timestamp is in the dedupe key, which is what lets the same person be asked
+     * again later: handing QA from Gerhard to Alisan and back is two real requests, and the second
+     * one deserves to be heard. Re-saving the same assignment is not.
+     */
+    public function qaAssigned(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        User $assignee,
+        User $assignedBy,
+    ): void {
+        $this->notify(
+            $page,
+            $assignee,
+            self::EVENT_QA_ASSIGNED,
+            sprintf(
+                '%s:%d:%d:%d',
+                self::EVENT_QA_ASSIGNED,
+                $version->id,
+                $assignee->id,
+                optional($version->qa_assigned_at)?->getTimestamp() ?? 0,
+            ),
+            'Wiki-side til kvalitetssikring',
+            sprintf('«%s» er sendt til deg for kvalitetssikring av %s.', $page->title, $assignedBy->name),
+            ['page_version_id' => (int) $version->id, 'assigned_by_user_id' => (int) $assignedBy->id],
+            // Assigning QA to yourself is allowed — a lone QA user must be able to record that the
+            // work is theirs — but telling them what they just did is not news.
+            $assignedBy,
+        );
     }
 
     /**
