@@ -290,3 +290,46 @@ describe('the handover says what happened', () => {
         assert.match(panel, /onClose=\{\(\) => \{ setIsSubmitOpen\(false\); setActionError\(null\); \}\}/);
     });
 });
+
+/**
+ * The reviewer's two decisions, and the fact that they are two.
+ *
+ * Both used to render behind can_approve_final, which folds six unrelated conditions into one flag.
+ * So a reviewer waiting on a document owner — the ordinary case — opened the page and found no
+ * action at all, including the return that was the way out of the wait.
+ */
+describe('the reviewer can act on the page', () => {
+    test('the panel is told whose move it is', () => {
+        assert.match(panel, /const canSendBack = isInReview && reviewAssignment\.can_send_back === true;/);
+        assert.match(panel, /data-testid="wiki-review-turn"/);
+        assert.match(panel, /Denne siden venter på din gjennomgang/);
+    });
+
+    test('publishing and returning render on their own conditions', () => {
+        assert.match(panel, /\{isInReview && reviewAssignment\.can_approve_final && \(\s*\n\s*<button/);
+        assert.match(panel, /\{canSendBack && \(\s*\n\s*<button/);
+        // The old single branch that hid both together must be gone.
+        assert.ok(!panel.includes('{isInReview && reviewAssignment.can_approve_final && (\n                    <>'));
+    });
+
+    test('the return is named for what it does, not for the requirement action beside it', () => {
+        // "Be om endringer" is the document owner's objection to their own source. A reviewer
+        // sending the whole page back is a different act and reads as one.
+        assert.match(panel, /review_send_back \?\? 'Send tilbake'/);
+        assert.match(panel, /const isPageReturn = changesTarget === 'page';/);
+        assert.match(panel, /review_comment \?\? 'Kommentar'/);
+    });
+
+    test('a return still cannot be sent empty', () => {
+        assert.match(panel, /disabled=\{busy \|\| reasonTooShort\}/);
+        assert.match(panel, /if \(trimmed\.length < MIN_REASON\) return;/);
+    });
+
+    test('why publishing is unavailable is still said, next to what is available', () => {
+        assert.match(panel, /\{isInReview && ! reviewAssignment\.can_approve_final && blocker && \(/);
+    });
+
+    test('the returned page says when it was sent back, not only by whom', () => {
+        assert.match(panel, /formatReviewDate\(changes\.latest\.created_at\)/);
+    });
+});

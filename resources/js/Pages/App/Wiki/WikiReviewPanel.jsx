@@ -26,6 +26,19 @@ function ActionError({ message }) {
     );
 }
 
+/** When a review decision was made, in the same short form the rest of the app uses. */
+function formatReviewDate(value) {
+    if (! value) {
+        return null;
+    }
+
+    const parsed = new Date(value);
+
+    return Number.isNaN(parsed.getTime())
+        ? null
+        : new Intl.DateTimeFormat('nb-NO', { day: '2-digit', month: 'short', year: 'numeric' }).format(parsed);
+}
+
 const FALLBACK_ERROR = 'Handlingen kunne ikke fullføres. Last siden på nytt og prøv igjen.';
 
 /** The first message Laravel sent back, whatever field it was attached to. */
@@ -319,6 +332,12 @@ export default function WikiReviewPanel({
 
     const isReturned = page.status === 'rejected';
     const isInReview = page.status === 'pending_review';
+    // The two review decisions have different conditions and always did. Publishing waits for the
+    // document owners and refuses a version that changed after it was handed over; sending the page
+    // back waits for neither, and is the way out of both. Gating them on one flag hid the only
+    // action a blocked reviewer still had.
+    const canSendBack = isInReview && reviewAssignment.can_send_back === true;
+    const isMyReview = isInReview && (canSendBack || reviewAssignment.can_approve_final);
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
     const blocker = blockerMessage(reviewAssignment.final_approval_blocker, gate, tw);
@@ -386,6 +405,7 @@ export default function WikiReviewPanel({
 
     const busy = processing !== null;
     const reasonTooShort = reason.trim().length < MIN_REASON;
+    const isPageReturn = changesTarget === 'page';
 
     return (
         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
@@ -473,6 +493,14 @@ export default function WikiReviewPanel({
                         {changes.latest.actor_role === 'document_owner'
                             ? (tw.review_role_document_owner ?? 'dokumenteier')
                             : (tw.review_role_reviewer ?? 'kontrollør')}
+                        {/* When it was said. A page that went round twice reads very differently
+                            from one sent back this morning, and the owner cannot tell without it. */}
+                        {formatReviewDate(changes.latest.created_at) && (
+                            <>
+                                {' · '}
+                                {formatReviewDate(changes.latest.created_at)}
+                            </>
+                        )}
                     </p>
 
                     {changes.history.length > 1 && (
@@ -563,6 +591,24 @@ export default function WikiReviewPanel({
                 </div>
             )}
 
+            {/* Whose move it is, said before the actions rather than left to be inferred from which
+                buttons happen to be present. */}
+            {isMyReview && (
+                <div
+                    data-testid="wiki-review-turn"
+                    className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3"
+                >
+                    <p className="text-base font-semibold text-violet-900">
+                        {tw.review_your_turn ?? 'Denne siden venter på din gjennomgang.'}
+                    </p>
+                    {reviewAssignment.reviewer?.name && (
+                        <p className="mt-1 text-sm text-violet-800">
+                            {tw.review_reviewer ?? 'Kontrollør:'} {reviewAssignment.reviewer.name}
+                        </p>
+                    )}
+                </div>
+            )}
+
             {! isSubmitOpen && ! isQaOpen && changesTarget === null && <ActionError message={actionError} />}
 
             {/* Actions. */}
@@ -619,27 +665,31 @@ export default function WikiReviewPanel({
                 )}
 
                 {isInReview && reviewAssignment.can_approve_final && (
-                    <>
-                        <button
-                            type="button"
-                            disabled={busy}
-                            onClick={approve}
-                            className={PRIMARY_ACTION}
-                        >
-                            {isSystemOwner && reviewAssignment.reviewer && currentUserId !== null
-                                && reviewAssignment.reviewer.id !== currentUserId
-                                ? (tw.review_approve_as_system_owner ?? 'Godkjenn og publiser som System Owner')
-                                : (tw.review_approve_and_publish ?? 'Godkjenn og publiser')}
-                        </button>
-                        <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => { setChangesTarget('page'); setReason(''); }}
-                            className={WARNING_ACTION}
-                        >
-                            {tw.review_request_changes ?? 'Be om endringer'}
-                        </button>
-                    </>
+                    <button
+                        type="button"
+                        disabled={busy}
+                        onClick={approve}
+                        className={PRIMARY_ACTION}
+                    >
+                        {isSystemOwner && reviewAssignment.reviewer && currentUserId !== null
+                            && reviewAssignment.reviewer.id !== currentUserId
+                            ? (tw.review_approve_as_system_owner ?? 'Godkjenn og publiser som System Owner')
+                            : (tw.review_approve_and_publish ?? 'Godkjenn og publiser')}
+                    </button>
+                )}
+
+                {/* Its own condition, because the backend has its own. A reviewer waiting on a
+                    document owner, or holding a version that moved under them, can still send the
+                    page back — and until now that was the one thing the panel never offered. */}
+                {canSendBack && (
+                    <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => { setActionError(null); setChangesTarget('page'); setReason(''); }}
+                        className={WARNING_ACTION}
+                    >
+                        {tw.review_send_back ?? 'Send tilbake'}
+                    </button>
                 )}
             </div>
 
@@ -737,16 +787,21 @@ export default function WikiReviewPanel({
                 </div>
             </ActionDialog>
 
-            {/* Asking for changes. The reason is what the owner works from, so it is required. */}
+            {/* Asking for changes. The reason is what the owner works from, so it is required.
+                Two callers, deliberately worded apart: a reviewer sends the whole page back, a
+                document owner objects to how their own source was used. Same dialog, because the
+                thing being written is the same — a short sentence the owner has to act on. */}
             <ActionDialog
                 isOpen={changesTarget !== null}
-                onClose={() => setChangesTarget(null)}
+                onClose={() => { setChangesTarget(null); setActionError(null); }}
                 closeDisabled={busy}
                 titleId="wiki-changes-title"
                 initialFocusRef={reasonRef}
             >
                 <h2 id="wiki-changes-title" className="text-xl font-semibold tracking-tight text-slate-950">
-                    {tw.review_request_changes ?? 'Be om endringer'}
+                    {isPageReturn
+                        ? (tw.review_send_back ?? 'Send tilbake')
+                        : (tw.review_request_changes ?? 'Be om endringer')}
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">
                     {changesTarget === 'page'
@@ -755,7 +810,9 @@ export default function WikiReviewPanel({
                 </p>
 
                 <label className="mt-4 block space-y-1.5" htmlFor="wiki-change-reason">
-                    <span className="text-base font-medium text-slate-800">{tw.review_reason ?? 'Begrunnelse'}</span>
+                    <span className="text-base font-medium text-slate-800">
+                        {isPageReturn ? (tw.review_comment ?? 'Kommentar') : (tw.review_reason ?? 'Begrunnelse')}
+                    </span>
                     <textarea
                         ref={reasonRef}
                         id="wiki-change-reason"
@@ -767,15 +824,26 @@ export default function WikiReviewPanel({
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                     />
                     <span id="wiki-change-reason-help" className="block text-sm text-slate-500">
-                        {tw.review_reason_help ?? 'Beskriv hva som må rettes.'} {reason.trim().length}/{MAX_REASON}
+                        {isPageReturn
+                            ? (tw.review_comment_help ?? 'Forklar hva sideeier må endre før siden kan sendes inn på nytt.')
+                            : (tw.review_reason_help ?? 'Beskriv hva som må rettes.')}
+                        {' '}{reason.trim().length}/{MAX_REASON}
                     </span>
                 </label>
 
+                {actionError && (
+                    <div className="mt-4">
+                        <ActionError message={actionError} />
+                    </div>
+                )}
+
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" disabled={busy || reasonTooShort} onClick={requestChanges} className={WARNING_ACTION}>
-                        {tw.review_request_changes ?? 'Be om endringer'}
+                        {isPageReturn
+                            ? (tw.review_send_back ?? 'Send tilbake')
+                            : (tw.review_request_changes ?? 'Be om endringer')}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => setChangesTarget(null)} className={SECONDARY_ACTION}>
+                    <button type="button" disabled={busy} onClick={() => { setChangesTarget(null); setActionError(null); }} className={SECONDARY_ACTION}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>

@@ -1790,6 +1790,16 @@ class WikiController extends Controller
                 'working_version_id' => $currentVersion !== null ? (int) $currentVersion->id : null,
                 'can_approve_final' => $currentVersion !== null
                     && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
+                // Sending a page back is NOT the same decision as publishing it, and it never had
+                // the same conditions. reject() asks only for the capability, a page in review and
+                // the person whose turn it is — no document-owner sign-off, and deliberately no
+                // stale-version check, because refusing a return would leave a page that cannot be
+                // approved, cannot be sent back and cannot be resubmitted.
+                //
+                // The panel used to gate both actions on can_approve_final, so an open source-owner
+                // gate hid the one action that was still available and was the way out of it.
+                'can_send_back' => $currentVersion !== null
+                    && $this->mayActOnCurrentVersion($user, $page, $currentVersion),
                 'final_approval_blocker' => $currentVersion !== null
                     ? $this->finalApprovalBlocker($page, $currentVersion, $user)
                     : 'no_working_version',
@@ -3242,6 +3252,32 @@ class WikiController extends Controller
     }
 
     /**
+     * Whose turn is it on this version — the question both the endpoint and the page have to answer.
+     *
+     * Shared so that what the panel offers and what reject() accepts cannot drift apart. The panel
+     * calls it to decide whether to show "Send tilbake"; the endpoint calls it to decide whether to
+     * honour one.
+     *
+     * An unsubmitted version names no reviewer, so "whose turn is it" has no answer from the version
+     * itself. The capability plus the page's own ownership is what remains, and a System Owner
+     * always qualifies.
+     */
+    private function mayActOnCurrentVersion(User $user, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version): bool
+    {
+        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return false;
+        }
+
+        if (! $user->canApproveWikiPages()) {
+            return false;
+        }
+
+        return $version->reviewer_user_id !== null
+            ? $user->canReviewEnterpriseWikiVersion($version, $page)
+            : true;
+    }
+
+    /**
      * The part of the review check that applies to ANY review decision: there has to be a version,
      * and this user has to be the one whose turn it is.
      *
@@ -3256,14 +3292,7 @@ class WikiController extends Controller
             abort(422, 'Siden har ingen arbeidsversjon å vurdere.');
         }
 
-        // An unsubmitted version names no reviewer, so "whose turn is it" has no answer from the
-        // version itself. The capability plus the page's own ownership is what remains, and a
-        // System Owner always qualifies.
-        $assigned = $version->reviewer_user_id !== null
-            ? $user->canReviewEnterpriseWikiVersion($version, $page)
-            : $user->canApproveWikiPages();
-
-        if ($assigned) {
+        if ($this->mayActOnCurrentVersion($user, $page, $version)) {
             return $version;
         }
 
