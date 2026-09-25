@@ -65,6 +65,7 @@ class EnterpriseWikiPatchApplicationService
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
+        private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
     ) {}
 
     /**
@@ -289,6 +290,11 @@ class EnterpriseWikiPatchApplicationService
                 'content_blocks_json' => $blocks,
                 'generated_by_model' => self::GENERATED_BY,
             ]);
+
+            // A patch target is an existing page, often one already published. The patched section
+            // is corrected knowledge, so the page returns to draft and the approved version keeps
+            // serving until a person approves the correction. Deterministic does not mean approved.
+            $this->publicationSettlement->afterAutomatedContentChange((int) $page->id);
 
             // The pivot is created WITH generated_page_version_id already set, so it can never be
             // picked up as pending work by EnterpriseWikiDocumentFlowService::beginGeneratingPages()

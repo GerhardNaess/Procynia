@@ -56,6 +56,7 @@ class EnterpriseWikiLinkSemanticRepairService
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
         private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
+        private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
     ) {}
 
     /**
@@ -490,14 +491,20 @@ class EnterpriseWikiLinkSemanticRepairService
             // Write and restore are ONE unit: if the block provenance cannot be reconstructed the
             // whole promotion is rolled back, and the page keeps the version that still has its
             // image figures, source provenance and claim anchors (run 54, page 191).
-            return $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
+            $version = $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
                 $pageId,
                 [
                     'content_markdown' => $markdown,
                     'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
                 ],
-                fn (EnterpriseWikiPageVersion $version) => $this->restoreBlockProvenance($pageId, $version),
+                fn (EnterpriseWikiPageVersion $written) => $this->restoreBlockProvenance($pageId, $written),
             );
+
+            // Links added, removed or re-anchored in the prose change what the article says and
+            // where it points, so a published page returns to draft for approval.
+            $this->publicationSettlement->afterAutomatedContentChange($pageId);
+
+            return $version;
         });
     }
 

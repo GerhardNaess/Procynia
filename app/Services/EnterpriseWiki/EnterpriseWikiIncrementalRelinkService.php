@@ -65,6 +65,7 @@ class EnterpriseWikiIncrementalRelinkService
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
+        private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
     ) {}
 
     /**
@@ -428,14 +429,21 @@ class EnterpriseWikiIncrementalRelinkService
             // reconstruct the block provenance it would otherwise drop — image figures, source
             // provenance and claim anchors all live there. The writer rolls the promotion back if
             // reconstruction is not possible, so a relink can never cost a page its blocks.
-            return $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
+            $version = $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
                 $pageId,
                 [
                     'content_markdown' => $markdown,
                     'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
                 ],
-                fn (EnterpriseWikiPageVersion $version) => $this->blockProvenanceRepairService->repairPageVersion($pageId, $version),
+                fn (EnterpriseWikiPageVersion $written) => $this->blockProvenanceRepairService->repairPageVersion($pageId, $written),
             );
+
+            // Candidates are ordinary customer pages picked outside this run, so a published one is
+            // the normal case rather than the exception. A wikilink woven into its prose is a change
+            // the reader sees: the page returns to draft and its approved version keeps serving.
+            $this->publicationSettlement->afterAutomatedContentChange($pageId);
+
+            return $version;
         });
     }
 

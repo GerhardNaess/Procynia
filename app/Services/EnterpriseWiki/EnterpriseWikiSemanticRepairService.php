@@ -32,6 +32,7 @@ class EnterpriseWikiSemanticRepairService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
+        private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
     ) {}
 
     /**
@@ -163,6 +164,10 @@ class EnterpriseWikiSemanticRepairService
         );
 
         $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
+
+        // An automated content change never publishes itself: a published page returns to
+        // draft, and its approved version keeps serving until a person approves this one.
+        $this->publicationSettlement->afterAutomatedContentChange($pageId);
 
         return $version;
     }

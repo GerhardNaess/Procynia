@@ -40,6 +40,7 @@ class EnterpriseWikiDocumentWithdrawalService
     public function __construct(
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiLinkParser $linkParser,
+        private readonly EnterpriseWikiPublicationSettlementService $publicationSettlement,
     ) {}
 
     /**
@@ -391,6 +392,10 @@ class EnterpriseWikiDocumentWithdrawalService
                 'content_blocks_json' => $renumbered,
                 'generated_by_model' => $version->generated_by_model,
             ]);
+
+            // Withdrawing a deleted document's paragraphs removes knowledge the page asserted, so
+            // a published page returns to draft rather than publishing the shorter text itself.
+            $this->publicationSettlement->afterAutomatedContentChange((int) $version->enterprise_wiki_page_id);
         } catch (\RuntimeException $e) {
             // The writer's own invariants (block provenance, best-practice review, atomic provenance)
             // are the last word on whether a version may become current. A withdrawal that cannot

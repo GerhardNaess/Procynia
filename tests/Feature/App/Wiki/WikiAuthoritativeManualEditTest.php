@@ -188,30 +188,41 @@ class WikiAuthoritativeManualEditTest extends TestCase
     }
 
     /**
-     * Ingest and automated repair write versions through their own routes and never call the manual
-     * edit path, so nothing they produce can publish itself. Asserted structurally because the
-     * alternative — running an ingest here — would test the pipeline rather than this rule.
+     * Publishing by saving is the manual path's privilege alone.
+     *
+     * Asserted structurally because the alternative — running an ingest here — would test the
+     * pipeline rather than this rule. afterManualEdit() is the only method that can move
+     * published_version_id without a review, so what matters is that exactly one caller reaches it
+     * and that caller is the manual working-version edit.
      */
     public function test_only_the_manual_edit_path_can_publish_directly(): void
     {
-        $service = file_get_contents(app_path('Services/EnterpriseWiki/EnterpriseWikiClaimContentRepairService.php'));
+        $settlement = file_get_contents(app_path('Services/EnterpriseWiki/EnterpriseWikiPublicationSettlementService.php'));
 
-        $this->assertSame(
-            1,
-            substr_count($service, 'settlePublicationAfterManualEdit('.PHP_EOL),
-            'publication settlement must have exactly one call site',
+        $this->assertStringContainsString(
+            "'published_version_id' => \$newVersion->id,",
+            $settlement,
+            'afterManualEdit() is where publication moves without a review',
         );
 
-        $callSite = substr($service, 0, strpos($service, '$published = $this->settlePublicationAfterManualEdit('));
+        $callers = [];
+
+        foreach (glob(app_path('Services/EnterpriseWiki/*.php')) as $path) {
+            if (str_contains(file_get_contents($path), 'afterManualEdit(')
+                && ! str_ends_with($path, 'EnterpriseWikiPublicationSettlementService.php')) {
+                $callers[] = basename($path);
+            }
+        }
+
+        $this->assertSame(['EnterpriseWikiClaimContentRepairService.php'], $callers);
+
+        $service = file_get_contents(app_path('Services/EnterpriseWiki/EnterpriseWikiClaimContentRepairService.php'));
+        $callSite = substr($service, 0, strpos($service, '$this->publicationSettlement->afterManualEdit('));
+
         $this->assertStringContainsString(
             'public function applyWorkingVersionBlockEdits(',
             $callSite,
-            'and it must be inside the manual working-version edit, not the automated repair path',
-        );
-        $this->assertStringNotContainsString(
-            'public function attempt(',
-            $callSite,
-            'the automated repair entry point must come after it, never contain it',
+            'and it sits inside the manual working-version edit',
         );
     }
 

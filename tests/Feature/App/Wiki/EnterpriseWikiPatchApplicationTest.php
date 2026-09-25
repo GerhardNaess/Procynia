@@ -85,6 +85,44 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
         $this->assertStringContainsString(self::OLD_A, $before->fresh()->content_markdown, 'history keeps the old value');
     }
 
+    /**
+     * A patch target is an existing page, often one already published. The correction is knowledge
+     * the reader gets, so the page goes back for approval rather than publishing itself —
+     * deterministic does not mean approved.
+     */
+    public function test_patching_a_published_page_returns_it_for_approval(): void
+    {
+        [$run, $pages] = $this->scenario([$this->replaceTargetA()]);
+        $page = $pages['article'];
+        $publishedVersionId = (int) $page->currentVersion->id;
+        $page->forceFill([
+            'status' => EnterpriseWikiPage::STATUS_APPROVED,
+            'published_version_id' => $publishedVersionId,
+        ])->save();
+
+        $this->service()->applyForRun($run);
+
+        $patched = $page->fresh();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $patched->status);
+        $this->assertSame($publishedVersionId, (int) $patched->published_version_id, 'readers still get the approved text');
+        $this->assertNotSame($publishedVersionId, (int) $patched->currentVersion->id, 'the patch is a working version');
+    }
+
+    /** Nothing was published, so there is nothing to protect and nothing to change. */
+    public function test_patching_an_unpublished_page_leaves_its_status_alone(): void
+    {
+        [$run, $pages] = $this->scenario([$this->replaceTargetA()]);
+        $statusBefore = $pages['article']->status;
+
+        $this->service()->applyForRun($run);
+
+        $patched = $pages['article']->fresh();
+
+        $this->assertNull($patched->published_version_id);
+        $this->assertSame($statusBefore, $patched->status);
+    }
+
     public function test_patched_version_is_marked_as_a_patch_not_a_generation(): void
     {
         [$run, $pages] = $this->scenario([$this->replaceTargetA()]);
