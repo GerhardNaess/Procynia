@@ -27,13 +27,24 @@ function formatNotificationTime(value, locale) {
     }).format(new Date(value));
 }
 
+/**
+ * Context labels for notifications that are not about a specific case.
+ *
+ * A case notification names its case, which is the most useful thing it can say. The rest fall back
+ * to prettifying the event type, which reads badly for anything with a dot in it — so the types
+ * that need a human name get one here.
+ */
+const EVENT_TYPE_LABELS = {
+    'watch_profile.match_found': 'Watch list',
+};
+
 function notificationContextLabel(notification) {
     if (notification?.saved_notice?.title) {
         return `Sak: ${notification.saved_notice.title}`;
     }
 
     if (notification?.event_type) {
-        return notification.event_type
+        return EVENT_TYPE_LABELS[notification.event_type] ?? notification.event_type
             .split('_')
             .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
             .join(' ');
@@ -177,7 +188,7 @@ export default function NotificationBell({
 
                                         <div className="mt-3 flex items-center justify-between gap-3 text-sm text-slate-600">
                                             <div className="min-w-0 truncate">
-                                                {notification.saved_notice?.title ? notificationContextLabel(notification) : notification.event_type ?? 'Varsel'}
+                                                {notificationContextLabel(notification)}
                                             </div>
                                             <time dateTime={notification.created_at ?? undefined} className="shrink-0">
                                                 {formatNotificationTime(notification.created_at, locale)}

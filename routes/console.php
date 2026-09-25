@@ -21,6 +21,12 @@ if (config('doffin.watch_inbox_discovery_enabled')) {
         ->withoutOverlapping();
 }
 
+// Deadlines and stalled cases are the passage of time rather than anything a user does, so they
+// need something to look. Early enough that the alert is waiting when people start work.
+Schedule::command('notifications:bid-workflow')
+    ->dailyAt('06:30')
+    ->withoutOverlapping();
+
 Schedule::command('ops:scheduler-heartbeat')->everyMinute();
 // Legacy Compose backup. Only scheduled where the runtime can actually execute it: the command ends
 // in scripts/backup-production.sh, which needs a Docker CLI and a Compose project. Azure Container

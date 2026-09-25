@@ -4,17 +4,17 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\SavedNotice;
-use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Services\SavedNoticeAccessService;
+use App\Services\SavedNoticeWorkflowSignals;
 use App\Support\CustomerContext;
 use Carbon\CarbonInterface;
-use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -24,8 +24,8 @@ class DashboardController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
-    ) {
-    }
+        private readonly SavedNoticeWorkflowSignals $workflowSignals,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -229,7 +229,7 @@ class DashboardController extends Controller
             ),
             $this->buildAttentionCategory(
                 'inactive-seven-days',
-                'Uten aktivitet siste 7 dager',
+                sprintf('Uten aktivitet siste %d dager', SavedNoticeWorkflowSignals::INACTIVE_DAYS),
                 'Saker som ikke har fått kommentarer eller innsendinger nylig.',
                 $this->buildInactiveSevenDaysAttentionItems($notices),
                 'warning',
@@ -260,7 +260,7 @@ class DashboardController extends Controller
     private function buildDeadlineSoonAttentionItems(array $deadlineItems): array
     {
         $deadlineStart = now()->startOfDay();
-        $deadlineLimit = now()->addDays(5)->endOfDay();
+        $deadlineLimit = now()->addDays(SavedNoticeWorkflowSignals::DEADLINE_SOON_DAYS)->endOfDay();
 
         return collect($deadlineItems)
             ->filter(function (array $item) use ($deadlineStart, $deadlineLimit): bool {
@@ -410,11 +410,7 @@ class DashboardController extends Controller
     private function buildInactiveSevenDaysAttentionItems(Collection $notices): array
     {
         return $notices
-            ->filter(function (SavedNotice $notice): bool {
-                $latestActivityAt = $this->latestSavedNoticeActivityAt($notice);
-
-                return $latestActivityAt === null || $latestActivityAt->lessThan(now()->subDays(7)->startOfDay());
-            })
+            ->filter(fn (SavedNotice $notice): bool => $this->workflowSignals->isInactive($notice))
             ->sortBy(function (SavedNotice $notice): int {
                 return $this->latestSavedNoticeActivityAt($notice)?->getTimestamp() ?? 0;
             })
@@ -490,17 +486,9 @@ class DashboardController extends Controller
      */
     private function deadlineEntriesForNotice(SavedNotice $notice): array
     {
-        // The official deadline IS the RFP submission deadline, so it is listed once, as "Frist".
-        // The legacy rfp_submission_deadline_at column is deliberately absent: it would produce a
-        // second entry for the same deadline, and nothing can edit it any more.
-        $definitions = [
-            'deadline' => 'Frist',
-            'questions_deadline_at' => 'Spørsmålsfrist',
-            'questions_rfi_deadline_at' => 'Spørsmål / RFI',
-            'rfi_submission_deadline_at' => 'RFI-innlevering',
-            'questions_rfp_deadline_at' => 'Spørsmål / RFP',
-            'award_date_at' => 'Tildeling',
-        ];
+        // Shared with the workflow notifications, so the cockpit and the alerts a user receives
+        // can never disagree about what counts as a deadline.
+        $definitions = SavedNoticeWorkflowSignals::DEADLINE_DEFINITIONS;
 
         $entries = [];
 
@@ -796,17 +784,7 @@ class DashboardController extends Controller
 
     private function latestSavedNoticeActivityAt(SavedNotice $notice): ?CarbonInterface
     {
-        $activityDates = collect([
-            $notice->updated_at,
-            $notice->phaseComments->max('created_at'),
-            $notice->submissions->max('submitted_at'),
-        ])->filter();
-
-        if ($activityDates->isEmpty()) {
-            return null;
-        }
-
-        return $activityDates->sortDesc()->first();
+        return $this->workflowSignals->latestActivityAt($notice);
     }
 
     private function pipelineStageCount(array $pipeline, string $stageKey): int

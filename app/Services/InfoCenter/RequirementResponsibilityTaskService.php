@@ -5,10 +5,15 @@ namespace App\Services\InfoCenter;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeInfoItem;
 use App\Models\User;
+use App\Services\BidWorkflowNotificationService;
 use Illuminate\Support\Str;
 
 class RequirementResponsibilityTaskService
 {
+    public function __construct(
+        private readonly BidWorkflowNotificationService $notifications,
+    ) {}
+
     /**
      * Keep one canonical info-center task in sync with the current assignee for a requirement.
      * Open tasks are updated in place, duplicates are collapsed, and removed assignees close the task.
@@ -32,13 +37,22 @@ class RequirementResponsibilityTaskService
             return null;
         }
 
+        // Whether responsibility MOVED is decided before the write, because afterwards the row no
+        // longer remembers who held it. An unchanged assignee re-saving the same task is not news.
+        $previousOwnerId = $task?->owner_user_id !== null ? (int) $task->owner_user_id : null;
+        $responsibilityMoved = $previousOwnerId !== (int) $requirement->assigned_user_id;
+
         if ($task === null) {
-            $task = new SavedNoticeInfoItem();
+            $task = new SavedNoticeInfoItem;
             $task->forceFill($this->openTaskAttributes($requirement, $actor));
             $task->save();
         } else {
             $task->forceFill($this->openTaskAttributes($requirement, $actor, $task));
             $task->save();
+        }
+
+        if ($responsibilityMoved) {
+            $this->notifications->taskAssigned($task, $actor);
         }
 
         foreach ($activeTasks->skip(1) as $duplicateTask) {

@@ -4,6 +4,7 @@ namespace App\Services\Doffin;
 
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
+use App\Services\BidWorkflowNotificationService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -15,8 +16,8 @@ class DoffinWatchProfileInboxDiscoveryService
     public function __construct(
         private readonly DoffinLiveSearchService $liveSearchService,
         private readonly DoffinImportControlService $importControlService,
-    ) {
-    }
+        private readonly BidWorkflowNotificationService $notifications,
+    ) {}
 
     public function run(?int $watchProfileId = null, string $trigger = 'manual'): array
     {
@@ -136,6 +137,11 @@ class DoffinWatchProfileInboxDiscoveryService
                 if (($result['state'] ?? null) === 'created') {
                     $summary['records_created']++;
                     $summary['created_record_ids'][] = $result['record_id'];
+
+                    // The one point where "new" is actually known: the insert, not the re-sighting.
+                    // A notice seen again on tomorrow's sweep takes the 'updated' branch and says
+                    // nothing, which is what keeps a standing watch from becoming a daily alarm.
+                    $this->notifyNewMatch($watchProfile, (int) $result['record_id']);
                 }
 
                 if (($result['state'] ?? null) === 'updated') {
@@ -149,6 +155,15 @@ class DoffinWatchProfileInboxDiscoveryService
         } while ($page <= $lastPage && $hits->isNotEmpty());
 
         return $summary;
+    }
+
+    private function notifyNewMatch(WatchProfile $watchProfile, int $recordId): void
+    {
+        $record = WatchProfileInboxRecord::query()->find($recordId);
+
+        if ($record instanceof WatchProfileInboxRecord) {
+            $this->notifications->watchProfileMatched($watchProfile, $record);
+        }
     }
 
     private function upsertInboxRecord(WatchProfile $watchProfile, array $hit): ?array
