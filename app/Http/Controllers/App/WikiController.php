@@ -2731,8 +2731,7 @@ class WikiController extends Controller
             ->first() ?? abort(404);
 
         $this->assertPendingReview($page);
-        $this->assertMayReviewCurrentVersion($user, $page);
-        $this->assertSourceOwnersHaveSignedOff($page);
+        $this->assertMayFinalApprove($user, $page);
 
         // Everything above is a fast pre-check for a good error message. The decision itself is made
         // again under a row lock, because two reviewers — or a reviewer and a System Owner stepping
@@ -2745,8 +2744,7 @@ class WikiController extends Controller
                 ->first();
 
             $this->assertPendingReview($locked);
-            $this->assertMayReviewCurrentVersion($user, $locked);
-            $this->assertSourceOwnersHaveSignedOff($locked);
+            $this->assertMayFinalApprove($user, $locked);
 
             $workingVersion = $locked->currentVersion()->first();
 
@@ -2755,6 +2753,9 @@ class WikiController extends Controller
             if ($workingVersion === null) {
                 abort(422, 'Siden har ingen arbeidsversjon å godkjenne.');
             }
+
+            // Inside the lock, so the row the gate was read against is the row that gets settled.
+            $this->settleOwnSourceApprovals($workingVersion, $user);
 
             // Status and publication move together, in one write. The previously published version
             // stays in the table untouched — it simply stops being the one the page points at.
@@ -3071,10 +3072,15 @@ class WikiController extends Controller
                 || $version->submitted_by_user_id === null
                 || $version->submitted_at === null => 'missing_assignment',
             ! $user->canApproveWikiPages() => 'missing_capability',
-            $version->submitted_by_user_id !== null
+            // Reported separately from not_assigned because the two need different sentences: one
+            // is "somebody else is holding this", the other is "you cannot sign off your own work".
+            // A System Owner passes both — see canFinalApproveEnterpriseWikiVersion().
+            ! $user->isSystemOwner()
                 && (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
-            ! $user->canReviewEnterpriseWikiVersion($version, $page) => 'not_assigned',
-            ! $this->documentOwnerApprovalService->sourceOwnerGateForVersion($version)['ready'] => 'source_owners_pending',
+            ! $user->canFinalApproveEnterpriseWikiVersion($version, $page) => 'not_assigned',
+            // Read as this actor would settle it: a System Owner is not waiting on their own
+            // outstanding sign-off, because publishing settles it in the same action.
+            ! $this->documentOwnerApprovalService->sourceOwnerGateAsSettledBy($version, $user)['ready'] => 'source_owners_pending',
             default => null,
         };
     }
@@ -3180,32 +3186,79 @@ class WikiController extends Controller
     }
 
     /**
-     * Final approval waits for the document owners.
+     * The one check standing between a request and publication.
      *
-     * Each active approval row is one owner confirming that the content taken from their documents
-     * is represented correctly. Until every one of them has said so, the page is not ready to be
-     * published — and a rejection from any of them stops it outright.
+     * Deliberately reads finalApprovalBlocker() — the same function the page reads to decide what
+     * to offer — rather than re-expressing the rule. A separate chain here is how a button that
+     * lies gets built: the page would say one thing and the endpoint enforce another.
      *
-     * No bypass, System Owner included: a System Owner may decide an individual owner's row (that
-     * override exists and is recorded on the row itself, with is_override and overridden_by_user_id),
-     * but skipping rows nobody has answered has never been decided and is not invented here.
+     * The status code carries the distinction the caller needs. 403 is "not you"; 409 is "you, but
+     * not yet", which is the reviewer's cue to send the page back instead.
      */
-    private function assertSourceOwnersHaveSignedOff(EnterpriseWikiPage $page): void
+    private function assertMayFinalApprove(User $user, EnterpriseWikiPage $page): void
     {
         $version = $page->currentVersion()->first();
 
         if ($version === null) {
-            abort(422);
+            abort(422, 'Siden har ingen arbeidsversjon å vurdere.');
         }
 
-        $gate = $this->documentOwnerApprovalService->sourceOwnerGateForVersion($version);
+        $blocker = $this->finalApprovalBlocker($page, $version, $user);
 
-        if ($gate['ready']) {
+        if ($blocker === null) {
             return;
         }
 
-        // 409, not 403: the actor is allowed to review, the version is simply not ready yet.
-        abort(409, $this->sourceOwnerGateMessage($gate));
+        // Named owners rather than a generic refusal: whoever is blocked has to know who to ask.
+        if ($blocker === 'source_owners_pending') {
+            abort(409, $this->sourceOwnerGateMessage(
+                $this->documentOwnerApprovalService->sourceOwnerGateAsSettledBy($version, $user),
+            ));
+        }
+
+        abort(match ($blocker) {
+            'missing_assignment' => 409,
+            'not_in_review' => 422,
+            default => 403,
+        }, match ($blocker) {
+            'missing_assignment' => 'Arbeidsversjonen er endret etter at siden ble sendt til gjennomgang, og kan ikke godkjennes som den er. Send siden tilbake, så kan den sendes til gjennomgang på nytt.',
+            'own_submission' => 'Du kan ikke godkjenne en versjon du selv har sendt til gjennomgang.',
+            'missing_capability' => 'Du har ikke tilgang til å godkjenne Wiki-sider.',
+            'not_in_review' => 'Versjonen er ikke sendt til gjennomgang.',
+            default => 'Du er ikke tildelt som kontrollør for denne versjonen.',
+        });
+    }
+
+    /**
+     * Settle the actor's OWN outstanding source sign-off as part of publishing.
+     *
+     * A System Owner who owns one of the source documents was being asked to click twice for the
+     * same judgement: once to vouch for their own document, once to publish the page. Publishing is
+     * the stronger statement and it is the same person on the same version, so it carries the other.
+     *
+     * Recorded through the ordinary decide(), which marks it as their own decision and not an
+     * override — because it is not one. Rows belonging to anyone else are untouched, and the gate
+     * has already refused the request if any of those were outstanding.
+     */
+    private function settleOwnSourceApprovals(EnterpriseWikiPageVersion $version, User $user): void
+    {
+        if (! $user->isSystemOwner()) {
+            return;
+        }
+
+        $ids = $this->documentOwnerApprovalService->pendingApprovalIdsOwnedBy($version, $user);
+
+        if ($ids === []) {
+            return;
+        }
+
+        foreach (EnterpriseWikiPageVersionDocumentOwnerApproval::query()->whereIn('id', $ids)->get() as $approval) {
+            $this->documentOwnerApprovalService->decide(
+                $approval,
+                $user,
+                EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED,
+            );
+        }
     }
 
     /**
@@ -3222,33 +3275,6 @@ class WikiController extends Controller
         $owners = implode(', ', array_column($gate['pending'], 'owner_label'));
 
         return "Siden kan ikke godkjennes ennå: venter på godkjenning fra {$owners}.";
-    }
-
-    /**
-     * The capability says who may review at all; the assignment says whose turn it is.
-     *
-     * A version submitted through the flow names its reviewer, and only they — or a System Owner
-     * stepping in on a stuck review — may act on it. Nobody may act on a version they submitted
-     * themselves, System Owner included.
-     */
-    private function assertMayReviewCurrentVersion(User $user, EnterpriseWikiPage $page): void
-    {
-        $version = $this->assertMayActOnCurrentVersion($user, $page);
-
-        // APPROVAL ONLY. A version with no submission is one nobody handed over: either legacy data
-        // from before ingest stopped submitting pages itself, or — far more commonly — a version the
-        // page owner saved while the page was already out for review. Publishing it would publish
-        // content the reviewer never saw, so approval refuses it.
-        //
-        // Rejection deliberately does NOT go through here. Sending a page back publishes nothing and
-        // returns it to its owner, and refusing that too would leave the page with no way out at
-        // all: it could not be approved, not be rejected, and not be resubmitted, because submit()
-        // only accepts a page that is not already in review.
-        if ($version->reviewer_user_id === null
-            || $version->submitted_by_user_id === null
-            || $version->submitted_at === null) {
-            abort(409, 'Arbeidsversjonen er endret etter at siden ble sendt til gjennomgang, og kan ikke godkjennes som den er. Send siden tilbake, så kan den sendes til gjennomgang på nytt.');
-        }
     }
 
     /**
@@ -3281,8 +3307,8 @@ class WikiController extends Controller
      * The part of the review check that applies to ANY review decision: there has to be a version,
      * and this user has to be the one whose turn it is.
      *
-     * Whether that version is publishable is a separate question, asked only where it matters —
-     * see assertMayReviewCurrentVersion().
+     * Whether that version is publishable is a separate question with its own authority rule —
+     * see assertMayFinalApprove() and User::canFinalApproveEnterpriseWikiVersion().
      */
     private function assertMayActOnCurrentVersion(User $user, EnterpriseWikiPage $page): EnterpriseWikiPageVersion
     {

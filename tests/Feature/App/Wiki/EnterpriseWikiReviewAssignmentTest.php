@@ -200,7 +200,14 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
     }
 
-    public function test_the_submitter_cannot_approve_their_own_submission_even_as_system_owner(): void
+    /**
+     * The four-eyes rule holds for a Wiki approver and yields for a System Owner.
+     *
+     * Being able to approve Wiki pages is not the same as being the customer's final authority.
+     * An approver does not publish what they themselves sent for review; a System Owner may, and
+     * the audit trail names them as the one who did it.
+     */
+    public function test_a_system_owner_may_approve_their_own_submission(): void
     {
         [$customer, , $page] = $this->draftPage();
         $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -212,6 +219,33 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
         ]);
 
         $this->actingAs($systemOwner)
+            ->patch("/app/wiki/{$page->slug}/approve")
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $page->refresh();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
+        $this->assertSame((int) $systemOwner->id, (int) $page->reviewed_by_user_id);
+        // The handover is history, not rewritten: the page still records who was asked.
+        $this->assertSame(
+            (int) $reviewer->id,
+            (int) $page->currentVersion()->first()->reviewer_user_id,
+        );
+    }
+
+    /** The same act by an ordinary Wiki approver is still refused. */
+    public function test_a_wiki_approver_still_cannot_approve_their_own_submission(): void
+    {
+        [$customer, , $page] = $this->draftPage();
+        $submitter = $this->reviewer($customer);
+        $page->forceFill(['owner_user_id' => $submitter->id])->save();
+        $reviewer = $this->reviewer($customer);
+
+        $this->actingAs($submitter)->patch("/app/wiki/{$page->slug}/submit", [
+            'reviewer_user_id' => $reviewer->id,
+        ]);
+
+        $this->actingAs($submitter)
             ->patch("/app/wiki/{$page->slug}/approve")
             ->assertForbidden();
 

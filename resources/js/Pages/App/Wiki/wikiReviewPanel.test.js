@@ -333,3 +333,38 @@ describe('the reviewer can act on the page', () => {
         assert.match(panel, /formatReviewDate\(changes\.latest\.created_at\)/);
     });
 });
+
+/**
+ * A System Owner can finish any page in their customer's Wiki. That is authority, not a queue —
+ * telling them the page is "waiting on your review" when somebody else was named would be false,
+ * and would hide the fact that a reviewer is presumably working on it.
+ */
+describe('stepping in reads differently from being asked', () => {
+    test('the turn banner requires actually being the named reviewer', () => {
+        assert.match(panel, /const isAssignedReviewer = currentUserId !== null\s*\n\s*&& reviewAssignment\.reviewer\?\.id === currentUserId;/);
+        assert.match(panel, /const isMyReview = isInReview && isAssignedReviewer &&/);
+    });
+
+    test('a stand-in is told who the page is with, and that they may finish it', () => {
+        assert.match(panel, /data-testid="wiki-review-standin"/);
+        assert.match(panel, /const actsAsSystemOwner = isInReview && ! isAssignedReviewer/);
+        assert.match(panel, /Siden er til gjennomgang hos/);
+        assert.match(panel, /Som System Owner kan du ferdigstille siden uten å være tildelt kontrollør/);
+    });
+
+    test('the two states are mutually exclusive', () => {
+        // isMyReview requires isAssignedReviewer; actsAsSystemOwner requires its negation.
+        assert.ok(panel.includes('isInReview && isAssignedReviewer &&'));
+        assert.ok(panel.includes('isInReview && ! isAssignedReviewer'));
+    });
+
+    test('the reviewer is still named either way', () => {
+        assert.match(panel, /review_reviewer \?\? 'Kontrollør:'/);
+        assert.match(panel, /reviewAssignment\.reviewer\?\.name/);
+    });
+
+    test('an outstanding source owner is still explained rather than silently blocking', () => {
+        assert.match(panel, /\{isInReview && ! reviewAssignment\.can_approve_final && blocker && \(/);
+        assert.match(panel, /source_owners_pending/);
+    });
+});

@@ -455,6 +455,48 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * May this user make the final decision to publish this version?
+     *
+     * Two different authorities, deliberately not one:
+     *
+     * A WIKI APPROVER decides the page they were handed. Being able to approve Wiki pages is not
+     * the same as being asked to approve this one, and the four-eyes rule holds for them — you do
+     * not publish what you yourself sent for review.
+     *
+     * A SYSTEM OWNER is the customer's final authority over their own Wiki. They do not have to be
+     * chosen as reviewer to finish a page, and they are not stopped by having submitted it. That is
+     * a deliberate trade: a System Owner can take a page from draft to published alone, which is
+     * what "final authority" means, and the audit trail says who did it.
+     *
+     * Not a licence over another customer's Wiki, and not a way to decide an unassigned version:
+     * reaching pending_review means somebody handed the version over through submit(), and a
+     * missing reviewer is broken state rather than an opening.
+     *
+     * Sending a page BACK is a separate question — see canReviewEnterpriseWikiVersion().
+     */
+    public function canFinalApproveEnterpriseWikiVersion(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page): bool
+    {
+        if (! $this->is_active || ! $this->canApproveWikiPages()) {
+            return false;
+        }
+
+        if ((int) $this->customer_id !== (int) $page->customer_id) {
+            return false;
+        }
+
+        if ($version->reviewer_user_id === null) {
+            return false;
+        }
+
+        if ($this->isSystemOwner()) {
+            return true;
+        }
+
+        return (int) $version->reviewer_user_id === (int) $this->id
+            && (int) $version->submitted_by_user_id !== (int) $this->id;
+    }
+
+    /**
      * May this user send a page for review? The page owner carries it; a System Owner can step in,
      * which also covers pages whose original owner could not be determined.
      */

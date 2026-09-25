@@ -156,7 +156,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
             ->assertForbidden();
     }
 
-    // H + I. separation of duties survives the System Owner override
+    // H + I. separation of duties holds for an approver, and yields for a System Owner
     public function test_the_submitter_cannot_approve_their_own_version(): void
     {
         $case = $this->readyForFinalReview();
@@ -168,7 +168,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_a_system_owner_may_take_over_but_not_approve_their_own_submission(): void
+    public function test_a_system_owner_may_take_over_someone_elses_assignment(): void
     {
         $case = $this->readyForFinalReview();
         $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
@@ -181,7 +181,12 @@ class EnterpriseWikiFinalReviewTest extends TestCase
         $this->assertSame($systemOwner->id, (int) $case['page']->fresh()->reviewed_by_user_id);
     }
 
-    public function test_a_system_owner_who_submitted_the_version_cannot_approve_it(): void
+    /**
+     * A System Owner is the customer's final authority, and that includes their own submissions —
+     * they can take a page from draft to published alone. A Wiki approver cannot; the test above
+     * holds that line.
+     */
+    public function test_a_system_owner_who_submitted_the_version_may_still_approve_it(): void
     {
         $case = $this->submittedPage();
         $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
@@ -200,7 +205,10 @@ class EnterpriseWikiFinalReviewTest extends TestCase
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertForbidden();
+            ->assertRedirect(route('app.wiki.show', $case['page']->slug));
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
+        $this->assertSame((int) $systemOwner->id, (int) $case['page']->fresh()->reviewed_by_user_id);
     }
 
     // J. the handover record is history, not scratch space

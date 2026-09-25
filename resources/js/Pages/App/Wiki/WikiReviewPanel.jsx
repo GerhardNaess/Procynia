@@ -337,7 +337,14 @@ export default function WikiReviewPanel({
     // back waits for neither, and is the way out of both. Gating them on one flag hid the only
     // action a blocked reviewer still had.
     const canSendBack = isInReview && reviewAssignment.can_send_back === true;
-    const isMyReview = isInReview && (canSendBack || reviewAssignment.can_approve_final);
+    // Being able to decide a page is not the same as having been asked to. A System Owner can
+    // finish any page in their customer's Wiki, and telling them it is waiting on them would be
+    // false — somebody else was named, and is presumably working on it.
+    const isAssignedReviewer = currentUserId !== null
+        && reviewAssignment.reviewer?.id === currentUserId;
+    const isMyReview = isInReview && isAssignedReviewer && (canSendBack || reviewAssignment.can_approve_final);
+    const actsAsSystemOwner = isInReview && ! isAssignedReviewer
+        && (canSendBack || reviewAssignment.can_approve_final);
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
     const blocker = blockerMessage(reviewAssignment.final_approval_blocker, gate, tw);
@@ -606,6 +613,25 @@ export default function WikiReviewPanel({
                             {tw.review_reviewer ?? 'Kontrollør:'} {reviewAssignment.reviewer.name}
                         </p>
                     )}
+                </div>
+            )}
+
+            {/* Somebody else was asked; this reader can finish it anyway. Said plainly, so the
+                action below is understood as stepping in rather than as their own queue. */}
+            {actsAsSystemOwner && (
+                <div
+                    data-testid="wiki-review-standin"
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                    <p className="text-base text-slate-800">
+                        {reviewAssignment.reviewer?.name
+                            ? `${tw.review_with_reviewer ?? 'Siden er til gjennomgang hos'} ${reviewAssignment.reviewer.name}.`
+                            : (tw.review_in_review ?? 'Siden er til gjennomgang.')}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                        {tw.review_system_owner_may_finish
+                            ?? 'Som System Owner kan du ferdigstille siden uten å være tildelt kontrollør.'}
+                    </p>
                 </div>
             )}
 
