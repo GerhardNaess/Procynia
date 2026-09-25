@@ -5,6 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\SavedNoticeInfoItem;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiQaTaskService;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -38,8 +39,8 @@ class InfoCenterController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
-    ) {
-    }
+        private readonly EnterpriseWikiQaTaskService $wikiQaTasks,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -67,6 +68,10 @@ class InfoCenterController extends Controller
             $items->getCollection()->map(fn (SavedNoticeInfoItem $infoItem): array => $this->infoItemPayload($infoItem, $customerId)),
         );
 
+        // Read once: the same list answers the "Mine oppgaver" counter and the list itself, so the
+        // two can never disagree about how much work is outstanding.
+        $wikiQaTasks = $this->wikiQaTasks->openTasksFor($user, $customerId);
+
         return Inertia::render('App/InfoCenter/Index', [
             'infoCenter' => [
                 'active_view' => $activeView,
@@ -74,8 +79,14 @@ class InfoCenterController extends Controller
                 'role_context' => $roleContext,
                 'view_options' => $this->viewOptions($roleContext['persona'], $activeView),
                 'summary' => [
-                    'items' => $this->summaryItems($user, $roleContext, clone $visibleItemsQuery),
+                    'items' => $this->summaryItems($user, $roleContext, clone $visibleItemsQuery, $wikiQaTasks->count()),
                 ],
+                // Work from the Wiki domain, which has no saved notice to hang on and therefore no
+                // SavedNoticeInfoItem row. Shown alongside the ordinary tasks and outside the
+                // paginator: there is one per assigned version, and they are the most actionable
+                // thing on the page. Only under "Mine oppgaver" — the person has work to do, they
+                // are not waiting on anybody.
+                'wiki_qa_tasks' => $activeView === 'my_tasks' ? $wikiQaTasks->all() : [],
                 'items' => $items->getCollection()->all(),
                 'pagination' => [
                     'from' => $items->firstItem(),
@@ -360,7 +371,7 @@ class InfoCenterController extends Controller
             ->exists();
     }
 
-    private function summaryItems(User $user, array $roleContext, Builder $baseQuery): array
+    private function summaryItems(User $user, array $roleContext, Builder $baseQuery, int $wikiQaTaskCount = 0): array
     {
         $responseDueSoonCount = $this->countMatching($baseQuery, function (Builder $query): void {
             $query
@@ -394,16 +405,18 @@ class InfoCenterController extends Controller
                 });
         });
 
+        $myTasksCount = $this->countMatching($baseQuery, function (Builder $query) use ($user): void {
+            $query
+                ->where('owner_user_id', $user->id)
+                ->where('status', '!=', SavedNoticeInfoItem::STATUS_CLOSED);
+        }) + $wikiQaTaskCount;
+
         if ($roleContext['persona'] === 'operational') {
             return [
                 [
                     'key' => 'my_tasks',
                     'label' => 'Mine oppgaver',
-                    'count' => $this->countMatching($baseQuery, function (Builder $query) use ($user): void {
-                        $query
-                            ->where('owner_user_id', $user->id)
-                            ->where('status', '!=', SavedNoticeInfoItem::STATUS_CLOSED);
-                    }),
+                    'count' => $myTasksCount,
                     'description' => 'Aksjoner og oppgaver som er tildelt deg og fortsatt er åpne.',
                     'tone' => 'danger',
                 ],
@@ -434,7 +447,21 @@ class InfoCenterController extends Controller
             ];
         }
 
-        return [
+        // A commercial owner normally watches decisions and clarifications rather than a task list,
+        // so this persona has no standing "Mine oppgaver" counter. Wiki quality assurance is the one
+        // thing that can be handed directly to them regardless of how they use the case surface —
+        // a Contributor with the QA capability is the ordinary case — and work assigned by name has
+        // to be countable somewhere, or the card below the fold is the only place it exists.
+        return array_values(array_filter([
+            $wikiQaTaskCount > 0
+                ? [
+                    'key' => 'my_tasks',
+                    'label' => 'Mine oppgaver',
+                    'count' => $myTasksCount,
+                    'description' => 'Aksjoner og oppgaver som er tildelt deg og fortsatt er åpne.',
+                    'tone' => 'danger',
+                ]
+                : null,
             [
                 'key' => 'decision',
                 'label' => 'Beslutninger',
@@ -456,7 +483,7 @@ class InfoCenterController extends Controller
                 'description' => 'Aksjoner du har sendt ut og fortsatt venter svar på.',
                 'tone' => 'amber',
             ],
-        ];
+        ]));
     }
 
     private function countMatching(Builder $baseQuery, callable $callback): int

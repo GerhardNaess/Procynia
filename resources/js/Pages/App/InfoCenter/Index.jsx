@@ -129,6 +129,81 @@ function InfoCenterViewTab({ option, activeView }) {
     );
 }
 
+/**
+ * Quality work from the Wiki, shown in the same shape as an ordinary task.
+ *
+ * It comes from a different domain — a page version, not a bid case — but the person reading this
+ * list does not care where the work is stored, only that it is theirs and still open. The card
+ * therefore mirrors the ordinary one and simply names its own context: a Wiki page rather than a
+ * saved notice.
+ *
+ * Deliberately no status chip beyond the type: the task exists only while claims are pending, so
+ * its presence in the list IS its status.
+ */
+function WikiQaTaskCard({ task, locale }) {
+    const detailUrl = task.action_url ?? '#';
+
+    return (
+        <article
+            className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 shadow-[0_6px_16px_rgba(15,23,42,0.03)]"
+            data-testid="info-center-wiki-qa-task"
+        >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                            {task.type_label}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                            Tildelt deg
+                        </span>
+                    </div>
+
+                    <Link
+                        href={detailUrl}
+                        className="block text-lg font-semibold tracking-tight text-slate-950 transition hover:text-violet-700"
+                    >
+                        {task.subject_label}
+                    </Link>
+
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                        <span>
+                            Wiki-side:{' '}
+                            <Link href={detailUrl} className="font-medium text-slate-700 transition hover:text-violet-700">
+                                {task.page_title ?? 'Ukjent side'}
+                            </Link>
+                        </span>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Påstander</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">
+                                {task.claims_handled} av {task.claims_total} behandlet
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Tildelt</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">
+                                {task.assigned_at ? formatDate(task.assigned_at, locale) : '—'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="shrink-0">
+                    <Link
+                        href={detailUrl}
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                        Åpne Wiki-side
+                    </Link>
+                </div>
+            </div>
+        </article>
+    );
+}
+
 export default function InfoCenterIndex({ infoCenter = null }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const ic = translations?.info_center_page ?? {};
@@ -137,6 +212,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     const viewOptions = infoCenter?.view_options ?? [];
     const summaryItems = infoCenter?.summary?.items ?? [];
     const items = infoCenter?.items ?? [];
+    const wikiQaTasks = infoCenter?.wiki_qa_tasks ?? [];
     const pagination = infoCenter?.pagination ?? {};
     const activeOption = viewOptions.find((option) => option.value === activeView) ?? viewOptions[0] ?? null;
     const heroClassName = heroToneClassName();
@@ -257,7 +333,15 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                         ) : null}
                     </div>
 
-                    {items.length === 0 ? (
+                    {wikiQaTasks.length > 0 ? (
+                        <div className="mb-3.5 space-y-3.5">
+                            {wikiQaTasks.map((task) => (
+                                <WikiQaTaskCard key={task.id} task={task} locale={locale} />
+                            ))}
+                        </div>
+                    ) : null}
+
+                    {items.length === 0 && wikiQaTasks.length === 0 ? (
                         <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
                             <div className="text-lg font-semibold text-slate-900">{emptyState.title}</div>
                             <p className="mt-2 text-sm text-slate-500">{emptyState.description}</p>
