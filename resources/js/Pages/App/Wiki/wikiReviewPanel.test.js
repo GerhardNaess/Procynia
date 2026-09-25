@@ -107,26 +107,6 @@ describe('final approval says what it does', () => {
     });
 });
 
-describe('blockers are explained in words', () => {
-    test('every raw key is mapped, and none is rendered', () => {
-        for (const key of ['own_submission', 'not_assigned', 'missing_assignment']) {
-            assert.ok(panel.includes(`'${key}'`), `${key} is handled`);
-        }
-
-        // The keys appear only as switch cases, never inside rendered markup. Anchored on the
-        // component itself rather than the file's first `return (`, which is whichever small
-        // helper happens to be declared at the top.
-        const rendered = panel.slice(panel.indexOf('export default function WikiReviewPanel'));
-        for (const key of ['missing_capability', 'not_in_review']) {
-            assert.ok(!rendered.includes(key), `${key} must not be shown to a user`);
-        }
-    });
-
-    test('blockers that are not the reader\'s problem stay silent', () => {
-        assert.match(panel, /default:\s*\n(\s*\/\/.*\n)*\s*return null;/);
-    });
-});
-
 describe('changes requested is easy to find and act on', () => {
     test('the latest reason, author and role are shown near the top', () => {
         assert.match(panel, /changes\.latest\.reason/);
@@ -296,8 +276,12 @@ describe('the reviewer can act on the page', () => {
         assert.match(panel, /if \(trimmed\.length < MIN_REASON\) return;/);
     });
 
-    test('why publishing is unavailable is still said, next to what is available', () => {
-        assert.match(panel, /\{isInReview && ! reviewAssignment\.can_approve_final && blocker && \(/);
+    test('why publishing is unavailable is still said, once, in the publication card', () => {
+        // Said by the card's own "Neste steg" and "Gjenstår", both computed server-side — the
+        // panel repeating it below the actions was the same sentence twice on one screen.
+        assert.match(panel, /data-testid="wiki-publication-next-step"/);
+        assert.match(panel, /data-testid="wiki-publication-blockers"/);
+        assert.ok(!panel.includes('blockerMessage'), 'and no second copy in the actions');
     });
 
     test('the returned page says when it was sent back, not only by whom', () => {
@@ -334,8 +318,9 @@ describe('stepping in reads differently from being asked', () => {
         assert.match(panel, /reviewAssignment\.reviewer\?\.name/);
     });
 
-    test('a blocked approval is still explained rather than silently missing', () => {
-        assert.match(panel, /\{isInReview && ! reviewAssignment\.can_approve_final && blocker && \(/);
+    test('a blocked approval is still explained, by the publication card', () => {
+        assert.match(panel, /data-testid="wiki-publication-next-step"/);
+        assert.ok(!panel.includes('blockerMessage'));
     });
 });
 
@@ -533,11 +518,9 @@ describe('source approval is not part of publishing', () => {
         assert.match(panel, /review_send_back \?\? 'Send tilbake'/);
     });
 
-    test('the remaining blockers are about who may decide, not about sources', () => {
-        assert.match(panel, /function blockerMessage\(blocker, tw, reviewerName = null\)/);
-        for (const key of ['own_submission', 'not_assigned', 'missing_assignment']) {
-            assert.match(panel, new RegExp(`case '${key}':`));
-        }
+    test('no source-owner reason survives anywhere in the panel', () => {
+        assert.ok(!panel.includes('source_owners_pending'));
+        assert.ok(!panel.includes('review_waiting_for_owners'));
     });
 
     test('what the page is now about: editing, QA, review, publishing', () => {
@@ -620,34 +603,5 @@ describe('a stale view corrects itself', () => {
         // Neither is stale state, so both fall through the early return above.
         assert.match(panel, /review_error_expired/);
         assert.match(panel, /review_error_forbidden/);
-    });
-});
-
-/**
- * Once somebody has been asked, the page says whose turn it is.
- *
- * A System Owner who sent the page for review is blocked by own_submission; anybody else looking
- * at it is blocked by not_assigned. Both mean the same thing to the reader — it is with Gerhard —
- * and saying whose turn it is beats saying why it is not yours.
- */
-describe('a named reviewer is named in the explanation', () => {
-    test('both blockers become "waiting for X" once a reviewer exists', () => {
-        assert.match(panel, /case 'own_submission':\s*\n\s*case 'not_assigned':/);
-        assert.match(panel, /review_waiting_for_reviewer \?\? 'Venter på gjennomgang hos'/);
-    });
-
-    test('the reviewer name is passed in rather than guessed', () => {
-        assert.match(panel, /function blockerMessage\(blocker, tw, reviewerName = null\)/);
-        assert.match(panel, /blockerMessage\(reviewAssignment\.final_approval_blocker, tw, reviewAssignment\.reviewer\?\.name \?\? null\)/);
-    });
-
-    test('with nobody named, each blocker keeps its own sentence', () => {
-        assert.match(panel, /review_blocked_own_submission/);
-        assert.match(panel, /review_blocked_not_assigned/);
-    });
-
-    /** The stand-in line promised something that stops being true once a reviewer holds the page. */
-    test('the System Owner stand-in line only appears when they can actually finish it', () => {
-        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(\s*\n\s*<p[\s\S]{0,200}review_system_owner_may_finish/);
     });
 });

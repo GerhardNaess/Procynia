@@ -90,29 +90,6 @@ function httpErrorMessage(status, tw) {
 const MIN_REASON = 10;
 const MAX_REASON = 2000;
 
-/** Why final approval is unavailable, in words the person reading them can act on. */
-function blockerMessage(blocker, tw, reviewerName = null) {
-    switch (blocker) {
-        // Both mean the same thing once somebody has been named: the page is with them, and it is
-        // their turn. Saying whose turn is more use than saying why it is not yours.
-        case 'own_submission':
-        case 'not_assigned':
-            if (reviewerName) {
-                return `${tw.review_waiting_for_reviewer ?? 'Venter på gjennomgang hos'} ${reviewerName}.`;
-            }
-
-            return blocker === 'own_submission'
-                ? (tw.review_blocked_own_submission ?? 'Du kan ikke godkjenne en versjon du selv har sendt inn.')
-                : (tw.review_blocked_not_assigned ?? 'En annen er tildelt som kontrollør for denne versjonen.');
-        case 'missing_assignment':
-            return tw.review_blocked_missing_assignment ?? 'Versjonen mangler en gyldig innsending. Gjenåpne siden og send den inn på nytt.';
-        default:
-            // not_in_review and missing_capability are not this reader's problem to solve, so they
-            // are simply not mentioned.
-            return null;
-    }
-}
-
 function OwnerLine({ label, name }) {
     if (! name) {
         return null;
@@ -335,7 +312,6 @@ export default function WikiReviewPanel({
         && (canSendBack || reviewAssignment.can_approve_final);
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
-    const blocker = blockerMessage(reviewAssignment.final_approval_blocker, tw, reviewAssignment.reviewer?.name ?? null);
     // Editing lives with the article text it changes, not here: this card is about where the page
     // stands, and a writing action in among the review decisions read as one of them.
     // A published page with nothing outstanding used to render nothing at all, which left the most
@@ -656,9 +632,6 @@ export default function WikiReviewPanel({
                 )}
             </div>
 
-            {isInReview && ! reviewAssignment.can_approve_final && blocker && (
-                <p className="text-sm text-slate-600">{blocker}</p>
-            )}
 
             {/* Choosing who takes over. Never implicit, even when only one person is possible. */}
             <ActionDialog
