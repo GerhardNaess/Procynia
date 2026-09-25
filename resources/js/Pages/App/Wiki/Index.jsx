@@ -117,7 +117,8 @@ const INGEST_STATUS_STYLES = {
     post_claim_verification: 'bg-cyan-100 text-cyan-700',
     verification_linking: 'bg-cyan-100 text-cyan-700',
     qa: 'bg-fuchsia-100 text-fuchsia-700',
-    awaiting_document_owner_approval: 'bg-amber-100 text-amber-700',
+    // Legacy status; kept so a row written before the migration still renders a badge.
+    awaiting_document_owner_approval: 'bg-emerald-100 text-emerald-700',
     completed: 'bg-emerald-100 text-emerald-700',
     failed: 'bg-rose-100 text-rose-700',
     escalated: 'bg-amber-100 text-amber-700',
@@ -138,7 +139,6 @@ const RUN_TIMELINE_DISPLAY_LABELS = {
     generating_pages: 'Sider',
     verification_linking: 'Verifisering',
     qa: 'QA',
-    awaiting_document_owner_approval: 'Dokumenteiergodkjenning',
 };
 
 const INGEST_STATUS_LABELS = {
@@ -153,7 +153,9 @@ const INGEST_STATUS_LABELS = {
     post_claim_verification: 'Etterbehandler påstander',
     verification_linking: 'Verifisering og lenking',
     qa: 'QA',
-    awaiting_document_owner_approval: 'Avventer godkjenning',
+    // Legacy. Runs in this status were settled by migration; the mapping stays so a row
+    // written by an older deploy reads as what it was — processing that had finished.
+    awaiting_document_owner_approval: 'Fullført',
     completed: 'Fullført',
     failed: 'Feilet',
     escalated: 'Eskalert',
@@ -173,7 +175,6 @@ const IN_PROGRESS_STATUSES = [
     'post_claim_verification',
     'verification_linking',
     'qa',
-    'awaiting_document_owner_approval',
     'decision_only',
 ];
 
@@ -331,9 +332,7 @@ function RunListItem({
     focusFindingId,
 }) {
     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
-    const statusBadgeClass = run.status === 'awaiting_document_owner_approval'
-        ? `${BADGE} ${statusCls} max-w-full whitespace-normal break-words text-left leading-5`
-        : `${BADGE} ${statusCls}`;
+    const statusBadgeClass = `${BADGE} ${statusCls}`;
     const runError = run.qa_last_error ?? run.error_message;
 
     const renderDecisionBadge = () => {
@@ -612,12 +611,10 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
     if (!run) return null;
 
     const isActive = isActiveWikiRun(run);
-    const isOwnerApprovalWaiting = run.status === 'awaiting_document_owner_approval';
     const isEscalated = run.status === 'escalated';
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
-    // Deliberately NOT based on isActive/isActiveWikiRun — that list also covers
-    // awaiting_document_owner_approval (kept "active" for polling/aria-live purposes), which must
-    // never be flagged stalled: it is a normal, indefinite wait for a human, not a stuck pipeline.
+    // Deliberately NOT based on isActive/isActiveWikiRun: whether a run is worth polling and
+    // whether it looks stuck are different questions, and the backend flag decides the second.
     const seemsStalled = isRunStalled(run);
     const statusSetAt = progressAt
         ? `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim()
@@ -645,21 +642,7 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                 </span>
             )}
 
-            {isOwnerApprovalWaiting ? (
-                <div className="min-w-0 max-w-full space-y-0.5 break-words">
-                    <p
-                        className="break-words text-base font-medium leading-6 text-slate-700"
-                        title={tw.ingest_activity_owner_approval_waiting ?? 'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.'}
-                    >
-                        {tw.ingest_activity_owner_approval_complete ?? 'Automatisk behandling fullført'}
-                    </p>
-                    {statusSetAt && (
-                        <p className="break-words text-xs leading-5 text-slate-400">
-                            {(tw.ingest_activity_status_set ?? 'Satt i status')} {statusSetAt}
-                        </p>
-                    )}
-                </div>
-            ) : isEscalated ? (
+            {isEscalated ? (
                 <div className="min-w-0 max-w-full space-y-1 break-words">
                     <p className="break-words text-base font-medium leading-6 text-amber-800">
                         {escalation.primaryReason}
@@ -733,7 +716,7 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                 </p>
             )}
 
-            {!isOwnerApprovalWaiting && statusSetAt && (
+            {statusSetAt && (
                 <p className="text-xs leading-5 text-slate-400">
                     {(tw.ingest_activity_last_progress ?? 'Siste fremdrift')} {formatRelativeProgress(progressAt, locale)}
                 </p>
@@ -983,14 +966,6 @@ function getWikiSourcesHelpSections(tw) {
                     title: tw.sources_page_help_item_status_failed_title ?? 'Feilet',
                     text: tw.sources_page_help_item_status_failed_text ?? 'Behandlingen stoppet på grunn av en feil. Åpne kjøringsinformasjonen for en forklaring og eventuell ny handling.',
                 },
-                {
-                    title: tw.sources_page_help_item_status_owner_title ?? 'Avventer Dokumenteier',
-                    text: tw.sources_page_help_item_status_owner_text ?? 'Dokumentet mangler en gyldig Dokumenteier, eller eierstatusen er ennå ikke synkronisert til Wiki-sidene som bruker dokumentet.',
-                },
-                {
-                    title: tw.sources_page_help_item_status_approval_title ?? 'Avventer godkjenning',
-                    text: tw.sources_page_help_item_status_approval_text ?? 'Wiki-materialet er under arbeid og venter på nødvendige godkjenninger før det kan tas i bruk.',
-                },
             ],
         },
         {
@@ -998,7 +973,7 @@ function getWikiSourcesHelpSections(tw) {
             items: [
                 {
                     title: tw.sources_page_help_item_changes_owner_title ?? 'Ny eier gir nye oppgaver',
-                    text: tw.sources_page_help_item_changes_owner_text ?? 'Når Dokumenteier endres, oppdateres hvem som skal godkjenne de Wiki-sidene som faktisk bruker dokumentet. Historikken beholdes.',
+                    text: tw.sources_page_help_item_changes_owner_text ?? 'Når Dokumenteier endres, oppdateres hvem som står som ansvarlig for de Wiki-sidene som faktisk bruker dokumentet. Historikken beholdes.',
                 },
                 {
                     title: tw.sources_page_help_item_changes_delete_title ?? 'Sletting viser konsekvenser først',
@@ -1063,7 +1038,7 @@ function getWikiRunsHelpSections(tw) {
             items: [
                 {
                     title: tw.runs_page_help_item_progress_status_title ?? 'Status',
-                    text: tw.runs_page_help_item_progress_status_text ?? 'Status viser den overordnede tilstanden til kjøringen, for eksempel Venter, Behandles, Genererer Wiki-sider, Avventer QA, Avventer godkjenning fra Dokumenteier, Fullført eller Feilet.',
+                    text: tw.runs_page_help_item_progress_status_text ?? 'Status viser den overordnede tilstanden til kjøringen, for eksempel Venter, Behandles, Genererer Wiki-sider, Avventer QA, Fullført eller Feilet.',
                 },
                 {
                     title: tw.runs_page_help_item_progress_activity_title ?? 'Aktivitet',
@@ -1097,14 +1072,6 @@ function getWikiRunsHelpSections(tw) {
                 {
                     title: tw.runs_page_help_item_status_qa_title ?? 'Kvalitetskontroll',
                     text: tw.runs_page_help_item_status_qa_text ?? 'Systemet kontrollerer struktur, dekning, kildegrunnlag og øvrige kvalitetskrav.',
-                },
-                {
-                    title: tw.runs_page_help_item_status_owner_title ?? 'Avventer godkjenning fra Dokumenteier',
-                    text: tw.runs_page_help_item_status_owner_text ?? 'Kjøringen har kommet langt, men én eller flere Dokumenteiere må fortsatt godkjenne materialet. Dette er ikke en teknisk feil, men en menneskelig beslutning som gjenstår.',
-                },
-                {
-                    title: tw.runs_page_help_item_status_rejected_title ?? 'Avvist av Dokumenteier',
-                    text: tw.runs_page_help_item_status_rejected_text ?? 'Minst én nødvendig Dokumenteier har avvist materialet. Kjøringen kan ikke fullføres før avviket er behandlet.',
                 },
                 {
                     title: tw.runs_page_help_item_status_missing_owner_title ?? 'Mangler Dokumenteier',
@@ -1263,7 +1230,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
 
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
-    const canRefresh = isInProgress && run.status !== 'awaiting_document_owner_approval';
+    const canRefresh = isInProgress;
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
     const errorMessage = run.qa_last_error ?? run.error_message;
     return (
@@ -2243,9 +2210,7 @@ function SourcesTab({
                                         const ingestDisabledTitle = !wikiGenerationAvailable
                                             ? (tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.')
                                             : (isInProgress
-                                                ? (source.latest_ingest_run?.status === 'awaiting_document_owner_approval'
-                                                    ? (tw.document_has_waiting_approval_run ?? 'Dokumentet venter på dokumenteiergodkjenning')
-                                                    : (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring'))
+                                                ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring')
                                                 : undefined);
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (

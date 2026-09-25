@@ -131,7 +131,8 @@ export const RUN_TIMELINE_STEPS = [
     { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
     { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
     { key: 'qa', labelKey: 'ingest_timeline_qa', fallback: 'QA' },
-    { key: 'awaiting_document_owner_approval', labelKey: 'ingest_timeline_owner_approval', fallback: 'Dokumenteier' },
+    // No document-owner step: a source sign-off is not part of processing a document, and a stage
+    // nothing can ever reach reads as a stage that is stuck.
 ];
 
 /**
@@ -208,7 +209,6 @@ export const ACTIVE_WIKI_RUN_STATUSES = [
     'verifying_claims',
     'post_claim_verification',
     'qa',
-    'awaiting_document_owner_approval',
 ];
 
 export function isActiveWikiRun(run) {
@@ -270,42 +270,6 @@ export function hasActiveWikiRunForTab(activeTab, { sources = [], runs = [] } = 
 }
 
 /**
- * Wiki run-3: derives the Dokumenteiergodkjenning (last) timeline step's state from the run's
- * actual document-owner approval evidence (`run.document_owner_approval`, built by
- * WikiController::documentOwnerApprovalCountsForRun()) instead of ever inferring it from
- * run.status. A human approve/reject decision never transitions run.status itself, so
- * run.status === 'completed' only ever proves the technical pipeline (and any automated QA)
- * finished — it is never proof a Document Owner looked at anything. Distinguishes:
- *
- *   - 'not_required': no page this run produced currently carries a live approval requirement
- *     (e.g. only an open, non-blocking claim QA signal, or the produced version was since
- *     superseded by a newer run) — rendered neutrally, never green, since no human approval could
- *     possibly have happened here.
- *   - 'error': at least one required approval was rejected.
- *   - 'waiting': at least one required approval is still undecided (including an unassigned owner
- *     or an approval row not yet synced).
- *   - 'done': every required approval was actually approved by a human.
- */
-function documentOwnerApprovalStepState(run) {
-    const approval = run?.document_owner_approval;
-    const requiredCount = approval?.required_count ?? 0;
-
-    if (!approval || requiredCount === 0) {
-        return 'not_required';
-    }
-
-    if ((approval.rejected_count ?? 0) > 0) {
-        return 'error';
-    }
-
-    if ((approval.pending_count ?? 0) > 0) {
-        return 'waiting';
-    }
-
-    return 'done';
-}
-
-/**
  * Renders the per-run step timeline. 'escalated' is a terminal status that never literally
  * matches any RUN_TIMELINE_STEPS key, so a naive "find the step matching run.status" lookup
  * always misses for it — and previously fell back to marking the LAST step (Dokumenteier) as the
@@ -333,17 +297,15 @@ function documentOwnerApprovalStepState(run) {
 export function getRunTimelineState(run, stepIndex) {
     if (!run) return 'empty';
 
-    const lastStepIndex = RUN_TIMELINE_STEPS.length - 1;
-
     if (run.status === 'decision_only') {
         return stepIndex === 0 ? 'done' : 'empty';
     }
 
-    // Wiki run-3: 'completed' proves every earlier pipeline step actually finished, but it must
-    // never blanket-imply the last step (Dokumenteiergodkjenning) — that one is decided solely by
-    // documentOwnerApprovalStepState() below, from real approval evidence.
+    // 'completed' proves every step in the timeline actually finished. It used to have to exclude
+    // the last one, because the last one was a wait for a person rather than a stage of processing.
+    // With that step gone, the whole timeline is processing and 'completed' means all of it.
     if (run.status === 'completed') {
-        return stepIndex === lastStepIndex ? documentOwnerApprovalStepState(run) : 'done';
+        return 'done';
     }
 
     if (run.status === 'escalated') {
@@ -369,16 +331,6 @@ export function getRunTimelineState(run, stepIndex) {
     }
 
     const currentIndex = findTimelineStepIndex(run.status);
-
-    // EnterpriseWikiDocumentOwnerApprovalService::evaluateRunCompletionGate() never lets a run
-    // leave this status while any approval is rejected (rejected keeps 'ready' false exactly like
-    // pending does) — so a rejection is only ever visible to the frontend while run.status is
-    // still 'awaiting_document_owner_approval', never once it reaches 'completed'. Uses the same
-    // evidence-based state as the 'completed' branch above instead of a hardcoded 'waiting', so
-    // that rejection surfaces as the step's error state rather than being shown as still pending.
-    if (run.status === 'awaiting_document_owner_approval') {
-        return stepIndex < lastStepIndex ? 'done' : documentOwnerApprovalStepState(run);
-    }
 
     if (currentIndex === -1) return 'empty';
     if (stepIndex < currentIndex) return 'done';

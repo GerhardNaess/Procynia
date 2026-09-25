@@ -45,32 +45,19 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         $this->createSourceReference($claimA, $documentA);
         $this->createSourceReference($claimB, $documentB);
 
-        $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
-        $response->assertOk();
+        // Opening the page is what keeps the requirement set current. It is no longer rendered
+        // there — a source sign-off is not part of approving a Wiki page — so what it produces is
+        // asserted against the row itself.
+        $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
 
-        $response->assertViewHas('page', function (array $inertia) use ($documentA, $documentB): bool {
-            $props = data_get($inertia, 'props');
-            $approvals = collect(data_get($props, 'document_owner_approvals', []));
-            $summary = data_get($props, 'document_owner_approval_summary', []);
-            $approval = $approvals->first();
+        $approval = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->sole();
 
-            return $approvals->count() === 1
-                && ($summary['total'] ?? null) === 1
-                && ($summary['pending'] ?? null) === 1
-                && ($summary['ready'] ?? null) === false
-                && ($approval['approval_status'] ?? null) === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING
-                && count($approval['source_document_ids'] ?? []) === 2
-                && in_array($documentA->id, $approval['source_document_ids'] ?? [], true)
-                && in_array($documentB->id, $approval['source_document_ids'] ?? [], true)
-                && ($approval['can_decide'] ?? null) === true;
-        });
-
-        $this->assertSame(
-            1,
-            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
-                ->where('enterprise_wiki_page_version_id', $version->id)
-                ->count(),
-        );
+        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING, $approval->approval_status);
+        $this->assertSame((int) $owner->id, (int) $approval->document_owner_user_id);
+        // Both documents collapse into the one owner's single requirement.
+        $this->assertEqualsCanonicalizing([$documentA->id, $documentB->id], $approval->source_document_ids);
 
         $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
 
@@ -82,7 +69,11 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         );
     }
 
-    public function test_run_stays_awaiting_document_owner_approval_until_all_required_owners_have_approved(): void
+    /**
+     * The requirement set is what this covers: one row per owner, each decided by its own owner.
+     * The run's status is no longer part of it — the run finished when its work did.
+     */
+    public function test_each_required_owner_decides_their_own_requirement(): void
     {
         $customer = $this->createCustomer();
         $ownerA = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
@@ -101,8 +92,10 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         $service->finalizeFromExistingQaResult($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
-        $this->assertStringContainsString('Dokumenteier', (string) $run->error_message);
+        // The run finishes on its own work. Who still has to vouch for the source material is
+        // recorded on the requirement rows below, and is no longer part of the run's own state.
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+        $this->assertNull($run->error_message);
 
         $approvalA = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
             ->where('enterprise_wiki_page_version_id', $version->id)
@@ -118,7 +111,7 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         ])->assertRedirect(route('app.wiki.show', $page->slug));
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         $this->actingAs($ownerB)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalB->id}/approve", [
             'comment' => 'Godkjent av dokumenteier B.',
@@ -186,7 +179,7 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         $approval = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
             ->where('enterprise_wiki_page_version_id', $version->id)
@@ -212,7 +205,7 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
 
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         $approval = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
             ->where('enterprise_wiki_page_version_id', $version->id)
@@ -252,7 +245,7 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
 
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         $approvalX = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
             ->where('enterprise_wiki_page_version_id', $version->id)
@@ -270,7 +263,7 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         $this->actingAs($ownerX)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalX->id}/approve")
             ->assertRedirect(route('app.wiki.show', $page->slug));
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         $this->actingAs($ownerY)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalY->id}/approve")
             ->assertRedirect(route('app.wiki.show', $page->slug));

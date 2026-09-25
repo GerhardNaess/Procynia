@@ -162,6 +162,31 @@ class EnterpriseWikiDocumentOwnerApprovalService
      *     message: ?string
      * }
      */
+    /**
+     * Record, for every page this run produced, which source documents it drew on and who owns them.
+     *
+     * Provenance, kept deliberately. These rows used to be written as a side effect of evaluating
+     * the publication gate, so removing the gate would have removed the record with it — a document
+     * owner would stop being asked anything AND stop being recorded as responsible, which is a
+     * bigger change than the one intended.
+     */
+    public function syncRequirementsForRun(EnterpriseWikiIngestRun $run): void
+    {
+        $runPages = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->whereNotNull('generated_page_version_id')
+            ->with(['page', 'generatedPageVersion'])
+            ->get();
+
+        foreach ($runPages as $runPage) {
+            $version = $runPage->generatedPageVersion;
+
+            if ($version instanceof EnterpriseWikiPageVersion) {
+                $this->syncForPageVersion($version, $run);
+            }
+        }
+    }
+
     public function evaluateRunCompletionGate(EnterpriseWikiIngestRun $run): array
     {
         $runPages = EnterpriseWikiIngestRunPage::query()

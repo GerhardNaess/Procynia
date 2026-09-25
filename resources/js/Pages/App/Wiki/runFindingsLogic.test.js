@@ -90,21 +90,13 @@ describe('matchesFindingsLocalFilter', () => {
     });
 });
 
-describe('getRunTimelineState — escalated run points at QA, never at Dokumenteier', () => {
+describe('getRunTimelineState — escalated run points at QA', () => {
     const qaIndex = RUN_TIMELINE_STEPS.findIndex((step) => step.key === 'qa');
-    const dokumenteierIndex = RUN_TIMELINE_STEPS.findIndex((step) => step.key === 'awaiting_document_owner_approval');
 
     test('an escalated run (e.g. repair_required from a claim-integrity defect) marks QA as the error step', () => {
         const run = { status: 'escalated', qa_status: 'repair_required' };
 
         assert.equal(getRunTimelineState(run, qaIndex), 'error');
-    });
-
-    test('an escalated run never marks Dokumenteier as the error step', () => {
-        const run = { status: 'escalated', qa_status: 'repair_required' };
-
-        assert.notEqual(getRunTimelineState(run, dokumenteierIndex), 'error');
-        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'empty');
     });
 
     test('an escalated run marks every step before QA as done', () => {
@@ -116,69 +108,19 @@ describe('getRunTimelineState — escalated run points at QA, never at Dokumente
     });
 
     // Wiki run-3 (A): completed + a real approved requirement -> Dokumenteier renders green.
-    test('a completed run with an actually-approved requirement marks Dokumenteier done', () => {
-        const run = {
-            status: 'completed',
-            document_owner_approval: { required_count: 1, approved_count: 1, rejected_count: 0, pending_count: 0 },
-        };
-
-        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'done');
-    });
-
     // Wiki run-3 (E): completed still marks every earlier step done — only the last step is
     // decided by real approval evidence instead of the blanket rule.
-    test('a completed run still marks every step before Dokumenteier done, regardless of approval evidence', () => {
-        const run = {
-            status: 'completed',
-            document_owner_approval: { required_count: 0, approved_count: 0, rejected_count: 0, pending_count: 0 },
-        };
-
-        for (let i = 0; i < dokumenteierIndex; i++) {
-            assert.equal(getRunTimelineState(run, i), 'done', `step ${i} should be done`);
-        }
-    });
-
-    // Wiki run-3 (D): completed but no page ever required a Document Owner decision -> neutral,
-    // never green, since a 'completed' run.status alone never proves a human approved anything.
-    test('a completed run with no live approval requirement marks Dokumenteier not_required, never done', () => {
-        const run = {
-            status: 'completed',
-            document_owner_approval: { required_count: 0, approved_count: 0, rejected_count: 0, pending_count: 0 },
-        };
-
-        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'not_required');
-    });
-
-    // Wiki run-3: a completed run with no document_owner_approval prop at all (e.g. an older
-    // cached response) must default to the same safe not_required rendering, never to done.
-    test('a completed run missing the document_owner_approval prop entirely defaults to not_required', () => {
+    /**
+     * Every step in the timeline is processing now. The document-owner step was removed with the
+     * approval it represented, so 'completed' no longer has to make an exception for a last step
+     * that was a wait for a person rather than a stage of work.
+     */
+    test('a completed run marks every step done', () => {
         const run = { status: 'completed' };
 
-        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'not_required');
-    });
-
-    // Wiki run-3 (B): awaiting_document_owner_approval + a genuinely pending requirement ->
-    // Dokumenteier renders as still waiting on a human.
-    test('a run awaiting document owner approval with a pending requirement marks that last step as waiting, not error', () => {
-        const run = {
-            status: 'awaiting_document_owner_approval',
-            document_owner_approval: { required_count: 1, approved_count: 0, rejected_count: 0, pending_count: 1 },
-        };
-
-        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'waiting');
-    });
-
-    // Wiki run-3 (C): a rejected requirement must render as the step's error state. The run
-    // completion gate never lets 'completed' happen while a rejection is outstanding
-    // (EnterpriseWikiDocumentOwnerApprovalService::evaluateRunCompletionGate()), so this is only
-    // ever observed while run.status is still 'awaiting_document_owner_approval'.
-    test('a rejected requirement marks Dokumenteier as the error step', () => {
-        const run = {
-            status: 'awaiting_document_owner_approval',
-            document_owner_approval: { required_count: 1, approved_count: 0, rejected_count: 1, pending_count: 0 },
-        };
-
-        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'error');
+        for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
+            assert.equal(getRunTimelineState(run, i), 'done', `step ${i} should be done`);
+        }
     });
 
     test('an active run in generating_pages marks that step active and later steps empty', () => {
@@ -203,7 +145,6 @@ describe('getRunTimelineState — failed run uses failed_phase, not the generic 
         assert.equal(getRunTimelineState(run, stepIndex('generating_pages')), 'empty');
         assert.equal(getRunTimelineState(run, stepIndex('verification_linking')), 'empty');
         assert.equal(getRunTimelineState(run, stepIndex('qa')), 'empty');
-        assert.equal(getRunTimelineState(run, stepIndex('awaiting_document_owner_approval')), 'empty');
     });
 
     // 16. Failed in generating_pages: earlier steps done, Sider red, later steps empty.
@@ -240,17 +181,9 @@ describe('getRunTimelineState — failed run uses failed_phase, not the generic 
 
         assert.equal(getRunTimelineState(run, stepIndex('verification_linking')), 'done');
         assert.equal(getRunTimelineState(run, stepIndex('qa')), 'error');
-        assert.equal(getRunTimelineState(run, stepIndex('awaiting_document_owner_approval')), 'empty');
     });
 
     // 19. Failed in the document-owner phase.
-    test('failed in awaiting_document_owner_approval shows Dokumenteier as error', () => {
-        const run = { status: 'failed', failed_phase: 'awaiting_document_owner_approval' };
-
-        assert.equal(getRunTimelineState(run, stepIndex('qa')), 'done');
-        assert.equal(getRunTimelineState(run, stepIndex('awaiting_document_owner_approval')), 'error');
-    });
-
     // 20. No failed_phase at all — must never mark all-but-last as done (the run-588 bug itself).
     test('failed with no failed_phase marks every step neutral, never done', () => {
         const run = { status: 'failed', failed_phase: null };
@@ -339,10 +272,6 @@ describe('ACTIVE_WIKI_RUN_STATUSES / isActiveWikiRun — polling contract (Wiki 
         assert.equal(isActiveWikiRun({ status: 'post_claim_verification' }), true);
     });
 
-    test('awaiting_document_owner_approval is kept active — existing product intent (an approval completed elsewhere must still be picked up)', () => {
-        assert.equal(isActiveWikiRun({ status: 'awaiting_document_owner_approval' }), true);
-    });
-
     test('every terminal status stops polling', () => {
         for (const status of ['completed', 'failed', 'escalated', 'cancelled']) {
             assert.equal(isActiveWikiRun({ status }), false, `expected ${status} to be inactive`);
@@ -409,12 +338,12 @@ describe('activeWikiRunLikeObjectsForTab / hasActiveWikiRunForTab — per-tab po
     // active per ACTIVE_WIKI_RUN_STATUSES) — proving the fix does not merely start polling, but
     // keeps it running long enough for the real transition to land — and each call is derived
     // fresh from whatever is passed in, so a new poll response is never shadowed by an old one.
-    test('run-4 transition: post_claim_verification -> awaiting_document_owner_approval stays active on the Kilder tab throughout', () => {
+    test('run-4 transition: post_claim_verification -> qa stays active on the Kilder tab throughout', () => {
         const sourcesBeforePoll = [
             { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'post_claim_verification', qa_status: null } },
         ];
         const sourcesAfterPoll = [
-            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'awaiting_document_owner_approval', qa_status: 'passed' } },
+            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'qa', qa_status: 'passed' } },
         ];
 
         assert.equal(hasActiveWikiRunForTab('sources', { sources: sourcesBeforePoll }), true, 'still active before the poll lands');
@@ -423,7 +352,7 @@ describe('activeWikiRunLikeObjectsForTab / hasActiveWikiRunForTab — per-tab po
         // The new props are used as-is — the old 'post_claim_verification' value is never retained
         // once sourcesAfterPoll is what's passed in (no local caching/merging inside the helper).
         const [afterRun] = activeWikiRunLikeObjectsForTab('sources', { sources: sourcesAfterPoll });
-        assert.equal(afterRun.status, 'awaiting_document_owner_approval');
+        assert.equal(afterRun.status, 'qa');
         assert.notEqual(afterRun.status, 'post_claim_verification');
     });
 
@@ -433,7 +362,7 @@ describe('activeWikiRunLikeObjectsForTab / hasActiveWikiRunForTab — per-tab po
     // exact wrong check to prove it always evaluates to false, unlike the fixed helper above.
     test('reproduces the pre-fix bug: checking source.status directly is always false, even while its run is active', () => {
         const sources = [
-            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'awaiting_document_owner_approval' } },
+            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'qa' } },
         ];
 
         const buggyHasActiveRun = sources.some(isActiveWikiRun) || sources.some((s) => s?.status === 'queued');
@@ -454,7 +383,7 @@ describe('hasActiveWikiRunForTab — the polling gate must never deadlock the Kj
     // The required end-to-end behaviour: a run observed at maintainer_decision must keep the gate
     // open across every intermediate status, all the way to awaiting_document_owner_approval, so
     // each poll replaces the run prop with the newer one and the row stops showing the decision.
-    test('the gate stays open for every status between maintainer_decision and awaiting_document_owner_approval', () => {
+    test('the gate stays open for every status between maintainer_decision and qa', () => {
         const pipeline = [
             'maintainer_decision',
             'applying',
@@ -464,7 +393,6 @@ describe('hasActiveWikiRunForTab — the polling gate must never deadlock the Kj
             'verifying_claims',
             'post_claim_verification',
             'qa',
-            'awaiting_document_owner_approval',
         ];
 
         for (const status of pipeline) {
@@ -532,8 +460,8 @@ describe('isRunStalled — requires BOTH an actively-processing status AND a lon
         assert.equal(isRunStalled(run, 15, NOW), false);
     });
 
-    test('awaiting_document_owner_approval is never flagged stalled, no matter how long it has waited', () => {
-        const run = { status: 'awaiting_document_owner_approval', expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+    test('a run that expects no automatic progress is never flagged stalled, however long it has sat', () => {
+        const run = { status: 'completed', expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
 
         assert.equal(isRunStalled(run, 15, NOW), false);
 

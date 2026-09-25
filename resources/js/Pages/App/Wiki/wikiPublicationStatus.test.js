@@ -77,11 +77,13 @@ describe('every page says what happens to it next', () => {
 });
 
 describe('the page itself answers where it stands', () => {
-    test('the publication block renders state, next step and blockers', () => {
+    test('the publication block renders next step and blockers', () => {
         assert.match(panel, /data-testid="wiki-publication-block"/);
-        assert.match(panel, /\{publication\.state_label\}/);
         assert.match(panel, /data-testid="wiki-publication-next-step"/);
         assert.match(panel, /data-testid="wiki-publication-blockers"/);
+        // The state itself is stated once, by the badge beside the page title — this card is for
+        // what happens next, not for repeating what the page is.
+        assert.ok(!panel.includes('publication.state_label'));
     });
 
     /**
@@ -102,16 +104,19 @@ describe('the page itself answers where it stands', () => {
     });
 
     /** A published page with nothing outstanding used to render no panel at all. */
-    test('the panel renders even when the only thing to say is the state', () => {
-        assert.match(panel, /\|\| showsArticleEdit \|\| publication !== null;/);
+    test('the panel renders even when the only thing to say is the next step', () => {
+        assert.match(panel, /\|\| publication !== null;/);
     });
 
-    test('the state badge covers every state the backend can return', () => {
+    /**
+     * The card no longer renders a badge of its own — the page title carries the state once — but
+     * the backend still computes it, so every state it can return must still have a name.
+     */
+    test('every state the backend can return has a label', () => {
         for (const state of [
             'draft', 'in_review', 'published', 'published_with_changes',
             'changes_requested', 'archived', 'no_version',
         ]) {
-            assert.match(panel, new RegExp(`\\n\\s+${state}: '`), state);
             assert.match(lang('no'), new RegExp(`'publication_state_${state}' =>`), state);
             assert.match(lang('en'), new RegExp(`'publication_state_${state}' =>`), state);
         }
