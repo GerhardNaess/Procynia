@@ -343,27 +343,39 @@ export default function WikiReviewPanel({
         if (processing) return;
         setProcessing(key);
         setActionError(null);
-        router.patch(url, data, {
-            preserveScroll: true,
-            onFinish: () => setProcessing(null),
-            onSuccess: () => {
-                setIsSubmitOpen(false);
-                setIsQaOpen(false);
-                setChangesTarget(null);
-                setReason('');
-            },
-            // A refused handover used to leave the dialog sitting there saying nothing, which reads
-            // exactly like a click that never happened. Validation errors and aborts arrive through
-            // two different channels, so both are caught and both end up in the same sentence.
-            onError: (errors) => setActionError(firstError(errors) ?? (tw.review_action_failed ?? FALLBACK_ERROR)),
-            // Returning false suppresses Inertia's raw error overlay: the person gets the reason in
-            // the dialog they are standing in, in language about the work rather than the protocol.
-            onHttpException: (response) => {
-                setActionError(httpErrorMessage(response?.status, tw));
 
-                return false;
-            },
-        });
+        // `processing` blocks a second click, and only onFinish clears it — so if the dispatch
+        // itself throws before Inertia's promise chain exists, onFinish never runs and every
+        // later click on the panel is swallowed in silence. The person is left with an enabled
+        // button that does nothing and no way back except reloading the page.
+        try {
+            router.patch(url, data, {
+                preserveScroll: true,
+                onFinish: () => setProcessing(null),
+                onSuccess: () => {
+                    setIsSubmitOpen(false);
+                    setIsQaOpen(false);
+                    setChangesTarget(null);
+                    setReason('');
+                },
+                // A refused handover used to leave the dialog sitting there saying nothing, which
+                // reads exactly like a click that never happened. Validation errors and aborts
+                // arrive through two different channels, so both are caught and both end up in the
+                // same sentence.
+                onError: (errors) => setActionError(firstError(errors) ?? (tw.review_action_failed ?? FALLBACK_ERROR)),
+                // Returning false suppresses Inertia's raw error overlay: the person gets the reason
+                // in the dialog they are standing in, in language about the work rather than the
+                // protocol.
+                onHttpException: (response) => {
+                    setActionError(httpErrorMessage(response?.status, tw));
+
+                    return false;
+                },
+            });
+        } catch (error) {
+            setProcessing(null);
+            setActionError(tw.review_action_failed ?? FALLBACK_ERROR);
+        }
     };
 
     const submit = () => run('submit', `/app/wiki/${page.slug}/submit`, { reviewer_user_id: Number(reviewerId) });
@@ -697,7 +709,9 @@ export default function WikiReviewPanel({
 
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" disabled={busy || reviewerId === ''} onClick={submit} className={PRIMARY_ACTION}>
-                        {tw.submit_button ?? 'Send til gjennomgang'}
+                        {processing === 'submit'
+                            ? (tw.review_sending ?? 'Sender …')
+                            : (tw.submit_button ?? 'Send til gjennomgang')}
                     </button>
                     <button type="button" disabled={busy} onClick={() => { setIsSubmitOpen(false); setActionError(null); }} className={SECONDARY_ACTION}>
                         {tw.cancel ?? 'Avbryt'}

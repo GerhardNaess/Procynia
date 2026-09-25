@@ -546,3 +546,28 @@ describe('source approval is not part of publishing', () => {
         assert.match(panel, /submit_button \?\? 'Send til gjennomgang'/);
     });
 });
+
+/**
+ * The panel must never end up enabled but inert.
+ *
+ * `processing` blocks a second click and only onFinish clears it. Inertia fires onFinish from a
+ * `finally`, so any completed request clears it — but a dispatch that throws before that promise
+ * chain exists never reaches it, and from then on every click on the panel is swallowed. An enabled
+ * button that does nothing is the worst state this panel can be in: there is no error, no progress
+ * and no way back except reloading the page.
+ */
+describe('a click always leaves the panel usable', () => {
+    test('a throwing dispatch releases the lock and says something', () => {
+        assert.match(panel, /try \{\s*\n\s*router\.patch\(url, data, \{/);
+        assert.match(panel, /\} catch \(error\) \{\s*\n\s*setProcessing\(null\);\s*\n\s*setActionError\(/);
+    });
+
+    test('the lock is taken before the request and released only by it', () => {
+        assert.match(panel, /if \(processing\) return;\s*\n\s*setProcessing\(key\);/);
+        assert.match(panel, /onFinish: \(\) => setProcessing\(null\)/);
+    });
+
+    test('a request in flight says so, rather than only greying out', () => {
+        assert.match(panel, /processing === 'submit'\s*\n\s*\? \(tw\.review_sending \?\? 'Sender …'\)/);
+    });
+});
