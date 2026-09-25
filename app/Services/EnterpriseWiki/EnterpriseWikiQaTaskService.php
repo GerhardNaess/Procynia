@@ -65,6 +65,9 @@ class EnterpriseWikiQaTaskService
             ])
             ->orderBy('qa_assigned_at')
             ->get()
+            // A base collection: these are payload rows, not models, and Eloquent's merge()
+            // keys by primary key — which is not a key these rows have.
+            ->toBase()
             // Nothing left to decide means nothing left to do. Filtered in PHP because the counts
             // are what decides, and they are already loaded.
             ->filter(static fn (EnterpriseWikiPageVersion $version): bool => $version->claims_pending > 0)

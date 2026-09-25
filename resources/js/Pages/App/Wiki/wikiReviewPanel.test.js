@@ -135,8 +135,10 @@ describe('blockers are explained in words', () => {
             assert.ok(panel.includes(`'${key}'`), `${key} is handled`);
         }
 
-        // The keys appear only as switch cases, never inside rendered markup.
-        const rendered = panel.slice(panel.indexOf('return ('));
+        // The keys appear only as switch cases, never inside rendered markup. Anchored on the
+        // component itself rather than the file's first `return (`, which is whichever small
+        // helper happens to be declared at the top.
+        const rendered = panel.slice(panel.indexOf('export default function WikiReviewPanel'));
         for (const key of ['source_owners_pending', 'missing_capability', 'not_in_review']) {
             assert.ok(!rendered.includes(key), `${key} must not be shown to a user`);
         }
@@ -244,5 +246,47 @@ describe('the page keeps its help layer', () => {
         assert.match(panel, /show_page_help_submit_hint_label/);
         assert.match(panel, /show_page_help_submit_hint\b/);
         assert.match(panel, /<InfoHint/);
+    });
+});
+
+/**
+ * A refused handover used to be indistinguishable from a click that never happened: the dialog
+ * stayed open, the button came back, and nothing said why. These guard the two halves of the fix —
+ * a success visibly finishes the action, and a failure says what went wrong in the dialog the
+ * person is standing in.
+ */
+describe('the handover says what happened', () => {
+    test('a success closes the dialog it was started from', () => {
+        assert.match(panel, /onSuccess: \(\) => \{\s*setIsSubmitOpen\(false\);/);
+        assert.match(panel, /setIsQaOpen\(false\);/);
+        assert.match(panel, /setChangesTarget\(null\);/);
+    });
+
+    test('validation errors and aborts both reach the same message', () => {
+        assert.match(panel, /onError: \(errors\) => setActionError\(/);
+        assert.match(panel, /onHttpException: \(response\) => \{/, 'aborts arrive outside onError');
+        // Returning false suppresses Inertia's raw overlay in favour of the panel's own message.
+        assert.match(panel, /setActionError\(httpErrorMessage\(response\?\.status, tw\)\);\s*\n\s*\n\s*return false;/);
+    });
+
+    test('each refusal is explained in terms of the work, not the status code', () => {
+        for (const status of ['403', '409', '419', '422']) {
+            assert.match(panel, new RegExp(`case ${status}:`), `${status} has its own sentence`);
+        }
+        assert.match(panel, /review_error_conflict/, 'somebody else took the assignment');
+        assert.match(panel, /review_error_expired/, 'the session ran out');
+        assert.match(panel, /Last siden på nytt/, 'and each one says what to do about it');
+    });
+
+    test('the message is rendered where the action was started', () => {
+        assert.match(panel, /data-testid="wiki-review-action-error"/);
+        assert.match(panel, /role="alert"/);
+        // Once inside the open dialog, once in the panel for the actions that have no dialog.
+        assert.ok(panel.split('<ActionError message={actionError} />').length - 1 >= 2);
+    });
+
+    test('a stale message does not survive the next attempt', () => {
+        assert.match(panel, /setProcessing\(key\);\s*\n\s*setActionError\(null\);/);
+        assert.match(panel, /onClose=\{\(\) => \{ setIsSubmitOpen\(false\); setActionError\(null\); \}\}/);
     });
 });

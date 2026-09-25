@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SavedNoticeInfoItem;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiQaTaskService;
+use App\Services\EnterpriseWiki\EnterpriseWikiReviewTaskService;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -40,6 +41,7 @@ class InfoCenterController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly EnterpriseWikiQaTaskService $wikiQaTasks,
+        private readonly EnterpriseWikiReviewTaskService $wikiReviewTasks,
     ) {}
 
     public function index(Request $request): Response
@@ -70,7 +72,12 @@ class InfoCenterController extends Controller
 
         // Read once: the same list answers the "Mine oppgaver" counter and the list itself, so the
         // two can never disagree about how much work is outstanding.
-        $wikiQaTasks = $this->wikiQaTasks->openTasksFor($user, $customerId);
+        //
+        // Two kinds, kept apart in the domain and merged only here, for display. Reviewing an
+        // article and quality assuring its claims carry different authority, and the card says
+        // which is which — but to the person they are both simply work with their name on it.
+        $wikiTasks = $this->wikiReviewTasks->openTasksFor($user, $customerId)
+            ->merge($this->wikiQaTasks->openTasksFor($user, $customerId));
 
         return Inertia::render('App/InfoCenter/Index', [
             'infoCenter' => [
@@ -79,14 +86,14 @@ class InfoCenterController extends Controller
                 'role_context' => $roleContext,
                 'view_options' => $this->viewOptions($roleContext['persona'], $activeView),
                 'summary' => [
-                    'items' => $this->summaryItems($user, $roleContext, clone $visibleItemsQuery, $wikiQaTasks->count()),
+                    'items' => $this->summaryItems($user, $roleContext, clone $visibleItemsQuery, $wikiTasks->count()),
                 ],
                 // Work from the Wiki domain, which has no saved notice to hang on and therefore no
                 // SavedNoticeInfoItem row. Shown alongside the ordinary tasks and outside the
                 // paginator: there is one per assigned version, and they are the most actionable
                 // thing on the page. Only under "Mine oppgaver" — the person has work to do, they
                 // are not waiting on anybody.
-                'wiki_qa_tasks' => $activeView === 'my_tasks' ? $wikiQaTasks->all() : [],
+                'wiki_tasks' => $activeView === 'my_tasks' ? $wikiTasks->all() : [],
                 'items' => $items->getCollection()->all(),
                 'pagination' => [
                     'from' => $items->firstItem(),
@@ -371,7 +378,7 @@ class InfoCenterController extends Controller
             ->exists();
     }
 
-    private function summaryItems(User $user, array $roleContext, Builder $baseQuery, int $wikiQaTaskCount = 0): array
+    private function summaryItems(User $user, array $roleContext, Builder $baseQuery, int $wikiTaskCount = 0): array
     {
         $responseDueSoonCount = $this->countMatching($baseQuery, function (Builder $query): void {
             $query
@@ -409,7 +416,7 @@ class InfoCenterController extends Controller
             $query
                 ->where('owner_user_id', $user->id)
                 ->where('status', '!=', SavedNoticeInfoItem::STATUS_CLOSED);
-        }) + $wikiQaTaskCount;
+        }) + $wikiTaskCount;
 
         if ($roleContext['persona'] === 'operational') {
             return [
@@ -448,12 +455,13 @@ class InfoCenterController extends Controller
         }
 
         // A commercial owner normally watches decisions and clarifications rather than a task list,
-        // so this persona has no standing "Mine oppgaver" counter. Wiki quality assurance is the one
-        // thing that can be handed directly to them regardless of how they use the case surface —
-        // a Contributor with the QA capability is the ordinary case — and work assigned by name has
-        // to be countable somewhere, or the card below the fold is the only place it exists.
+        // so this persona has no standing "Mine oppgaver" counter. Wiki work is the one thing that
+        // can be handed directly to them regardless of how they use the case surface — a
+        // Contributor who reviews or quality assures pages is the ordinary case — and work assigned
+        // by name has to be countable somewhere, or the card below the fold is the only place it
+        // exists.
         return array_values(array_filter([
-            $wikiQaTaskCount > 0
+            $wikiTaskCount > 0
                 ? [
                     'key' => 'my_tasks',
                     'label' => 'Mine oppgaver',

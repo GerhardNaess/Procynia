@@ -130,28 +130,40 @@ function InfoCenterViewTab({ option, activeView }) {
 }
 
 /**
- * Quality work from the Wiki, shown in the same shape as an ordinary task.
+ * Wiki work, shown in the same shape as an ordinary task.
  *
  * It comes from a different domain — a page version, not a bid case — but the person reading this
  * list does not care where the work is stored, only that it is theirs and still open. The card
  * therefore mirrors the ordinary one and simply names its own context: a Wiki page rather than a
  * saved notice.
  *
- * Deliberately no status chip beyond the type: the task exists only while claims are pending, so
- * its presence in the list IS its status.
+ * Two kinds share it, and the difference is stated rather than implied: reviewing decides whether
+ * the whole page is published, quality assuring decides whether its individual claims hold. The
+ * type chip and the detail row are what tell them apart.
+ *
+ * Deliberately no status chip beyond the type. Each task exists only while its work is outstanding
+ * — until the claims are decided, or until the page is approved or sent back — so its presence in
+ * the list IS its status.
  */
-function WikiQaTaskCard({ task, locale }) {
+function WikiTaskCard({ task, locale }) {
     const detailUrl = task.action_url ?? '#';
+    const isReview = task.type === 'wiki_review';
 
     return (
         <article
             className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 shadow-[0_6px_16px_rgba(15,23,42,0.03)]"
-            data-testid="info-center-wiki-qa-task"
+            data-testid={isReview ? 'info-center-wiki-review-task' : 'info-center-wiki-qa-task'}
         >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                        <span
+                            className={
+                                isReview
+                                    ? 'inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200'
+                                    : 'inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200'
+                            }
+                        >
                             {task.type_label}
                         </span>
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
@@ -177,15 +189,21 @@ function WikiQaTaskCard({ task, locale }) {
 
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Påstander</div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                {isReview ? 'Sendt av' : 'Påstander'}
+                            </div>
                             <div className="mt-1 text-sm font-medium text-slate-900">
-                                {task.claims_handled} av {task.claims_total} behandlet
+                                {isReview
+                                    ? (task.submitted_by ?? 'Ukjent')
+                                    : `${task.claims_handled} av ${task.claims_total} behandlet`}
                             </div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Tildelt</div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                {isReview ? 'Sendt inn' : 'Tildelt'}
+                            </div>
                             <div className="mt-1 text-sm font-medium text-slate-900">
-                                {task.assigned_at ? formatDate(task.assigned_at, locale) : '—'}
+                                {formatDate(isReview ? task.submitted_at : task.assigned_at, locale)}
                             </div>
                         </div>
                     </div>
@@ -212,7 +230,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     const viewOptions = infoCenter?.view_options ?? [];
     const summaryItems = infoCenter?.summary?.items ?? [];
     const items = infoCenter?.items ?? [];
-    const wikiQaTasks = infoCenter?.wiki_qa_tasks ?? [];
+    const wikiTasks = infoCenter?.wiki_tasks ?? [];
     const pagination = infoCenter?.pagination ?? {};
     const activeOption = viewOptions.find((option) => option.value === activeView) ?? viewOptions[0] ?? null;
     const heroClassName = heroToneClassName();
@@ -333,15 +351,15 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                         ) : null}
                     </div>
 
-                    {wikiQaTasks.length > 0 ? (
+                    {wikiTasks.length > 0 ? (
                         <div className="mb-3.5 space-y-3.5">
-                            {wikiQaTasks.map((task) => (
-                                <WikiQaTaskCard key={task.id} task={task} locale={locale} />
+                            {wikiTasks.map((task) => (
+                                <WikiTaskCard key={task.id} task={task} locale={locale} />
                             ))}
                         </div>
                     ) : null}
 
-                    {items.length === 0 && wikiQaTasks.length === 0 ? (
+                    {items.length === 0 && wikiTasks.length === 0 ? (
                         <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
                             <div className="text-lg font-semibold text-slate-900">{emptyState.title}</div>
                             <p className="mt-2 text-sm text-slate-500">{emptyState.description}</p>

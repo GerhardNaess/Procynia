@@ -46,7 +46,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
 
-        $task = collect($this->infoCenterFor($qa)['wiki_qa_tasks'])->sole();
+        $task = collect($this->infoCenterFor($qa)['wiki_tasks'])->sole();
 
         $this->assertSame('wiki_qa', $task['type']);
         $this->assertSame('Kvalitetssikre Wiki-side', $task['subject_label']);
@@ -63,7 +63,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
 
-        $task = collect($this->infoCenterFor($qa)['wiki_qa_tasks'])->sole();
+        $task = collect($this->infoCenterFor($qa)['wiki_tasks'])->sole();
 
         $this->assertSame(route('app.wiki.show', ['slug' => $page->slug], false), $task['action_url']);
     }
@@ -78,7 +78,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $infoCenter = $this->infoCenterFor($qa);
 
         $this->assertSame(1, $this->myTasksCount($infoCenter));
-        $this->assertCount(1, $infoCenter['wiki_qa_tasks']);
+        $this->assertCount(1, $infoCenter['wiki_tasks']);
     }
 
     /**
@@ -106,8 +106,8 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
 
-        $this->assertSame([], $this->infoCenterFor($qa, 'awaiting_response')['wiki_qa_tasks']);
-        $this->assertCount(1, $this->infoCenterFor($qa, 'my_tasks')['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($qa, 'awaiting_response')['wiki_tasks']);
+        $this->assertCount(1, $this->infoCenterFor($qa, 'my_tasks')['wiki_tasks']);
     }
 
     // ── The bell and the list are different things ──────────────────────────
@@ -132,7 +132,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $this->actingAs($qa)->patch(route('app.notifications.read', ['userNotification' => $notification->id]));
 
         $this->assertTrue((bool) $notification->fresh()->is_read);
-        $this->assertCount(1, $this->infoCenterFor($qa)['wiki_qa_tasks'], 'the work is still theirs');
+        $this->assertCount(1, $this->infoCenterFor($qa)['wiki_tasks'], 'the work is still theirs');
     }
 
     /** And when the work really is done, the task goes without anybody closing it. */
@@ -142,13 +142,13 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
 
-        $this->assertCount(1, $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertCount(1, $this->infoCenterFor($qa)['wiki_tasks']);
 
         EnterpriseWikiClaim::query()
             ->where('enterprise_wiki_page_version_id', $version->id)
             ->update(['approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED]);
 
-        $this->assertSame([], $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($qa)['wiki_tasks']);
     }
 
     /**
@@ -161,7 +161,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
 
-        $this->assertSame([], $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($qa)['wiki_tasks']);
     }
 
     /** A version nobody wrote claims for has no quality work, exactly as the Wiki page says. */
@@ -171,7 +171,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
 
-        $this->assertSame([], $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($qa)['wiki_tasks']);
     }
 
     // ── Assignment changes ──────────────────────────────────────────────────
@@ -191,7 +191,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
             ->where('user_id', $owner->id)
             ->where('event_type', EnterpriseWikiReviewNotificationService::EVENT_QA_ASSIGNED)
             ->get(), 'no self-notification');
-        $this->assertCount(1, $this->infoCenterFor($owner->fresh())['wiki_qa_tasks'], 'but the work is theirs');
+        $this->assertCount(1, $this->infoCenterFor($owner->fresh())['wiki_tasks'], 'but the work is theirs');
     }
 
     /** Nothing has to be closed: the list reads the assignment, so a handover moves it outright. */
@@ -202,12 +202,12 @@ class InfoCenterWikiQaTaskTest extends TestCase
         $second = $this->qaUser($customer);
 
         $this->assign($owner, $page, $first);
-        $this->assertCount(1, $this->infoCenterFor($first)['wiki_qa_tasks']);
+        $this->assertCount(1, $this->infoCenterFor($first)['wiki_tasks']);
 
         $this->assign($owner, $page, $second);
 
-        $this->assertSame([], $this->infoCenterFor($first)['wiki_qa_tasks']);
-        $this->assertCount(1, $this->infoCenterFor($second)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($first)['wiki_tasks']);
+        $this->assertCount(1, $this->infoCenterFor($second)['wiki_tasks']);
     }
 
     /**
@@ -219,12 +219,12 @@ class InfoCenterWikiQaTaskTest extends TestCase
         [$customer, $owner, $page, $v1] = $this->pageWithClaims(pending: 2);
         $qa = $this->qaUser($customer);
         $this->assign($owner, $page, $qa);
-        $this->assertCount(1, $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertCount(1, $this->infoCenterFor($qa)['wiki_tasks']);
 
         $v1->forceFill(['is_current' => false])->save();
         $this->version($page, 2);
 
-        $this->assertSame([], $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($qa)['wiki_tasks']);
         $this->assertSame((int) $qa->id, (int) $v1->refresh()->qa_user_id, 'v1 keeps its history');
     }
 
@@ -238,7 +238,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
 
         $this->assign($owner, $page, $qa);
 
-        $this->assertSame([], $this->infoCenterFor($bystander)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($bystander)['wiki_tasks']);
     }
 
     public function test_qa_work_never_crosses_a_customer_boundary(): void
@@ -249,7 +249,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
 
         $outsider = $this->qaUser($this->customer('Annen Kunde AS'));
 
-        $this->assertSame([], $this->infoCenterFor($outsider)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($outsider)['wiki_tasks']);
     }
 
     public function test_an_archived_page_is_not_outstanding_work(): void
@@ -260,7 +260,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
 
         $page->forceFill(['status' => EnterpriseWikiPage::STATUS_ARCHIVED])->save();
 
-        $this->assertSame([], $this->infoCenterFor($qa)['wiki_qa_tasks']);
+        $this->assertSame([], $this->infoCenterFor($qa)['wiki_tasks']);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

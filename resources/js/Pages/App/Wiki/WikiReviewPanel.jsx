@@ -9,6 +9,58 @@ import {
     WARNING_ACTION,
 } from '../../../Support/actionStyles';
 
+/** One shape for the message, wherever the action was started from. */
+function ActionError({ message }) {
+    if (! message) {
+        return null;
+    }
+
+    return (
+        <p
+            role="alert"
+            data-testid="wiki-review-action-error"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+        >
+            {message}
+        </p>
+    );
+}
+
+const FALLBACK_ERROR = 'Handlingen kunne ikke fullføres. Last siden på nytt og prøv igjen.';
+
+/** The first message Laravel sent back, whatever field it was attached to. */
+function firstError(errors) {
+    const values = Object.values(errors ?? {});
+
+    return values.length > 0 ? String(values[0]) : null;
+}
+
+/**
+ * What went wrong, said in terms of the work rather than the status code.
+ *
+ * Each of these is a real outcome of the review rules: the page moved on while the dialog was open,
+ * somebody else took the assignment, the session expired. The person can act on every one of them,
+ * but only if they are told which happened.
+ */
+function httpErrorMessage(status, tw) {
+    switch (status) {
+        case 403:
+            return tw.review_error_forbidden
+                ?? 'Du har ikke tilgang til å gjøre dette. Kontakt System Owner hvis dette er feil.';
+        case 409:
+            return tw.review_error_conflict
+                ?? 'Noen andre har allerede sendt denne versjonen til gjennomgang. Last siden på nytt for å se hvem.';
+        case 419:
+            return tw.review_error_expired
+                ?? 'Økten din er utløpt. Last siden på nytt og logg inn igjen.';
+        case 422:
+            return tw.review_error_state
+                ?? 'Siden er ikke lenger i en tilstand som tillater dette. Last siden på nytt for å se gjeldende status.';
+        default:
+            return tw.review_action_failed ?? FALLBACK_ERROR;
+    }
+}
+
 /**
  * The review state of one Wiki page, and whatever the viewer can actually do about it.
  *
@@ -241,6 +293,7 @@ export default function WikiReviewPanel({
     onEditArticle = null,
 }) {
     const [processing, setProcessing] = useState(null);
+    const [actionError, setActionError] = useState(null);
     const [isSubmitOpen, setIsSubmitOpen] = useState(false);
     const [isQaOpen, setIsQaOpen] = useState(false);
     const [reviewerId, setReviewerId] = useState('');
@@ -287,6 +340,7 @@ export default function WikiReviewPanel({
     const run = (key, url, data = {}) => {
         if (processing) return;
         setProcessing(key);
+        setActionError(null);
         router.patch(url, data, {
             preserveScroll: true,
             onFinish: () => setProcessing(null),
@@ -295,6 +349,17 @@ export default function WikiReviewPanel({
                 setIsQaOpen(false);
                 setChangesTarget(null);
                 setReason('');
+            },
+            // A refused handover used to leave the dialog sitting there saying nothing, which reads
+            // exactly like a click that never happened. Validation errors and aborts arrive through
+            // two different channels, so both are caught and both end up in the same sentence.
+            onError: (errors) => setActionError(firstError(errors) ?? (tw.review_action_failed ?? FALLBACK_ERROR)),
+            // Returning false suppresses Inertia's raw error overlay: the person gets the reason in
+            // the dialog they are standing in, in language about the work rather than the protocol.
+            onHttpException: (response) => {
+                setActionError(httpErrorMessage(response?.status, tw));
+
+                return false;
             },
         });
     };
@@ -498,6 +563,8 @@ export default function WikiReviewPanel({
                 </div>
             )}
 
+            {! isSubmitOpen && ! isQaOpen && changesTarget === null && <ActionError message={actionError} />}
+
             {/* Actions. */}
             <div className="flex flex-wrap items-center gap-2">
                 {canSubmit && (
@@ -506,7 +573,11 @@ export default function WikiReviewPanel({
                             ref={submitTriggerRef}
                             type="button"
                             disabled={busy || eligibleReviewers.length === 0}
-                            onClick={() => { setReviewerId(eligibleReviewers.length === 1 ? String(eligibleReviewers[0].id) : ''); setIsSubmitOpen(true); }}
+                            onClick={() => {
+                                setActionError(null);
+                                setReviewerId(eligibleReviewers.length === 1 ? String(eligibleReviewers[0].id) : '');
+                                setIsSubmitOpen(true);
+                            }}
                             className={PRIMARY_ACTION}
                         >
                             {tw.submit_button ?? 'Send til gjennomgang'}
@@ -621,7 +692,7 @@ export default function WikiReviewPanel({
 
             <ActionDialog
                 isOpen={isSubmitOpen}
-                onClose={() => setIsSubmitOpen(false)}
+                onClose={() => { setIsSubmitOpen(false); setActionError(null); }}
                 closeDisabled={busy}
                 titleId="wiki-submit-title"
                 initialFocusRef={reviewerSelectRef}
@@ -650,11 +721,17 @@ export default function WikiReviewPanel({
                     </select>
                 </label>
 
+                {actionError && (
+                    <div className="mt-4">
+                        <ActionError message={actionError} />
+                    </div>
+                )}
+
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" disabled={busy || reviewerId === ''} onClick={submit} className={PRIMARY_ACTION}>
                         {tw.submit_button ?? 'Send til gjennomgang'}
                     </button>
-                    <button type="button" disabled={busy} onClick={() => setIsSubmitOpen(false)} className={SECONDARY_ACTION}>
+                    <button type="button" disabled={busy} onClick={() => { setIsSubmitOpen(false); setActionError(null); }} className={SECONDARY_ACTION}>
                         {tw.cancel ?? 'Avbryt'}
                     </button>
                 </div>
