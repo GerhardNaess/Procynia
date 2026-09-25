@@ -484,21 +484,26 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        // The customer's final authority, over a page in their own Wiki. Neither the assignment
-        // nor the four-eyes rule constrains them, and a draft they never sent anywhere is still
-        // theirs to publish.
-        if ($this->isSystemOwner()) {
-            return true;
+        // A version that has been handed over belongs to the person it was handed to. Sending a
+        // page for review is a choice to have somebody else look at it, and a System Owner who
+        // makes that choice has chosen it for this version — stepping back in to approve would
+        // make the reviewer's turn decorative, and the handover a formality anyone could skip.
+        //
+        // Not a dead end for a review that stalls: sending the page back is a separate authority
+        // (canReviewEnterpriseWikiVersion), and once it returns to draft the direct route is open
+        // again.
+        if ($version->reviewer_user_id !== null) {
+            return (int) $version->reviewer_user_id === (int) $this->id
+                // submit() already refuses a reviewer who is the submitter; this holds the same
+                // line against data that predates it.
+                && (int) $version->submitted_by_user_id !== (int) $this->id;
         }
 
-        // For everybody else there has to be a handover, because being able to approve Wiki pages
-        // is not the same as having been asked to approve this one.
-        if ($version->reviewer_user_id === null) {
-            return false;
-        }
-
-        return (int) $version->reviewer_user_id === (int) $this->id
-            && (int) $version->submitted_by_user_id !== (int) $this->id;
+        // Nothing was handed to anybody. A System Owner is the customer's final authority over
+        // their own Wiki and may publish such a draft outright; everybody else has to be asked,
+        // because being able to approve Wiki pages is not the same as having been asked to approve
+        // this one.
+        return $this->isSystemOwner();
     }
 
     /**

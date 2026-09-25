@@ -91,12 +91,19 @@ const MIN_REASON = 10;
 const MAX_REASON = 2000;
 
 /** Why final approval is unavailable, in words the person reading them can act on. */
-function blockerMessage(blocker, tw) {
+function blockerMessage(blocker, tw, reviewerName = null) {
     switch (blocker) {
+        // Both mean the same thing once somebody has been named: the page is with them, and it is
+        // their turn. Saying whose turn is more use than saying why it is not yours.
         case 'own_submission':
-            return tw.review_blocked_own_submission ?? 'Du kan ikke godkjenne en versjon du selv har sendt inn.';
         case 'not_assigned':
-            return tw.review_blocked_not_assigned ?? 'En annen er tildelt som kontrollør for denne versjonen.';
+            if (reviewerName) {
+                return `${tw.review_waiting_for_reviewer ?? 'Venter på gjennomgang hos'} ${reviewerName}.`;
+            }
+
+            return blocker === 'own_submission'
+                ? (tw.review_blocked_own_submission ?? 'Du kan ikke godkjenne en versjon du selv har sendt inn.')
+                : (tw.review_blocked_not_assigned ?? 'En annen er tildelt som kontrollør for denne versjonen.');
         case 'missing_assignment':
             return tw.review_blocked_missing_assignment ?? 'Versjonen mangler en gyldig innsending. Gjenåpne siden og send den inn på nytt.';
         default:
@@ -328,7 +335,7 @@ export default function WikiReviewPanel({
         && (canSendBack || reviewAssignment.can_approve_final);
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
-    const blocker = blockerMessage(reviewAssignment.final_approval_blocker, tw);
+    const blocker = blockerMessage(reviewAssignment.final_approval_blocker, tw, reviewAssignment.reviewer?.name ?? null);
     // Editing lives with the article text it changes, not here: this card is about where the page
     // stands, and a writing action in among the review decisions read as one of them.
     // A published page with nothing outstanding used to render nothing at all, which left the most
@@ -556,10 +563,12 @@ export default function WikiReviewPanel({
                             ? `${tw.review_with_reviewer ?? 'Siden er til gjennomgang hos'} ${reviewAssignment.reviewer.name}.`
                             : (tw.review_in_review ?? 'Siden er til gjennomgang.')}
                     </p>
-                    <p className="mt-1 text-sm text-slate-600">
-                        {tw.review_system_owner_may_finish
-                            ?? 'Som System Owner kan du ferdigstille siden uten å være tildelt kontrollør.'}
-                    </p>
+                    {reviewAssignment.can_approve_final && (
+                        <p className="mt-1 text-sm text-slate-600">
+                            {tw.review_system_owner_may_finish
+                                ?? 'Som System Owner kan du ferdigstille siden uten å være tildelt kontrollør.'}
+                        </p>
+                    )}
                 </div>
             )}
 

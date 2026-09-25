@@ -18,18 +18,20 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Who may finish a Wiki page, and the line between final authority and the capability to approve.
+ * Who may finish a Wiki page, and what handing it over costs the person who hands it.
  *
- * A SYSTEM OWNER is the customer's final authority over their own Wiki. They do not have to be
- * chosen as reviewer, and they are not stopped by having submitted the page themselves. That last
- * part is a deliberate trade, made explicitly: one person can take a page from draft to published
- * alone, and the audit trail is what keeps that honest.
+ * A SYSTEM OWNER is the customer's final authority over their own Wiki, and may publish a draft
+ * outright — nobody has to be asked, and one person can take a page from draft to published alone.
  *
- * A WIKI APPROVER may decide the page they were handed, and only that one. Holding the capability
- * is not the same as having been asked, and the four-eyes rule still holds for them.
+ * But sending a page for review is a choice to have somebody else look at it, and that choice
+ * binds the person who makes it. Once a version names a reviewer, only that reviewer decides it.
+ * Otherwise the handover would be decorative: a reviewer whose turn can be skipped by the person
+ * who asked for it was never really asked.
  *
- * The distinction is the whole point, so most of what follows is about who is REFUSED. A rule that
- * only ever says yes is not a rule.
+ * Not a dead end. Sending the page back is a separate authority, so a stalled review can always be
+ * recovered — and once the page is in draft again the direct route is open.
+ *
+ * Most of what follows is about who is REFUSED. A rule that only ever says yes is not a rule.
  */
 class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
 {
@@ -59,23 +61,81 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $this->assertSame((int) $case['reviewer']->id, (int) $page->reviewed_by_user_id);
     }
 
-    /** Somebody else was asked. The System Owner can finish it regardless. */
-    public function test_a_system_owner_approves_a_page_assigned_to_someone_else(): void
+    /** Somebody else was asked, so it is theirs to decide — System Owner included. */
+    public function test_a_system_owner_cannot_decide_a_page_assigned_to_someone_else(): void
     {
         $case = $this->pageOutForReview();
         $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
 
-        $this->assertTrue($this->reviewAssignmentSeenBy($systemOwner, $case['page'])['can_approve_final']);
+        $payload = $this->reviewAssignmentSeenBy($systemOwner, $case['page']);
+        $this->assertFalse($payload['can_approve_final']);
+        $this->assertSame('not_assigned', $payload['final_approval_blocker']);
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
+    }
+
+    /**
+     * The case the rule exists for: the System Owner chose the reviewer track for this version.
+     * Having asked Gerhard, they wait for Gerhard.
+     */
+    public function test_a_system_owner_who_sent_the_page_for_review_waits_for_the_reviewer(): void
+    {
+        $case = $this->pageOutForReview();
+
+        $payload = $this->reviewAssignmentSeenBy($case['owner'], $case['page']);
+        $this->assertFalse($payload['can_approve_final']);
+        $this->assertSame('own_submission', $payload['final_approval_blocker']);
+        $this->assertSame($case['reviewer']->name, $payload['reviewer']['name'], 'and the page names who');
+
+        $this->actingAs($case['owner'])
+            ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
+    }
+
+    /**
+     * The reviewer's other decision is the way out of a review nobody wants to finish. The
+     * submitter cannot use it on their own page: the four-eyes rule that stops them approving it
+     * stops them returning it too, which is worth knowing but is not new here.
+     */
+    public function test_the_reviewer_can_send_the_page_back_and_the_submitter_cannot(): void
+    {
+        $case = $this->pageOutForReview();
+
+        $this->assertFalse($this->reviewAssignmentSeenBy($case['owner'], $case['page'])['can_send_back']);
+        $this->assertTrue($this->reviewAssignmentSeenBy($case['reviewer'], $case['page'])['can_send_back']);
+
+        $this->actingAs($case['reviewer'])
+            ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Andre avsnitt må avklares mot kilden.'])
             ->assertRedirect();
 
-        $page = $case['page']->fresh();
+        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $case['page']->fresh()->status);
+    }
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
-        $this->assertSame((int) $case['version']->id, (int) $page->published_version_id);
-        $this->assertNotNull($page->reviewed_at);
+    /** And once the page is a draft again, the direct route is open. */
+    public function test_the_direct_route_returns_once_the_page_is_a_draft_again(): void
+    {
+        $case = $this->pageOutForReview();
+
+        $this->actingAs($case['reviewer'])
+            ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Andre avsnitt må avklares mot kilden.'])
+            ->assertRedirect();
+        // Reopening a returned page clears the handover.
+        $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/submit")->assertRedirect();
+
+        $page = $case['page']->fresh();
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status);
+        $this->assertNull($page->currentVersion()->first()->reviewer_user_id);
+        $this->assertTrue($this->reviewAssignmentSeenBy($case['owner'], $page)['can_approve_final']);
+
+        $this->actingAs($case['owner'])->patch("/app/wiki/{$page->slug}/approve")->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
     }
 
     /**
@@ -85,14 +145,13 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
     public function test_the_audit_trail_names_the_person_who_actually_decided(): void
     {
         $case = $this->pageOutForReview();
-        $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
 
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+        $this->actingAs($case['reviewer'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
 
         $page = $case['page']->fresh();
         $version = $case['version']->fresh();
 
-        $this->assertSame((int) $systemOwner->id, (int) $page->reviewed_by_user_id);
+        $this->assertSame((int) $case['reviewer']->id, (int) $page->reviewed_by_user_id);
         $this->assertSame((int) $case['reviewer']->id, (int) $version->reviewer_user_id, 'who was asked');
         $this->assertSame((int) $case['owner']->id, (int) $version->submitted_by_user_id, 'who sent it');
         $this->assertNotNull($version->submitted_at);
@@ -308,12 +367,11 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
     }
 
-    public function test_an_unsigned_source_no_longer_blocks_a_system_owner(): void
+    public function test_an_unsigned_source_no_longer_blocks_a_draft_publication(): void
     {
-        $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
-        $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
+        $case = $this->draftPage(withSourceOwnedBy: 'other');
 
-        $this->actingAs($systemOwner)
+        $this->actingAs($case['owner'])
             ->patch("/app/wiki/{$case['page']->slug}/approve")
             ->assertRedirect();
 
@@ -338,9 +396,8 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
     public function test_publishing_does_not_sign_anybodys_source_off(): void
     {
         $case = $this->pageOutForReview(withSourceOwnedBy: 'other');
-        $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
 
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+        $this->actingAs($case['reviewer'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
 
         $this->assertTrue(
             $this->approvalFor($case['version'], $case['documentOwner'])->isPending(),
@@ -351,7 +408,10 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
     /** Not even the actor's own row, which publishing used to settle for them. */
     public function test_publishing_does_not_sign_the_actors_own_source_off(): void
     {
-        $case = $this->pageOutForReview(withSourceOwnedBy: 'self');
+        $case = $this->draftPage(withSourceOwnedBy: 'self');
+        // Opening the page is what keeps the requirement rows current; a draft that nobody has
+        // looked at has none yet.
+        $this->reviewAssignmentSeenBy($case['owner'], $case['page']);
 
         $this->actingAs($case['owner'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
 
@@ -386,14 +446,13 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
     // ── The task list ───────────────────────────────────────────────────────
 
     /** The page is decided, so nobody is still holding it — least of all the person who was asked. */
-    public function test_the_reviewers_task_disappears_when_a_system_owner_finishes_the_page(): void
+    public function test_the_reviewers_task_disappears_once_they_decide(): void
     {
         $case = $this->pageOutForReview();
-        $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
 
         $this->assertCount(1, $this->wikiTasksFor($case['reviewer']), 'the premise: it was theirs');
 
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
+        $this->actingAs($case['reviewer'])->patch("/app/wiki/{$case['page']->slug}/approve")->assertRedirect();
 
         $this->assertSame([], $this->wikiTasksFor($case['reviewer']));
     }

@@ -161,7 +161,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
             ->assertForbidden();
     }
 
-    // H + I. separation of duties holds for an approver, and yields for a System Owner
+    // H + I. separation of duties holds for everyone once a reviewer has been named
     public function test_the_submitter_cannot_approve_their_own_version(): void
     {
         $case = $this->readyForFinalReview();
@@ -173,25 +173,24 @@ class EnterpriseWikiFinalReviewTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_a_system_owner_may_take_over_someone_elses_assignment(): void
+    /** A named reviewer holds the version; final authority over the Wiki does not override that. */
+    public function test_a_system_owner_may_not_take_over_someone_elses_assignment(): void
     {
         $case = $this->readyForFinalReview();
         $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertRedirect(route('app.wiki.show', $case['page']->slug));
+            ->assertForbidden();
 
-        // The takeover is recorded as the actual decision-maker.
-        $this->assertSame($systemOwner->id, (int) $case['page']->fresh()->reviewed_by_user_id);
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
     }
 
     /**
-     * A System Owner is the customer's final authority, and that includes their own submissions —
-     * they can take a page from draft to published alone. A Wiki approver cannot; the test above
-     * holds that line.
+     * Choosing the reviewer track binds the person who chose it. A System Owner can publish a
+     * draft alone; once they have handed a version to somebody, it is that person's to decide.
      */
-    public function test_a_system_owner_who_submitted_the_version_may_still_approve_it(): void
+    public function test_a_system_owner_who_submitted_the_version_cannot_approve_it(): void
     {
         $case = $this->submittedPage();
         $systemOwner = $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER);
@@ -210,10 +209,16 @@ class EnterpriseWikiFinalReviewTest extends TestCase
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$case['page']->slug}/approve")
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $case['page']->fresh()->status);
+
+        // The reviewer they chose still decides it.
+        $this->actingAs($case['reviewer'])
+            ->patch("/app/wiki/{$case['page']->slug}/approve")
             ->assertRedirect(route('app.wiki.show', $case['page']->slug));
 
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $case['page']->fresh()->status);
-        $this->assertSame((int) $systemOwner->id, (int) $case['page']->fresh()->reviewed_by_user_id);
     }
 
     // J. the handover record is history, not scratch space

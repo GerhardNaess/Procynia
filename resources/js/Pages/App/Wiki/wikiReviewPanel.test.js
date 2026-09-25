@@ -534,7 +534,7 @@ describe('source approval is not part of publishing', () => {
     });
 
     test('the remaining blockers are about who may decide, not about sources', () => {
-        assert.match(panel, /function blockerMessage\(blocker, tw\)/);
+        assert.match(panel, /function blockerMessage\(blocker, tw, reviewerName = null\)/);
         for (const key of ['own_submission', 'not_assigned', 'missing_assignment']) {
             assert.match(panel, new RegExp(`case '${key}':`));
         }
@@ -620,5 +620,34 @@ describe('a stale view corrects itself', () => {
         // Neither is stale state, so both fall through the early return above.
         assert.match(panel, /review_error_expired/);
         assert.match(panel, /review_error_forbidden/);
+    });
+});
+
+/**
+ * Once somebody has been asked, the page says whose turn it is.
+ *
+ * A System Owner who sent the page for review is blocked by own_submission; anybody else looking
+ * at it is blocked by not_assigned. Both mean the same thing to the reader — it is with Gerhard —
+ * and saying whose turn it is beats saying why it is not yours.
+ */
+describe('a named reviewer is named in the explanation', () => {
+    test('both blockers become "waiting for X" once a reviewer exists', () => {
+        assert.match(panel, /case 'own_submission':\s*\n\s*case 'not_assigned':/);
+        assert.match(panel, /review_waiting_for_reviewer \?\? 'Venter på gjennomgang hos'/);
+    });
+
+    test('the reviewer name is passed in rather than guessed', () => {
+        assert.match(panel, /function blockerMessage\(blocker, tw, reviewerName = null\)/);
+        assert.match(panel, /blockerMessage\(reviewAssignment\.final_approval_blocker, tw, reviewAssignment\.reviewer\?\.name \?\? null\)/);
+    });
+
+    test('with nobody named, each blocker keeps its own sentence', () => {
+        assert.match(panel, /review_blocked_own_submission/);
+        assert.match(panel, /review_blocked_not_assigned/);
+    });
+
+    /** The stand-in line promised something that stops being true once a reviewer holds the page. */
+    test('the System Owner stand-in line only appears when they can actually finish it', () => {
+        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(\s*\n\s*<p[\s\S]{0,200}review_system_owner_may_finish/);
     });
 });

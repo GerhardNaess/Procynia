@@ -201,13 +201,13 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
     }
 
     /**
-     * The four-eyes rule holds for a Wiki approver and yields for a System Owner.
+     * Sending a page for review binds the person who sends it — System Owner included.
      *
-     * Being able to approve Wiki pages is not the same as being the customer's final authority.
-     * An approver does not publish what they themselves sent for review; a System Owner may, and
-     * the audit trail names them as the one who did it.
+     * A System Owner may publish a draft outright, but choosing the reviewer track for a version
+     * is choosing it. Approving it themselves afterwards would make the reviewer's turn
+     * decorative, and the handover something anyone could skip.
      */
-    public function test_a_system_owner_may_approve_their_own_submission(): void
+    public function test_a_system_owner_cannot_approve_their_own_submission(): void
     {
         [$customer, , $page] = $this->draftPage();
         $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -220,17 +220,16 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$page->slug}/approve")
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+
+        // The person who was asked still decides it.
+        $this->actingAs($reviewer)
+            ->patch("/app/wiki/{$page->slug}/approve")
             ->assertRedirect(route('app.wiki.show', $page->slug));
 
-        $page->refresh();
-
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
-        $this->assertSame((int) $systemOwner->id, (int) $page->reviewed_by_user_id);
-        // The handover is history, not rewritten: the page still records who was asked.
-        $this->assertSame(
-            (int) $reviewer->id,
-            (int) $page->currentVersion()->first()->reviewer_user_id,
-        );
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
     }
 
     /** The same act by an ordinary Wiki approver is still refused. */
@@ -252,16 +251,17 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
 
-    public function test_a_system_owner_may_step_in_on_someone_elses_assignment(): void
+    /** Not even on somebody else's assignment: the version belongs to whoever it was handed to. */
+    public function test_a_system_owner_may_not_step_in_on_someone_elses_assignment(): void
     {
         [$customer, $page] = $this->submittedPage();
         $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertRedirect(route('app.wiki.show', $page->slug));
+            ->assertForbidden();
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
 
     // L. a version that never went through the flow cannot be decided at all

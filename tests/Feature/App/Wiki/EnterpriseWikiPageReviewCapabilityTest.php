@@ -23,8 +23,9 @@ use Tests\TestCase;
  * It is deliberately NOT `approve_wiki_claims`. A claim decision vouches for one statement against
  * its source; a page decision publishes the page. Holding one must never imply the other.
  *
- * System Owner still passes — roleHasPermission() short-circuits — but as an override rather than
- * because the workflow names them the approver. See docs/enterprise-wiki-approval-model.md §10.
+ * System Owner still passes — roleHasPermission() short-circuits — but holding the capability is
+ * not the same as being the one who was asked: a version that names a reviewer is decided by that
+ * reviewer. See docs/enterprise-wiki-approval-model.md §10.
  */
 class EnterpriseWikiPageReviewCapabilityTest extends TestCase
 {
@@ -91,20 +92,27 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
         }
     }
 
-    // C. System Owner keeps an override
-    public function test_a_system_owner_can_still_approve_without_being_granted_it(): void
+    // C. the capability is not the assignment
+    /**
+     * The capability survives an empty permission matrix — but it is still only a capability. What
+     * decides a version that has been handed over is the handover, System Owner included.
+     */
+    public function test_a_system_owner_keeps_the_capability_but_not_somebody_elses_assignment(): void
     {
         [$customer, $page] = $this->pendingPage();
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
-        $this->submitTo($page, $this->user($customer, User::BID_ROLE_BID_MANAGER));
+        $reviewer = $this->user($customer, User::BID_ROLE_BID_MANAGER);
+        $this->submitTo($page, $reviewer);
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, []);
 
-        // A System Owner takes over an assignment that is not theirs.
-        $this->actingAs($this->user($customer, User::BID_ROLE_SYSTEM_OWNER))
-            ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertRedirect(route('app.wiki.show', $page->slug));
+        $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $this->assertTrue($systemOwner->canApproveWikiPages(), 'granted to nobody, and they still hold it');
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+        $this->actingAs($systemOwner)
+            ->patch("/app/wiki/{$page->slug}/approve")
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
 
     // D. never across customers

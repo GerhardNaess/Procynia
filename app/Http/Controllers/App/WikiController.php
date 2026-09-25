@@ -2867,11 +2867,11 @@ class WikiController extends Controller
                     || $version->submitted_by_user_id === null
                     || $version->submitted_at === null) => 'missing_assignment',
             ! $user->canApproveWikiPages() => 'missing_capability',
-            // Reported separately from not_assigned because the two need different sentences: one
-            // is "somebody else is holding this", the other is "you cannot sign off your own work".
-            // A System Owner passes both — see canFinalApproveEnterpriseWikiVersion().
-            ! $user->isSystemOwner()
-                && (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
+            // Reported separately from not_assigned because the two can need different sentences:
+            // one is "somebody else is holding this", the other is "you cannot sign off your own
+            // work". Once a reviewer is named, both mean the same thing to the reader and the page
+            // says so by naming them.
+            (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
             ! $user->canFinalApproveEnterpriseWikiVersion($version, $page) => 'not_assigned',
             // Source documents are provenance, not a level of approval. Whether a document owner
             // has vouched for their own material is recorded and visible, and it no longer decides
