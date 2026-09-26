@@ -18,7 +18,7 @@ test('the three sections render in priority order', async ({ page }) => {
 
     await expect(headings.filter({ hasText: 'Krever oppfølging' })).toBeVisible();
 
-    // Card titles render uppercase, and innerText reflects text-transform — compare lowercased.
+    // Compared lowercased: the section titles are sentence case now, but this only cares about order.
     const order = await page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
 

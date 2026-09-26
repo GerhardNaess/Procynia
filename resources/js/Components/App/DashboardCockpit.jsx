@@ -175,21 +175,41 @@ function InfoButton({ infoKey, title, infoText, texts = {} }) {
     );
 }
 
-function Card({ title, subtitle, infoKey, infoText, action, children, className = '', openInfoKey, setOpenInfoKey, texts = {}, dense = false }) {
+/**
+ * A titled region of the cockpit.
+ *
+ * Every region used to be a card: a 24px radius, a drop shadow and a 12px uppercase title. Five of
+ * them stacked, several holding cards of their own, which left the page reading as a report form —
+ * and the titles were not headings at all, so a screen reader found exactly one <h2> on the whole
+ * page. The title is now a real heading at the section level, and `bare` drops the frame for the
+ * regions that only needed grouping, not a surface of their own.
+ *
+ * `sub` is for a region nested inside another one (the follow-up drill-down): a level down in the
+ * document outline, and a step down in size, so it cannot outrank the section holding it.
+ */
+function Card({ title, subtitle, infoKey, infoText, action, children, className = '', openInfoKey, setOpenInfoKey, texts = {}, dense = false, bare = false, sub = false }) {
+    const Heading = sub ? 'h3' : 'h2';
+
     return (
-        <section className={classNames('rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.05)]', dense ? 'p-4' : 'p-5', className)}>
+        <section className={classNames(
+            bare ? '' : classNames('rounded-2xl border border-slate-200 bg-white', dense ? 'p-4' : 'p-5'),
+            className,
+        )}>
             <div className={classNames('flex items-start justify-between gap-4', dense ? 'mb-3' : 'mb-4')}>
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+                        <Heading className={classNames(
+                            'font-semibold tracking-tight text-slate-950',
+                            sub ? 'text-lg' : 'text-xl',
+                        )}>
                             {title}
-                        </div>
+                        </Heading>
                         {infoKey ? (
                             <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} texts={texts} />
                         ) : null}
                     </div>
                     {subtitle ? (
-                        <p className={classNames('mt-1 text-base text-slate-600', dense ? 'leading-5' : 'leading-6')}>
+                        <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
                             {subtitle}
                         </p>
                     ) : null}
@@ -231,14 +251,14 @@ function AttentionCaseRow({ item, texts = {} }) {
                 <div className="truncate text-base font-semibold text-slate-950">
                     {item.title}
                 </div>
-                <div className="mt-0.5 text-sm font-semibold text-slate-700">
+                <div className="mt-0.5 text-base font-semibold leading-6 text-slate-700">
                     {item.reason}
                 </div>
                 <div className="mt-0.5 text-sm leading-5 text-slate-600">
                     {item.secondary}
                 </div>
             </div>
-            <span className="mt-1 text-sm font-semibold uppercase tracking-[0.12em] text-violet-700 opacity-0 transition group-hover:opacity-100">
+            <span className="mt-1 shrink-0 text-base font-semibold text-violet-700 opacity-0 transition group-hover:opacity-100">
                 {texts.open_case}
             </span>
         </Link>
@@ -307,9 +327,11 @@ function SectionHeading({ title, subtitle, infoKey, infoText, openInfoKey, setOp
  */
 function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) {
     const isActive = Number(signal.count ?? 0) > 0;
+    // Tint only: the signal already says what it is in words, so colour repeats it quietly rather
+    // than carrying it. A signal at zero drops the tint entirely and mutes its number.
     const tone = {
-        danger: 'border-rose-200 bg-rose-50/70',
-        warning: 'border-amber-200 bg-amber-50/70',
+        danger: 'border-rose-200 bg-rose-50/50',
+        warning: 'border-amber-200 bg-amber-50/50',
         neutral: 'border-slate-200 bg-white',
     };
 
@@ -319,25 +341,25 @@ function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) 
             aria-expanded={isOpen}
             onClick={onToggle}
             className={classNames(
-                'flex h-full w-full flex-col rounded-[24px] border px-4 py-4 text-left transition',
-                isActive ? (tone[signal.severity] ?? tone.neutral) : 'border-slate-200 bg-white/60',
+                'flex h-full w-full flex-col rounded-2xl border px-5 py-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600',
+                isActive ? (tone[signal.severity] ?? tone.neutral) : 'border-slate-200 bg-white',
                 isOpen ? 'ring-2 ring-violet-200' : 'hover:border-slate-300',
             )}
         >
             <div className={classNames(
-                'text-xs font-semibold uppercase tracking-[0.14em]',
-                isActive ? 'text-slate-700' : 'text-slate-500',
+                'text-base font-semibold leading-6',
+                isActive ? 'text-slate-800' : 'text-slate-600',
             )}>
                 {signal.label}
             </div>
             <div className={classNames(
-                'mt-2 text-4xl font-semibold tabular-nums',
+                'mt-2 text-[30px] font-semibold leading-none tabular-nums',
                 isActive ? 'text-slate-950' : 'text-slate-400',
             )}>
                 {formatNumber(signal.count, locale)}
             </div>
             <p className={classNames(
-                'mt-2 text-base leading-6',
+                'mt-2.5 text-base leading-6',
                 isActive ? 'text-slate-700' : 'text-slate-500',
             )}>
                 {signal.description}
@@ -351,22 +373,30 @@ function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) 
     );
 }
 
+/**
+ * One phase inside the pipeline strip.
+ *
+ * These were six bordered cards inside a seventh, which made the pipeline read as six unrelated
+ * numbers rather than one portfolio. They are cells of a single strip now, separated by a divider
+ * instead of a frame each. The violet fill still shows the phase's share of the busiest one — that
+ * is the only thing carrying colour here, so it stays.
+ */
 function PipelineStage({ stage, locale, stageMax }) {
     const count = Number(stage.count ?? 0);
     const width = stageMax > 0 ? Math.round((count / stageMax) * 100) : 0;
 
     return (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+        <div className="flex min-w-30 flex-1 flex-col gap-2 px-4 py-4">
+            <div className="text-base font-semibold leading-6 text-slate-700">
                 {stage.label}
             </div>
             <div className={classNames(
-                'mt-1 text-2xl font-semibold tabular-nums',
+                'text-[26px] font-semibold leading-none tabular-nums',
                 count > 0 ? 'text-slate-950' : 'text-slate-400',
             )}>
                 {formatNumber(count, locale)}
             </div>
-            <div className="mt-2 h-1.5 rounded-full bg-slate-200">
+            <div className="mt-0.5 h-1.5 rounded-full bg-slate-100">
                 <div
                     className="h-1.5 rounded-full bg-violet-500 transition-all"
                     style={{ width: `${Math.max(count > 0 ? 6 : 0, width)}%` }}
@@ -375,10 +405,18 @@ function PipelineStage({ stage, locale, stageMax }) {
         </div>
     );
 }
+/**
+ * The calendar's toolbar shares one height, the way the Wiki list's does, so month, year and the
+ * date jump read as one control rather than three stacked rows.
+ */
+const CALENDAR_CONTROL_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
+const CALENDAR_LABEL_CLS = 'text-base font-medium text-slate-600';
+const CALENDAR_ARROW_CLS = 'inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-base text-slate-600 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200';
+
 function DeadlinePopover({ items, locale, texts = {}, commonText = {} }) {
     return (
         <div className="absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_20px_40px_rgba(15,23,42,0.12)] group-hover:block group-focus-within:block">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+            <div className="mb-2 text-sm font-semibold text-slate-600">
                 {texts.title}
             </div>
             <div className="space-y-2">
@@ -388,15 +426,15 @@ function DeadlinePopover({ items, locale, texts = {}, commonText = {} }) {
                         href={item.show_url}
                         className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-violet-200 hover:bg-violet-50/80"
                     >
-                        <div className="text-sm font-semibold text-slate-950">
+                        <div className="text-base font-semibold leading-6 text-slate-950">
                             {item.title}
                         </div>
-                        <div className="mt-1 text-xs leading-5 text-slate-500">
+                        <div className="mt-1 text-sm leading-5 text-slate-600">
                             {item.deadline_type_label}
                             {' · '}
                             {formatDate(item.date, locale, commonText.not_available, { day: 'numeric', month: 'short' })}
                         </div>
-                        <div className="mt-1 text-xs leading-5 text-slate-500">
+                        <div className="mt-1 text-sm leading-5 text-slate-600">
                             {item.bid_manager_name ?? texts.no_bid_manager}
                             {item.phase_label ? ` · ${item.phase_label}` : ''}
                         </div>
@@ -495,8 +533,8 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
     const stageMax = Math.max(...pipelineStages.map((stage) => Number(stage.count ?? 0)), 1);
 
     return (
-        <div className="space-y-5">
-            <section className="space-y-1.5">
+        <div className="space-y-8">
+            <header className="space-y-2">
                 <div className="flex items-center gap-3">
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                         {pageTitle}
@@ -508,12 +546,12 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         sections={getDashboardHelpSections(texts)}
                     />
                 </div>
-                <p className="max-w-4xl text-base leading-7 text-slate-600">
+                <p className="max-w-3xl text-base leading-6 text-slate-600">
                     {pageSubtitle}
                 </p>
-            </section>
+            </header>
 
-            <div className="space-y-3">
+            <section className="space-y-4">
                 <SectionHeading
                     title={redesignText.follow_up_title}
                     subtitle={redesignText.follow_up_subtitle}
@@ -538,13 +576,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         ))}
                     </div>
                 ) : (
-                    <p className="rounded-[24px] border border-dashed border-slate-200 bg-white/70 px-5 py-6 text-base text-slate-600">
+                    <p className="text-base leading-6 text-slate-600">
                         {redesignText.follow_up_clear}
                     </p>
                 )}
 
                 {openSignal ? (
                     <Card
+                        sub
                         title={openSignal.title}
                         subtitle={openSignal.subtitle}
                         openInfoKey={openInfoKey}
@@ -567,17 +606,18 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                 ))}
                             </div>
                         ) : (
-                            <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-base text-slate-600">
+                            <p className="text-base leading-6 text-slate-600">
                                 {emptyStatesText.no_category_items}
-                            </div>
+                            </p>
                         )}
                     </Card>
                 ) : null}
-            </div>
+            </section>
 
-            <div className="grid gap-4 xl:grid-cols-12">
+            <div className="grid gap-8 xl:grid-cols-12 xl:gap-6">
                 <div className="xl:col-span-8">
                     <Card
+                        bare
                         title={redesignText.pipeline_title}
                         subtitle={redesignText.pipeline_subtitle}
                         infoKey="pipeline_stages"
@@ -586,7 +626,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         setOpenInfoKey={setOpenInfoKey}
                         texts={dashboardText}
                     >
-                        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+                        <div className="flex flex-wrap items-stretch divide-x divide-slate-200 rounded-2xl border border-slate-200 bg-white">
                             {pipelineStages.map((stage) => (
                                 <PipelineStage
                                     key={stage.key}
@@ -601,6 +641,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
 
                 <div className="xl:col-span-4">
                     <Card
+                        bare
                         title={redesignText.management_title}
                         infoKey="management"
                         infoText={infoTextsText.management}
@@ -608,14 +649,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         setOpenInfoKey={setOpenInfoKey}
                         texts={dashboardText}
                     >
-                        <dl className="space-y-1">
+                        <dl className="divide-y divide-slate-200 border-y border-slate-200">
                             {managementRows.map((row) => (
                                 <div
                                     key={row.key}
-                                    className="flex items-baseline justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0"
+                                    className="flex items-baseline justify-between gap-4 py-3"
                                 >
-                                    <dt className="min-w-0 text-base text-slate-600">{row.label}</dt>
-                                    <dd className="shrink-0 text-base font-semibold text-slate-950">{row.value}</dd>
+                                    <dt className="min-w-0 text-base leading-6 text-slate-600">{row.label}</dt>
+                                    <dd className="shrink-0 text-base font-semibold tabular-nums text-slate-950">{row.value}</dd>
                                 </div>
                             ))}
                         </dl>
@@ -623,174 +664,164 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                 </div>
             </div>
 
-            <div className="grid gap-5 xl:grid-cols-12 xl:items-stretch">
-                <div className="xl:col-span-8 h-full flex flex-col">
+            <div className="grid gap-8 xl:grid-cols-12 xl:items-start xl:gap-6">
+                <div className="xl:col-span-8">
                     <Card
                         title={sectionsText.deadlines?.title}
-                        subtitle={`${sectionsText.deadlines?.subtitle_prefix} ${calendar.monthLabel}`}
+                        subtitle={[
+                            `${sectionsText.deadlines?.subtitle_prefix ?? ''} ${calendar.monthLabel}`.trim(),
+                            calendarText.hover_hint,
+                        ].filter(Boolean).join('. ')}
                         infoKey="deadlines"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
-                        className="h-full border-violet-200 bg-violet-50/60"
-                        dense
                         texts={dashboardText}
                     >
-                        <div className="space-y-3">
-                            <div className="rounded-2xl border border-slate-200 bg-white p-2.5">
-                                <div className="flex flex-col gap-2.5">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                aria-label={calendarText.previous_month}
-                                                onClick={() => setVisibleMonthStart((current) => addMonths(current, -1))}
-                                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                                            >
-                                                ←
-                                            </button>
-                                            <div className="text-[15px] font-semibold capitalize text-slate-900">
-                                                {calendar.monthLabel}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                aria-label={calendarText.next_month}
-                                                onClick={() => setVisibleMonthStart((current) => addMonths(current, 1))}
-                                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                                            >
-                                                →
-                                            </button>
-                                        </div>
-                                        <div className="text-xs text-slate-600">
-                                            {calendarText.hover_hint}
-                                        </div>
-                                    </div>
+                        {/* One toolbar, one control height. The month arrows, the two selects and
+                            the date jump used to sit in three separate rows at three sizes, with
+                            12px uppercase labels above them — the calendar's own chrome outweighed
+                            the month it was showing. */}
+                        <div className="flex flex-wrap items-end gap-3">
+                            <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                    type="button"
+                                    aria-label={calendarText.previous_month}
+                                    onClick={() => setVisibleMonthStart((current) => addMonths(current, -1))}
+                                    className={CALENDAR_ARROW_CLS}
+                                >
+                                    ←
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-label={calendarText.next_month}
+                                    onClick={() => setVisibleMonthStart((current) => addMonths(current, 1))}
+                                    className={CALENDAR_ARROW_CLS}
+                                >
+                                    →
+                                </button>
+                            </div>
 
-                                    <div className="grid gap-2 md:grid-cols-[minmax(0,0.9fr)_minmax(0,0.8fr)_minmax(0,1.1fr)]">
-                                        <label className="block">
-                                            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                {calendarText.month_label}
-                                            </span>
-                                            <select
-                                                value={String(visibleMonthStart.getMonth())}
-                                                onChange={(event) => {
-                                                    const nextMonth = Number(event.target.value);
-                                                    setVisibleMonthStart(new Date(visibleMonthStart.getFullYear(), nextMonth, 1));
-                                                }}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                                            >
-                                                {monthOptions.map((option) => (
-                                                    <option key={option.value} value={option.value}>
-                                                        {option.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-
-                                        <label className="block">
-                                            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                {calendarText.year_label}
-                                            </span>
-                                            <select
-                                                value={calendar.yearValue}
-                                                onChange={(event) => {
-                                                    const nextYear = Number(event.target.value);
-                                                    setVisibleMonthStart(new Date(nextYear, visibleMonthStart.getMonth(), 1));
-                                                }}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                                            >
-                                                {calendarYearOptions.map((year) => (
-                                                    <option key={year} value={String(year)}>
-                                                        {year}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-
-                                        <div>
-                                            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="deadline-date-jump">
-                                                {calendarText.jump_label}
-                                            </label>
-                                            <div className="flex gap-2">
-                                                <input
-                                                    id="deadline-date-jump"
-                                                    type="date"
-                                                    value={jumpDateValue}
-                                                    onChange={(event) => setJumpDateValue(event.target.value)}
-                                                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        if (!jumpDateValue) {
-                                                            return;
-                                                        }
-
-                                                        const nextDate = new Date(`${jumpDateValue}T00:00:00`);
-                                                        setVisibleMonthStart(startOfMonth(nextDate));
-                                                        setSelectedDateKey(toDateKey(nextDate));
-                                                    }}
-                                                    className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base font-medium text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
-                                                >
-                                                    {actionsText.show}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mt-2 grid grid-cols-7 gap-0.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {calendarText.weekdays?.map((label) => (
-                                        <div key={label} className="px-1 py-0.5 text-center">
-                                            {label}
-                                        </div>
+                            <label className="flex min-w-0 flex-1 basis-32 flex-col gap-1">
+                                <span className={CALENDAR_LABEL_CLS}>{calendarText.month_label}</span>
+                                <select
+                                    value={String(visibleMonthStart.getMonth())}
+                                    onChange={(event) => {
+                                        const nextMonth = Number(event.target.value);
+                                        setVisibleMonthStart(new Date(visibleMonthStart.getFullYear(), nextMonth, 1));
+                                    }}
+                                    className={classNames(CALENDAR_CONTROL_CLS, 'min-w-0')}
+                                >
+                                    {monthOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
                                     ))}
-                                </div>
+                                </select>
+                            </label>
 
-                                <div className="mt-1 grid grid-cols-7 gap-0.5">
-                                    {calendar.days.map((day) => {
-                                        const items = deadlineGroups[day.dateKey] ?? [];
-                                        const isSelected = selectedDateKey === day.dateKey;
+                            <label className="flex min-w-0 flex-1 basis-24 flex-col gap-1">
+                                <span className={CALENDAR_LABEL_CLS}>{calendarText.year_label}</span>
+                                <select
+                                    value={calendar.yearValue}
+                                    onChange={(event) => {
+                                        const nextYear = Number(event.target.value);
+                                        setVisibleMonthStart(new Date(nextYear, visibleMonthStart.getMonth(), 1));
+                                    }}
+                                    className={classNames(CALENDAR_CONTROL_CLS, 'min-w-0')}
+                                >
+                                    {calendarYearOptions.map((year) => (
+                                        <option key={year} value={String(year)}>
+                                            {year}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
 
-                                        return (
-                                            <button
-                                                key={day.dateKey}
-                                                type="button"
-                                                onClick={() => setSelectedDateKey(day.dateKey)}
-                                                className={classNames(
-                                                    'group relative min-h-10 rounded-xl border px-1 py-0.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-                                                    day.inCurrentMonth ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/70 text-slate-400',
-                                                    day.isToday ? 'ring-2 ring-violet-200' : '',
-                                                    isSelected ? 'border-violet-400 bg-violet-50' : '',
-                                                )}
-                                            >
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <div className="text-xs font-semibold">
-                                                        {day.dayOfMonth}
-                                                    </div>
-                                                    {items.length > 0 ? (
-                                                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1 text-xs font-semibold text-violet-700">
-                                                            {items.length}
-                                                        </span>
-                                                    ) : null}
-                                                </div>
+                            <div className="flex w-full min-w-0 flex-col gap-1 sm:w-auto sm:flex-1 sm:basis-56">
+                                <label className={CALENDAR_LABEL_CLS} htmlFor="deadline-date-jump">
+                                    {calendarText.jump_label}
+                                </label>
+                                <div className="flex min-w-0 gap-2">
+                                    <input
+                                        id="deadline-date-jump"
+                                        type="date"
+                                        value={jumpDateValue}
+                                        onChange={(event) => setJumpDateValue(event.target.value)}
+                                        className={classNames(CALENDAR_CONTROL_CLS, 'min-w-0 flex-1')}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!jumpDateValue) {
+                                                return;
+                                            }
 
-                                                {items.length > 0 ? (
-                                                    <DeadlinePopover items={items} locale={locale} texts={{
-                                                        title: popoversText.deadlines_title,
-                                                        no_bid_manager: emptyStatesText.no_bid_manager,
-                                                    }} commonText={sharedText} />
-                                                ) : null}
-                                            </button>
-                                        );
-                                    })}
+                                            const nextDate = new Date(`${jumpDateValue}T00:00:00`);
+                                            setVisibleMonthStart(startOfMonth(nextDate));
+                                            setSelectedDateKey(toDateKey(nextDate));
+                                        }}
+                                        className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+                                    >
+                                        {actionsText.show}
+                                    </button>
                                 </div>
                             </div>
+                        </div>
+
+                        <div className="mt-5 grid grid-cols-7 gap-1 text-sm font-semibold text-slate-600">
+                            {calendarText.weekdays?.map((label) => (
+                                <div key={label} className="px-1 pb-1 text-center">
+                                    {label}
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-1">
+                            {calendar.days.map((day) => {
+                                const items = deadlineGroups[day.dateKey] ?? [];
+                                const isSelected = selectedDateKey === day.dateKey;
+
+                                return (
+                                    <button
+                                        key={day.dateKey}
+                                        type="button"
+                                        onClick={() => setSelectedDateKey(day.dateKey)}
+                                        className={classNames(
+                                            'group relative min-h-12 rounded-lg border px-1.5 py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
+                                            day.inCurrentMonth
+                                                ? 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                                                : 'border-slate-100 bg-slate-50/70 text-slate-400',
+                                            day.isToday ? 'ring-2 ring-violet-200' : '',
+                                            isSelected ? 'border-violet-400 bg-violet-50' : '',
+                                        )}
+                                    >
+                                        <div className="flex items-start justify-between gap-1">
+                                            <div className="text-base font-semibold leading-6 tabular-nums">
+                                                {day.dayOfMonth}
+                                            </div>
+                                            {items.length > 0 ? (
+                                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-violet-100 px-1 text-sm font-semibold tabular-nums text-violet-700">
+                                                    {items.length}
+                                                </span>
+                                            ) : null}
+                                        </div>
+
+                                        {items.length > 0 ? (
+                                            <DeadlinePopover items={items} locale={locale} texts={{
+                                                title: popoversText.deadlines_title,
+                                                no_bid_manager: emptyStatesText.no_bid_manager,
+                                            }} commonText={sharedText} />
+                                        ) : null}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </Card>
                 </div>
 
                 <div className="xl:col-span-4">
                     <Card
+                        bare
                         title={redesignText.results_title}
                         subtitle={redesignText.results_subtitle}
                         infoKey="outcomes"
@@ -800,39 +831,43 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         texts={dashboardText}
                     >
                         {hasAnyOutcome ? (
-                            <div className="grid grid-cols-2 gap-2.5">
-                                {visibleOutcomes.map((outcome) => (
+                            <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                                {visibleOutcomes.map((outcome, index) => (
                                     <div
                                         key={outcome.key}
-                                        className="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3"
+                                        className={classNames(
+                                            'flex flex-col gap-1.5 px-5 py-4',
+                                            index % 2 === 1 ? 'border-l border-slate-200' : '',
+                                            index > 1 ? 'border-t border-slate-200' : '',
+                                        )}
                                     >
                                         <div className={classNames(
-                                            'text-xs font-semibold uppercase tracking-[0.12em]',
+                                            'text-base font-semibold leading-6',
                                             OUTCOME_TONE[outcome.key] ?? 'text-slate-600',
                                         )}>
                                             {outcome.label}
                                         </div>
-                                        <div className="mt-1 text-2xl font-semibold text-slate-950">
+                                        <div className="text-[26px] font-semibold leading-none tabular-nums text-slate-950">
                                             {formatNumber(outcome.count, locale)}
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         ) : (
-                            <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-3 py-4 text-base text-slate-600">
+                            <p className="text-base leading-6 text-slate-600">
                                 {redesignText.results_none}
                             </p>
                         )}
 
                         {winRate ? (
-                            <div className="mt-3 flex items-baseline justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3">
+                            <div className="mt-4 flex items-baseline justify-between gap-4 border-t border-slate-200 pt-4">
                                 <div className="min-w-0">
-                                    <div className="text-base font-medium text-slate-700">{redesignText.results_win_rate}</div>
+                                    <div className="text-base font-medium leading-6 text-slate-700">{redesignText.results_win_rate}</div>
                                     <div className="text-sm leading-5 text-slate-600">
                                         {winRate.numerator}/{winRate.denominator} {redesignText.results_win_rate_basis}
                                     </div>
                                 </div>
-                                <div className="shrink-0 text-2xl font-semibold text-slate-950">
+                                <div className="shrink-0 text-[26px] font-semibold leading-none tabular-nums text-slate-950">
                                     {formatPercent(winRate.value, locale)}
                                 </div>
                             </div>
