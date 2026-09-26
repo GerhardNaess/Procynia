@@ -2082,9 +2082,14 @@ export default function NoticeIndex({
                                                 <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                                                     <div className="min-w-0 flex-1">
                                                         <div className="flex flex-wrap items-center gap-2.5">
-                                                            <h2 className="text-[1.7rem] font-semibold tracking-tight text-slate-950">
+                                                            {/* A card title sits inside "Registrerte kunngjøringer", so it reads
+                                                                and nests below it — at 27px it was the largest thing on the page
+                                                                after the page title, which put the section it belongs to beneath
+                                                                its own contents. Still 18px and bold: smaller than the section,
+                                                                clearly the card's name. */}
+                                                            <h3 className="text-lg font-semibold tracking-tight text-slate-950">
                                                                 {notice.title}
-                                                            </h2>
+                                                            </h3>
                                                         </div>
 
                                                         <div className="mt-1.5 flex flex-wrap items-center gap-4 text-base text-slate-700">

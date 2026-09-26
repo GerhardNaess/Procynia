@@ -73,3 +73,37 @@ describe('nothing else about the page moved', () => {
         assert.match(index, /id="doffin-results"/);
     });
 });
+
+/**
+ * A card title belongs under the section that holds it.
+ *
+ * The notice cards used <h2> at 27px — the largest thing on the page after the page title, and
+ * larger than "Registrerte kunngjøringer", the section they sit inside. So the list read as if the
+ * section were a footnote to its own contents, and a screen reader heard both at the same level.
+ */
+describe('notice card titles nest under their section', () => {
+    test('the card title is a level below the section', () => {
+        assert.match(index, /<h3 className="text-lg font-semibold tracking-tight text-slate-950">\s*\n\s*\{notice\.title\}\s*\n\s*<\/h3>/);
+        assert.ok(! index.includes('text-[1.7rem]'), 'and no longer outsizes the section');
+    });
+
+    test('it stays a heading people can read at a glance', () => {
+        // 18px and bold. Hierarchy comes from weight and level here, not from shrinking text.
+        const start = index.indexOf('{notice.title}');
+        const heading = index.slice(index.lastIndexOf('<h3', start), start);
+        assert.match(heading, /text-lg/);
+        assert.match(heading, /font-semibold/);
+        assert.match(heading, /text-slate-950/);
+    });
+
+    test('nothing on this page is set below 14px', () => {
+        // The readability floor for this surface: no 12px anywhere, including badges and metadata.
+        assert.ok(! index.includes('text-xs'), 'no 12px text');
+        assert.ok(! /text-\[1[0-3]px\]/.test(index), 'and nothing hand-set below 14px either');
+    });
+
+    test('the card keeps its layout, badges and actions', () => {
+        assert.match(index, /rounded-\[20px\] border border-slate-200 bg-white p-5/);
+        assert.match(index, /\{notice\.buyer_name \|\| noticesText\.buyerUnknown\}/);
+    });
+});
