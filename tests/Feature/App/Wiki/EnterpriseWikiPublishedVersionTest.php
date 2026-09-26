@@ -91,18 +91,19 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
     // C + D. approving the new version moves publication, atomically, and only ever to one version
     public function test_approving_the_new_version_moves_publication(): void
     {
-        [$customer, $systemOwner, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
+        [$customer, $reviewer, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
         $v1 = $page->currentVersion()->first();
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$page->slug}/approve");
+        $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve");
 
         $v2 = $this->version($page, 2, isCurrent: false);
         $v1->forceFill(['is_current' => false])->save();
         $v2->forceFill(['is_current' => true])->save();
         EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
         $v2->forceFill(['submitted_by_user_id' => null, 'submitted_at' => null, 'reviewer_user_id' => null])->save();
-        $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
+        // A second round means a second handover, and the new version belongs to whoever it names.
+        $secondReviewer = $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
 
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$page->slug}/approve");
+        $this->actingAs($secondReviewer)->patch("/app/wiki/{$page->slug}/approve");
 
         $page->refresh();
         $this->assertSame($v2->id, (int) $page->published_version_id);
@@ -122,18 +123,18 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
     // E. rejection never withdraws what was already approved
     public function test_rejecting_the_new_version_leaves_the_published_one_in_place(): void
     {
-        [$customer, $systemOwner, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
+        [$customer, $reviewer, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
         $v1 = $page->currentVersion()->first();
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$page->slug}/approve");
+        $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve");
 
         $v2 = $this->version($page, 2, isCurrent: false);
         $v1->forceFill(['is_current' => false])->save();
         $v2->forceFill(['is_current' => true])->save();
         EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
         $v2->forceFill(['submitted_by_user_id' => null, 'submitted_at' => null, 'reviewer_user_id' => null])->save();
-        $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
+        $secondReviewer = $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
 
-        $this->actingAs($systemOwner)
+        $this->actingAs($secondReviewer)
             ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect(route('app.wiki.show', $page->slug));
 
@@ -200,8 +201,10 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
      * page reaches that status now — ingest leaves pages in draft, and approve() refuses a version
      * with no assignment behind it.
      *
-     * The System Owner returned acts as reviewer by taking over the assignment. These tests are
-     * about version semantics, not about who is allowed to decide.
+     * The user returned is whoever may decide this page: the assigned reviewer once it has been
+     * handed over, and a System Owner while it is still a draft. These tests are about version
+     * semantics, not about who is allowed to decide — that rule lives in
+     * EnterpriseWikiSystemOwnerApprovalTest.
      *
      * @return array{0: Customer, 1: User, 2: EnterpriseWikiPage}
      */
@@ -216,14 +219,14 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $this->version($page, 1, isCurrent: true);
 
         if ($status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
-            $this->handOver($page, $customer, $pageOwner);
+            return [$customer, $this->handOver($page, $customer, $pageOwner), $page->fresh()];
         }
 
         return [$customer, $systemOwner, $page->fresh()];
     }
 
     /** Submit the page to a reviewer who is not its owner, so the assignment is real. */
-    private function handOver(EnterpriseWikiPage $page, Customer $customer, User $pageOwner): void
+    private function handOver(EnterpriseWikiPage $page, Customer $customer, User $pageOwner): User
     {
         $settings = $customer->resolvedPermissionSettings();
         $settings[Customer::PERMISSION_APPROVE_WIKI_PAGES] = ['bid_manager'];
@@ -234,6 +237,8 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $this->actingAs($pageOwner)
             ->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])
             ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        return $reviewer;
     }
 
     private function customer(): Customer

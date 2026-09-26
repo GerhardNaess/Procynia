@@ -1062,6 +1062,24 @@ class WikiController extends Controller
     }
 
     /**
+     * Which document-owner state a run's page version is in.
+     *
+     * Removed by accident along with the unconsumed page payload it also fed, which left
+     * documentOwnerApprovalCountsForRun() calling a method that no longer existed — and the
+     * Kjøringer tab returning 500. It delegates; both halves it delegates to are still here.
+     *
+     * A superseded version is not awaiting anything: a newer run has replaced what it produced.
+     */
+    private function documentOwnerSummaryForRunPageVersion(EnterpriseWikiPageVersion $version, bool $isCurrent): array
+    {
+        if (! $isCurrent) {
+            return $this->documentOwnerSummarySuperseded();
+        }
+
+        return $this->documentOwnerSummaryForVersion($version);
+    }
+
+    /**
      * Document Owner approval evidence for the Kjøringer timeline (Del 1-9): a run's own `status`
      * is never sufficient to know whether a human actually approved anything, since an
      * approve/reject decision (WikiClaimController/EnterpriseWikiDocumentOwnerApprovalService)

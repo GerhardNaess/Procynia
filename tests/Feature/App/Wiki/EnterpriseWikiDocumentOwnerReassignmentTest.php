@@ -19,22 +19,20 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
- * A completed run must not keep looking finished once a document owner change creates a NEW,
- * still-undecided approval requirement on one of its current page versions.
+ * Who may decide a document-owner requirement, and how that decision is recorded.
  *
- * Before the fix, three layered terminal guards made completed -> awaiting impossible, so the Wiki
- * showed a finished run next to an approval nobody had made. The fix opens exactly one transition —
- * `completed` -> `awaiting_document_owner_approval`, and only when the existing completion gate says
- * the run is genuinely not ready.
+ * This file once opened with the opposite guarantee: that a finished run reopened when an owner
+ * change created a new, undecided requirement. That mattered while the sign-off gated publishing —
+ * a run looking finished next to an approval nobody had made was a lie. It gates nothing now, so a
+ * finished run stays finished and those tests went with the rule (see the reassignment test in
+ * EnterpriseWikiSourceDocumentLifecycleTest for what replaced them).
  *
- * The second half of this file closes the override-test gap the mapping found: System Owner deciding
- * a NAMED other owner's requirement was never covered (only the missing-owner case), and the reject
- * route had no test at all. Nothing about the authorization model is changed here — these tests only
- * pin the behaviour that already exists.
+ * What remains is the authorization model, which is unchanged: a System Owner may decide a NAMED
+ * other owner's requirement and is recorded as having overridden it, an owner's own decision is not
+ * an override, and nobody else may decide at all.
  */
 class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 {
@@ -48,155 +46,10 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
     }
 
     // =========================================================================
-    // The main scenario: owner change after a completed run
-    // =========================================================================
-
-    public function test_owner_change_after_a_completed_run_reopens_it_and_the_new_owner_can_complete_it_again(): void
-    {
-        [$customer, $ownerA, $document, $page, $version, $run] = $this->completedRunApprovedBy();
-        $ownerB = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-
-        $approvalA = $this->approvalFor($version, $ownerA);
-        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED, $approvalA->approval_status);
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status);
-
-        // 4-8: ownership moves to B.
-        $document->forceFill(['owner_user_id' => $ownerB->id])->save();
-        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document->fresh());
-
-        $run->refresh();
-        $this->assertSame(
-            EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
-            $run->status,
-            'a new outstanding requirement must reopen the run',
-        );
-        $this->assertNull($run->finished_at);
-        $this->assertStringContainsString('Dokumenteier', (string) $run->error_message);
-
-        // 9: the historical decision is untouched and still attributed to A.
-        $approvalA->refresh();
-        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED, $approvalA->approval_status);
-        $this->assertSame($ownerA->id, $approvalA->document_owner_user_id);
-        $this->assertSame($ownerA->id, $approvalA->decided_by_user_id);
-
-        $approvalB = $this->approvalFor($version, $ownerB);
-        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING, $approvalB->approval_status);
-        $this->assertNotSame($approvalA->id, $approvalB->id);
-
-        // 10-11: B approves through the ordinary route and the run completes again.
-        $this->actingAs($ownerB)
-            ->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalB->id}/approve")
-            ->assertRedirect(route('app.wiki.show', $page->slug));
-
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
-        $this->assertSame($ownerB->id, $approvalB->fresh()->decided_by_user_id);
-        $this->assertFalse((bool) $approvalB->fresh()->is_override);
-    }
-
-    public function test_a_system_owner_override_can_complete_the_reopened_run(): void
-    {
-        [$customer, $ownerA, $document, $page, $version, $run] = $this->completedRunApprovedBy();
-        $ownerB = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-        $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-
-        $document->forceFill(['owner_user_id' => $ownerB->id])->save();
-        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document->fresh());
-
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->fresh()->status);
-
-        $approvalB = $this->approvalFor($version, $ownerB);
-
-        $this->actingAs($systemOwner)
-            ->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalB->id}/approve", [
-                'comment' => 'B er utilgjengelig, overstyrt.',
-            ])
-            ->assertRedirect(route('app.wiki.show', $page->slug));
-
-        $approvalB->refresh();
-        $run->refresh();
-
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
-        $this->assertTrue((bool) $approvalB->is_override);
-        $this->assertSame($systemOwner->id, $approvalB->decided_by_user_id);
-        $this->assertSame($ownerB->id, $approvalB->document_owner_user_id);
-    }
-
-    // =========================================================================
-    // Negative: an owner change that creates nothing outstanding
-    // =========================================================================
-
-    public function test_a_document_no_current_page_version_uses_never_reopens_a_completed_run(): void
-    {
-        [$customer, , , , , $run] = $this->completedRunApprovedBy();
-
-        // A second document of the same customer that no page version references at all.
-        $unrelated = $this->createDocument($customer, $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR), 'ubrukt.docx');
-        $newOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-
-        $unrelated->forceFill(['owner_user_id' => $newOwner->id])->save();
-        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($unrelated->fresh());
-
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status);
-        $this->assertNotNull($run->fresh()->finished_at);
-    }
-
-    public function test_a_sync_that_creates_no_new_requirement_leaves_the_run_completed(): void
-    {
-        [, , $document, , $version, $run] = $this->completedRunApprovedBy();
-
-        // Same owner, same documents: the gate stays ready, so nothing may change.
-        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document->fresh());
-
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status);
-        $this->assertNotNull($run->fresh()->finished_at);
-        $this->assertSame(
-            1,
-            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
-                ->where('enterprise_wiki_page_version_id', $version->id)
-                ->count(),
-            'a no-op sync must not create a second approval row',
-        );
-    }
-
-    // =========================================================================
-    // Only `completed` reopens — other terminal statuses stay terminal
-    // =========================================================================
-
-    #[DataProvider('protectedTerminalStatuses')]
-    public function test_an_owner_change_never_revives_a_run_that_ended_for_a_technical_reason(string $terminalStatus): void
-    {
-        [$customer, , $document, , $version, $run] = $this->completedRunApprovedBy();
-        $ownerB = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-
-        $run->forceFill(['status' => $terminalStatus, 'finished_at' => now()])->save();
-
-        $document->forceFill(['owner_user_id' => $ownerB->id])->save();
-        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document->fresh());
-
-        $this->assertSame($terminalStatus, $run->fresh()->status, "a {$terminalStatus} run must stay terminal");
-
-        // The requirement itself is still recorded — only the run status is protected.
-        $this->assertNotNull($this->approvalFor($version, $ownerB));
-    }
-
-    /** @return array<string, array{0: string}> */
-    public static function protectedTerminalStatuses(): array
-    {
-        return [
-            'failed' => [EnterpriseWikiIngestRun::STATUS_FAILED],
-            'cancelled' => [EnterpriseWikiIngestRun::STATUS_CANCELLED],
-            'escalated' => [EnterpriseWikiIngestRun::STATUS_ESCALATED],
-        ];
-    }
-
-    // =========================================================================
-    // System Owner override on a NAMED other owner (the mapped test gap)
-    // =========================================================================
 
     public function test_a_system_owner_approves_a_named_other_owners_requirement_and_is_recorded_as_the_actor(): void
     {
-        [$customer, $owner, , $page, $version, $run] = $this->awaitingRunOwnedBy();
+        [$customer, $owner, , $page, $version, $run] = $this->finishedRunOwnedBy();
         $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $approval = $this->approvalFor($version, $owner);
 
@@ -221,7 +74,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 
     public function test_a_system_owner_rejects_a_named_other_owners_requirement(): void
     {
-        [$customer, $owner, , $page, $version, $run] = $this->awaitingRunOwnedBy();
+        [$customer, $owner, , $page, $version, $run] = $this->finishedRunOwnedBy();
         $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $approval = $this->approvalFor($version, $owner);
 
@@ -240,12 +93,14 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
         $this->assertSame($systemOwner->id, $approval->overridden_by_user_id);
         $this->assertSame('Innholdet er ikke dekkende.', $approval->override_reason);
 
-        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status, 'a rejected requirement cannot complete the run');
+        // The run's own status is about its processing and is not revisited. What a refusal does
+        // is send the page back to its owner, which is the consequence that still means something.
+        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
     }
 
     public function test_the_document_owners_own_decision_is_not_marked_as_an_override(): void
     {
-        [, $owner, , $page, $version] = $this->awaitingRunOwnedBy();
+        [, $owner, , $page, $version] = $this->finishedRunOwnedBy();
         $approval = $this->approvalFor($version, $owner);
 
         $this->actingAs($owner)
@@ -266,7 +121,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 
     public function test_an_ordinary_user_who_is_not_the_owner_cannot_decide(): void
     {
-        [$customer, $owner, , $page, $version] = $this->awaitingRunOwnedBy();
+        [$customer, $owner, , $page, $version] = $this->finishedRunOwnedBy();
         $bystander = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $approval = $this->approvalFor($version, $owner);
 
@@ -283,7 +138,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 
     public function test_a_bid_manager_who_is_not_the_owner_cannot_decide(): void
     {
-        [$customer, $owner, , $page, $version] = $this->awaitingRunOwnedBy();
+        [$customer, $owner, , $page, $version] = $this->finishedRunOwnedBy();
         $bidManager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
         $approval = $this->approvalFor($version, $owner);
 
@@ -296,7 +151,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 
     public function test_a_user_from_another_customer_cannot_reach_the_approval_route(): void
     {
-        [, $owner, , $page, $version] = $this->awaitingRunOwnedBy();
+        [, $owner, , $page, $version] = $this->finishedRunOwnedBy();
         $approval = $this->approvalFor($version, $owner);
 
         $foreignCustomer = $this->createCustomer('Fremmed Kunde AS');
@@ -320,7 +175,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 
     public function test_the_can_decide_contract_is_unchanged(): void
     {
-        [$customer, $owner, , , $version] = $this->awaitingRunOwnedBy();
+        [$customer, $owner, , , $version] = $this->finishedRunOwnedBy();
         $service = app(EnterpriseWikiDocumentOwnerApprovalService::class);
         $approval = $this->approvalFor($version, $owner);
 
@@ -346,7 +201,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
      */
     private function completedRunApprovedBy(): array
     {
-        [$customer, $owner, $document, $page, $version, $run] = $this->awaitingRunOwnedBy();
+        [$customer, $owner, $document, $page, $version, $run] = $this->finishedRunOwnedBy();
         $approval = $this->approvalFor($version, $owner);
 
         $this->actingAs($owner)
@@ -360,11 +215,14 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
     }
 
     /**
-     * A QA-passed run parked at `awaiting_document_owner_approval` with one pending requirement.
+     * A QA-passed run that has finished, with one pending requirement recorded against it.
+     *
+     * The run completing while the requirement is undecided is the point: the sign-off is
+     * provenance, and the run was never waiting on it.
      *
      * @return array{0: Customer, 1: User, 2: EnterpriseWikiDocument, 3: EnterpriseWikiPage, 4: EnterpriseWikiPageVersion, 5: EnterpriseWikiIngestRun}
      */
-    private function awaitingRunOwnedBy(): array
+    private function finishedRunOwnedBy(): array
     {
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
@@ -378,7 +236,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         return [$customer, $owner, $document, $page, $version, $run];
     }

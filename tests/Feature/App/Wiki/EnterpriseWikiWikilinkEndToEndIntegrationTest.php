@@ -243,11 +243,11 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
                 ->exists(),
         );
 
-        // --- 52: claims/verification/lint/QA ran, and the run is now held at the document-owner
-        // approval gate rather than completing on its own. QA has already passed; what is
-        // outstanding is a human decision, one approval row per generated page version.
+        // --- 52: claims/verification/lint/QA ran and the run finished. One approval row per
+        // generated page version is recorded and left undecided — that is provenance, not a step
+        // the run was waiting on.
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
 
         $approvalService = app(EnterpriseWikiDocumentOwnerApprovalService::class);

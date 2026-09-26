@@ -283,10 +283,15 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
     }
 
     // =========================================================================
-    // Document Owner approval is never suppressed by claim QA signals (v0.10)
+    // The document-owner requirement is recorded regardless of claim QA signals
     // =========================================================================
+    //
+    // These used to assert that a run PARKED in awaiting_document_owner_approval. It no longer
+    // does: a source sign-off gates nothing, so a run that has finished its work is finished. The
+    // guarantee they exist for is unchanged and still asserted — the requirement row is built, and
+    // an open claim QA signal neither suppresses it nor escalates the run.
 
-    public function test_valid_run_reaches_awaiting_document_owner_approval(): void
+    public function test_a_valid_run_completes_and_records_the_requirement(): void
     {
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer);
@@ -300,7 +305,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertSame(
             1,
             EnterpriseWikiPageVersionDocumentOwnerApproval::query()
@@ -309,7 +314,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         );
     }
 
-    public function test_run_with_open_claim_qa_signal_still_reaches_document_owner_approval(): void
+    public function test_an_open_claim_qa_signal_does_not_suppress_the_requirement(): void
     {
         // v0.10: a source-linked claim's Document Owner approval requirement is built regardless
         // of an unrelated open claim QA signal on the same page — QA review and Document Owner
@@ -327,7 +332,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertSame(
             1,
             EnterpriseWikiPageVersionDocumentOwnerApproval::query()
@@ -336,7 +341,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         );
     }
 
-    public function test_legacy_repair_required_run_now_proceeds_to_document_owner_approval(): void
+    public function test_a_legacy_repair_required_run_finishes_rather_than_escalating(): void
     {
         // Backward compatibility (Del 7, v0.10): a historical run already recorded with the
         // now-retired qa_status=repair_required value is treated exactly like passed — it is not
@@ -355,7 +360,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
     }
 
@@ -388,11 +393,18 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document);
 
-        // The good claim's approval requirement is auto-created but still pending an explicit
-        // owner decision, so the run reaches "awaiting approval" rather than completing outright.
+        // The requirement is recorded and left pending — nobody has decided it — and the run
+        // finishes anyway, because it was never waiting on that decision.
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->whereNull('superseded_at')
+                ->count(),
+        );
     }
 
     /**
@@ -556,10 +568,12 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         });
     }
 
-    public function test_document_owner_sees_normal_approval_flow_despite_an_open_claim_qa_signal(): void
+    public function test_an_open_claim_qa_signal_does_not_withhold_the_requirement_from_the_page(): void
     {
-        // v0.10: a real source-linked claim on the same page as an open claim QA signal still
-        // produces the ordinary approve/reject flow — the signal never withholds it.
+        // A real source-linked claim on the same page as an open claim QA signal still produces the
+        // requirement — the signal never withholds it. Asserted against the row rather than the
+        // page payload: the per-requirement props went with the document-owner panel, which is no
+        // longer part of approving a Wiki page.
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer);
         $document = $this->createDocument($customer, $owner);
@@ -573,11 +587,17 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $response->assertOk();
 
         $response->assertViewHas('page', function (array $inertia): bool {
-            $props = data_get($inertia, 'props');
-
-            return data_get($props, 'document_owner_summary.state') !== 'qa_review_open'
-                && count(data_get($props, 'document_owner_approvals', [])) > 0;
+            return data_get($inertia, 'props.document_owner_summary.state') !== 'qa_review_open';
         });
+
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->whereNull('superseded_at')
+                ->count(),
+            'the requirement is recorded, signal or no signal',
+        );
     }
 
     // =========================================================================

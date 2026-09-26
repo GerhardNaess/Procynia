@@ -334,9 +334,11 @@ class WikiSourceControllerTest extends TestCase
         $run->refresh();
 
         $this->assertSame($firstOwner->id, $document->owner_user_id);
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
-        $this->assertNull($run->finished_at);
-        $this->assertStringContainsString('Dokumenteier', (string) $run->error_message);
+        // The requirement rows below are what an owner change touches. The run that produced them
+        // had already finished, and an owner change is not a reason to reopen finished work — so
+        // it is left exactly as it was, error message and all.
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+        $this->assertNull($run->error_message);
 
         $approvals = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
             ->where('enterprise_wiki_page_version_id', $page->currentVersion->id)
@@ -363,7 +365,7 @@ class WikiSourceControllerTest extends TestCase
             ->get();
 
         $this->assertSame($secondOwner->id, $document->owner_user_id);
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertCount(2, $approvals);
         $this->assertSame(
             [$firstOwner->id, $secondOwner->id],
@@ -422,7 +424,8 @@ class WikiSourceControllerTest extends TestCase
                 ->where('enterprise_wiki_page_version_id', $pageB->currentVersion->id)
                 ->count(),
         );
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $runA->fresh()->status);
+        // Both finished. What separates them is the requirement rows above, not their status.
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $runA->fresh()->status);
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $runB->fresh()->status);
     }
 
