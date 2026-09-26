@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const panel = readFileSync(join(here, 'WikiReviewPanel.jsx'), 'utf8');
 const show = readFileSync(join(here, 'Show.jsx'), 'utf8');
+const lang = (locale) => readFileSync(join(here, '..', '..', '..', '..', '..', 'lang', locale, 'procynia.php'), 'utf8');
 
 /**
  * The Wiki page had to answer six questions after steps 1-10: what is published, what is being
@@ -399,7 +400,7 @@ describe('the edit action belongs to the article', () => {
 
 /**
  * Quality assurance is work on claims, so a version with none offers nobody anything to do.
- * "Send til QA" was showing beside "Ingen påstander å kvalitetssikre" — an invitation to ask
+ * The assign action was showing beside "Ingen påstander å kvalitetssikre" — an invitation to ask
  * somebody to check nothing.
  */
 describe('the QA action appears only when there is quality work', () => {
@@ -432,8 +433,8 @@ describe('the QA action appears only when there is quality work', () => {
     });
 
     test('assigning itself is untouched', () => {
-        assert.match(panel, /qa_assign_button \?\? 'Send til QA'/);
-        assert.match(panel, /qa_change_button \?\? 'Endre QA'/);
+        assert.match(panel, /qa_assign_button \?\? 'Tildel kvalitetssikrer'/);
+        assert.match(panel, /qa_change_button \?\? 'Endre kvalitetssikrer'/);
         assert.match(panel, /\/qa-assignment`, \{ qa_user_id: Number\(qaUserId\) \}/);
     });
 });
@@ -603,5 +604,48 @@ describe('a stale view corrects itself', () => {
         // Neither is stale state, so both fall through the early return above.
         assert.match(panel, /review_error_expired/);
         assert.match(panel, /review_error_forbidden/);
+    });
+});
+
+/**
+ * Quality assurance, in words a bid manager would use.
+ *
+ * "QA" is what the code calls the capability; it is not what the person doing the work is called.
+ * "Endre QA" read as changing a setting rather than asking a colleague to check something, and the
+ * dialog it opened used a third vocabulary again.
+ */
+describe('the quality reviewer is named as a person', () => {
+    test('the action names what it does, and to whom', () => {
+        assert.match(panel, /qa_assign_button \?\? 'Tildel kvalitetssikrer'/);
+        assert.match(panel, /qa_change_button \?\? 'Endre kvalitetssikrer'/);
+        assert.ok(!panel.includes("'Endre QA'"));
+        assert.ok(!panel.includes("'Send til QA'"));
+    });
+
+    test('the dialog title follows whether somebody already holds it', () => {
+        const start = panel.indexOf('id="wiki-qa-title"');
+        const title = panel.slice(start, start + 320);
+        assert.match(title, /qaAssignment\?\.assignee/);
+        assert.match(title, /qa_change_button/);
+        assert.match(title, /qa_assign_button/);
+    });
+
+    test('the field is labelled for the person, not the area', () => {
+        // The block heading still says Kvalitetssikring — that is the area. The field asks for a
+        // Kvalitetssikrer, which is a colleague.
+        assert.match(panel, /qa_user_label \?\? 'Kvalitetssikrer'/);
+        assert.match(panel, /qa_heading \?\? 'Kvalitetssikring'/);
+    });
+
+    test('the confirm button says which of the two it is doing', () => {
+        assert.match(panel, /qa_update_button \?\? 'Oppdater'/);
+        assert.match(panel, /qa_send_button \?\? 'Tildel'/);
+    });
+
+    test('both languages carry every key the panel falls back from', () => {
+        for (const key of ['qa_assign_button', 'qa_change_button', 'qa_send_button', 'qa_update_button', 'qa_user_label']) {
+            assert.match(lang('no'), new RegExp(`'${key}' =>`), `no: ${key}`);
+            assert.match(lang('en'), new RegExp(`'${key}' =>`), `en: ${key}`);
+        }
     });
 });

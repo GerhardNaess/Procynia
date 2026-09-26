@@ -251,7 +251,9 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                         data-testid="wiki-qa-assign"
                         className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        {assignee ? (tw.qa_change_button ?? 'Endre QA') : (tw.qa_assign_button ?? 'Send til QA')}
+                        {assignee
+                            ? (tw.qa_change_button ?? 'Endre kvalitetssikrer')
+                            : (tw.qa_assign_button ?? 'Tildel kvalitetssikrer')}
                     </button>
                 )}
             </div>
@@ -643,7 +645,9 @@ export default function WikiReviewPanel({
                 returnFocusRef={qaTriggerRef}
             >
                 <h2 id="wiki-qa-title" className="text-xl font-semibold tracking-tight text-slate-950">
-                    {tw.qa_assign_button ?? 'Send til QA'}
+                    {qaAssignment?.assignee
+                        ? (tw.qa_change_button ?? 'Endre kvalitetssikrer')
+                        : (tw.qa_assign_button ?? 'Tildel kvalitetssikrer')}
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">
                     {tw.qa_assign_description
@@ -651,7 +655,7 @@ export default function WikiReviewPanel({
                 </p>
 
                 <label className="mt-4 block space-y-1.5" htmlFor="wiki-qa-user">
-                    <span className="text-base font-medium text-slate-800">{tw.qa_heading ?? 'Kvalitetssikring'}</span>
+                    <span className="text-base font-medium text-slate-800">{tw.qa_user_label ?? 'Kvalitetssikrer'}</span>
                     <select
                         ref={qaSelectRef}
                         id="wiki-qa-user"
@@ -668,7 +672,9 @@ export default function WikiReviewPanel({
 
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" disabled={busy || qaUserId === ''} onClick={assignQa} className={PRIMARY_ACTION}>
-                        {tw.qa_send_button ?? 'Send'}
+                        {qaAssignment?.assignee
+                            ? (tw.qa_update_button ?? 'Oppdater')
+                            : (tw.qa_send_button ?? 'Tildel')}
                     </button>
                     <button type="button" disabled={busy} onClick={() => setIsQaOpen(false)} className={SECONDARY_ACTION}>
                         {tw.cancel ?? 'Avbryt'}
