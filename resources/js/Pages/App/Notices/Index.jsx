@@ -1763,8 +1763,8 @@ export default function NoticeIndex({
                                 <div className="space-y-4">
                                     <div className="flex items-start justify-between gap-4">
                                         <div>
-                                            <div className="text-base font-medium text-slate-900">{noticesText.privateRequestTitle}</div>
-                                            <p className="mt-1 text-base leading-6 text-slate-600">
+                                            <h2 className="text-lg font-semibold text-slate-900">{noticesText.privateRequestTitle}</h2>
+                                            <p className="mt-1.5 text-base leading-6 text-slate-600">
                                                 {noticesText.privateRequestDescription}
                                             </p>
                                         </div>
@@ -1952,8 +1952,8 @@ export default function NoticeIndex({
                             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                                     <div>
-                                        <div className="text-base font-medium text-slate-900">{worklistFilterTitle}</div>
-                                        <p className="mt-1 text-base leading-6 text-slate-600">
+                                        <h2 className="text-lg font-semibold text-slate-900">{worklistFilterTitle}</h2>
+                                        <p className="mt-1.5 text-base leading-6 text-slate-600">
                                             {worklistFilterDescription}
                                         </p>
                                     </div>
@@ -1989,11 +1989,9 @@ export default function NoticeIndex({
                         ) : null}
 
                         <section ref={liveSearchResultsRef} id="doffin-results" className="scroll-mt-28 space-y-3.5">
-                            <div className="space-y-1">
-                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
-                                    {source?.label}
-                                </div>
-                                <div className="text-[17px] font-semibold text-slate-950">{liveSearchHeading}</div>
+                            <div>
+                                <h2 className="text-lg font-semibold text-slate-900">{source?.label}</h2>
+                                <p className="mt-1.5 text-base leading-6 text-slate-600">{liveSearchHeading}</p>
                             </div>
 
                             {isCappedLiveSearch ? (
