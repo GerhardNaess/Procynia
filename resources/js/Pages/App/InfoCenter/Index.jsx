@@ -41,18 +41,25 @@ function heroToneClassName() {
     return 'border-slate-200 bg-white';
 }
 
+/**
+ * The tone a panel's number carries.
+ *
+ * It used to tint the whole panel — border, background and text — which left nothing for the
+ * selected state to say. Now that a panel can be the active view, the tint belongs to the
+ * selection; the tone the backend sends still distinguishes the four counts, on the number alone.
+ */
 function summaryToneClassName(tone) {
     switch (tone) {
         case 'danger':
-            return 'border-rose-200 bg-rose-50 text-rose-700';
+            return 'text-rose-700';
         case 'indigo':
-            return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+            return 'text-indigo-700';
         case 'amber':
-            return 'border-amber-200 bg-amber-50 text-amber-800';
+            return 'text-amber-800';
         case 'violet':
-            return 'border-violet-200 bg-violet-50 text-violet-700';
+            return 'text-violet-700';
         default:
-            return 'border-slate-200 bg-slate-50 text-slate-700';
+            return 'text-slate-900';
     }
 }
 
@@ -87,45 +94,121 @@ function infoCenterEmptyState(view) {
     }
 }
 
-const INFO_CENTER_TAB_HELP_TEXTS = {
+/**
+ * The explanations that used to hang off the tab row, keyed by what they explain.
+ *
+ * They move with the thing they describe rather than being rewritten: "Mine oppgaver" means the
+ * same whether it is read on a tab or on a panel. `due_soon` reuses the sentence the page help
+ * already gives that counter, so no new wording was invented for it either.
+ */
+const INFO_CENTER_HELP_TEXTS = {
     my_tasks: 'Åpne aksjoner og oppfølginger som er tildelt deg.',
     awaiting_response: 'Aksjoner du har sendt ut og fortsatt venter svar på fra andre.',
     outbound: 'Aksjoner og oppfølginger du har opprettet, også tidligere og lukkede.',
     inbound: 'Informasjon og oppfølginger som har kommet inn til deg eller saken.',
+    due_soon: 'Viser åpne punkter med nær frist.',
 };
 
-function InfoCenterViewTab({ option, activeView }) {
-    const isActive = option.value === activeView;
-    const helpText = INFO_CENTER_TAB_HELP_TEXTS[option.value];
+/**
+ * One counter at the top of the page, and — where the count names a list — the way into it.
+ *
+ * The page used to show these four panels and then a separate row of buttons underneath, so the
+ * thing the eye landed on first was not the thing you could act on. A panel whose key matches one
+ * of the backend's views is now that view's control; the rest stay plain counters.
+ *
+ * That split is not arbitrary. `my_tasks` and `awaiting_response` are views the controller already
+ * filters by; `decision`, `clarification` and `due_soon` are counted over the same visible set but
+ * have no view behind them, and inventing one would be a filtering rule this page is not allowed
+ * to add. A panel that cannot open a list therefore does not pretend it can — it has no hover, no
+ * focus ring and no pointer.
+ *
+ * The info button is a sibling of the link rather than a child of it: nesting one interactive
+ * element inside another is invalid markup, and it is also what keeps a click on the "i" from
+ * selecting the panel underneath it.
+ */
+function SummaryPanel({ item, href, isActive }) {
+    const helpText = INFO_CENTER_HELP_TEXTS[item.key];
+    const toneClassName = summaryToneClassName(item.tone);
+
+    const body = (
+        <>
+            <div className="text-base font-semibold leading-6 text-slate-900">
+                {item.label}
+            </div>
+            <div className={classNames('mt-2 text-[30px] font-semibold leading-none tabular-nums', toneClassName)}>
+                {item.count}
+            </div>
+            <p className="mt-2 text-base leading-6 text-slate-600">
+                {item.description}
+            </p>
+        </>
+    );
+
+    const frame = classNames(
+        'block h-full rounded-2xl border px-4 py-4 pr-11 transition',
+        isActive
+            ? 'border-violet-300 bg-violet-50/70 ring-1 ring-violet-200'
+            : 'border-slate-200 bg-white',
+    );
 
     return (
-        <div
-            className={classNames(
-                'inline-flex items-stretch overflow-visible rounded-xl border shadow-sm transition',
-                isActive
-                    ? 'border-violet-200 bg-violet-50'
-                    : 'border-slate-200 bg-white hover:border-slate-300',
+        <div className="relative min-w-60 flex-1" data-testid={`info-center-panel-${item.key}`}>
+            {href ? (
+                <Link
+                    href={href}
+                    aria-current={isActive ? 'true' : undefined}
+                    data-active={isActive ? 'true' : 'false'}
+                    className={classNames(
+                        frame,
+                        'hover:border-slate-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600',
+                        isActive ? 'hover:border-violet-300' : '',
+                    )}
+                >
+                    {body}
+                </Link>
+            ) : (
+                <div className={frame}>{body}</div>
             )}
-        >
+
+            {helpText ? (
+                <span className="absolute right-3 top-3 z-10">
+                    <InfoHint label={`Vis forklaring for ${item.label}`} text={helpText} />
+                </span>
+            ) : null}
+        </div>
+    );
+}
+
+/**
+ * A view with no counter of its own.
+ *
+ * "Opprettet av meg" and "Innkommende" are real views, but nothing at the top of the page counts
+ * them, so they have no panel to become. They keep their place as a quiet pair beside the list
+ * heading — the list they change is right there — rather than as a second navigation row, which is
+ * what this page was meant to lose.
+ */
+function SecondaryViewLink({ option, isActive }) {
+    const helpText = INFO_CENTER_HELP_TEXTS[option.value];
+
+    return (
+        <span className="inline-flex items-center gap-1">
             <Link
-                key={option.value}
                 href={option.href}
+                aria-current={isActive ? 'true' : undefined}
+                data-active={isActive ? 'true' : 'false'}
                 className={classNames(
-                    'inline-flex min-h-11 items-center justify-center px-4 py-2.5 text-sm font-semibold transition',
+                    'inline-flex min-h-9 items-center rounded-lg px-2.5 text-base font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600',
                     isActive
-                        ? 'text-violet-700'
-                        : 'text-slate-700 hover:text-slate-950',
+                        ? 'bg-violet-50 font-semibold text-violet-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
                 )}
             >
                 {option.label}
             </Link>
-
             {helpText ? (
-                <div className="flex items-center pr-3">
-                    <InfoHint label={`Vis forklaring for ${option.label}`} text={helpText} />
-                </div>
+                <InfoHint label={`Vis forklaring for ${option.label}`} text={helpText} />
             ) : null}
-        </div>
+        </span>
     );
 }
 
@@ -233,6 +316,13 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     const wikiTasks = infoCenter?.wiki_tasks ?? [];
     const pagination = infoCenter?.pagination ?? {};
     const activeOption = viewOptions.find((option) => option.value === activeView) ?? viewOptions[0] ?? null;
+    // A panel becomes that view's control when the backend counts something it also filters by.
+    // The lookup is by key, so a panel the controller adds later needs no change here.
+    const viewByKey = new Map(viewOptions.map((option) => [option.value, option]));
+    // Whatever is left has no counter to live in, and keeps a quiet place beside the list instead.
+    const secondaryViews = viewOptions.filter(
+        (option) => ! summaryItems.some((item) => item.key === option.value),
+    );
     const heroClassName = heroToneClassName();
     const [countLabelSingular, countLabelPlural] = infoCenterCountLabels(activeView);
     const emptyState = infoCenterEmptyState(activeView);
@@ -302,53 +392,54 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                     </div>
 
                     {summaryItems.length ? (
-                        <div className="mt-5 grid gap-3 md:grid-cols-3">
+                        <div className="mt-5 flex flex-wrap gap-3" data-testid="info-center-panels">
                             {summaryItems.map((item) => (
-                                <div key={item.key} className={classNames('rounded-2xl border px-4 py-4 shadow-sm', summaryToneClassName(item.tone))}>
-                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] opacity-70">
-                                        {item.label}
-                                    </div>
-                                    <div className="mt-2 text-3xl font-semibold tracking-tight">
-                                        {item.count}
-                                    </div>
-                                    <p className="mt-2 text-sm leading-6 opacity-90">
-                                        {item.description}
-                                    </p>
-                                </div>
+                                <SummaryPanel
+                                    key={item.key}
+                                    item={item}
+                                    href={viewByKey.get(item.key)?.href ?? null}
+                                    isActive={item.key === activeView}
+                                />
                             ))}
                         </div>
                     ) : null}
                 </section>
 
-                <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="flex flex-wrap gap-2.5">
-                        {viewOptions.map((option) => (
-                            <InfoCenterViewTab
-                                key={option.value}
-                                option={option}
-                                activeView={activeView}
-                            />
-                        ))}
-                    </div>
-                </section>
-
                 <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <h2 className="text-lg font-semibold text-slate-900">
                                 {activeOption?.label ?? 'Infosenter'}
-                            </div>
+                            </h2>
                             <div className="mt-1 text-[1.7rem] font-semibold tracking-tight text-slate-950">
                                 {pagination.total ?? items.length}{' '}
                                 {Number(pagination.total ?? items.length) === 1 ? countLabelSingular : countLabelPlural}
                             </div>
                         </div>
 
-                        {pagination.from && pagination.to ? (
-                            <div className="text-sm text-slate-500">
-                                Viser {pagination.from}–{pagination.to}
-                            </div>
-                        ) : null}
+                        <div className="flex flex-col items-start gap-2 sm:items-end">
+                            {secondaryViews.length ? (
+                                <div
+                                    className="flex flex-wrap items-center gap-x-1 gap-y-1"
+                                    data-testid="info-center-secondary-views"
+                                >
+                                    <span className="mr-1 text-base text-slate-500">Vis også</span>
+                                    {secondaryViews.map((option) => (
+                                        <SecondaryViewLink
+                                            key={option.value}
+                                            option={option}
+                                            isActive={option.value === activeView}
+                                        />
+                                    ))}
+                                </div>
+                            ) : null}
+
+                            {pagination.from && pagination.to ? (
+                                <div className="text-sm text-slate-500">
+                                    Viser {pagination.from}–{pagination.to}
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
 
                     {wikiTasks.length > 0 ? (

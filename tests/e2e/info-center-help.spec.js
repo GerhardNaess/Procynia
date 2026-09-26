@@ -5,15 +5,21 @@ test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);
 });
 
-const TABS = [
+/**
+ * The help buttons these cover no longer sit on a tab row — that row is gone, and each explanation
+ * moved onto the panel or the secondary link that names the same view. The assertions are unchanged
+ * on purpose: the text, its size, its contrast and its keyboard behaviour have to survive the move,
+ * and they are found by the same accessible name they always had.
+ */
+const VIEWS = [
     { view: 'my_tasks', label: 'Mine oppgaver', help: 'Åpne aksjoner og oppfølginger som er tildelt deg.' },
     { view: 'awaiting_response', label: 'Venter på svar', help: 'Aksjoner du har sendt ut og fortsatt venter svar på fra andre.' },
     { view: 'outbound', label: 'Opprettet av meg', help: 'Aksjoner og oppfølginger du har opprettet, også tidligere og lukkede.' },
     { view: 'inbound', label: 'Innkommende', help: 'Informasjon og oppfølginger som har kommet inn til deg eller saken.' },
 ];
 
-for (const { view, label, help } of TABS) {
-    test(`"${label}" tab help tooltip meets the readable-text standard`, async ({ page }) => {
+for (const { view, label, help } of VIEWS) {
+    test(`"${label}" help tooltip meets the readable-text standard`, async ({ page }) => {
         const response = await page.goto(`/app/info-center?view=${view}`);
         expect(response?.status()).toBe(200);
 
@@ -42,7 +48,7 @@ for (const { view, label, help } of TABS) {
     });
 }
 
-test('tab help tooltip opens and closes via keyboard focus without errors', async ({ page }) => {
+test('help tooltip opens and closes via keyboard focus without errors', async ({ page }) => {
     const consoleErrors = [];
     page.on('console', (msg) => {
         if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -63,7 +69,7 @@ test('tab help tooltip opens and closes via keyboard focus without errors', asyn
     expect(consoleErrors).toEqual([]);
 });
 
-test('tab help tooltip is usable on a mobile viewport', async ({ page }) => {
+test('help tooltip is usable on a mobile viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/app/info-center?view=awaiting_response');
 
