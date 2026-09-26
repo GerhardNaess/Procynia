@@ -119,6 +119,28 @@ describe('the info button explains the panel without selecting it', () => {
         assert.ok(source.includes("due_soon: 'Viser åpne punkter med nær frist.'"));
         assert.ok(source.includes("page_help_item_deadline_text ?? 'Viser åpne punkter med nær frist.'"));
     });
+
+    test('every panel the page can show has one', () => {
+        // The backend emits five distinct panel keys across the two personas. A panel without an
+        // explanation, next to three that have one, reads as an oversight rather than a decision.
+        const map = source.match(/const INFO_CENTER_HELP_TEXTS = \{([\s\S]*?)\n\};/)?.[1] ?? '';
+
+        for (const key of ['my_tasks', 'awaiting_response', 'decision', 'clarification', 'due_soon']) {
+            assert.match(map, new RegExp(`\\n *${key}: '`), `${key} has no help text`);
+        }
+    });
+
+    test('the two counters that span other people\'s work say so', () => {
+        // Their panel body describes what a decision or clarification is; what it cannot say is
+        // that these two are counted across every visible case while their neighbours are not.
+        for (const key of ['decision', 'clarification']) {
+            const text = source.match(new RegExp(`${key}: '([^']*)'`))?.[1] ?? '';
+
+            assert.match(text, /alle saker du har tilgang til/, `${key} must state its scope`);
+            assert.match(text, /uansett hvem de er tildelt/, `${key} must say it is not only yours`);
+            assert.match(text, /[Ll]ukkede/, `${key} must say closed items are excluded`);
+        }
+    });
 });
 
 describe('a view with no counter keeps its place beside the list', () => {

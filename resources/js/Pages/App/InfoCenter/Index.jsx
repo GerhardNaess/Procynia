@@ -100,6 +100,11 @@ function infoCenterEmptyState(view) {
  * They move with the thing they describe rather than being rewritten: "Mine oppgaver" means the
  * same whether it is read on a tab or on a panel. `due_soon` reuses the sentence the page help
  * already gives that counter, so no new wording was invented for it either.
+ *
+ * `decision` and `clarification` had no tab and therefore no text to inherit. Theirs says the one
+ * thing the panel body cannot: these two count across every case the reader can see, whoever owns
+ * the item, while the panels either side of them count only what is theirs. Four counters in a row
+ * invite the assumption that they are all about you, and two of them are not.
  */
 const INFO_CENTER_HELP_TEXTS = {
     my_tasks: 'Åpne aksjoner og oppfølginger som er tildelt deg.',
@@ -107,6 +112,8 @@ const INFO_CENTER_HELP_TEXTS = {
     outbound: 'Aksjoner og oppfølginger du har opprettet, også tidligere og lukkede.',
     inbound: 'Informasjon og oppfølginger som har kommet inn til deg eller saken.',
     due_soon: 'Viser åpne punkter med nær frist.',
+    decision: 'Åpne beslutningspunkter i alle saker du har tilgang til, uansett hvem de er tildelt. Lukkede beslutninger telles ikke med.',
+    clarification: 'Åpne avklaringer i alle saker du har tilgang til, uansett hvem de er tildelt. Lukkede avklaringer telles ikke med.',
 };
 
 /**
