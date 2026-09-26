@@ -1343,6 +1343,9 @@ class WikiController extends Controller
         $page = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->where('slug', $slug)
+            // Read twice below: once for the page payload, and once so the publication status can
+            // name the owner rather than say "sideeier" and leave the reader to work out who.
+            ->with('owner')
             ->first() ?? abort(404);
 
         // reviewer/submittedBy are read further down for the review payload anyway; loading them

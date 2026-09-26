@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use Tests\TestCase;
 
@@ -192,6 +193,110 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
      * @param  array{total: int, approved: int}|null  $claimCounts
      * @return array<string, mixed>
      */
+    /**
+     * "Sideeier må sende siden til gjennomgang" is true and useless: the payload already holds the
+     * owner's name, so the sentence can say who, in what role, owes what.
+     */
+    public function test_a_draft_someone_else_owns_names_that_person(): void
+    {
+        $page = $this->page('draft');
+        $page->setRelation('owner', $this->user('Alisan Senel'));
+
+        $result = $this->publicationFor($page, $this->version(9), [
+            'can_submit' => false,
+            'eligible_reviewer_count' => 1,
+        ]);
+
+        $this->assertSame('awaiting_owner', $result['next_step']);
+        $this->assertSame(
+            ['name' => 'Alisan Senel', 'role' => EnterpriseWikiPublicationStatusService::ACTOR_PAGE_OWNER],
+            $result['next_actor'],
+        );
+        $this->assertStringContainsString('Alisan Senel', $result['next_step_label']);
+    }
+
+    /**
+     * A page with no owner has nobody to point at. Naming the role anyway would send the reader
+     * looking for a person who does not exist, so the generic sentence stays.
+     */
+    public function test_a_draft_with_no_owner_keeps_the_unnamed_sentence(): void
+    {
+        $page = $this->page('draft');
+        $page->setRelation('owner', null);
+
+        $result = $this->publicationFor($page, $this->version(9), [
+            'can_submit' => false,
+            'eligible_reviewer_count' => 1,
+        ]);
+
+        $this->assertSame('awaiting_owner', $result['next_step']);
+        $this->assertNull($result['next_actor']);
+        $this->assertSame(__('procynia.wiki.publication_next_awaiting_owner'), $result['next_step_label']);
+    }
+
+    /** The viewer who may act is addressed directly, rather than told what the page is ready for. */
+    public function test_the_viewer_who_may_submit_is_addressed_directly(): void
+    {
+        $result = $this->publicationFor($this->page('draft'), $this->version(9), [
+            'can_submit' => true,
+            'eligible_reviewer_count' => 1,
+        ]);
+
+        $this->assertSame('submit', $result['next_step']);
+        $this->assertNull($result['next_actor'], 'nobody is being waited on — it is this reader\'s turn');
+        $this->assertSame(__('procynia.wiki.publication_next_submit_self'), $result['next_step_label']);
+    }
+
+    /**
+     * The list computes no viewer context, so a row there must not claim the reader may act: most
+     * of the rows on that screen belong to somebody else.
+     */
+    public function test_a_row_without_viewer_context_says_what_the_page_is_ready_for(): void
+    {
+        $result = $this->publicationFor($this->page('draft'), $this->version(9));
+
+        $this->assertSame('submit', $result['next_step']);
+        $this->assertSame(__('procynia.wiki.publication_next_submit'), $result['next_step_label']);
+    }
+
+    /** The reviewer case already named its person, and keeps doing so unchanged. */
+    public function test_a_version_in_review_still_names_its_reviewer(): void
+    {
+        $version = $this->version(9);
+        $version->setRelation('reviewer', $this->user('Gerhard Næss'));
+
+        $result = $this->publicationFor($this->page('pending_review'), $version, [
+            'is_assigned_reviewer' => false,
+        ]);
+
+        $this->assertSame('awaiting_review', $result['next_step']);
+        $this->assertSame(
+            ['name' => 'Gerhard Næss', 'role' => EnterpriseWikiPublicationStatusService::ACTOR_REVIEWER],
+            $result['next_actor'],
+        );
+        $this->assertSame(
+            __('procynia.wiki.publication_next_awaiting_review_named', ['name' => 'Gerhard Næss']),
+            $result['next_step_label'],
+        );
+    }
+
+    /** Nobody is waited on once the page is published, so there is no actor to name. */
+    public function test_a_settled_page_names_nobody(): void
+    {
+        $result = $this->publicationFor($this->page('approved', 9), $this->version(9));
+
+        $this->assertSame('none', $result['next_step']);
+        $this->assertNull($result['next_actor']);
+    }
+
+    private function user(string $name): User
+    {
+        $user = new User;
+        $user->name = $name;
+
+        return $user;
+    }
+
     private function publicationFor(
         EnterpriseWikiPage $page,
         ?EnterpriseWikiPageVersion $version,

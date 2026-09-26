@@ -3130,10 +3130,16 @@ return [
         'publication_state_no_version' => 'Uten innhold',
         'publication_next_label' => 'Neste steg',
         'publication_next_submit' => 'Siden er klar til å sendes til gjennomgang.',
+        // Same step, but said to somebody who may actually take it.
+        'publication_next_submit_self' => 'Du kan sende siden til gjennomgang.',
         'publication_next_publish' => 'Siden kan publiseres, eller sendes til gjennomgang først.',
         'publication_next_awaiting_review' => 'Venter på gjennomgang.',
         'publication_next_awaiting_review_named' => 'Venter på gjennomgang hos :name.',
         'publication_next_awaiting_owner' => 'Sideeier må sende siden til gjennomgang.',
+        // Used whenever the page has an owner: the role, the person, and the action they owe.
+        'publication_next_awaiting_owner_named' => 'Wiki-sideeier, :name, må sende siden til gjennomgang før den kan behandles videre.',
+        // Heading over the sentence above, so the name is the first thing read.
+        'publication_waiting_for' => 'Venter på :name',
         'publication_next_awaiting_document_owner' => 'Venter på at dokumenteier godkjenner kildegrunnlaget.',
         'publication_next_approve' => 'Klar for publisering. Du kan godkjenne siden.',
         'publication_next_resolve_changes' => 'Rett innholdet, og send siden til gjennomgang på nytt.',

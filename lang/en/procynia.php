@@ -3131,10 +3131,16 @@ return [
         'publication_state_no_version' => 'No content',
         'publication_next_label' => 'Next step',
         'publication_next_submit' => 'The page is ready to be sent for review.',
+        // Same step, but said to somebody who may actually take it.
+        'publication_next_submit_self' => 'You can send the page for review.',
         'publication_next_publish' => 'The page can be published, or sent for review first.',
         'publication_next_awaiting_review' => 'Waiting for review.',
         'publication_next_awaiting_review_named' => 'Waiting for review by :name.',
         'publication_next_awaiting_owner' => 'The page owner must send the page for review.',
+        // Used whenever the page has an owner: the role, the person, and the action they owe.
+        'publication_next_awaiting_owner_named' => 'The Wiki page owner, :name, must send the page for review before it can go any further.',
+        // Heading over the sentence above, so the name is the first thing read.
+        'publication_waiting_for' => 'Waiting for :name',
         'publication_next_awaiting_document_owner' => 'Waiting for the document owner to approve the source basis.',
         'publication_next_approve' => 'Ready to publish. You can approve the page.',
         'publication_next_resolve_changes' => 'Correct the content, then send the page for review again.',

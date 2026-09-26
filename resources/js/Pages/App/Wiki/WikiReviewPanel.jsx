@@ -135,6 +135,13 @@ function PublicationBlock({ publication, tw }) {
 
     const blockers = publication.blocking_reasons ?? [];
 
+    // Who the page is waiting on, when the sentence below does not already name them. It does for
+    // a version in review ("Venter på gjennomgang hos Gerhard Næss"), so only the page owner is
+    // promoted to the heading — repeating the reviewer's name twice on two lines says nothing new.
+    const waitingOn = publication.next_actor?.role === 'page_owner'
+        ? publication.next_actor.name
+        : null;
+
     return (
         <div className="space-y-3 border-b border-slate-100 pb-4" data-testid="wiki-publication-block">
             {/* One heading, not a small-caps label with another label under it. The card answers a
@@ -144,9 +151,15 @@ function PublicationBlock({ publication, tw }) {
                 Where the page stands is stated once, beside the page title; repeating it here said
                 the same word twice on one screen and invited the two to disagree. Claim progress
                 used to sit here too, which read as a contradiction next to "Ingen handling
-                gjenstår"; it belongs with the assignment it describes, one block below. */}
-            <h3 className="text-lg font-semibold text-slate-900">
-                {tw.publication_heading ?? 'Publisering'} – {tw.publication_next_label ?? 'Neste steg'}
+                gjenstår"; it belongs with the assignment it describes, one block below.
+
+                When the page is waiting on somebody, that person's name replaces the generic
+                heading. "Publisering – Neste steg" describes the card; "Venter på Alisan Senel"
+                answers the question the reader actually has. */}
+            <h3 className="text-lg font-semibold text-slate-900" data-testid="wiki-publication-heading">
+                {waitingOn
+                    ? (tw.publication_waiting_for ?? 'Venter på :name').replace(':name', waitingOn)
+                    : `${tw.publication_heading ?? 'Publisering'} – ${tw.publication_next_label ?? 'Neste steg'}`}
             </h3>
 
             <p className="text-base leading-6 text-slate-700" data-testid="wiki-publication-next-step">

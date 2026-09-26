@@ -735,8 +735,39 @@ describe('a published page says so', () => {
  */
 describe('the publication panel reads as a hierarchy', () => {
     test('each block names itself once, as a heading', () => {
-        assert.match(panel, /<h3 className="text-lg font-semibold text-slate-900">\s*\n\s*\{tw\.publication_heading \?\? 'Publisering'\} – \{tw\.publication_next_label \?\? 'Neste steg'\}/);
+        assert.match(panel, /<h3 className="text-lg font-semibold text-slate-900" data-testid="wiki-publication-heading">/);
+        assert.match(panel, /`\$\{tw\.publication_heading \?\? 'Publisering'\} – \$\{tw\.publication_next_label \?\? 'Neste steg'\}`/);
         assert.match(panel, /<h3 className="text-lg font-semibold text-slate-900">\s*\n\s*\{tw\.qa_heading \?\? 'Kvalitetssikring'\}/);
+    });
+
+    test('the heading names the person the page is waiting on', () => {
+        // "Publisering – Neste steg" describes the card; "Venter på Alisan Senel" answers the
+        // question the reader has. Only the page owner is promoted: the reviewer case already
+        // names its person in the sentence below, and saying it twice adds nothing.
+        assert.match(panel, /publication\.next_actor\?\.role === 'page_owner'/);
+        assert.match(panel, /\(tw\.publication_waiting_for \?\? 'Venter på :name'\)\.replace\(':name', waitingOn\)/);
+    });
+
+    test('both languages carry the same three sentences', () => {
+        for (const locale of ['no', 'en']) {
+            const lang = langFile(locale);
+
+            for (const key of [
+                'publication_waiting_for',
+                'publication_next_awaiting_owner_named',
+                'publication_next_submit_self',
+            ]) {
+                assert.match(lang, new RegExp(`'${key}' => '`), `${key} missing in ${locale}`);
+            }
+        }
+
+        // The named sentence has to carry the placeholder, or the name never reaches the screen.
+        for (const locale of ['no', 'en']) {
+            const named = langFile(locale).match(/'publication_next_awaiting_owner_named' => '([^']*)'/)?.[1];
+
+            assert.ok(named, `no ${locale} sentence`);
+            assert.match(named, /:name/, `${locale} sentence must interpolate the owner`);
+        }
     });
 
     test('no section name is set as a machine label any more', () => {

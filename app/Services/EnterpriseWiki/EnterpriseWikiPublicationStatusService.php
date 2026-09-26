@@ -49,6 +49,12 @@ class EnterpriseWikiPublicationStatusService
     /** No version exists at all — nothing can be done with the page until one does. */
     public const STATE_NO_VERSION = 'no_version';
 
+    /** The page is waiting on the person who owns it to hand it over. */
+    public const ACTOR_PAGE_OWNER = 'page_owner';
+
+    /** The page is waiting on the reviewer it was handed to. */
+    public const ACTOR_REVIEWER = 'reviewer';
+
     /**
      * @param  array{
      *     can_submit?: bool,
@@ -66,6 +72,7 @@ class EnterpriseWikiPublicationStatusService
      *     published_version_number: int|null,
      *     working_version_number: int|null,
      *     reviewer_name: string|null,
+     *     next_actor: array{name: string, role: string}|null,
      *     claims_total: int,
      *     claims_approved: int,
      *     next_step: string,
@@ -119,7 +126,8 @@ class EnterpriseWikiPublicationStatusService
             'claims_total' => $claimCounts['total'] ?? $claims?->count() ?? 0,
             'claims_approved' => $claimCounts['approved'] ?? $claims?->where('approval_status', 'approved')->count() ?? 0,
             'next_step' => $nextStep,
-            'next_step_label' => $this->nextStepLabel($nextStep, $currentVersion),
+            'next_step_label' => $this->nextStepLabel($nextStep, $page, $currentVersion, $reviewContext),
+            'next_actor' => $this->nextActor($nextStep, $page, $currentVersion),
             'blocking_reasons' => $blockingReasons,
         ];
     }
@@ -249,17 +257,78 @@ class EnterpriseWikiPublicationStatusService
         return ['awaiting_review', []];
     }
 
-    private function nextStepLabel(string $nextStep, ?EnterpriseWikiPageVersion $currentVersion): string
-    {
-        $reviewerName = $currentVersion?->relationLoaded('reviewer') === true
-            ? $currentVersion->reviewer?->name
-            : null;
+    /**
+     * The sentence under "Neste steg", said to whoever is reading it.
+     *
+     * Two things decide it: whether we know the person the page is waiting on, and whether the
+     * caller told us this viewer may act. A waiting sentence that names nobody sends the reader
+     * off to find out who — "Sideeier må sende siden til gjennomgang" is true and useless when the
+     * payload already holds the owner's name.
+     *
+     * @param  array<string, mixed>  $reviewContext
+     */
+    private function nextStepLabel(
+        string $nextStep,
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $currentVersion,
+        array $reviewContext,
+    ): string {
+        $actor = $this->nextActor($nextStep, $page, $currentVersion);
 
-        if ($nextStep === 'awaiting_review' && $reviewerName !== null) {
-            return __('procynia.wiki.publication_next_awaiting_review_named', ['name' => $reviewerName]);
+        if ($actor !== null) {
+            return __('procynia.wiki.publication_next_'.$nextStep.'_named', ['name' => $actor['name']]);
+        }
+
+        // "Du" only where the caller said this viewer may submit. The list computes no viewer
+        // context at all, so a row there says what the page is ready for, never what the reader
+        // may do about it — most rows on that screen belong to somebody else.
+        if ($nextStep === 'submit' && ($reviewContext['can_submit'] ?? null) === true) {
+            return __('procynia.wiki.publication_next_submit_self');
         }
 
         return __('procynia.wiki.publication_next_'.$nextStep);
+    }
+
+    /**
+     * Who the page is waiting on, when the payload already knows.
+     *
+     * Only ever somebody a gate actually names. The page owner is the one person besides a System
+     * Owner that canSubmitEnterpriseWikiPage() lets through, so a draft this viewer may not submit
+     * is waiting on them by definition; a version in review is waiting on its assigned reviewer.
+     *
+     * A page with no owner returns null rather than a role with nobody in it: telling somebody
+     * "the page owner must send this" when there is no page owner sends them looking for a person
+     * who does not exist. The generic sentence stays the honest answer there.
+     *
+     * Both relations are read only when already loaded, the way reviewer_name is. The list loads
+     * neither and never reaches an awaiting_owner step, so this costs it no query per row.
+     *
+     * @return array{name: string, role: string}|null
+     */
+    private function nextActor(
+        string $nextStep,
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $currentVersion,
+    ): ?array {
+        if ($nextStep === 'awaiting_owner') {
+            $ownerName = $page->relationLoaded('owner') ? $page->owner?->name : null;
+
+            return $ownerName !== null
+                ? ['name' => $ownerName, 'role' => self::ACTOR_PAGE_OWNER]
+                : null;
+        }
+
+        if ($nextStep === 'awaiting_review') {
+            $reviewerName = $currentVersion?->relationLoaded('reviewer') === true
+                ? $currentVersion->reviewer?->name
+                : null;
+
+            return $reviewerName !== null
+                ? ['name' => $reviewerName, 'role' => self::ACTOR_REVIEWER]
+                : null;
+        }
+
+        return null;
     }
 
     /**
