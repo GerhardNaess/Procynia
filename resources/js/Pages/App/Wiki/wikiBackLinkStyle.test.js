@@ -6,17 +6,22 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, 'Show.jsx'), 'utf8');
+const actionStyles = readFileSync(join(here, '../../../Support/actionStyles.js'), 'utf8');
 
 /**
  * "Tilbake til funn" is a real navigation action, not breadcrumb text, and used to render as a
- * faint grey link that read as incidental. It now uses the page's own primary-action button style.
+ * faint grey link that read as incidental. It now uses the page's own primary-action style.
  *
  * These are source-level guards rather than render tests (the project has no JSX test renderer):
- * what actually needs protecting is that the style stays SHARED — a future edit that hand-copies
- * a slightly different violet, or introduces a new shade, is the regression, not a visual diff.
+ * what needs protecting is that the style stays SHARED. Originally that meant listing the violet
+ * tokens the button was expected to carry — but those tokens have since moved into
+ * Support/actionStyles.js, which is now the one place deciding what a primary action looks like,
+ * and the palette it settled on is a violet tint rather than a filled violet-600. Freezing the old
+ * token list here would only make this file argue with that decision, so the guards now assert what
+ * actually matters: the button COMPOSES the shared role instead of hand-copying colours.
  */
-describe('the "Tilbake til funn" button reuses Procynia\'s existing violet action style', () => {
-    const buttonClass = source.match(/const WIKI_FINDING_BACK_BUTTON_CLASS =\s*\n?\s*'([^']*)'/)?.[1];
+describe('the "Tilbake til funn" button reuses Procynia\'s shared primary action style', () => {
+    const buttonClass = source.match(/const WIKI_FINDING_BACK_BUTTON_CLASS =\s*\n?\s*`([^`]*)`/)?.[1];
 
     test('the button style is declared once as a shared constant', () => {
         assert.ok(buttonClass, 'WIKI_FINDING_BACK_BUTTON_CLASS must exist as a single named constant');
@@ -27,28 +32,27 @@ describe('the "Tilbake til funn" button reuses Procynia\'s existing violet actio
         assert.ok(usages.length >= 3, 'the constant must be declared once and used by both back links');
     });
 
-    test('it carries the same violet tokens as the page\'s other primary buttons', () => {
-        // Exactly the tokens on "Send til gjennomgang" / "Lagre endring" in this same file.
-        for (const token of ['bg-violet-600', 'hover:bg-violet-700', 'text-white', 'font-semibold', 'rounded-full']) {
-            assert.ok(buttonClass.includes(token), `missing shared token: ${token}`);
-        }
+    test('its colours come from the shared primary role, not from this file', () => {
+        assert.match(buttonClass, /\$\{PRIMARY_COLOURS\}/);
+        assert.match(source, /import \{ PRIMARY_COLOURS \} from '\.\.\/\.\.\/\.\.\/Support\/actionStyles'/);
     });
 
-    test('it introduces no new colour value or violet shade', () => {
-        assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(buttonClass), false, 'no raw hex colour');
-        assert.equal(/rgba?\(/.test(buttonClass), false, 'no raw rgb colour');
+    test('it introduces no colour of its own', () => {
+        // Anything colour-like left once the shared role is removed is a hand-copied token.
+        const local = buttonClass.replace(/\$\{[^}]*\}/g, '');
 
-        const shades = [...buttonClass.matchAll(/violet-(\d+)/g)].map((m) => m[1]);
-        const allowed = new Set(['600', '700']);
-
-        for (const shade of shades) {
-            assert.ok(allowed.has(shade), `violet-${shade} is not one of the shades this page already uses`);
-        }
+        assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(local), false, 'no raw hex colour');
+        assert.equal(/rgba?\(/.test(local), false, 'no raw rgb colour');
+        assert.equal(/\b(bg|text|border|outline)-[a-z]+-\d{2,3}\b/.test(local), false, 'no local colour tokens');
     });
 
     test('it keeps a visible focus-visible state', () => {
-        assert.ok(buttonClass.includes('focus-visible:outline'), 'focus ring is required for keyboard users');
-        assert.ok(buttonClass.includes('focus-visible:outline-violet-700'), 'uses the Wiki module\'s existing focus ring');
+        // Carried by the shared role now, so the guard belongs on the role.
+        const primary = actionStyles.match(/export const PRIMARY_COLOURS = '([^']*)'/)?.[1] ?? '';
+
+        assert.ok(primary, 'the primary role must stay a single named constant');
+        assert.ok(primary.includes('focus-visible:outline'), 'focus ring is required for keyboard users');
+        assert.match(primary, /focus-visible:outline-violet-\d{3}/, 'and it stays the violet ring');
     });
 
     test('icon and text stay vertically centred, and the icon never squashes', () => {
@@ -70,7 +74,7 @@ describe('the "Tilbake til funn" button reuses Procynia\'s existing violet actio
         const secondary = source.match(/const WIKI_SECONDARY_BACK_LINK_CLASS =\s*\n?\s*'([^']*)'/)?.[1];
 
         assert.ok(secondary, 'ordinary Wiki navigation keeps its own style');
-        assert.equal(secondary.includes('bg-violet-600'), false, 'plain navigation must not become a primary button');
+        assert.equal(/\bbg-violet-\d{2,3}\b/.test(secondary), false, 'plain navigation must not become a primary button');
         assert.ok(secondary.includes('text-slate-500'), 'unchanged from the original discreet link');
     });
 

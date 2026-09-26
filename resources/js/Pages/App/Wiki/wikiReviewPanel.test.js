@@ -87,7 +87,15 @@ describe('submitting names a reviewer explicitly', () => {
     test('no eligible reviewer is explained, not silently broken', () => {
         assert.match(panel, /disabled=\{busy \|\| eligibleReviewers\.length === 0\}/);
         assert.match(panel, /review_no_eligible_reviewers/);
-        assert.ok(!panel.includes('approve_wiki_pages'), 'permission keys never reach the screen');
+
+        // Permission keys are for branching, never for reading: the panel now distinguishes "you
+        // are the only approver" from "nobody can approve", which needs the capability in hand. The
+        // guard is therefore that every mention is a property read, not that the name is absent.
+        for (const mention of panel.matchAll(/approve_wiki_pages/g)) {
+            const lead = panel.slice(Math.max(0, mention.index - 40), mention.index);
+
+            assert.match(lead, /reviewAssignment\.actor_can_$/, 'permission keys never reach the screen');
+        }
     });
 });
 
