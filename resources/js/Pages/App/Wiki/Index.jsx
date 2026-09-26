@@ -1408,6 +1408,13 @@ function DecisionModal({ run, tw, onClose }) {
 
 // ─── Pages tab ───────────────────────────────────────────────────────────────
 
+/**
+ * The Wiki page list's own controls: one height for everything on the toolbar row, and 16px text,
+ * so a filter reads like something you operate rather than fine print. Deliberately separate from
+ * SELECT_CLS, which the other tabs share.
+ */
+const PAGES_CONTROL_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
+
 const SELECT_CLS = 'h-9 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
 /**
@@ -1421,33 +1428,34 @@ function PublicationSummary({ summary, tw }) {
         return null;
     }
 
+    // The number leads and the label explains it, which is the order somebody reads a count in.
+    // Colour is carried by the number alone and kept close to the text weight of the page — four
+    // filled cards would make a status summary louder than the pages it summarises.
     const parts = [
-        [summary.total, tw.publication_summary_total ?? 'sider'],
-        [summary.published, tw.publication_summary_published ?? 'publisert'],
-        [summary.in_review, tw.publication_summary_in_review ?? 'til gjennomgang'],
-        [summary.draft, tw.publication_summary_draft ?? 'utkast'],
+        [summary.total, tw.publication_summary_total ?? 'sider', 'text-slate-900'],
+        [summary.published, tw.publication_summary_published ?? 'publisert', 'text-emerald-700'],
+        [summary.in_review, tw.publication_summary_in_review ?? 'til gjennomgang', 'text-amber-700'],
+        [summary.draft, tw.publication_summary_draft ?? 'utkast', 'text-slate-500'],
         // Only when they exist: a zero here would read as a problem rather than an absence.
         ...((summary.changes_requested ?? 0) > 0
-            ? [[summary.changes_requested, tw.publication_summary_changes_requested ?? 'endringer kreves']]
+            ? [[summary.changes_requested, tw.publication_summary_changes_requested ?? 'endringer kreves', 'text-rose-700']]
             : []),
         ...((summary.unpublished_changes ?? 0) > 0
-            ? [[summary.unpublished_changes, tw.publication_summary_unpublished_changes ?? 'med upubliserte endringer']]
+            ? [[summary.unpublished_changes, tw.publication_summary_unpublished_changes ?? 'med upubliserte endringer', 'text-sky-700']]
             : []),
     ];
 
     return (
         <div className="space-y-3">
             <div
-                className="flex flex-wrap items-baseline gap-x-5 gap-y-1 rounded-2xl border border-slate-200 bg-white px-5 py-4"
+                className="flex flex-wrap items-stretch divide-x divide-slate-200 rounded-2xl border border-slate-200 bg-white"
                 data-testid="wiki-publication-summary"
             >
-                <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                    {tw.publication_summary_heading ?? 'Wiki-status'}
-                </span>
-                {parts.map(([value, label]) => (
-                    <span key={label} className="text-base text-slate-600">
-                        <span className="font-semibold text-slate-950">{value ?? 0}</span> {label}
-                    </span>
+                {parts.map(([value, label, tone]) => (
+                    <div key={label} className="flex min-w-[9rem] flex-1 flex-col gap-0.5 px-5 py-4">
+                        <span className={`text-[22px] font-semibold leading-none ${tone}`}>{value ?? 0}</span>
+                        <span className="text-base leading-6 text-slate-500">{label}</span>
+                    </div>
                 ))}
             </div>
 
@@ -1533,21 +1541,24 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
         <div className="space-y-4">
             <PublicationSummary summary={publicationSummary} tw={tw} />
 
-            {/* Filter bar */}
-            <div className="flex flex-wrap items-end gap-2">
-                <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
+            {/* One toolbar rather than a row of loose controls: search leads, the filters sit
+                beside it as the secondary things they are, and the count stays out of the way on
+                the right. Everything on one height so the row reads as a single surface. */}
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3">
+                <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
                     <input
                         type="search"
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
                         placeholder={tw.filter_search_placeholder ?? 'Søk...'}
-                        className={SELECT_CLS + ' w-52'}
+                        className={PAGES_CONTROL_CLS + ' w-full min-w-0 sm:w-72'}
                     />
                     <button
                         type="submit"
-                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                        aria-label={tw.filter_search_placeholder ?? 'Søk...'}
+                        className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-base font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
                     >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
                         </svg>
                     </button>
@@ -1556,7 +1567,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 <select
                     value={filters.page_type ?? ''}
                     onChange={(e) => navigate({ page_type: e.target.value, page: 1 })}
-                    className={SELECT_CLS}
+                    className={PAGES_CONTROL_CLS}
                 >
                     <option value="">{tw.filter_page_type_all ?? 'Alle typer'}</option>
                     <option value="article">{tw.page_type_article ?? 'Kildeartikkel'}</option>
@@ -1568,7 +1579,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 <select
                     value={filters.status ?? ''}
                     onChange={(e) => navigate({ status: e.target.value, page: 1 })}
-                    className={SELECT_CLS}
+                    className={PAGES_CONTROL_CLS}
                 >
                     <option value="">{tw.filter_status_all ?? 'Alle statuser'}</option>
                     <option value="approved">{tw.status_approved ?? 'Godkjent'}</option>
@@ -1581,7 +1592,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     <select
                         value={filters.document_owner ?? ''}
                         onChange={(e) => navigate({ document_owner: e.target.value, page: 1 })}
-                        className={SELECT_CLS}
+                        className={PAGES_CONTROL_CLS}
                     >
                         <option value="">{tw.filter_document_owner_all ?? 'Alle dokumenteiere'}</option>
                         {pagesDocumentOwnerOptions.map((owner) => (
@@ -1593,7 +1604,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 <select
                     value={filters.lint ?? ''}
                     onChange={(e) => navigate({ lint: e.target.value, page: 1 })}
-                    className={SELECT_CLS}
+                    className={PAGES_CONTROL_CLS}
                 >
                     <option value="">{tw.filter_lint_all ?? 'Alle'}</option>
                     <option value="errors">{tw.filter_lint_errors ?? 'Har feil'}</option>
@@ -1604,7 +1615,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 <select
                     value={filters.sort ?? 'updated_at_desc'}
                     onChange={(e) => navigate({ sort: e.target.value, page: 1 })}
-                    className={SELECT_CLS}
+                    className={PAGES_CONTROL_CLS}
                 >
                     <option value="updated_at_desc">{tw.filter_sort_updated_at_desc ?? 'Nyeste oppdatering'}</option>
                     <option value="title_asc">{tw.filter_sort_title_asc ?? 'Tittel A–Å'}</option>
@@ -1615,9 +1626,9 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     <button
                         type="button"
                         onClick={() => { setSearchInput(''); navigate({ search: '', page_type: '', status: '', lint: '', document_owner: '', sort: 'updated_at_desc', page: 1 }); }}
-                        className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                        className="inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-base font-medium text-slate-500 transition hover:text-slate-800"
                     >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
                         </svg>
                         {tw.filter_clear ?? 'Nullstill'}
@@ -1625,7 +1636,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                 )}
 
                 {meta.total > 0 && (
-                    <span className="ml-auto text-sm text-slate-400">
+                    <span className="ml-auto whitespace-nowrap pr-1 text-base text-slate-500">
                         {meta.total} {tw.pages_total_label ?? 'sider totalt'}
                     </span>
                 )}
@@ -1643,12 +1654,12 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                         {pages.map((page) => (
                             <article
                                 key={page.id}
-                                className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]"
+                                className="rounded-2xl border border-slate-200 bg-white p-5"
                             >
                                 <div className="space-y-3">
                                     <div>
                                         <div className="text-base font-semibold text-slate-950">{page.title}</div>
-                                        <div className="mt-1 text-sm text-slate-400">
+                                        <div className="mt-1 text-sm text-slate-500">
                                             {tw.updated ?? 'Oppdatert'} {formatDate(page.updated_at, locale)}
                                         </div>
                                     </div>
@@ -1661,14 +1672,14 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                             summary={page.document_owner_summary}
                                             fallbackLabel={tw.document_owner_sync_pending ?? 'Avventer synkronisering'}
                                         />
-                                        <span className="text-xs text-slate-400">
+                                        <span className="text-sm text-slate-500">
                                             {page.claims_count} {tw.claims ?? 'påstander'}
                                         </span>
                                     </div>
                                     <PageNextStep publication={page.publication} tw={tw} />
                                     <Link
                                         href={`/app/wiki/${page.slug}`}
-                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
                                     >
                                         {tw.open ?? 'Åpne'}
                                     </Link>
@@ -1678,34 +1689,37 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                     </section>
 
                     {/* Desktop table */}
-                    <section className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
+                    <section className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white md:block">
                         <div className="max-h-[min(60vh,44rem)] overflow-auto">
                             <table className="min-w-full divide-y divide-slate-200">
+                                {/* Column names stay in small caps — that is what a column head is
+                                    — but at 14px rather than 12px, which is below this app's floor
+                                    for anything a person actually reads. */}
                                 <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
-                                    <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        <th className="px-6 py-4">Tittel</th>
-                                        <th className="px-6 py-4">Type</th>
-                                        <th className="px-6 py-4">Status</th>
-                                        <th className="px-6 py-4">{tw.document_owner_column ?? 'Dokumenteier'}</th>
-                                        <th className="px-6 py-4">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
-                                        <th className="px-6 py-4">{tw.updated ?? 'Oppdatert'}</th>
-                                        <th className="px-6 py-4"></th>
+                                    <tr className="text-left text-sm font-semibold uppercase tracking-[0.08em] text-slate-500">
+                                        <th className="px-6 py-3.5">Tittel</th>
+                                        <th className="px-6 py-3.5">Type</th>
+                                        <th className="px-6 py-3.5">Status</th>
+                                        <th className="px-6 py-3.5">{tw.document_owner_column ?? 'Dokumenteier'}</th>
+                                        <th className="px-6 py-3.5">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
+                                        <th className="px-6 py-3.5">{tw.updated ?? 'Oppdatert'}</th>
+                                        <th className="px-6 py-3.5"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {pages.map((page) => (
-                                        <tr key={page.id} className="text-sm text-slate-700">
-                                            <td className="px-6 py-4 font-medium text-slate-950">{page.title}</td>
-                                            <td className="px-6 py-4">
+                                        <tr key={page.id} className="text-base text-slate-700 transition hover:bg-slate-50/70">
+                                            <td className="px-6 py-5 font-semibold text-slate-950">{page.title}</td>
+                                            <td className="px-6 py-5">
                                                 {page.page_type && (
                                                     <PageTypeBadge type={page.page_type} label={pageTypeLabel(page.page_type)} />
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-6 py-5">
                                                 <StatusBadge status={page.status} label={statusLabel(page.status)} />
                                                 <PageNextStep publication={page.publication} tw={tw} />
                                             </td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-6 py-5">
                                                 <DocumentOwnerSummaryBadge
                                                     summary={page.document_owner_summary}
                                                     fallbackLabel={tw.document_owner_sync_pending ?? 'Avventer synkronisering'}
@@ -1714,16 +1728,16 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                             {/* Approved out of total, both counted from the same
                                                 (current) version — a bare total said nothing about
                                                 how much of it anyone had actually checked. */}
-                                            <td className="px-6 py-4 text-slate-500">
+                                            <td className="px-6 py-5 text-slate-500">
                                                 {(tw.claims_approved_of_total ?? ':approved av :total')
                                                     .replace(':approved', page.claims_approved_count ?? 0)
                                                     .replace(':total', page.claims_count ?? 0)}
                                             </td>
-                                            <td className="px-6 py-4 text-slate-500">{formatDate(page.updated_at, locale)}</td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-6 py-5 text-slate-500">{formatDate(page.updated_at, locale)}</td>
+                                            <td className="px-6 py-5">
                                                 <Link
                                                     href={`/app/wiki/${page.slug}`}
-                                                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
                                                 >
                                                     {tw.open ?? 'Åpne'}
                                                 </Link>
@@ -3475,8 +3489,10 @@ export default function WikiIndex({
     return (
         <CustomerAppLayout title={tw.index_title ?? 'Wiki'} showPageTitle={false}>
             <div className="space-y-6">
-                <section className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm overflow-visible sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-1.5">
+                {/* No card. The page title is the page, not an object on it — a border and a
+                    shadow around it made the header compete with the content it introduces. */}
+                <header className="flex flex-col gap-4 overflow-visible sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-3">
                             <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                                 {tw.index_title ?? 'Wiki'}
@@ -3490,11 +3506,11 @@ export default function WikiIndex({
                                 />
                             )}
                         </div>
-                        <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        <p className="max-w-3xl text-base leading-6 text-slate-600">
                             {tw.index_description ?? 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.'}
                         </p>
                     </div>
-                </section>
+                </header>
 
                 {activeTab === 'pages' && (
                     <PagesTab
