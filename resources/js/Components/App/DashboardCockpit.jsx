@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import InfoHint from './InfoHint';
 import PageHelpButton from './PageHelpButton';
 import {
@@ -161,6 +161,34 @@ function buildMonthOptions(locale = 'nb-NO') {
     });
 }
 
+function Icon({ path, className = 'h-5 w-5' }) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d={path} />
+        </svg>
+    );
+}
+
+const ICON_PATHS = {
+    clipboard: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+    user: 'M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z',
+    clock: 'M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+    chat: 'M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 0 1-.923 1.785A5.969 5.969 0 0 0 6 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337Z',
+    chevronRight: 'm8.25 4.5 7.5 7.5-7.5 7.5',
+};
+
+/**
+ * Each follow-up signal gets its own mark, so the four are told apart before they are read. The
+ * tile keeps its colour whatever the count is — it identifies the signal, it does not report it.
+ * Severity is carried by the card and the number, which is what actually changes.
+ */
+const SIGNAL_MARKS = {
+    'go-no-go-pending': { path: ICON_PATHS.clipboard, tile: 'bg-indigo-50 text-indigo-600' },
+    'missing-bid-manager': { path: ICON_PATHS.user, tile: 'bg-violet-50 text-violet-600' },
+    'deadline-soon': { path: ICON_PATHS.clock, tile: 'bg-amber-50 text-amber-600' },
+    'inactive-seven-days': { path: ICON_PATHS.chat, tile: 'bg-emerald-50 text-emerald-600' },
+};
+
 // Adapter that preserves the internal API used by Card while delegating
 // rendering to the shared InfoHint component. The openInfoKey/setOpenInfoKey props
 // are no longer needed but are accepted so existing call sites do not need to change.
@@ -192,7 +220,7 @@ function Card({ title, subtitle, infoKey, infoText, action, children, className 
 
     return (
         <section className={classNames(
-            bare ? '' : classNames('rounded-2xl border border-slate-200 bg-white', dense ? 'p-4' : 'p-5'),
+            bare ? '' : classNames('rounded-3xl border border-slate-200 bg-white', dense ? 'p-5' : 'p-6'),
             className,
         )}>
             <div className={classNames('flex items-start justify-between gap-4', dense ? 'mb-3' : 'mb-4')}>
@@ -327,8 +355,9 @@ function SectionHeading({ title, subtitle, infoKey, infoText, openInfoKey, setOp
  */
 function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) {
     const isActive = Number(signal.count ?? 0) > 0;
-    // Tint only: the signal already says what it is in words, so colour repeats it quietly rather
-    // than carrying it. A signal at zero drops the tint entirely and mutes its number.
+    const mark = SIGNAL_MARKS[signal.key] ?? { path: ICON_PATHS.clipboard, tile: 'bg-slate-100 text-slate-500' };
+    // Tint only, and only when there is something to act on: the signal already says what it is in
+    // words, so colour repeats it quietly rather than carrying it.
     const tone = {
         danger: 'border-rose-200 bg-rose-50/50',
         warning: 'border-amber-200 bg-amber-50/50',
@@ -341,34 +370,40 @@ function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) 
             aria-expanded={isOpen}
             onClick={onToggle}
             className={classNames(
-                'flex h-full w-full flex-col rounded-2xl border px-5 py-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600',
+                'flex h-full w-full items-start gap-4 rounded-2xl border px-5 py-5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600',
                 isActive ? (tone[signal.severity] ?? tone.neutral) : 'border-slate-200 bg-white',
                 isOpen ? 'ring-2 ring-violet-200' : 'hover:border-slate-300',
             )}
         >
-            <div className={classNames(
-                'text-base font-semibold leading-6',
-                isActive ? 'text-slate-800' : 'text-slate-600',
+            <span className={classNames(
+                'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl',
+                mark.tile,
             )}>
-                {signal.label}
-            </div>
-            <div className={classNames(
-                'mt-2 text-[30px] font-semibold leading-none tabular-nums',
-                isActive ? 'text-slate-950' : 'text-slate-400',
-            )}>
-                {formatNumber(signal.count, locale)}
-            </div>
-            <p className={classNames(
-                'mt-2.5 text-base leading-6',
-                isActive ? 'text-slate-700' : 'text-slate-500',
-            )}>
-                {signal.description}
-            </p>
-            {isActive ? (
-                <span className="mt-3 inline-flex items-center gap-1 text-base font-semibold text-violet-700">
-                    {isOpen ? actionTexts.hide : actionTexts.show}
+                <Icon path={mark.path} />
+            </span>
+
+            <span className="min-w-0 flex-1">
+                <span className={classNames(
+                    'block text-[30px] font-semibold leading-none tabular-nums',
+                    isActive ? 'text-slate-950' : 'text-slate-400',
+                )}>
+                    {formatNumber(signal.count, locale)}
                 </span>
-            ) : null}
+                <span className="mt-2 block text-base font-semibold leading-6 text-slate-900">
+                    {signal.label}
+                </span>
+                <span className={classNames(
+                    'mt-1.5 block text-base leading-6',
+                    isActive ? 'text-slate-700' : 'text-slate-500',
+                )}>
+                    {signal.description}
+                </span>
+                {isActive ? (
+                    <span className="mt-3 inline-flex items-center gap-1 text-base font-semibold text-violet-700">
+                        {isOpen ? actionTexts.hide : actionTexts.show}
+                    </span>
+                ) : null}
+            </span>
         </button>
     );
 }
@@ -377,32 +412,45 @@ function FollowUpSignal({ signal, locale, isOpen, onToggle, actionTexts = {} }) 
  * One phase inside the pipeline strip.
  *
  * These were six bordered cards inside a seventh, which made the pipeline read as six unrelated
- * numbers rather than one portfolio. They are cells of a single strip now, separated by a divider
- * instead of a frame each. The violet fill still shows the phase's share of the busiest one — that
- * is the only thing carrying colour here, so it stays.
+ * numbers rather than one portfolio. They are segments of a single strip now, joined by chevrons
+ * so the strip reads left to right as the route a case actually takes. A phase holding cases is
+ * tinted; the violet fill still shows its share of the busiest phase.
  */
 function PipelineStage({ stage, locale, stageMax }) {
     const count = Number(stage.count ?? 0);
     const width = stageMax > 0 ? Math.round((count / stageMax) * 100) : 0;
+    const hasCases = count > 0;
 
     return (
-        <div className="flex min-w-30 flex-1 flex-col gap-2 px-4 py-4">
-            <div className="text-base font-semibold leading-6 text-slate-700">
+        <div className={classNames(
+            'flex min-w-0 flex-1 flex-col gap-2 px-4 py-4',
+            hasCases ? 'bg-violet-50' : '',
+        )}>
+            <div className="text-sm font-semibold uppercase tracking-[0.06em] text-slate-500">
                 {stage.label}
             </div>
             <div className={classNames(
                 'text-[26px] font-semibold leading-none tabular-nums',
-                count > 0 ? 'text-slate-950' : 'text-slate-400',
+                hasCases ? 'text-slate-950' : 'text-slate-400',
             )}>
                 {formatNumber(count, locale)}
             </div>
-            <div className="mt-0.5 h-1.5 rounded-full bg-slate-100">
+            <div className={classNames('mt-0.5 h-1.5 rounded-full', hasCases ? 'bg-violet-200' : 'bg-slate-200')}>
                 <div
-                    className="h-1.5 rounded-full bg-violet-500 transition-all"
-                    style={{ width: `${Math.max(count > 0 ? 6 : 0, width)}%` }}
+                    className="h-1.5 rounded-full bg-violet-600 transition-all"
+                    style={{ width: `${Math.max(hasCases ? 6 : 0, width)}%` }}
                 />
             </div>
         </div>
+    );
+}
+
+/** The join between two phases. Decoration, so it is hidden from assistive technology. */
+function PipelineChevron() {
+    return (
+        <span className="hidden shrink-0 items-center text-slate-300 sm:flex" aria-hidden="true">
+            <Icon path={ICON_PATHS.chevronRight} className="h-4 w-4" />
+        </span>
     );
 }
 /**
@@ -410,8 +458,8 @@ function PipelineStage({ stage, locale, stageMax }) {
  * date jump read as one control rather than three stacked rows.
  */
 const CALENDAR_CONTROL_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
-const CALENDAR_LABEL_CLS = 'text-base font-medium text-slate-600';
-const CALENDAR_ARROW_CLS = 'inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-base text-slate-600 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200';
+const CALENDAR_LABEL_CLS = 'text-sm font-medium text-slate-500';
+const CALENDAR_ARROW_CLS = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200';
 
 function DeadlinePopover({ items, locale, texts = {}, commonText = {} }) {
     return (
@@ -617,7 +665,6 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
             <div className="grid gap-8 xl:grid-cols-12 xl:gap-6">
                 <div className="xl:col-span-8">
                     <Card
-                        bare
                         title={redesignText.pipeline_title}
                         subtitle={redesignText.pipeline_subtitle}
                         infoKey="pipeline_stages"
@@ -626,14 +673,17 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         setOpenInfoKey={setOpenInfoKey}
                         texts={dashboardText}
                     >
-                        <div className="flex flex-wrap items-stretch divide-x divide-slate-200 rounded-2xl border border-slate-200 bg-white">
-                            {pipelineStages.map((stage) => (
-                                <PipelineStage
-                                    key={stage.key}
-                                    stage={stage}
-                                    locale={locale}
-                                    stageMax={stageMax}
-                                />
+                        {/* Stacked below sm, where six segments in a row would be unreadable. */}
+                        <div className="flex flex-col divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 sm:flex-row sm:items-stretch sm:divide-y-0">
+                            {pipelineStages.map((stage, index) => (
+                                <Fragment key={stage.key}>
+                                    {index > 0 ? <PipelineChevron /> : null}
+                                    <PipelineStage
+                                        stage={stage}
+                                        locale={locale}
+                                        stageMax={stageMax}
+                                    />
+                                </Fragment>
                             ))}
                         </div>
                     </Card>
@@ -641,7 +691,6 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
 
                 <div className="xl:col-span-4">
                     <Card
-                        bare
                         title={redesignText.management_title}
                         infoKey="management"
                         infoText={infoTextsText.management}
@@ -649,11 +698,11 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         setOpenInfoKey={setOpenInfoKey}
                         texts={dashboardText}
                     >
-                        <dl className="divide-y divide-slate-200 border-y border-slate-200">
+                        <dl className="divide-y divide-slate-200">
                             {managementRows.map((row) => (
                                 <div
                                     key={row.key}
-                                    className="flex items-baseline justify-between gap-4 py-3"
+                                    className="flex items-baseline justify-between gap-4 py-3.5 first:pt-0 last:pb-0"
                                 >
                                     <dt className="min-w-0 text-base leading-6 text-slate-600">{row.label}</dt>
                                     <dd className="shrink-0 text-base font-semibold tabular-nums text-slate-950">{row.value}</dd>
@@ -668,10 +717,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                 <div className="xl:col-span-8">
                     <Card
                         title={sectionsText.deadlines?.title}
-                        subtitle={[
-                            `${sectionsText.deadlines?.subtitle_prefix ?? ''} ${calendar.monthLabel}`.trim(),
-                            calendarText.hover_hint,
-                        ].filter(Boolean).join('. ')}
+                        subtitle={`${sectionsText.deadlines?.subtitle_prefix ?? ''} ${calendar.monthLabel}`.trim()}
                         infoKey="deadlines"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
@@ -682,22 +728,26 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                             12px uppercase labels above them — the calendar's own chrome outweighed
                             the month it was showing. */}
                         <div className="flex flex-wrap items-end gap-3">
-                            <div className="flex shrink-0 items-center gap-2">
+                            {/* Month, and the two steps either side of it, as one control. */}
+                            <div className="flex h-11 shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-1">
                                 <button
                                     type="button"
                                     aria-label={calendarText.previous_month}
                                     onClick={() => setVisibleMonthStart((current) => addMonths(current, -1))}
                                     className={CALENDAR_ARROW_CLS}
                                 >
-                                    ←
+                                    <Icon path={ICON_PATHS.chevronRight} className="h-4 w-4 rotate-180" />
                                 </button>
+                                <span className="min-w-36 px-1 text-center text-base font-semibold capitalize text-slate-900">
+                                    {calendar.monthLabel}
+                                </span>
                                 <button
                                     type="button"
                                     aria-label={calendarText.next_month}
                                     onClick={() => setVisibleMonthStart((current) => addMonths(current, 1))}
                                     className={CALENDAR_ARROW_CLS}
                                 >
-                                    →
+                                    <Icon path={ICON_PATHS.chevronRight} className="h-4 w-4" />
                                 </button>
                             </div>
 
@@ -766,9 +816,15 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                     </button>
                                 </div>
                             </div>
+
+                            {calendarText.hover_hint ? (
+                                <p className="max-w-44 text-sm leading-5 text-slate-400">
+                                    {calendarText.hover_hint}
+                                </p>
+                            ) : null}
                         </div>
 
-                        <div className="mt-5 grid grid-cols-7 gap-1 text-sm font-semibold text-slate-600">
+                        <div className="mt-5 grid grid-cols-7 gap-1 text-sm font-semibold uppercase tracking-[0.06em] text-slate-500">
                             {calendarText.weekdays?.map((label) => (
                                 <div key={label} className="px-1 pb-1 text-center">
                                     {label}
@@ -787,7 +843,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                         type="button"
                                         onClick={() => setSelectedDateKey(day.dateKey)}
                                         className={classNames(
-                                            'group relative min-h-12 rounded-lg border px-1.5 py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
+                                            'group relative min-h-11 rounded-lg border px-2 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
                                             day.inCurrentMonth
                                                 ? 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
                                                 : 'border-slate-100 bg-slate-50/70 text-slate-400',
@@ -796,11 +852,11 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                         )}
                                     >
                                         <div className="flex items-start justify-between gap-1">
-                                            <div className="text-base font-semibold leading-6 tabular-nums">
+                                            <div className="text-sm font-semibold leading-5 tabular-nums">
                                                 {day.dayOfMonth}
                                             </div>
                                             {items.length > 0 ? (
-                                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-violet-100 px-1 text-sm font-semibold tabular-nums text-violet-700">
+                                                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1 text-sm font-semibold tabular-nums text-violet-700">
                                                     {items.length}
                                                 </span>
                                             ) : null}
@@ -821,7 +877,6 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
 
                 <div className="xl:col-span-4">
                     <Card
-                        bare
                         title={redesignText.results_title}
                         subtitle={redesignText.results_subtitle}
                         infoKey="outcomes"
@@ -854,9 +909,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                 ))}
                             </div>
                         ) : (
-                            <p className="text-base leading-6 text-slate-600">
-                                {redesignText.results_none}
-                            </p>
+                            <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center">
+                                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                                    <Icon path={ICON_PATHS.clipboard} className="h-6 w-6" />
+                                </span>
+                                <p className="text-base leading-6 text-slate-500">
+                                    {redesignText.results_none}
+                                </p>
+                            </div>
                         )}
 
                         {winRate ? (
