@@ -62,7 +62,7 @@ function getWikiShowHelpSections(tw) {
             items: [
                 {
                     title: tw.show_page_help_item_published_title ?? 'Den publiserte versjonen er den som gjelder',
-                    text: tw.show_page_help_item_published_text ?? 'Når en versjon er godkjent, blir den den publiserte kunnskapen på siden. Den er det brukerne og AI-svar bygger på.',
+                    text: tw.show_page_help_item_published_text ?? 'Når en versjon er godkjent, blir den den publiserte kunnskapen på siden. Den er det brukerne og AI-svar bygger på. Kvalitetssikring kan fortsatt pågå.',
                 },
                 {
                     title: tw.show_page_help_item_working_title ?? 'Arbeidsversjonen endrer ingenting før den godkjennes',
@@ -75,23 +75,49 @@ function getWikiShowHelpSections(tw) {
             items: [
                 {
                     title: tw.show_page_help_item_owner_title ?? 'Sideeier',
-                    text: tw.show_page_help_item_owner_text ?? 'Har ansvar for Wiki-siden som helhet, retter innholdet og sender det til gjennomgang.',
-                },
-                {
-                    title: tw.show_page_help_item_document_owner_title ?? 'Dokumenteier',
-                    text: tw.show_page_help_item_document_owner_text ?? 'Bekrefter at innhold hentet fra egne kildedokumenter er riktig gjengitt. Dette er en kontroll av kildegrunnlaget, ikke en publisering.',
+                    text: tw.show_page_help_item_owner_text ?? 'Har ansvar for Wiki-siden, retter innholdet i utkastet og sender det til gjennomgang.',
                 },
                 {
                     title: tw.show_page_help_item_reviewer_title ?? 'Kontrollør',
-                    text: tw.show_page_help_item_reviewer_text ?? 'Gjør den endelige gjennomgangen av hele arbeidsversjonen og avgjør om den skal publiseres.',
+                    text: tw.show_page_help_item_reviewer_text ?? 'Når en kontrollør er tildelt, er det kontrolløren som godkjenner og publiserer siden, eller sender den tilbake med en kommentar. Ingen kan hoppe over en tildelt kontrollør — heller ikke System Owner.',
+                },
+                {
+                    title: tw.show_page_help_item_system_owner_title ?? 'System Owner',
+                    text: tw.show_page_help_item_system_owner_text ?? 'Kan publisere en side direkte fra utkast, uten å sende den til gjennomgang. Velger System Owner å sende den til en kontrollør, er det kontrolløren som avgjør den versjonen.',
                 },
                 {
                     title: tw.show_page_help_item_submit_title ?? 'Send til gjennomgang',
-                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør. Relevante dokumenteiere får sine egne kontrollpunkter, og kontrolløren får ansvaret for sluttgjennomgangen. Alle som får et ansvar blir varslet i Procynia.',
+                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør, som får beskjed og oppgaven i Infosenter. Dette er den vanlige flyten. For System Owner er den valgfri.',
                 },
                 {
                     title: tw.show_page_help_item_publish_title ?? 'Godkjenn og publiser',
-                    text: tw.show_page_help_item_publish_text ?? 'Kontrolløren kan publisere først når nødvendige dokumenteierkontroller er ferdige. Da blir arbeidsversjonen den publiserte kunnskapen på siden.',
+                    text: tw.show_page_help_item_publish_text ?? 'Arbeidsversjonen blir den publiserte kunnskapen på siden. Ingenting annet må være ferdig først.',
+                },
+                {
+                    title: tw.show_page_help_item_edit_title ?? 'Rediger artikkel',
+                    text: tw.show_page_help_item_edit_text ?? 'Endrer arbeidsversjonen. Den publiserte versjonen berøres ikke før den nye er godkjent.',
+                },
+            ],
+        },
+        {
+            title: tw.show_page_help_section_quality ?? 'Kvalitetssikring',
+            items: [
+                {
+                    title: tw.show_page_help_item_quality_who_title ?? 'Kvalitetssikrer',
+                    text: tw.show_page_help_item_quality_who_text ?? 'Kontrollerer de enkelte påstandene i innholdet mot kildene. Sideeier kan tildele en kvalitetssikrer når som helst, på sider som har påstander.',
+                },
+                {
+                    title: tw.show_page_help_item_quality_optional_title ?? 'Støtte i arbeidet, ikke et krav for å publisere',
+                    text: tw.show_page_help_item_quality_optional_text ?? 'Kvalitetssikring stopper ingenting. En side kan publiseres selv om ingen påstander er kvalitetssikret, og kvalitetssikringen kan fortsette etterpå. «0 av 9 påstander kvalitetssikret» sier derfor noe om kvalitetsarbeidet, ikke om publiseringen.',
+                },
+            ],
+        },
+        {
+            title: tw.show_page_help_section_sources ?? 'Kildegrunnlag',
+            items: [
+                {
+                    title: tw.show_page_help_item_document_owner_title ?? 'Dokumenteier',
+                    text: tw.show_page_help_item_document_owner_text ?? 'Står som ansvarlig for kildedokumentet og kan bekrefte eller innvende mot hvordan innholdet er gjengitt. Dette er sporbarhet: Wiki-siden kan publiseres uten at dokumenteier har tatt stilling.',
                 },
             ],
         },

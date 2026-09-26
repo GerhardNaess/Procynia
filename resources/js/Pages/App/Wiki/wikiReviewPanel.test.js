@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const panel = readFileSync(join(here, 'WikiReviewPanel.jsx'), 'utf8');
 const show = readFileSync(join(here, 'Show.jsx'), 'utf8');
-const lang = (locale) => readFileSync(join(here, '..', '..', '..', '..', '..', 'lang', locale, 'procynia.php'), 'utf8');
+const langFile = (locale) => readFileSync(join(here, '..', '..', '..', '..', '..', 'lang', locale, 'procynia.php'), 'utf8');
 
 /**
  * The Wiki page had to answer six questions after steps 1-10: what is published, what is being
@@ -643,8 +643,8 @@ describe('the quality reviewer is named as a person', () => {
 
     test('both languages carry every key the panel falls back from', () => {
         for (const key of ['qa_assign_button', 'qa_change_button', 'qa_send_button', 'qa_update_button', 'qa_user_label']) {
-            assert.match(lang('no'), new RegExp(`'${key}' =>`), `no: ${key}`);
-            assert.match(lang('en'), new RegExp(`'${key}' =>`), `en: ${key}`);
+            assert.match(langFile('no'), new RegExp(`'${key}' =>`), `no: ${key}`);
+            assert.match(langFile('en'), new RegExp(`'${key}' =>`), `en: ${key}`);
         }
     });
 });
@@ -675,14 +675,14 @@ describe('publication and quality are told apart', () => {
     });
 
     test('a published page says which kind of action is finished', () => {
-        assert.match(lang('no'), /'publication_next_none' => 'Ingen publiseringshandling gjenstår\.'/);
-        assert.match(lang('en'), /'publication_next_none' => 'No publication action remains\.'/);
+        assert.match(langFile('no'), /'publication_next_none' => 'Ingen publiseringshandling gjenstår\.'/);
+        assert.match(langFile('en'), /'publication_next_none' => 'No publication action remains\.'/);
     });
 
     test('the removed keys are gone from both languages', () => {
         for (const key of ['publication_quality_heading', 'publication_claims_quality']) {
-            assert.ok(! lang('no').includes(`'${key}'`), `no: ${key}`);
-            assert.ok(! lang('en').includes(`'${key}'`), `en: ${key}`);
+            assert.ok(! langFile('no').includes(`'${key}'`), `no: ${key}`);
+            assert.ok(! langFile('en').includes(`'${key}'`), `en: ${key}`);
         }
     });
 
@@ -701,8 +701,8 @@ describe('publication and quality are told apart', () => {
 describe('a published page says so', () => {
     test('the badge names publication, not approval', () => {
         assert.match(show, /approved: tw\.status_approved \?\? 'Publisert'/);
-        assert.match(lang('no'), /'status_approved' => 'Publisert',/);
-        assert.match(lang('en'), /'status_approved' => 'Published',/);
+        assert.match(langFile('no'), /'status_approved' => 'Publisert',/);
+        assert.match(langFile('en'), /'status_approved' => 'Published',/);
     });
 
     test('the other statuses are untouched', () => {
@@ -772,5 +772,71 @@ describe('the publication panel reads as a hierarchy', () => {
 
     test('the divisions between the blocks are untouched', () => {
         assert.ok((panel.match(/border-b border-slate-100 pb-4/g) ?? []).length >= 2);
+    });
+});
+
+/**
+ * The page help has to describe the workflow that exists.
+ *
+ * It still said the reviewer could publish only once the document-owner checks were done, that
+ * submitting gave those owners their own checkpoints, and nothing at all about quality assurance
+ * or about a System Owner publishing a draft outright. Every one of those was true of a workflow
+ * that has since been taken apart — and help that describes a removed gate is worse than no help,
+ * because somebody will wait for it.
+ */
+describe('the page help matches the workflow', () => {
+    test('nothing claims a document owner gates publication', () => {
+        for (const lang of ['no', 'en']) {
+            assert.ok(! langFile(lang).includes('dokumenteierkontroller'), lang);
+            assert.ok(! langFile(lang).includes('document-owner checks'), lang);
+        }
+        assert.match(show, /show_page_help_item_publish_text \?\? 'Arbeidsversjonen blir den publiserte kunnskapen på siden\. Ingenting annet må være ferdig først\.'/);
+    });
+
+    test('an assigned reviewer is described as decisive', () => {
+        assert.match(show, /Ingen kan hoppe over en tildelt kontrollør — heller ikke System Owner/);
+    });
+
+    test('the System Owner route from draft is described, and as optional', () => {
+        assert.match(show, /show_page_help_item_system_owner_title/);
+        assert.match(show, /Kan publisere en side direkte fra utkast/);
+        assert.match(show, /For System Owner er den valgfri/);
+    });
+
+    test('quality assurance is explained, and explicitly not a gate', () => {
+        assert.match(show, /show_page_help_section_quality/);
+        assert.match(show, /Kvalitetssikring stopper ingenting/);
+        assert.match(show, /kan publiseres selv om ingen påstander er kvalitetssikret/);
+    });
+
+    test('a published page is told that quality work may continue', () => {
+        assert.match(show, /Kvalitetssikring kan fortsatt pågå/);
+    });
+
+    test('editing is described', () => {
+        assert.match(show, /show_page_help_item_edit_title \?\? 'Rediger artikkel'/);
+    });
+
+    test('the source material is framed as traceability', () => {
+        assert.match(show, /Dette er sporbarhet: Wiki-siden kan publiseres uten at dokumenteier har tatt stilling/);
+    });
+
+    test('no internal vocabulary reaches the reader', () => {
+        const help = show.slice(show.indexOf('show_page_help_section_about'), show.indexOf('const PAGE_STATUS_STYLES'));
+        for (const word of ['awaiting_document_owner', 'Send til QA', 'claims']) {
+            assert.ok(! help.includes(word), word);
+        }
+    });
+
+    test('both languages carry every key the help falls back from', () => {
+        for (const key of [
+            'show_page_help_item_system_owner_title', 'show_page_help_item_system_owner_text',
+            'show_page_help_item_edit_title', 'show_page_help_item_edit_text',
+            'show_page_help_section_quality', 'show_page_help_item_quality_who_text',
+            'show_page_help_item_quality_optional_text', 'show_page_help_section_sources',
+        ]) {
+            assert.match(langFile('no'), new RegExp(`'${key}' =>`), `no: ${key}`);
+            assert.match(langFile('en'), new RegExp(`'${key}' =>`), `en: ${key}`);
+        }
     });
 });
