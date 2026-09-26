@@ -87,20 +87,18 @@ describe('the page itself answers where it stands', () => {
     });
 
     /**
-     * The distinction the whole change exists to make. Claims live under "Kvalitetsstatus" and are
-     * rendered from claims_total/claims_approved — never from blocking_reasons, which the backend
-     * fills only with gates approve() actually enforces.
+     * The distinction the whole change exists to make, now kept by placement rather than by a
+     * label: claim progress lives in the quality block, and this card never mentions it. It never
+     * belonged among the blockers either — the backend fills those only with gates approve()
+     * actually enforces.
      */
-    test('claims are quality status, rendered separately from blockers', () => {
-        assert.match(panel, /publication_quality_heading \?\? 'Kvalitetsstatus'/);
-        assert.match(panel, /data-testid="wiki-publication-claims"/);
-        assert.match(panel, /publication\.claims_total > 0 &&/);
+    test('claims are nowhere in the publication card', () => {
+        const start = panel.indexOf('function PublicationBlock');
+        const card = panel.slice(start, panel.indexOf('\n}\n', start));
 
-        const blockerBlock = panel.slice(
-            panel.indexOf('data-testid="wiki-publication-blockers"'),
-            panel.indexOf('data-testid="wiki-publication-blockers"') + 500,
-        );
-        assert.ok(! blockerBlock.includes('claims'), 'blockers must never be built from claims');
+        assert.ok(! card.includes('claims'), 'not as a status, and not among the blockers');
+        assert.ok(! panel.includes('publication_quality_heading'));
+        assert.ok(! panel.includes('data-testid="wiki-publication-claims"'));
     });
 
     /** A published page with nothing outstanding used to render no panel at all. */

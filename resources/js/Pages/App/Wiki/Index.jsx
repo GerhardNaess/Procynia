@@ -1687,7 +1687,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
                                         <th className="px-6 py-4">Type</th>
                                         <th className="px-6 py-4">Status</th>
                                         <th className="px-6 py-4">{tw.document_owner_column ?? 'Dokumenteier'}</th>
-                                        <th className="px-6 py-4">{tw.claims_approved_column ?? 'Påstander godkjent'}</th>
+                                        <th className="px-6 py-4">{tw.claims_approved_column ?? 'Påstander kvalitetssikret'}</th>
                                         <th className="px-6 py-4">{tw.updated ?? 'Oppdatert'}</th>
                                         <th className="px-6 py-4"></th>
                                     </tr>

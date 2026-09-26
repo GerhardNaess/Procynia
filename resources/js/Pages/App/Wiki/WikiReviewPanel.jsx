@@ -144,18 +144,12 @@ function PublicationBlock({ publication, tw }) {
                 {tw.publication_heading ?? 'Publisering'}
             </span>
 
+            {/* Deliberately only the next step. Claim progress used to sit here too, which put
+                "0 av 7 påstander" next to "Ingen handling gjenstår" and read as a contradiction —
+                it is not one, because quality assurance has never gated publication, but a card
+                that answers two different questions at once invites exactly that reading. The
+                progress belongs with the assignment it describes, one block below. */}
             <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
-                {publication.claims_total > 0 && (
-                    <div>
-                        <dt className="text-sm text-slate-500">{tw.publication_quality_heading ?? 'Kvalitetsstatus'}</dt>
-                        <dd className="text-base text-slate-900" data-testid="wiki-publication-claims">
-                            {(tw.publication_claims_quality ?? ':approved av :total påstander godkjent')
-                                .replace(':approved', publication.claims_approved ?? 0)
-                                .replace(':total', publication.claims_total ?? 0)}
-                        </dd>
-                    </div>
-                )}
-
                 <div>
                     <dt className="text-sm text-slate-500">{tw.publication_next_label ?? 'Neste steg'}</dt>
                     <dd className="text-base text-slate-900" data-testid="wiki-publication-next-step">
@@ -232,7 +226,7 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                 <p className="text-base text-slate-600" data-testid="wiki-qa-progress">
                     {! hasClaims
                         ? (tw.qa_no_claims ?? 'Ingen påstander å kvalitetssikre')
-                        : (tw.qa_claims_progress ?? ':approved av :total påstander godkjent')
+                        : (tw.qa_claims_progress ?? ':approved av :total påstander kvalitetssikret')
                             .replace(':approved', claims.approved ?? 0)
                             .replace(':total', claims.total ?? 0)}
                     {claims.rejected > 0 && (

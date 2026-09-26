@@ -15,11 +15,16 @@ const lang = (locale) => readFileSync(join(here, '..', '..', '..', '..', '..', '
  * Source-level guards, in the same style as the other Wiki tests: the project has no JSX test
  * renderer, and what needs protecting is that the cell keeps showing both numbers.
  */
-describe('the claims column shows approval progress', () => {
+describe('the claims column shows quality assurance progress', () => {
+    /**
+     * "Godkjent" is what a page gets when it is published, and what a claim gets from quality
+     * assurance — two different decisions sharing one word. The claim number says how far the
+     * quality work has come, so it says that.
+     */
     test('the header says what the number means', () => {
-        assert.match(source, /tw\.claims_approved_column \?\? 'Påstander godkjent'/);
-        assert.match(lang('no'), /'claims_approved_column' => 'Påstander godkjent',/);
-        assert.match(lang('en'), /'claims_approved_column' => 'Claims approved',/);
+        assert.match(source, /tw\.claims_approved_column \?\? 'Påstander kvalitetssikret'/);
+        assert.match(lang('no'), /'claims_approved_column' => 'Påstander kvalitetssikret',/);
+        assert.match(lang('en'), /'claims_approved_column' => 'Claims quality assured',/);
     });
 
     test('the cell renders approved out of total', () => {

@@ -483,7 +483,6 @@ describe('the publication card explains what happens next, not what the page is'
     test('what the card is actually for is untouched', () => {
         assert.match(panel, /data-testid="wiki-publication-next-step"/);
         assert.match(panel, /data-testid="wiki-publication-blockers"/);
-        assert.match(panel, /data-testid="wiki-publication-claims"/);
         assert.match(panel, /publication_heading \?\? 'Publisering'/);
     });
 });
@@ -647,5 +646,47 @@ describe('the quality reviewer is named as a person', () => {
             assert.match(lang('no'), new RegExp(`'${key}' =>`), `no: ${key}`);
             assert.match(lang('en'), new RegExp(`'${key}' =>`), `en: ${key}`);
         }
+    });
+});
+
+/**
+ * A published page used to say "0 av 7 påstander godkjent" directly above "Ingen handling
+ * gjenstår." Both were true — quality assurance has never gated publication — but a card that
+ * answers two different questions at once invites the reading that it contradicts itself.
+ *
+ * The card now answers one question: what has to happen for this page to be published. Quality
+ * progress sits with the assignment it describes, and says "kvalitetssikret" rather than
+ * "godkjent", because approving a page and quality assuring a claim are different decisions that
+ * happened to share a word.
+ */
+describe('publication and quality are told apart', () => {
+    test('the publication card carries no claim progress', () => {
+        const start = panel.indexOf('function PublicationBlock');
+        const card = panel.slice(start, panel.indexOf('\n}\n', start));
+
+        assert.ok(! card.includes('claims'));
+        assert.ok(! panel.includes('publication_claims_quality'));
+        assert.ok(! panel.includes('publication_quality_heading'));
+    });
+
+    test('the quality block keeps it, in its own words', () => {
+        assert.match(panel, /qa_claims_progress \?\? ':approved av :total påstander kvalitetssikret'/);
+        assert.match(panel, /data-testid="wiki-qa-progress"/);
+    });
+
+    test('a published page says which kind of action is finished', () => {
+        assert.match(lang('no'), /'publication_next_none' => 'Ingen publiseringshandling gjenstår\.'/);
+        assert.match(lang('en'), /'publication_next_none' => 'No publication action remains\.'/);
+    });
+
+    test('the removed keys are gone from both languages', () => {
+        for (const key of ['publication_quality_heading', 'publication_claims_quality']) {
+            assert.ok(! lang('no').includes(`'${key}'`), `no: ${key}`);
+            assert.ok(! lang('en').includes(`'${key}'`), `en: ${key}`);
+        }
+    });
+
+    test('a version with no claims still says so, in the quality block', () => {
+        assert.match(panel, /qa_no_claims \?\? 'Ingen påstander å kvalitetssikre'/);
     });
 });
