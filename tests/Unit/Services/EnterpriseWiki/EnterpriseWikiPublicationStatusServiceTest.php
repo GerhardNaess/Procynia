@@ -15,8 +15,8 @@ use Tests\TestCase;
  * or approve() would refuse it, and never claims to be blocked by something the domain does not
  * actually check.
  *
- * Models are built in memory rather than persisted: the presenter reads status, two version ids
- * and a document-owner summary, and nothing here needs a database to be true.
+ * Models are built in memory rather than persisted: the presenter reads status and two version
+ * ids, and nothing here needs a database to be true.
  */
 class EnterpriseWikiPublicationStatusServiceTest extends TestCase
 {
@@ -30,7 +30,7 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
 
     public function test_a_page_that_was_never_published_is_a_draft_ready_to_submit(): void
     {
-        $result = $this->publicationFor($this->page('draft'), $this->version(9), [], [
+        $result = $this->publicationFor($this->page('draft'), $this->version(9), [
             'can_submit' => true,
             'eligible_reviewer_count' => 1,
         ]);
@@ -48,7 +48,7 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
      */
     public function test_a_draft_with_nobody_available_to_review_says_so(): void
     {
-        $result = $this->publicationFor($this->page('draft'), $this->version(9), [], [
+        $result = $this->publicationFor($this->page('draft'), $this->version(9), [
             'can_submit' => true,
             'eligible_reviewer_count' => 0,
         ]);
@@ -59,7 +59,7 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
 
     public function test_a_draft_someone_else_owns_points_at_the_owner_rather_than_an_action(): void
     {
-        $result = $this->publicationFor($this->page('draft'), $this->version(9), [], [
+        $result = $this->publicationFor($this->page('draft'), $this->version(9), [
             'can_submit' => false,
             'eligible_reviewer_count' => 1,
         ]);
@@ -77,7 +77,6 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
         $result = $this->publicationFor(
             $this->page('pending_review'),
             $this->version(9),
-            ['pending_count' => 0],
             ['is_assigned_reviewer' => true, 'final_approval_blocker' => null],
             ['total' => 10, 'approved' => 2],
         );
@@ -88,31 +87,29 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
         $this->assertSame(2, $result['claims_approved']);
     }
 
-    /** Document-owner sign-off does gate approve(), so in review it is a real blocker. */
-    public function test_a_pending_document_owner_blocks_approval_in_review(): void
+    /**
+     * Source sign-off was decoupled from publication: a document owner vouching for their own
+     * material is provenance, recorded on the source document, and never a gate the Wiki page has
+     * to clear. The reviewer is the only person a version in review is waiting on.
+     */
+    public function test_source_sign_off_is_not_a_publication_gate(): void
     {
         $result = $this->publicationFor(
             $this->page('pending_review'),
             $this->version(9),
-            ['pending_count' => 2],
-            ['is_assigned_reviewer' => true],
+            ['is_assigned_reviewer' => true, 'final_approval_blocker' => null],
         );
 
         $this->assertSame('in_review', $result['state']);
-        $this->assertSame('awaiting_document_owner', $result['next_step']);
-        $this->assertCount(1, $result['blocking_reasons']);
+        $this->assertSame('approve', $result['next_step']);
+        $this->assertSame([], $result['blocking_reasons']);
     }
 
-    /**
-     * The approval rows are created BY submit(), so a draft page has none. Reporting their absence
-     * as outstanding work would send the owner looking for something that does not exist yet.
-     */
-    public function test_a_draft_never_reports_a_document_owner_blocker(): void
+    public function test_a_draft_reports_no_source_blocker(): void
     {
         $result = $this->publicationFor(
             $this->page('draft'),
             $this->version(9),
-            ['pending_count' => 3, 'missing_owner_count' => 1],
             ['can_submit' => true, 'eligible_reviewer_count' => 1],
         );
 
@@ -125,7 +122,6 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
         $result = $this->publicationFor(
             $this->page('pending_review'),
             $this->version(9),
-            ['pending_count' => 0],
             ['is_assigned_reviewer' => false],
         );
 
@@ -149,7 +145,7 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
      */
     public function test_a_published_page_with_newer_work_says_both_things(): void
     {
-        $result = $this->publicationFor($this->page('draft', 5), $this->version(9), [], [
+        $result = $this->publicationFor($this->page('draft', 5), $this->version(9), [
             'can_submit' => true,
             'eligible_reviewer_count' => 1,
         ]);
@@ -176,7 +172,7 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
 
     public function test_a_returned_page_asks_the_owner_to_fix_and_resubmit(): void
     {
-        $result = $this->publicationFor($this->page('rejected'), $this->version(9), [], ['can_submit' => true]);
+        $result = $this->publicationFor($this->page('rejected'), $this->version(9), ['can_submit' => true]);
 
         $this->assertSame('changes_requested', $result['state']);
         $this->assertSame('resolve_changes', $result['next_step']);
@@ -199,11 +195,10 @@ class EnterpriseWikiPublicationStatusServiceTest extends TestCase
     private function publicationFor(
         EnterpriseWikiPage $page,
         ?EnterpriseWikiPageVersion $version,
-        array $ownerSummary = [],
         array $reviewContext = [],
         ?array $claimCounts = null,
     ): array {
-        return $this->service->forPage($page, $version, $ownerSummary, $reviewContext, $claimCounts);
+        return $this->service->forPage($page, $version, $reviewContext, $claimCounts);
     }
 
     private function page(string $status, ?int $publishedVersionId = null): EnterpriseWikiPage
