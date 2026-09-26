@@ -13,7 +13,6 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use App\Models\UserNotification;
-use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService as Notify;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -44,6 +43,39 @@ class EnterpriseWikiReviewNotificationTest extends TestCase
         $this->withoutMiddleware(ValidateCsrfToken::class);
     }
 
+    /**
+     * Only the reviewer. A document owner used to be told their material was in use and had to be
+     * checked, because that check gated publishing the page. It does not any more — a source
+     * document is provenance, not a level of approval — so nobody is waiting on them and the bell
+     * has nothing to say. The ownership itself is still recorded, on the approval rows.
+     */
+    public function test_submitting_tells_nobody_but_the_reviewer(): void
+    {
+        $case = $this->submittedPage(documentOwners: 2);
+
+        foreach ($case['documentOwners'] as $owner) {
+            $this->assertSame(
+                0,
+                UserNotification::query()->where('user_id', $owner->id)->count(),
+                'a document owner is asked for nothing',
+            );
+        }
+
+        $this->assertNotNull($this->notificationFor($case['reviewer'], Notify::EVENT_REVIEW_ASSIGNED));
+        $this->assertSame(1, UserNotification::query()->count(), 'one notification, to one person');
+    }
+
+    /** A document owner approving their own source unblocks nothing, so it announces nothing. */
+    public function test_deciding_a_source_requirement_notifies_nobody(): void
+    {
+        $case = $this->submittedPage();
+        $before = UserNotification::query()->count();
+
+        $this->clearGate($case);
+
+        $this->assertSame($before, UserNotification::query()->count());
+    }
+
     // A. the reviewer is told they have been assigned
     public function test_submitting_tells_the_assigned_reviewer(): void
     {
@@ -57,90 +89,6 @@ class EnterpriseWikiReviewNotificationTest extends TestCase
 
         // The gate may still be closed, so it must not promise a decision they cannot make.
         $this->assertStringNotContainsString('klar til godkjenning', mb_strtolower($notification->message));
-    }
-
-    // B. every outstanding document owner is asked, once
-    public function test_submitting_asks_each_outstanding_document_owner_once(): void
-    {
-        $case = $this->submittedPage(documentOwners: 2);
-
-        foreach ($case['documentOwners'] as $owner) {
-            $this->assertSame(
-                1,
-                $this->notificationCount($owner, Notify::EVENT_SOURCE_OWNER_REQUIRED),
-                'each owner is asked exactly once',
-            );
-        }
-    }
-
-    // C. one owner, several documents, one ask
-    public function test_an_owner_of_several_documents_is_asked_once_not_once_per_document(): void
-    {
-        $case = $this->pageWithSources(3, sharedOwner: true);
-        $this->submitFor($case['page'], $case['reviewer']);
-
-        $this->assertSame(1, $this->notificationCount($case['documentOwners'][0], Notify::EVENT_SOURCE_OWNER_REQUIRED));
-    }
-
-    // D + Q. retired requirements are not work anybody is waiting on
-    public function test_a_superseded_requirement_produces_no_notification(): void
-    {
-        $case = $this->submittedPage();
-        $formerOwner = $case['documentOwners'][0];
-        $before = $this->notificationCount($formerOwner, Notify::EVENT_SOURCE_OWNER_REQUIRED);
-
-        $newOwner = $this->user($case['customer']);
-        $case['documents'][0]->forceFill(['owner_user_id' => $newOwner->id])->save();
-        app(EnterpriseWikiDocumentOwnerApprovalService::class)
-            ->syncForDocument($case['documents'][0]->fresh());
-
-        app(Notify::class)->notifyOutstandingDocumentOwners($case['page'], $case['version']);
-
-        $this->assertSame($before, $this->notificationCount($formerOwner, Notify::EVENT_SOURCE_OWNER_REQUIRED));
-        $this->assertSame(1, $this->notificationCount($newOwner, Notify::EVENT_SOURCE_OWNER_REQUIRED), 'the new owner is asked');
-    }
-
-    // E + R. repeated work never duplicates
-    public function test_repeating_the_notification_pass_creates_no_duplicates(): void
-    {
-        $case = $this->submittedPage();
-        $owner = $case['documentOwners'][0];
-
-        for ($i = 0; $i < 3; $i++) {
-            app(Notify::class)->notifyOutstandingDocumentOwners($case['page'], $case['version']);
-            app(Notify::class)->pageSubmittedForReview($case['page'], $case['version']->fresh(), $case['pageOwner']);
-        }
-
-        $this->assertSame(1, $this->notificationCount($owner, Notify::EVENT_SOURCE_OWNER_REQUIRED));
-        $this->assertSame(1, $this->notificationCount($case['reviewer'], Notify::EVENT_REVIEW_ASSIGNED));
-    }
-
-    // F + G. the reviewer hears only when the gate actually opens
-    public function test_the_reviewer_is_told_only_when_the_last_owner_has_signed_off(): void
-    {
-        $case = $this->submittedPage(documentOwners: 2);
-        $requirements = $this->activeRequirements($case['version']);
-
-        $this->decideRequirement($case['page'], $requirements[0], $case['documentOwners']);
-        $this->assertSame(
-            0,
-            $this->notificationCount($case['reviewer'], Notify::EVENT_SOURCE_OWNER_GATE_READY),
-            'one of two owners is not a green gate',
-        );
-
-        $this->decideRequirement($case['page'], $requirements[1], $case['documentOwners']);
-        $this->assertSame(1, $this->notificationCount($case['reviewer'], Notify::EVENT_SOURCE_OWNER_GATE_READY));
-    }
-
-    public function test_the_gate_ready_message_is_not_repeated(): void
-    {
-        $case = $this->submittedPage();
-        $this->clearGate($case);
-
-        app(Notify::class)->sourceOwnerGateBecameReady($case['page'], $case['version']->fresh());
-        app(Notify::class)->sourceOwnerGateBecameReady($case['page'], $case['version']->fresh());
-
-        $this->assertSame(1, $this->notificationCount($case['reviewer'], Notify::EVENT_SOURCE_OWNER_GATE_READY));
     }
 
     // H. a document owner's objection reaches the page owner, with the reason

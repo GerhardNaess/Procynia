@@ -219,13 +219,16 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
     }
 
     // L. no bypass of the gate
-    /** There is no gate to skip; the requirement simply has nothing to say about publishing. */
-    public function test_a_system_owner_publishes_regardless_of_the_requirement(): void
+    /**
+     * There is no gate to skip; the requirement simply has nothing to say about publishing. Who
+     * may publish is a separate question, and the answer is the person the page was handed to —
+     * see EnterpriseWikiSystemOwnerApprovalTest for that rule.
+     */
+    public function test_the_reviewer_publishes_regardless_of_the_requirement(): void
     {
         [$customer, $page, $version] = $this->submittedPage(1);
-        $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
 
-        $this->actingAs($systemOwner)
+        $this->actingAs($this->reviewerOf($page))
             ->patch("/app/wiki/{$page->slug}/approve")
             ->assertRedirect();
 

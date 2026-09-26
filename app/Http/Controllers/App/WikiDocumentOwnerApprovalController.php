@@ -104,12 +104,11 @@ class WikiDocumentOwnerApprovalController extends Controller
 
         $version = EnterpriseWikiPageVersion::query()->find($approval->enterprise_wiki_page_version_id);
 
+        // A refusal still returns the version to its owner: that is a real objection somebody has
+        // to act on. An approval tells nobody anything, because it unblocks nothing — the page was
+        // never waiting on it.
         if ($isRejection) {
             $this->returnVersionToOwner($page, $approval, $user, (string) $comment);
-        } elseif ($version instanceof EnterpriseWikiPageVersion) {
-            // Only when this approval was the last one outstanding does the reviewer hear anything —
-            // the service checks the gate itself, so approving the first of three stays quiet.
-            $this->reviewNotifications->sourceOwnerGateBecameReady($page, $version, $user);
         }
 
         $runId = $approval->enterprise_wiki_ingest_run_id

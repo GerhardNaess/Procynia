@@ -690,3 +690,29 @@ describe('publication and quality are told apart', () => {
         assert.match(panel, /qa_no_claims \?\? 'Ingen påstander å kvalitetssikre'/);
     });
 });
+
+/**
+ * An approved page is a published page.
+ *
+ * approve() writes status and published_version_id in one go, so the two can never disagree. The
+ * badge said "Godkjent", which left the reader asking what was still missing — especially next to
+ * a quality block reporting 0 of 7, which is unrelated and does not stop anything.
+ */
+describe('a published page says so', () => {
+    test('the badge names publication, not approval', () => {
+        assert.match(show, /approved: tw\.status_approved \?\? 'Publisert'/);
+        assert.match(lang('no'), /'status_approved' => 'Publisert',/);
+        assert.match(lang('en'), /'status_approved' => 'Published',/);
+    });
+
+    test('the other statuses are untouched', () => {
+        assert.match(show, /pending_review: tw\.status_pending_review \?\? 'Til gjennomgang'/);
+        assert.match(show, /draft: tw\.status_draft \?\? 'Utkast'/);
+        assert.match(show, /rejected: tw\.status_changes_requested \?\? 'Endringer kreves'/);
+    });
+
+    /** A claim is still approved by a person; only the page's own status changed wording. */
+    test('claim approval keeps its own word', () => {
+        assert.match(show, /claim_status_approved \?\? 'Godkjent'/);
+    });
+});

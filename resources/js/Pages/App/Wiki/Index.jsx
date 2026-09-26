@@ -794,8 +794,8 @@ function getWikiPagesHelpSections(tw) {
                     text: tw.page_help_item_status_draft_text ?? 'Siden er opprettet, men ikke ferdig behandlet ennå.',
                 },
                 {
-                    title: tw.page_help_item_status_approved_title ?? 'Godkjent',
-                    text: tw.page_help_item_status_approved_text ?? 'Siden har bestått den eksisterende artikkel- eller kvalitetsgodkjenningen.',
+                    title: tw.page_help_item_status_approved_title ?? 'Publisert',
+                    text: tw.page_help_item_status_approved_text ?? 'Siden er publisert og er den versjonen lesere og tilbudsgenerering får.',
                 },
                 {
                     title: tw.page_help_item_status_sync_title ?? 'Avventer synkronisering',
@@ -1513,7 +1513,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = 
     };
 
     const statusLabel = (status) => ({
-        approved: tw.status_approved ?? 'Godkjent',
+        approved: tw.status_approved ?? 'Publisert',
         pending_review: tw.status_pending_review ?? 'Til gjennomgang',
         draft: tw.status_draft ?? 'Utkast',
         rejected: tw.status_rejected ?? 'Avvist',

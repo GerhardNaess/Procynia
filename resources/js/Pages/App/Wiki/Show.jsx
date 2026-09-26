@@ -1274,7 +1274,9 @@ export default function WikiShow({
     const actionLabel = tw.action_confirming ?? 'Behandler...';
 
     const pageStatusLabel = (status) => ({
-        approved: tw.status_approved ?? 'Godkjent',
+        // approve() writes status and published_version_id in one go, so an approved page is a
+        // published one — and "Godkjent" left the reader asking what was still missing.
+        approved: tw.status_approved ?? 'Publisert',
         pending_review: tw.status_pending_review ?? 'Til gjennomgang',
         draft: tw.status_draft ?? 'Utkast',
         // Technically 'rejected', but it means "fix this and send it again", not a final refusal.

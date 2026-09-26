@@ -29,10 +29,6 @@ class EnterpriseWikiReviewNotificationService
 {
     public const EVENT_REVIEW_ASSIGNED = 'wiki.review_assigned';
 
-    public const EVENT_SOURCE_OWNER_REQUIRED = 'wiki.source_owner_review_required';
-
-    public const EVENT_SOURCE_OWNER_GATE_READY = 'wiki.source_owner_gate_ready';
-
     public const EVENT_CHANGES_REQUESTED = 'wiki.changes_requested';
 
     public const EVENT_PAGE_PUBLISHED = 'wiki.page_published';
@@ -47,9 +43,8 @@ class EnterpriseWikiReviewNotificationService
      * A version has been handed over: tell the reviewer, and tell every document owner whose
      * sign-off it now waits on.
      *
-     * The reviewer's wording is deliberately "you are assigned", not "ready to approve" — the
-     * source-owner gate may still be closed, and promising a decision they cannot make yet would
-     * send them to a blocked page.
+     * The reviewer's wording is deliberately "you are assigned" rather than a promise about what
+     * they will find: the page is theirs to decide, and what it needs is on the page.
      */
     public function pageSubmittedForReview(
         EnterpriseWikiPage $page,
@@ -71,8 +66,6 @@ class EnterpriseWikiReviewNotificationService
                 ['page_version_id' => (int) $version->id, 'submitted_by_user_id' => (int) $submitter->id],
             );
         }
-
-        $this->notifyOutstandingDocumentOwners($page, $version, $submitter);
     }
 
     /**
@@ -109,94 +102,6 @@ class EnterpriseWikiReviewNotificationService
             // Assigning QA to yourself is allowed — a lone QA user must be able to record that the
             // work is theirs — but telling them what they just did is not news.
             $assignedBy,
-        );
-    }
-
-    /**
-     * One notification per outstanding requirement row, not per document.
-     *
-     * A requirement already carries every document the same owner is responsible for, so an owner
-     * with four sources is asked once. Rows that are superseded, approved or rejected are not work
-     * anybody is waiting on, and are skipped.
-     */
-    public function notifyOutstandingDocumentOwners(
-        EnterpriseWikiPage $page,
-        EnterpriseWikiPageVersion $version,
-        ?User $actor = null,
-    ): void {
-        $requirements = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
-            ->where('enterprise_wiki_page_version_id', $version->id)
-            ->whereNull('superseded_at')
-            ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
-            ->whereNotNull('document_owner_user_id')
-            ->with('documentOwner')
-            ->get();
-
-        foreach ($requirements as $requirement) {
-            $owner = $requirement->documentOwner;
-
-            if (! $owner instanceof User) {
-                continue;
-            }
-
-            $documentCount = is_array($requirement->source_document_ids) ? count($requirement->source_document_ids) : 0;
-
-            $this->notify(
-                $page,
-                $owner,
-                self::EVENT_SOURCE_OWNER_REQUIRED,
-                sprintf('%s:%d:%d', self::EVENT_SOURCE_OWNER_REQUIRED, $requirement->id, $owner->id),
-                'Kildegrunnlag må kontrolleres',
-                sprintf(
-                    '«%s» bruker innhold fra %s. Kontroller at innholdet er riktig gjengitt.',
-                    $page->title,
-                    $documentCount === 1 ? 'ditt kildedokument' : "{$documentCount} av dine kildedokumenter",
-                ),
-                [
-                    'page_version_id' => (int) $version->id,
-                    'approval_id' => (int) $requirement->id,
-                    'source_document_ids' => $requirement->source_document_ids,
-                ],
-                $actor,
-            );
-        }
-    }
-
-    /**
-     * The last outstanding document owner has signed off, so the reviewer can finally act.
-     *
-     * Keyed on the version, so it is sent once when the gate opens rather than on every
-     * re-evaluation. If the gate is not actually open, or nobody is assigned, nothing is sent — this
-     * never guesses a reviewer.
-     */
-    public function sourceOwnerGateBecameReady(
-        EnterpriseWikiPage $page,
-        EnterpriseWikiPageVersion $version,
-        ?User $actor = null,
-    ): void {
-        if ($version->reviewer_user_id === null) {
-            return;
-        }
-
-        if (! $this->documentOwnerApprovals->sourceOwnerGateForVersion($version)['ready']) {
-            return;
-        }
-
-        $reviewer = User::query()->find($version->reviewer_user_id);
-
-        if (! $reviewer instanceof User) {
-            return;
-        }
-
-        $this->notify(
-            $page,
-            $reviewer,
-            self::EVENT_SOURCE_OWNER_GATE_READY,
-            sprintf('%s:%d:%d', self::EVENT_SOURCE_OWNER_GATE_READY, $version->id, $reviewer->id),
-            'Klar for endelig gjennomgang',
-            sprintf('Dokumenteierkontrollen for «%s» er fullført. Siden er klar for endelig gjennomgang.', $page->title),
-            ['page_version_id' => (int) $version->id],
-            $actor,
         );
     }
 
