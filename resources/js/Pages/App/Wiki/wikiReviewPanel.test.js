@@ -716,3 +716,61 @@ describe('a published page says so', () => {
         assert.match(show, /claim_status_approved \?\? 'Godkjent'/);
     });
 });
+
+/**
+ * The panel's own hierarchy, and its readability floor.
+ *
+ * Publisering announced itself as a small-caps label, then used a second label to say "Neste steg",
+ * then answered — three levels of chrome for one sentence. Kvalitetssikring did the same. Below
+ * them, ordinary information about the page sat at 14px and one line at 12px, which is the size
+ * this app reserves for things nobody has to read.
+ */
+describe('the publication panel reads as a hierarchy', () => {
+    test('each block names itself once, as a heading', () => {
+        assert.match(panel, /<h3 className="text-lg font-semibold text-slate-900">\s*\n\s*\{tw\.publication_heading \?\? 'Publisering'\} – \{tw\.publication_next_label \?\? 'Neste steg'\}/);
+        assert.match(panel, /<h3 className="text-lg font-semibold text-slate-900">\s*\n\s*\{tw\.qa_heading \?\? 'Kvalitetssikring'\}/);
+    });
+
+    test('no section name is set as a machine label any more', () => {
+        assert.ok(! panel.includes('uppercase tracking-[0.12em]'), 'no small caps, no wide tracking');
+    });
+
+    test('the next step is the answer under the heading, not a second label', () => {
+        assert.match(panel, /<p className="text-base leading-6 text-slate-700" data-testid="wiki-publication-next-step">/);
+        assert.ok(! panel.includes('<dt className='), 'the label/value pair is gone');
+    });
+
+    test('information about the page is information, at 16px', () => {
+        for (const key of ['review_nothing_published', 'review_working_version', 'review_page_owner']) {
+            assert.match(panel, new RegExp(key));
+        }
+        assert.match(panel, /className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-base"/);
+        assert.match(panel, /className="flex flex-wrap gap-x-6 gap-y-1 text-base"/);
+    });
+
+    test('nothing anybody reads is set at 12px', () => {
+        assert.ok(! panel.includes('text-xs'));
+    });
+
+    /**
+     * What is left at 14px: the byline under a returned page's reason, the previous rounds of
+     * feedback folded away behind a disclosure and their bylines, and a character counter. None is
+     * an instruction, a status or next to an action — the things this surface keeps at 16px.
+     */
+    test('14px is left only for genuinely secondary metadata', () => {
+        const small = [...panel.matchAll(/className="[^"]*text-sm[^"]*"/g)].map((m) => m[0]);
+
+        assert.ok(small.length <= 4, `14px used ${small.length} times`);
+        assert.ok(
+            small.every((c) => /amber-800|amber-900|slate-500/.test(c)),
+            'bylines, folded history and counters only',
+        );
+        // The things that must not shrink: what the owner was asked to change, whose turn it is.
+        assert.match(panel, /<p className="mt-1 text-base leading-6 text-amber-900">\{changes\.latest\.reason\}/);
+        assert.match(panel, /<p className="mt-1 text-base text-violet-800">/);
+    });
+
+    test('the divisions between the blocks are untouched', () => {
+        assert.ok((panel.match(/border-b border-slate-100 pb-4/g) ?? []).length >= 2);
+    });
+});

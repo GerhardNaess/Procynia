@@ -20,7 +20,7 @@ function ActionError({ message }) {
         <p
             role="alert"
             data-testid="wiki-review-action-error"
-            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-800"
         >
             {message}
         </p>
@@ -137,30 +137,25 @@ function PublicationBlock({ publication, tw }) {
 
     return (
         <div className="space-y-3 border-b border-slate-100 pb-4" data-testid="wiki-publication-block">
-            {/* The heading only. Where the page stands is stated once, beside the page title;
-                repeating it here said the same word twice on one screen and invited the two to
-                disagree. This card is for what happens next, not for what the page is. */}
-            <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                {tw.publication_heading ?? 'Publisering'}
-            </span>
+            {/* One heading, not a small-caps label with another label under it. The card answers a
+                single question — what happens next before this page is published — so it says so on
+                one line and then answers it.
 
-            {/* Deliberately only the next step. Claim progress used to sit here too, which put
-                "0 av 7 påstander" next to "Ingen handling gjenstår" and read as a contradiction —
-                it is not one, because quality assurance has never gated publication, but a card
-                that answers two different questions at once invites exactly that reading. The
-                progress belongs with the assignment it describes, one block below. */}
-            <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
-                <div>
-                    <dt className="text-sm text-slate-500">{tw.publication_next_label ?? 'Neste steg'}</dt>
-                    <dd className="text-base text-slate-900" data-testid="wiki-publication-next-step">
-                        {publication.next_step_label}
-                    </dd>
-                </div>
-            </dl>
+                Where the page stands is stated once, beside the page title; repeating it here said
+                the same word twice on one screen and invited the two to disagree. Claim progress
+                used to sit here too, which read as a contradiction next to "Ingen handling
+                gjenstår"; it belongs with the assignment it describes, one block below. */}
+            <h3 className="text-lg font-semibold text-slate-900">
+                {tw.publication_heading ?? 'Publisering'} – {tw.publication_next_label ?? 'Neste steg'}
+            </h3>
+
+            <p className="text-base leading-6 text-slate-700" data-testid="wiki-publication-next-step">
+                {publication.next_step_label}
+            </p>
 
             {blockers.length > 0 && (
                 <div data-testid="wiki-publication-blockers">
-                    <p className="text-sm text-slate-500">{tw.publication_blocking_heading ?? 'Gjenstår'}</p>
+                    <p className="text-base font-medium text-slate-700">{tw.publication_blocking_heading ?? 'Gjenstår'}</p>
                     <ul className="mt-1 space-y-1">
                         {blockers.map((reason) => (
                             <li key={reason} className="text-base text-amber-800">• {reason}</li>
@@ -206,9 +201,9 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
     return (
         <div className="space-y-2 border-b border-slate-100 pb-4" data-testid="wiki-qa-assignment">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                <h3 className="text-lg font-semibold text-slate-900">
                     {tw.qa_heading ?? 'Kvalitetssikring'}
-                </span>
+                </h3>
                 {/* Who is on it — but "Ikke tildelt" is only worth saying when there is something
                     to be tildelt. With no claims the next line already says why nobody is. */}
                 {(hasClaims || assignee) && (
@@ -243,7 +238,7 @@ function QaAssignmentBlock({ qaAssignment, tw, busy, triggerRef, onOpen }) {
                         disabled={busy}
                         onClick={onOpen}
                         data-testid="wiki-qa-assign"
-                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {assignee
                             ? (tw.qa_change_button ?? 'Endre kvalitetssikrer')
@@ -413,7 +408,7 @@ export default function WikiReviewPanel({
 
             {/* What readers get versus what is being worked on. The single most misread thing on
                 this page, so it comes first and is stated plainly. */}
-            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-base">
                 {reviewAssignment.published_version_id ? (
                     <span className="text-slate-600">
                         {tw.review_published_version ?? 'Publisert versjon'}{' '}
@@ -437,7 +432,7 @@ export default function WikiReviewPanel({
 
             {reviewAssignment.published_version_id && currentVersion
                 && reviewAssignment.published_version_id !== currentVersion.id && (
-                <p className="text-sm text-slate-500">
+                <p className="text-base leading-6 text-slate-600">
                     {tw.review_published_still_serves
                         ?? 'Den publiserte versjonen er fortsatt den brukerne og Spør Wiki får. Arbeidsversjonen påvirker ingenting før den er godkjent.'}
                 </p>
@@ -445,7 +440,7 @@ export default function WikiReviewPanel({
 
             {/* Responsibility, only where there is something to say. */}
             {(page.owner?.name || reviewAssignment.submitted_by || reviewAssignment.reviewer) && (
-                <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-base">
                     <OwnerLine label={tw.review_page_owner ?? 'Sideeier:'} name={page.owner?.name} />
                     <OwnerLine label={tw.review_submitted_by ?? 'Sendt inn av:'} name={reviewAssignment.submitted_by?.name} />
                     <OwnerLine label={tw.review_reviewer ?? 'Kontrollør:'} name={reviewAssignment.reviewer?.name} />
@@ -456,11 +451,11 @@ export default function WikiReviewPanel({
                 page is sitting still. */}
             {isReturned && changes.latest && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                    <p className="text-sm font-semibold text-amber-900">
+                    <p className="text-base font-semibold text-amber-900">
                         {tw.review_changes_requested ?? 'Endringer kreves'}
                     </p>
-                    <p className="mt-1 text-sm text-amber-900">{changes.latest.reason}</p>
-                    <p className="mt-2 text-xs text-amber-800">
+                    <p className="mt-1 text-base leading-6 text-amber-900">{changes.latest.reason}</p>
+                    <p className="mt-2 text-sm text-amber-800">
                         {changes.latest.actor?.name ?? (tw.review_unknown_actor ?? 'Ukjent')}
                         {' · '}
                         {changes.latest.actor_role === 'document_owner'
@@ -494,7 +489,7 @@ export default function WikiReviewPanel({
                                 {changes.history.slice(1).map((event) => (
                                     <li key={event.id} className="rounded-lg bg-white/70 px-3 py-2 text-sm text-amber-900">
                                         {event.reason}
-                                        <span className="mt-1 block text-xs text-amber-800">
+                                        <span className="mt-1 block text-sm text-amber-800">
                                             {event.actor?.name ?? (tw.review_unknown_actor ?? 'Ukjent')}
                                         </span>
                                     </li>
@@ -516,7 +511,7 @@ export default function WikiReviewPanel({
                         {tw.review_your_turn ?? 'Denne siden venter på din gjennomgang.'}
                     </p>
                     {reviewAssignment.reviewer?.name && (
-                        <p className="mt-1 text-sm text-violet-800">
+                        <p className="mt-1 text-base text-violet-800">
                             {tw.review_reviewer ?? 'Kontrollør:'} {reviewAssignment.reviewer.name}
                         </p>
                     )}
@@ -536,7 +531,7 @@ export default function WikiReviewPanel({
                             : (tw.review_in_review ?? 'Siden er til gjennomgang.')}
                     </p>
                     {reviewAssignment.can_approve_final && (
-                        <p className="mt-1 text-sm text-slate-600">
+                        <p className="mt-1 text-base leading-6 text-slate-600">
                             {tw.review_system_owner_may_finish
                                 ?? 'Som System Owner kan du ferdigstille siden uten å være tildelt kontrollør.'}
                         </p>
