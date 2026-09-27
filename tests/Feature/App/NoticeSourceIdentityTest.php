@@ -351,11 +351,11 @@ class NoticeSourceIdentityTest extends TestCase
             );
         }
 
-        // No new foreign key was pushed onto saved_notices, and no source awareness either.
+        // No new foreign key was pushed onto saved_notices, and no source awareness either. The
+        // watch inbox HAS since become source-aware (Phase 3A), so it is no longer asserted here;
+        // saved_notices is the one this phase promised to leave alone, and still is.
         $this->assertFalse(Schema::hasColumn('saved_notices', 'notice_source_id'));
         $this->assertFalse(Schema::hasColumn('saved_notices', 'source'));
-        $this->assertFalse(Schema::hasColumn('watch_profile_inbox_records', 'source'));
-        $this->assertFalse(Schema::hasColumn('watch_profile_inbox_records', 'external_id'));
 
         // And no domain rewrite happened underneath this phase.
         $this->assertFalse(Schema::hasTable('opportunities'));

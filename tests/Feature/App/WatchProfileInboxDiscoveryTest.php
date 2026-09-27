@@ -3,8 +3,8 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\DoffinImportSetting;
 use App\Models\Department;
+use App\Models\DoffinImportSetting;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
@@ -72,15 +72,15 @@ class WatchProfileInboxDiscoveryTest extends TestCase
                         'numHitsAccessible' => 1,
                         'numHitsTotal' => 1,
                         'hits' => [[
-                        'id' => '2026-200001',
-                        'heading' => 'Rammeavtale for konsulentbistand',
-                        'description' => 'Denne rammeavtalen gjelder konsulenttjenester.',
-                        'buyer' => [['name' => 'Procynia AS']],
-                        'publicationDate' => '2026-03-29T00:45:00',
-                        'deadline' => '2026-04-10',
-                        'cpvCodes' => ['72000000'],
-                        'status' => 'ACTIVE',
-                    ]],
+                            'id' => '2026-200001',
+                            'heading' => 'Rammeavtale for konsulentbistand',
+                            'description' => 'Denne rammeavtalen gjelder konsulenttjenester.',
+                            'buyer' => [['name' => 'Procynia AS']],
+                            'publicationDate' => '2026-03-29T00:45:00',
+                            'deadline' => '2026-04-10',
+                            'cpvCodes' => ['72000000'],
+                            'status' => 'ACTIVE',
+                        ]],
                     ];
                 }
 
@@ -117,11 +117,16 @@ class WatchProfileInboxDiscoveryTest extends TestCase
         $this->assertSame('renhold', $searchCalls[1]['filters']['keywords']);
         $this->assertSame('any', $searchCalls[1]['filters']['keywords_mode']);
 
+        // The identity discovery writes is the source and what that source calls the notice.
+        // doffin_notice_id is dual-written beside it, for whatever still reads the old column.
         $this->assertDatabaseHas('watch_profile_inbox_records', [
             'watch_profile_id' => $personalProfile->id,
             'user_id' => $user->id,
             'department_id' => null,
+            'source' => 'doffin',
+            'external_id' => '2026-200001',
             'doffin_notice_id' => '2026-200001',
+            'external_url' => 'https://doffin.no/notices/2026-200001',
             'relevance_score' => 55,
         ]);
         $this->assertDatabaseHas('watch_profile_inbox_records', [
@@ -400,7 +405,11 @@ class WatchProfileInboxDiscoveryTest extends TestCase
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
-            $table->string('doffin_notice_id');
+            // The identity, as of 2026_09_27_000002. doffin_notice_id stays as legacy
+            // compatibility and is nullable, because a non-Doffin record has none.
+            $table->string('source', 50);
+            $table->string('external_id');
+            $table->string('doffin_notice_id')->nullable();
             $table->string('title');
             $table->string('buyer_name')->nullable();
             $table->timestamp('publication_date')->nullable();

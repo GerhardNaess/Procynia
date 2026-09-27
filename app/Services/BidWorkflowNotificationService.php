@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
+use App\Services\Doffin\DoffinSourceAdapter;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -226,22 +227,45 @@ class BidWorkflowNotificationService
             $recipientId,
             null,
             self::EVENT_WATCH_PROFILE_MATCH,
-            sprintf(
-                '%s:%d:%s:%d',
-                self::EVENT_WATCH_PROFILE_MATCH,
-                $watchProfile->id,
-                (string) $record->doffin_notice_id,
-                $recipientId,
-            ),
+            $this->watchMatchDedupeKey($watchProfile, $record, $recipientId),
             'Ny relevant kunngjøring',
             sprintf('Et nytt treff ble funnet for «%s»: %s.', $watchProfile->name, $record->title),
             UserNotification::SEVERITY_INFO,
             route('app.notices.index', ['mode' => 'live', 'tab' => 'alerts'], false),
             [
                 'watch_profile_id' => (int) $watchProfile->id,
-                'doffin_notice_id' => (string) $record->doffin_notice_id,
+                // The identity. Added beside the legacy key rather than replacing it, so that
+                // anything already reading metadata keeps reading what it expects.
+                'source' => (string) $record->source,
+                'external_id' => (string) $record->external_id,
+                'doffin_notice_id' => $record->doffin_notice_id !== null ? (string) $record->doffin_notice_id : null,
                 'watch_profile_inbox_record_id' => (int) $record->id,
             ],
+        );
+    }
+
+    /**
+     * What makes two watch-match alerts the same alert.
+     *
+     * It was profile + Doffin id + recipient, which cannot tell a Doffin notice from a future TED
+     * notice that happens to share a number. The source belongs in the key — but adding it to
+     * every key would change the string for alerts that already exist, and a dedupe key that
+     * changes meaning re-announces matches people were told about weeks ago.
+     *
+     * So Doffin keeps exactly the key it always had, and any other source carries its own name.
+     * The two can never collide, and nothing already written is invalidated.
+     */
+    private function watchMatchDedupeKey(WatchProfile $watchProfile, WatchProfileInboxRecord $record, int $recipientId): string
+    {
+        $source = (string) $record->source;
+        $externalId = (string) $record->external_id;
+
+        return sprintf(
+            '%s:%d:%s:%d',
+            self::EVENT_WATCH_PROFILE_MATCH,
+            $watchProfile->id,
+            $source === DoffinSourceAdapter::SOURCE_KEY ? $externalId : $source.'/'.$externalId,
+            $recipientId,
         );
     }
 

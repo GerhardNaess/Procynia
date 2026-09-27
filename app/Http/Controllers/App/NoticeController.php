@@ -1414,7 +1414,7 @@ class NoticeController extends Controller
             return $this->emptyWatchAlertsPayload();
         }
 
-        $alertExternalIds = $records->pluck('doffin_notice_id')->filter()->map(fn (mixed $value): string => (string) $value)->all();
+        $alertExternalIds = $records->pluck('external_id')->filter()->map(fn (mixed $value): string => (string) $value)->all();
         $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user, $customerId)
             ->whereIn('external_id', $alertExternalIds)
             ->pluck('external_id')
@@ -1455,10 +1455,21 @@ class NoticeController extends Controller
             $status = '';
         }
 
+        // Identity comes from the source, not from a Doffin id. For a Doffin record the two are
+        // the same string, so the payload the frontend already reads is unchanged.
+        $externalId = (string) $record->external_id;
+        // Compared against the adapter this controller is wired with, not against a Doffin
+        // constant: Phase 1 put the interface here precisely so the controller need not know.
+        $isCurrentSource = (string) $record->source === $this->sourceAdapter->sourceKey();
+
         return [
             'id' => $record->id,
-            'notice_id' => $record->doffin_notice_id,
-            'title' => trim((string) $record->title) !== '' ? trim((string) $record->title) : $record->doffin_notice_id,
+            'notice_id' => $externalId,
+            // Additive: what the frontend reads is above, but a consumer that wants to know where
+            // a hit came from no longer has to infer it from a column name.
+            'source' => (string) $record->source,
+            'external_id' => $externalId,
+            'title' => trim((string) $record->title) !== '' ? trim((string) $record->title) : $externalId,
             'buyer_name' => $record->buyer_name,
             'summary' => $summary !== '' ? Str::squish($summary) : null,
             'publication_date' => optional($record->publication_date)?->toIso8601String(),
@@ -1470,9 +1481,13 @@ class NoticeController extends Controller
             'saved_search_name' => null,
             'cpv_code' => $cpvCode !== '' ? $cpvCode : null,
             'is_new' => false,
-            'external_url' => $record->external_url ?: $this->sourceAdapter->sourceUrl($record->doffin_notice_id),
-            'is_saved' => in_array($record->doffin_notice_id, $savedExternalIds, true),
-            'is_in_history' => in_array($record->doffin_notice_id, $archivedExternalIds, true),
+            // The stored URL is what the source actually gave us. The adapter is only a fallback,
+            // and only for the source it speaks for.
+            'external_url' => $record->external_url ?: ($isCurrentSource ? $this->sourceAdapter->sourceUrl($externalId) : null),
+            // SavedNotice is still identified by a bare external id, so these compare like for like
+            // only while Doffin is the only source. Making that comparison source-aware is Phase 3B.
+            'is_saved' => in_array($externalId, $savedExternalIds, true),
+            'is_in_history' => in_array($externalId, $archivedExternalIds, true),
             'watch_profile_name' => $record->watchProfile?->name,
             'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
             'delete_url' => route('app.notices.watch-alerts.destroy', ['watchProfileInboxRecord' => $record->id]),

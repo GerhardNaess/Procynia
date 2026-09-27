@@ -69,7 +69,8 @@ class DoffinWatchInboxDigestService
                 Log::warning('[Procynia][WatchAlerts] Skipping record without valid recipient.', [
                     'record_id' => $record->id,
                     'watch_profile_id' => $record->watch_profile_id,
-                    'doffin_notice_id' => $record->doffin_notice_id,
+                    'source' => $record->source,
+                    'external_id' => $record->external_id,
                     'owner_scope' => $record->watchProfile?->ownerScope(),
                     'user_id' => $record->user_id,
                     'department_id' => $record->department_id,
@@ -228,6 +229,9 @@ class DoffinWatchInboxDigestService
                         ->values()
                         ->map(fn (WatchProfileInboxRecord $record): array => [
                             'record_id' => $record->id,
+                            'source' => $record->source,
+                            'external_id' => $record->external_id,
+                            // Kept for whatever still reads it; the two above are the identity.
                             'doffin_notice_id' => $record->doffin_notice_id,
                             'title' => $record->title,
                             'buyer_name' => $record->buyer_name,

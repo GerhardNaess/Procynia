@@ -518,11 +518,15 @@ class BidWorkflowNotificationTest extends TestCase
             'is_active' => true,
         ]);
 
+        $externalId = 'DOFFIN-'.Str::upper(Str::random(6));
+
         $record = WatchProfileInboxRecord::query()->create([
             'watch_profile_id' => $profile->id,
             'customer_id' => $customer->id,
             'user_id' => $owner?->id,
-            'doffin_notice_id' => 'DOFFIN-'.Str::upper(Str::random(6)),
+            'source' => 'doffin',
+            'external_id' => $externalId,
+            'doffin_notice_id' => $externalId,
             'title' => 'Rammeavtale for sikkerhetstjenester',
             'discovered_at' => now(),
             'last_seen_at' => now(),

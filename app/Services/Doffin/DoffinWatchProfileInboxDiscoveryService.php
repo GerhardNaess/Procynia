@@ -175,13 +175,19 @@ class DoffinWatchProfileInboxDiscoveryService
         }
 
         $now = now();
+        // The identity a record is found by is the source and what that source calls it — not a
+        // Doffin id. The adapter is the authority for the key, so there is one spelling of it.
         $record = WatchProfileInboxRecord::query()->firstOrNew([
             'watch_profile_id' => $watchProfile->id,
-            'doffin_notice_id' => $noticeId,
+            'source' => $this->sourceAdapter->sourceKey(),
+            'external_id' => $noticeId,
         ]);
         $isNew = ! $record->exists;
 
         $record->fill([
+            // Legacy compatibility, written only because this source is Doffin. A record from any
+            // other source leaves the column null rather than borrowing Doffin's vocabulary.
+            'doffin_notice_id' => $noticeId,
             'customer_id' => $watchProfile->customer_id,
             'user_id' => $watchProfile->user_id,
             'department_id' => $watchProfile->department_id,

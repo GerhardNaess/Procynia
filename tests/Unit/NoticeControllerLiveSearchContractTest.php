@@ -144,7 +144,10 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
-            $table->string('doffin_notice_id');
+            // The identity, as of 2026_09_27_000002; the Doffin column is legacy and nullable.
+            $table->string('source', 50);
+            $table->string('external_id');
+            $table->string('doffin_notice_id')->nullable();
             $table->string('title');
             $table->string('buyer_name')->nullable();
             $table->timestamp('publication_date')->nullable();
@@ -309,6 +312,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => 23,
                 'department_id' => null,
+                'source' => 'doffin',
+                'external_id' => '2026-100001',
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
                 'buyer_name' => 'Oppdragsgiver 1',
@@ -334,6 +339,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => null,
                 'department_id' => 8,
+                'source' => 'doffin',
+                'external_id' => '2026-100002',
                 'doffin_notice_id' => '2026-100002',
                 'title' => 'Test 2',
                 'buyer_name' => 'Oppdragsgiver 2',
@@ -642,6 +649,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => 23,
                 'department_id' => null,
+                'source' => 'doffin',
+                'external_id' => '2026-100001',
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
                 'buyer_name' => 'Oppdragsgiver 1',
@@ -718,6 +727,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => 23,
                 'department_id' => null,
+                'source' => 'doffin',
+                'external_id' => '2026-100001',
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
                 'discovered_at' => now()->subHours(6),
