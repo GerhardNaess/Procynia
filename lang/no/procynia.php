@@ -310,6 +310,8 @@ return [
         'alerts_nav' => 'Varsler',
         'worklist_nav' => 'Saksliste',
         'infosenter_nav' => 'Oppfølging',
+        'follow_up_hint' => 'Oppgaver, beslutninger og avklaringer som krever oppfølging',
+        'notifications_hint' => 'Nye varsler du ikke har lest',
         'go_no_go_templates_nav' => 'Vurderingsmaler',
         'customer_area' => 'Kundeområde',
         'customer_footer' => 'Procynia · Kundeområde',

@@ -1,6 +1,7 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import ActionDialog from '../Components/App/ActionDialog';
+import ControlHint from '../Components/App/ControlHint';
 import NotificationBell from '../Components/App/NotificationBell';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 
@@ -225,6 +226,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         key: 'info-center',
         label: translations.frontend.infosenter_nav,
         href: '/app/info-center',
+        hint: translations.frontend.follow_up_hint
+            ?? 'Oppgaver, beslutninger og avklaringer som krever oppfølging',
     };
 
     const secondaryNavigation = (() => {
@@ -606,22 +609,30 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     className="hidden h-6 w-px shrink-0 bg-slate-200 lg:block"
                                 />
 
-                                <Link
-                                    href={followUpNavigation.href}
-                                    aria-current={activeMainArea === followUpNavigation.key ? 'page' : undefined}
-                                    data-testid="header-follow-up"
-                                    className={classNames(
-                                        'shrink-0 rounded-xl px-3 py-2 text-base font-medium transition',
-                                        activeMainArea === followUpNavigation.key
-                                            ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                    )}
-                                >
-                                    {followUpNavigation.label}
-                                </Link>
+                                {/* The counterpart to the bell's explanation. These two are the
+                                    only things in the bar that could both be read as "something
+                                    needs me", so each says which it is: the bell holds what has
+                                    happened, this holds what is still to do. */}
+                                <ControlHint text={followUpNavigation.hint}>
+                                    <Link
+                                        href={followUpNavigation.href}
+                                        aria-current={activeMainArea === followUpNavigation.key ? 'page' : undefined}
+                                        data-testid="header-follow-up"
+                                        className={classNames(
+                                            'shrink-0 rounded-xl px-3 py-2 text-base font-medium transition',
+                                            activeMainArea === followUpNavigation.key
+                                                ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                                        )}
+                                    >
+                                        {followUpNavigation.label}
+                                    </Link>
+                                </ControlHint>
 
                                 <NotificationBell
                                     menuRef={notificationsMenuRef}
+                                    hint={translations.frontend.notifications_hint
+                                        ?? 'Nye varsler du ikke har lest'}
                                     isOpen={isNotificationsOpen}
                                     locale={locale}
                                     notifications={notificationState}

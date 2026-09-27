@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import ControlHint from './ControlHint';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -107,6 +108,12 @@ function useAvailableHeight(ref, isOpen) {
 
 export default function NotificationBell({
     menuRef,
+    /**
+     * Read on hover and on keyboard focus. Says what the number means, because a badge on its own
+     * cannot: unread messages, not outstanding work. Passed in rather than held here so it is
+     * translated with the rest of the header.
+     */
+    hint,
     isOpen,
     locale,
     notifications,
@@ -125,6 +132,10 @@ export default function NotificationBell({
 
     return (
         <div ref={menuRef} className="relative">
+            {/* What the badge counts, said out loud. The bell and "Oppfølging" sit next to each
+                other and both look like somewhere work might be waiting; this one holds messages
+                about things that already happened, and the number is how many are unread. */}
+            <ControlHint text={hint} suppressed={isOpen}>
             <button
                 type="button"
                 onClick={onToggle}
@@ -162,6 +173,7 @@ export default function NotificationBell({
                     </span>
                 ) : null}
             </button>
+            </ControlHint>
 
             {isOpen ? (
                 <div

@@ -1,14 +1,8 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { HintTooltipPanel, useHintTooltip } from './hintTooltip';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
-
-const ALIGN_BASE_TRANSFORM = {
-    left: '',
-    right: '',
-    center: 'translateX(-50%)',
-};
 
 /**
  * Small circular "i" button that reveals a tooltip explaining a field, section,
@@ -44,84 +38,11 @@ export default function InfoHint({
     variant = 'light',
     align = 'right',
 }) {
-    const [isOpen, setIsOpen] = useState(false);
-    const rawId = useId();
-    // useId returns strings like ":r0:" — strip colons for a valid HTML id
-    const tooltipId = `infohint-${rawId.replace(/:/g, '')}`;
-    const containerRef = useRef(null);
-    const buttonRef = useRef(null);
-    const tooltipRef = useRef(null);
+    // The panel, its clamping, Escape and the id all come from the shared tooltip — the same one
+    // ControlHint uses — so an explanation looks and behaves the same wherever it is attached.
+    const { isOpen, open, close, toggle, tooltipId, containerRef, tooltipRef, triggerRef } = useHintTooltip(align);
 
     const content = text ?? children;
-
-    // Close tooltip when Escape is pressed anywhere on the page
-    useEffect(() => {
-        if (!isOpen) return undefined;
-
-        function onKeyDown(event) {
-            if (event.key === 'Escape') {
-                setIsOpen(false);
-                buttonRef.current?.focus();
-            }
-        }
-
-        document.addEventListener('keydown', onKeyDown);
-        return () => document.removeEventListener('keydown', onKeyDown);
-    }, [isOpen]);
-
-    // Close on a click anywhere outside the hint (covers input that doesn't blur the
-    // trigger, e.g. a click landing on a non-focusable ancestor).
-    useEffect(() => {
-        if (!isOpen) return undefined;
-
-        function onDocumentMouseDown(event) {
-            if (!containerRef.current?.contains(event.target)) {
-                setIsOpen(false);
-            }
-        }
-
-        document.addEventListener('mousedown', onDocumentMouseDown);
-        return () => document.removeEventListener('mousedown', onDocumentMouseDown);
-    }, [isOpen]);
-
-    // Keep the panel inside the viewport horizontally, regardless of the requested
-    // `align` — a page can render this hint anywhere (near the left edge, right edge,
-    // inside a narrow card), so a single static alignment class would clip.
-    const recalculatePosition = useCallback(() => {
-        const el = tooltipRef.current;
-        if (!el) return;
-
-        const baseTransform = ALIGN_BASE_TRANSFORM[align] ?? '';
-        el.style.transform = baseTransform;
-
-        const rect = el.getBoundingClientRect();
-        const margin = 8;
-        const viewportWidth = window.innerWidth;
-        let shift = 0;
-
-        if (rect.left < margin) {
-            shift = margin - rect.left;
-        } else if (rect.right > viewportWidth - margin) {
-            shift = (viewportWidth - margin) - rect.right;
-        }
-
-        if (shift !== 0) {
-            el.style.transform = `${baseTransform} translateX(${shift}px)`.trim();
-        }
-    }, [align]);
-
-    useLayoutEffect(() => {
-        if (!isOpen) return undefined;
-
-        recalculatePosition();
-        window.addEventListener('resize', recalculatePosition);
-        window.addEventListener('scroll', recalculatePosition, true);
-
-        return () => {
-            window.removeEventListener('resize', recalculatePosition);
-            window.removeEventListener('scroll', recalculatePosition, true);
-        };
-    }, [isOpen, recalculatePosition]);
 
     if (!content) {
         return null;
@@ -131,27 +52,15 @@ export default function InfoHint({
         ? 'h-5 w-5 text-[10px]'
         : 'h-7 w-7 text-[11px]';
 
-    const tooltipWidthClass = size === 'sm' ? 'w-64' : 'w-72';
-
-    const tooltipColorClass = variant === 'dark'
-        ? 'border-slate-800 bg-slate-950 text-white'
-        : 'border-slate-200 bg-white text-slate-700';
-
-    const tooltipAlignClass = align === 'left'
-        ? 'left-0'
-        : align === 'center'
-            ? 'left-1/2'
-            : 'right-0';
-
     return (
         <span
             ref={containerRef}
             className="relative inline-flex shrink-0"
-            onMouseEnter={() => setIsOpen(true)}
-            onMouseLeave={() => setIsOpen(false)}
+            onMouseEnter={open}
+            onMouseLeave={close}
         >
             <button
-                ref={buttonRef}
+                ref={triggerRef}
                 type="button"
                 aria-label={label}
                 aria-expanded={isOpen}
@@ -159,10 +68,10 @@ export default function InfoHint({
                 onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    setIsOpen((current) => !current);
+                    toggle();
                 }}
-                onFocus={() => setIsOpen(true)}
-                onBlur={() => setIsOpen(false)}
+                onFocus={open}
+                onBlur={close}
                 className={classNames(
                     'inline-flex items-center justify-center rounded-full border border-slate-300 bg-white font-semibold leading-none text-slate-500 transition',
                     'hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
@@ -174,20 +83,17 @@ export default function InfoHint({
             </button>
 
             {isOpen && (
-                <div
-                    ref={tooltipRef}
+                <HintTooltipPanel
                     id={tooltipId}
-                    role="tooltip"
-                    className={classNames(
-                        'absolute top-full z-30 mt-2 max-w-[calc(100vw-2rem)] rounded-2xl border p-4 font-sans text-base font-normal leading-7 tracking-normal normal-case shadow-[0_20px_40px_rgba(15,23,42,0.12)]',
-                        tooltipWidthClass,
-                        tooltipColorClass,
-                        tooltipAlignClass,
-                    )}
+                    panelRef={tooltipRef}
+                    size={size}
+                    variant={variant}
+                    align={align}
                 >
                     {content}
-                </div>
+                </HintTooltipPanel>
             )}
+
         </span>
     );
 }

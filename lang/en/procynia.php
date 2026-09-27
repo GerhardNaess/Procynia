@@ -311,6 +311,8 @@ return [
         'alerts_nav' => 'Alerts',
         'worklist_nav' => 'Case list',
         'infosenter_nav' => 'Follow-up',
+        'follow_up_hint' => 'Tasks, decisions and clarifications that need following up',
+        'notifications_hint' => 'New alerts you have not read',
         'go_no_go_templates_nav' => 'Assessment templates',
         'customer_area' => 'Customer area',
         'customer_footer' => 'Procynia · Customer area',

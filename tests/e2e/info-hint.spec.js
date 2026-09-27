@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);
 });
 
-test('InfoHint near the left viewport edge does not clip (Infosenter, light variant, align=right)', async ({ page }) => {
+test('InfoHint near the left viewport edge does not clip (Oppfølging, light variant, align=right)', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/app/info-center?view=awaiting_response');
 
@@ -20,7 +20,7 @@ test('InfoHint near the left viewport edge does not clip (Infosenter, light vari
     expect(box.x + box.width).toBeLessThanOrEqual(390);
 });
 
-test('InfoHint near the right viewport edge does not clip (Infosenter, light variant, align=right)', async ({ page }) => {
+test('InfoHint near the right viewport edge does not clip (Oppfølging, light variant, align=right)', async ({ page }) => {
     await page.goto('/app/info-center?view=inbound');
 
     const helpButton = page.getByRole('button', { name: 'Vis forklaring for Innkommende' });
@@ -62,7 +62,7 @@ test('clicking outside closes an open InfoHint', async ({ page }) => {
     await expect(page.getByRole('tooltip')).toBeVisible();
 
     // Click on an unrelated part of the page, far from the hint.
-    await page.locator('h1', { hasText: 'Infosenter' }).click();
+    await page.locator('h1', { hasText: 'Oppfølging' }).click();
     await expect(page.getByRole('tooltip')).toHaveCount(0);
 });
 
