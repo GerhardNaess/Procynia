@@ -245,16 +245,20 @@ class NoticeController extends Controller
         $accessibleTotal = $searchResponse->numHitsAccessible;
         $total = $searchResponse->numHitsTotal;
         $hitExternalIds = $notices->pluck('externalId')->filter()->map(fn (mixed $id): string => (string) $id)->all();
-        $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user)
-            ->whereIn('external_id', $hitExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $id): string => (string) $id)
-            ->all();
-        $archivedExternalIds = $this->archivedSavedNoticeVisibleQuery($user)
-            ->whereIn('external_id', $hitExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $id): string => (string) $id)
-            ->all();
+        // Matched within the source these hits came from. An external id on its own cannot tell
+        // Doffin's notice 123 from another register's notice 123, and answering "already saved"
+        // on the strength of a shared number would be wrong in exactly the case that matters.
+        $sourceKey = $this->sourceAdapter->sourceKey();
+        $savedExternalIds = $this->savedExternalIdsForSource(
+            $this->activeSavedNoticeVisibleQuery($user),
+            $sourceKey,
+            $hitExternalIds,
+        );
+        $archivedExternalIds = $this->savedExternalIdsForSource(
+            $this->archivedSavedNoticeVisibleQuery($user),
+            $sourceKey,
+            $hitExternalIds,
+        );
 
         $items = $notices
             ->map(fn ($notice): array => $notice->toDiscoveryPayload($savedExternalIds, $archivedExternalIds))
@@ -392,10 +396,39 @@ class NoticeController extends Controller
                 'notes' => ['nullable', 'string'],
             ]);
 
-            $record = SavedNotice::query()->firstOrNew([
-                'customer_id' => $customerId,
-                'external_id' => $validated['notice_id'],
-            ]);
+            // The identity of a public case is the register plus what that register calls the
+            // notice. The source comes from the adapter, so there is one spelling of it, and the
+            // controller never has to know which register it is talking to.
+            //
+            // A public case whose source is still null is a row from before the register was
+            // recorded. It is matched too — otherwise saving the same notice again would create a
+            // second case beside it and step straight past the archived-case guard below — and
+            // named on the way past, so it only ever happens once per row.
+            $sourceKey = $this->sourceAdapter->sourceKey();
+            $record = SavedNotice::query()
+                ->where('customer_id', $customerId)
+                ->where('external_id', $validated['notice_id'])
+                ->where(fn (Builder $query) => $query
+                    ->where('source', $sourceKey)
+                    ->orWhere(fn (Builder $legacy) => $legacy
+                        ->whereNull('source')
+                        ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+                ->first()
+                ?? new SavedNotice([
+                    'customer_id' => $customerId,
+                    'external_id' => $validated['notice_id'],
+                ]);
+
+            $record->source = $sourceKey;
+
+            // Link the imported notice when Procynia actually has one. Most public cases are saved
+            // straight from a live search or a watch alert and never pass through the import
+            // pipeline, so a null here is an ordinary answer — and no Notice is created to avoid it.
+            if ($record->notice_id === null) {
+                $record->notice_id = Notice::query()
+                    ->where('notice_id', (string) $validated['notice_id'])
+                    ->value('id');
+            }
         }
 
         // Moving a case to history is final: an archived case is never brought back by saving the
@@ -1369,6 +1402,78 @@ class NoticeController extends Controller
             ->whereIn('history_type', SavedNotice::HISTORY_TYPES);
     }
 
+    /**
+     * The external ids, within one source, that the given query already holds.
+     *
+     * Returned as a flat list because every hit in a live search comes from the same source, so
+     * the source is a filter rather than part of the answer.
+     *
+     * @param  array<int, string>  $externalIds
+     * @return array<int, string>
+     */
+    private function savedExternalIdsForSource(Builder $query, string $source, array $externalIds): array
+    {
+        if ($externalIds === []) {
+            return [];
+        }
+
+        return $query
+            // A legacy public case that predates the source column belongs to the register that
+            // was the only one when it was written.
+            ->where(fn (Builder $scope) => $scope
+                ->where('source', $source)
+                ->orWhere(fn (Builder $legacy) => $legacy
+                    ->whereNull('source')
+                    ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+            ->whereIn('external_id', $externalIds)
+            ->pluck('external_id')
+            ->map(fn (mixed $value): string => (string) $value)
+            ->all();
+    }
+
+    /**
+     * The same question across several sources at once, for a list that may mix them.
+     *
+     * Keyed "source\nexternal_id" rather than returned as a flat list: a watch list can hold the
+     * same number from two registers, and a flat list would say both were saved as soon as one of
+     * them was.
+     *
+     * @param  array<int, string>  $sources
+     * @param  array<int, string>  $externalIds
+     * @return array<int, string>
+     */
+    private function savedIdentitiesForSources(Builder $query, array $sources, array $externalIds): array
+    {
+        if ($sources === [] || $externalIds === []) {
+            return [];
+        }
+
+        // A legacy public case that predates the source column came from the only register there
+        // was, which is the one the adapter speaks for. Read under that name so it keeps matching;
+        // a row from any other register always names itself and is never folded in here.
+        $legacySource = $this->sourceAdapter->sourceKey();
+
+        return $query
+            ->where(fn (Builder $scope) => $scope
+                ->whereIn('source', $sources)
+                ->orWhere(fn (Builder $legacy) => $legacy
+                    ->whereNull('source')
+                    ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+            ->whereIn('external_id', $externalIds)
+            ->get(['source', 'external_id'])
+            ->map(fn ($row): string => self::sourceIdentityKey(
+                $row->source !== null ? (string) $row->source : $legacySource,
+                (string) $row->external_id,
+            ))
+            ->all();
+    }
+
+    /** One string for one external identity, so two registers can never be mistaken for each other. */
+    private static function sourceIdentityKey(string $source, string $externalId): string
+    {
+        return $source."\n".$externalId;
+    }
+
     private function customerSavedNoticeManageableQuery(User $user): Builder
     {
         return $this->savedNoticeAccess->manageableQueryFor($user);
@@ -1415,16 +1520,19 @@ class NoticeController extends Controller
         }
 
         $alertExternalIds = $records->pluck('external_id')->filter()->map(fn (mixed $value): string => (string) $value)->all();
-        $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user, $customerId)
-            ->whereIn('external_id', $alertExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $value): string => (string) $value)
-            ->all();
-        $archivedExternalIds = $this->archivedSavedNoticeVisibleQuery($user, $customerId)
-            ->whereIn('external_id', $alertExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $value): string => (string) $value)
-            ->all();
+        // Keyed by source, because two registers may name a notice the same thing. Each record is
+        // then asked about its own source rather than about a flat list of ids.
+        $alertSources = $records->pluck('source')->filter()->map(fn (mixed $value): string => (string) $value)->unique()->all();
+        $savedExternalIds = $this->savedIdentitiesForSources(
+            $this->activeSavedNoticeVisibleQuery($user, $customerId),
+            $alertSources,
+            $alertExternalIds,
+        );
+        $archivedExternalIds = $this->savedIdentitiesForSources(
+            $this->archivedSavedNoticeVisibleQuery($user, $customerId),
+            $alertSources,
+            $alertExternalIds,
+        );
 
         return [
             'data' => $records
@@ -1486,8 +1594,10 @@ class NoticeController extends Controller
             'external_url' => $record->external_url ?: ($isCurrentSource ? $this->sourceAdapter->sourceUrl($externalId) : null),
             // SavedNotice is still identified by a bare external id, so these compare like for like
             // only while Doffin is the only source. Making that comparison source-aware is Phase 3B.
-            'is_saved' => in_array($externalId, $savedExternalIds, true),
-            'is_in_history' => in_array($externalId, $archivedExternalIds, true),
+            // Asked as an identity, not as a number: a record from another register that happens
+            // to share this id is a different opportunity and must not read as already saved.
+            'is_saved' => in_array(self::sourceIdentityKey((string) $record->source, $externalId), $savedExternalIds, true),
+            'is_in_history' => in_array(self::sourceIdentityKey((string) $record->source, $externalId), $archivedExternalIds, true),
             'watch_profile_name' => $record->watchProfile?->name,
             'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
             'delete_url' => route('app.notices.watch-alerts.destroy', ['watchProfileInboxRecord' => $record->id]),
@@ -1550,6 +1660,11 @@ class NoticeController extends Controller
             'id' => $notice->id,
             'saved_notice_id' => $notice->id,
             'notice_id' => $notice->external_id,
+            // Additive: the payload key above is the external id the frontend already reads, and
+            // keeps its name. These two say which register it belongs to and whether Procynia
+            // holds the imported notice behind it.
+            'source' => $notice->source,
+            'source_notice_id' => $notice->notice_id,
             'source_type' => $notice->source_type,
             'source_type_label' => $notice->source_type_label,
             'title' => $notice->title,
@@ -1631,6 +1746,11 @@ class NoticeController extends Controller
         return [
             'id' => $notice->id,
             'notice_id' => $notice->external_id,
+            // Additive: the payload key above is the external id the frontend already reads, and
+            // keeps its name. These two say which register it belongs to and whether Procynia
+            // holds the imported notice behind it.
+            'source' => $notice->source,
+            'source_notice_id' => $notice->notice_id,
             'source_type' => $notice->source_type,
             'source_type_label' => $notice->source_type_label,
             'title' => $notice->title,
@@ -1903,10 +2023,19 @@ class NoticeController extends Controller
      */
     private function savedNoticeDocumentsPayload(SavedNotice $notice): array
     {
-        $sourceNotice = Notice::query()
-            ->where('notice_id', (string) $notice->external_id)
-            ->with('documents')
-            ->first();
+        // The link, when the case has one. Falling back to matching the external id by hand is
+        // what this has always done, and it stays — but only for a case from the register whose
+        // ids `notices.notice_id` actually holds. Another register's id must not reach in here and
+        // collect a Doffin notice's documents because the two happen to share a number.
+        $isCurrentOrLegacySource = $notice->source === null
+            ? $notice->isPublicNotice()
+            : (string) $notice->source === $this->sourceAdapter->sourceKey();
+
+        $sourceNotice = $notice->notice_id !== null
+            ? Notice::query()->whereKey($notice->notice_id)->with('documents')->first()
+            : ($isCurrentOrLegacySource
+                ? Notice::query()->where('notice_id', (string) $notice->external_id)->with('documents')->first()
+                : null);
 
         if ($sourceNotice === null) {
             return [
@@ -2230,7 +2359,15 @@ class NoticeController extends Controller
             return $notice->external_url;
         }
 
-        return $notice->external_url ?: $this->sourceAdapter->sourceUrl($notice->external_id);
+        // The stored URL first, because it is what the register actually gave us. The adapter is
+        // only a fallback, and only for the register it speaks for — a case from somewhere else
+        // must not be handed a Doffin link built from its own id. A null source is a case from
+        // before the column existed, when that register was the only one.
+        $belongsToCurrentSource = $notice->source === null
+            || (string) $notice->source === $this->sourceAdapter->sourceKey();
+
+        return $notice->external_url
+            ?: ($belongsToCurrentSource ? $this->sourceAdapter->sourceUrl($notice->external_id) : null);
     }
 
     private function emptySearchResult(): array

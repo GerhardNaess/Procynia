@@ -265,7 +265,14 @@ class SavedNotice extends Model
         'bid_closed_at',
         'bid_closure_reason',
         'bid_closure_note',
+        // The identity of a public case: which external register, and what it calls the notice.
+        // `source` is null for a private request, which comes from no register at all.
+        'source',
         'external_id',
+        // The canonical Notice, where one exists. Many public cases are saved straight from a
+        // live search or a watch alert and never pass through the import pipeline, so this is a
+        // link, not a requirement.
+        'notice_id',
         'title',
         'buyer_name',
         'external_url',
@@ -319,6 +326,17 @@ class SavedNotice extends Model
         'follow_up_offset_months' => 'integer',
         'next_process_date_at' => 'datetime',
     ];
+
+    /**
+     * The imported public notice this case was built from, when Procynia has one.
+     *
+     * Null is an ordinary answer, not a gap: a case saved from live search or a watch alert exists
+     * before — and often without — any row in `notices`.
+     */
+    public function notice(): BelongsTo
+    {
+        return $this->belongsTo(Notice::class);
+    }
 
     public function savedBy(): BelongsTo
     {

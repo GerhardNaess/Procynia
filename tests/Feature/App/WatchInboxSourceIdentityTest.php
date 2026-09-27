@@ -327,12 +327,16 @@ class WatchInboxSourceIdentityTest extends TestCase
         $this->assertTrue($keys->contains(sprintf('watch_profile.match_found:%d:ted/2026-300011:%d', $profile->id, $profile->user_id)));
     }
 
-    /** Phase 3A touches the watch inbox and nothing else. */
+    /**
+     * Phase 3A touched the watch inbox and nothing else.
+     *
+     * SavedNotice has since become source-aware in its own phase, so its columns are no longer
+     * asserted absent here — what still holds, and is what 3A actually promised, is that the
+     * legacy external_id survived and notice_sources was left alone.
+     */
     public function test_saved_notice_and_notice_sources_are_untouched(): void
     {
         $this->assertTrue(Schema::hasColumn('saved_notices', 'external_id'));
-        $this->assertFalse(Schema::hasColumn('saved_notices', 'source'));
-        $this->assertFalse(Schema::hasColumn('saved_notices', 'notice_id'));
 
         foreach (['notice_id', 'source', 'external_id', 'source_url', 'first_seen_at', 'last_seen_at', 'published_at'] as $column) {
             $this->assertTrue(Schema::hasColumn('notice_sources', $column), "notice_sources.{$column}");

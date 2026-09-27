@@ -51,6 +51,12 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
             $table->unsignedBigInteger('bid_manager_user_id')->nullable();
             $table->unsignedBigInteger('organizational_department_id')->nullable();
+            // Public notice or private request — NOT NULL in production, and what tells a case
+            // that predates the source column apart from a private request.
+            $table->string('source_type')->default('public_notice');
+            // The identity, as of 2026_09_27_000003; external_id stays as legacy compatibility.
+            $table->string('source', 50)->nullable();
+            $table->unsignedBigInteger('notice_id')->nullable();
             $table->string('external_id');
             $table->string('title');
             $table->string('buyer_name')->nullable();
@@ -292,6 +298,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'opportunity_owner_user_id' => null,
                 'bid_manager_user_id' => null,
                 'organizational_department_id' => null,
+                'source_type' => 'public_notice',
+                'source' => 'doffin',
                 'external_id' => '2026-100002',
                 'title' => 'Test 2',
                 'buyer_name' => 'Oppdragsgiver 2',
