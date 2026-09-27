@@ -21,8 +21,10 @@ use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
+use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
@@ -181,13 +183,24 @@ class NoticeController extends Controller
             'customer_id' => $customerId,
         ]);
 
-        $searchFilters = $filters;
+        // What the user asked for, said without naming a register. Five of the keys in $filters —
+        // watch_list_id, relevance, bid_status, history_type, cockpit_scope — filter saved cases
+        // inside Procynia and never reached the register at all; they were passed to search() and
+        // silently ignored. They are simply not part of the question any more.
+        $criteria = new OpportunitySearchCriteria(
+            query: $filters['q'] !== '' ? $filters['q'] : null,
+            keywords: OpportunitySearchCriteria::fromArray(['keywords' => $filters['keywords']])->keywords,
+            // The dropdown offers all-or-any and defaults to all, exactly as before.
+            matchAllKeywords: $keywordsMode !== 'any',
+            buyerName: $filters['organization_name'] !== '' ? $filters['organization_name'] : null,
+            cpvCodes: OpportunitySearchCriteria::fromArray(['cpv_codes' => $filters['cpv']])->cpvCodes,
+            status: OpportunityStatus::fromRequestValue($filters['status']),
+            publishedFrom: $publicationDateFrom !== '' ? $publicationDateFrom : null,
+            publishedTo: $publicationDateTo !== '' ? $publicationDateTo : null,
+            publishedWithinDays: $publicationPeriod !== '' ? (int) $publicationPeriod : null,
+        );
 
-        if ($keywordsMode !== '') {
-            $searchFilters['keywords_mode'] = $keywordsMode;
-        }
-
-        $searchResponse = $this->discoveryAdapter()->search($searchFilters, $page, $perPage);
+        $searchResponse = $this->discoveryAdapter()->search($criteria, $page, $perPage);
         $page = $searchResponse->page;
         $perPage = $searchResponse->perPage;
         $fallbackUsed = $searchResponse->fallbackUsed;

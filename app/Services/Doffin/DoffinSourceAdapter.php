@@ -3,8 +3,10 @@
 namespace App\Services\Doffin;
 
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceSearchResult;
+use App\Services\OpportunitySources\OpportunityStatus;
 use Illuminate\Support\Str;
 
 class DoffinSourceAdapter implements OpportunitySourceAdapter
@@ -25,9 +27,9 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
         return 'Live søk i Doffin';
     }
 
-    public function search(array $filters, int $page, int $perPage): OpportunitySourceSearchResult
+    public function search(OpportunitySearchCriteria $criteria, int $page, int $perPage): OpportunitySourceSearchResult
     {
-        $response = $this->liveSearchService->search($filters, $page, $perPage);
+        $response = $this->liveSearchService->search($this->toDoffinFilters($criteria), $page, $perPage);
         $page = max(1, (int) ($response['page'] ?? $page));
         $perPage = max(1, (int) ($response['perPage'] ?? $perPage));
         $fallbackUsed = (bool) ($response['fallback_used'] ?? false);
@@ -107,6 +109,57 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
             cpvCodes: $cpvCodes,
             rawPayload: $hit,
         );
+    }
+
+    /**
+     * The criteria, in the parameters Doffin's API actually takes.
+     *
+     * This method is the only place those parameter names exist outside DoffinLiveSearchService.
+     * `publication_period` counts days the way Doffin counts them, `keywords_mode` is its spelling
+     * of all-or-any, and the statuses are its lifecycle words — none of which a second register
+     * would share, and none of which a caller should have to know.
+     *
+     * The service still takes an array, which is left alone on purpose: it is Doffin's own client
+     * and the array is its own wire format, so nothing is gained by typing it a second time.
+     *
+     * @return array<string, string>
+     */
+    private function toDoffinFilters(OpportunitySearchCriteria $criteria): array
+    {
+        return [
+            'q' => $criteria->query ?? '',
+            'organization_name' => $criteria->buyerName ?? '',
+            // Doffin takes one comma-separated string; the criteria keep the codes apart, because
+            // joining them is a wire format and belongs to whoever owns the wire.
+            'cpv' => implode(',', $criteria->cpvCodes),
+            // One per line is what the service's own keyword splitter expects.
+            'keywords' => implode("\n", $criteria->keywords),
+            'keywords_mode' => $criteria->matchAllKeywords ? 'all' : 'any',
+            'publication_date_from' => $criteria->publishedFrom ?? '',
+            'publication_date_to' => $criteria->publishedTo ?? '',
+            // Doffin only understands a fixed set of windows. A window it does not offer is left
+            // out rather than rounded to a neighbour: silently searching a different period than
+            // the one asked for is worse than not narrowing at all.
+            'publication_period' => $this->doffinPublicationPeriod($criteria->publishedWithinDays),
+            'status' => $this->doffinStatus($criteria->status),
+        ];
+    }
+
+    /** The windows Doffin's API accepts, in days. */
+    private function doffinPublicationPeriod(?int $days): string
+    {
+        return in_array($days, [1, 7, 30, 90, 365], true) ? (string) $days : '';
+    }
+
+    private function doffinStatus(?OpportunityStatus $status): string
+    {
+        return match ($status) {
+            OpportunityStatus::Open => 'ACTIVE',
+            OpportunityStatus::Expired => 'EXPIRED',
+            OpportunityStatus::Awarded => 'AWARDED',
+            OpportunityStatus::Cancelled => 'CANCELLED',
+            null => '',
+        };
     }
 
     public function sourceUrl(string $externalId): ?string

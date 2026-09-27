@@ -198,20 +198,25 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $liveSearchService
             ->shouldReceive('search')
             ->once()
+            // What reaches Doffin's own client, now that the controller asks in source-neutral
+            // terms and DoffinSourceAdapter translates.
+            //
+            // Two differences from the pre-4B1 array, neither of them a change in what is
+            // searched for. watch_list_id, relevance, bid_status, history_type and cockpit_scope
+            // filter saved cases inside Procynia; they were passed here and silently ignored, and
+            // are no longer part of the question. And the keywords arrive newline-separated
+            // rather than comma-separated — the service splits on [,;\n]+ either way, so both
+            // spellings parse to the same two keywords.
             ->with([
                 'q' => 'Domstoladministrasjonen',
                 'organization_name' => '',
                 'cpv' => '90910000,72222300',
-                'keywords' => 'renhold, tingrett',
-                'watch_list_id' => '1',
+                'keywords' => "renhold\ntingrett",
+                'keywords_mode' => 'all',
                 'publication_date_from' => '2026-03-01',
                 'publication_date_to' => '2026-03-31',
                 'publication_period' => '',
                 'status' => 'ACTIVE',
-                'relevance' => '',
-                'bid_status' => '',
-                'history_type' => '',
-                'cockpit_scope' => '',
             ], 1, 15)
             ->andReturn([
                 'numHitsTotal' => 1,

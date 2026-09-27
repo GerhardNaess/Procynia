@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\OpportunitySources\Exceptions\UnknownOpportunitySourceException;
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\OpportunitySources\OpportunitySourceSearchResult;
@@ -41,7 +42,7 @@ class OpportunitySourceRegistryTest extends TestCase
                 return 'Stand-in for '.$this->key;
             }
 
-            public function search(array $filters, int $page, int $perPage): OpportunitySourceSearchResult
+            public function search(OpportunitySearchCriteria $criteria, int $page, int $perPage): OpportunitySourceSearchResult
             {
                 return new OpportunitySourceSearchResult(
                     ok: true,

@@ -6,6 +6,8 @@ use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\BidWorkflowNotificationService;
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunitySearchCriteria;
+use App\Services\OpportunitySources\OpportunityStatus;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -112,7 +114,7 @@ class DoffinWatchProfileInboxDiscoveryService
 
     public function discoverWatchProfile(WatchProfile $watchProfile): array
     {
-        $filters = $this->buildFilters($watchProfile);
+        $criteria = $this->buildCriteria($watchProfile);
         $summary = [
             'records_seen' => 0,
             'records_created' => 0,
@@ -124,7 +126,7 @@ class DoffinWatchProfileInboxDiscoveryService
         $lastPage = 1;
 
         do {
-            $response = $this->sourceAdapter->search($filters, $page, $perPage);
+            $response = $this->sourceAdapter->search($criteria, $page, $perPage);
             $hits = collect($response->notices)
                 ->filter(fn (NormalizedNotice $notice): bool => $this->shouldIncludeNotice($watchProfile, $notice))
                 ->values();
@@ -210,24 +212,30 @@ class DoffinWatchProfileInboxDiscoveryService
         ];
     }
 
-    private function buildFilters(WatchProfile $watchProfile): array
+    /**
+     * What this watch profile is watching for, said without naming a register.
+     *
+     * The three settings that used to be written in Doffin's own words — keywords_mode 'any',
+     * publication_period '1', status 'ACTIVE' — are the same three questions here: match any of
+     * the keywords, published in the last day, still open for offers. What changes is that the
+     * adapter now decides how to say them, which is what lets a second register answer the same
+     * profile without Doffin's parameter names being part of the contract.
+     */
+    private function buildCriteria(WatchProfile $watchProfile): OpportunitySearchCriteria
     {
-        return [
-            'q' => '',
-            'organization_name' => '',
-            'cpv' => $watchProfile->cpvCodes
-                ->pluck('cpv_code')
-                ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-                ->map(fn (string $value): string => trim($value))
-                ->unique()
-                ->sort()
-                ->values()
-                ->implode(','),
-            'keywords' => $this->keywordsFilter($watchProfile),
-            'keywords_mode' => 'any',
-            'publication_period' => '1',
-            'status' => 'ACTIVE',
-        ];
+        return new OpportunitySearchCriteria(
+            keywords: OpportunitySearchCriteria::fromArray([
+                'keywords' => $this->keywordsFilter($watchProfile),
+            ])->keywords,
+            // A watch profile casts a net: any keyword is a hit, not all of them.
+            matchAllKeywords: false,
+            cpvCodes: OpportunitySearchCriteria::fromArray([
+                'cpv_codes' => $watchProfile->cpvCodes->pluck('cpv_code')->all(),
+            ])->cpvCodes,
+            // Only what is still open, and only what appeared since the last nightly sweep.
+            status: OpportunityStatus::Open,
+            publishedWithinDays: 1,
+        );
     }
 
     private function shouldIncludeNotice(WatchProfile $watchProfile, NormalizedNotice $notice): bool
