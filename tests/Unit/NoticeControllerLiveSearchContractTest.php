@@ -10,6 +10,7 @@ use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
@@ -394,7 +395,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            new DoffinSourceAdapter($liveSearchService),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -482,7 +483,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            new DoffinSourceAdapter($liveSearchService),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -550,7 +551,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            new DoffinSourceAdapter($liveSearchService),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -608,7 +609,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            new DoffinSourceAdapter($liveSearchService),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -698,7 +699,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            new DoffinSourceAdapter($liveSearchService),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -753,7 +754,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             new CustomerNoticeCpvSearchService,
-            new DoffinSourceAdapter(Mockery::mock(DoffinLiveSearchService::class)),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter(Mockery::mock(DoffinLiveSearchService::class))]),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -993,7 +994,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         return new NoticeController(
             $customerContext,
             new CustomerNoticeCpvSearchService,
-            new DoffinSourceAdapter($liveSearchService),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,

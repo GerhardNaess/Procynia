@@ -4,7 +4,7 @@ namespace App\Providers;
 
 use App\Models\Customer;
 use App\Services\Doffin\DoffinSourceAdapter;
-use App\Services\OpportunitySources\OpportunitySourceAdapter;
+use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -23,7 +23,17 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(AiCallContextScope::class);
-        $this->app->bind(OpportunitySourceAdapter::class, DoffinSourceAdapter::class);
+
+        // Every opportunity source Procynia can speak to, addressed by its own key.
+        //
+        // This replaces a bind of OpportunitySourceAdapter to DoffinSourceAdapter. That binding
+        // made "the adapter" mean Doffin everywhere, so a consumer holding a row from another
+        // register would have been handed Doffin's adapter and had no way to tell. Nothing
+        // source-neutral resolves the interface from the container any more; it asks the registry
+        // for the source it actually has.
+        $this->app->singleton(OpportunitySourceRegistry::class, fn ($app): OpportunitySourceRegistry => new OpportunitySourceRegistry([
+            $app->make(DoffinSourceAdapter::class),
+        ]));
     }
 
     public function boot(): void

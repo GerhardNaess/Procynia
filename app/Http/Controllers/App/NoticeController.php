@@ -19,8 +19,10 @@ use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
+use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
@@ -43,7 +45,7 @@ class NoticeController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly CustomerNoticeCpvSearchService $cpvSearchService,
-        private readonly OpportunitySourceAdapter $sourceAdapter,
+        private readonly OpportunitySourceRegistry $sources,
         private readonly DoffinNoticeDocumentService $documentService,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
@@ -185,7 +187,7 @@ class NoticeController extends Controller
             $searchFilters['keywords_mode'] = $keywordsMode;
         }
 
-        $searchResponse = $this->sourceAdapter->search($searchFilters, $page, $perPage);
+        $searchResponse = $this->discoveryAdapter()->search($searchFilters, $page, $perPage);
         $page = $searchResponse->page;
         $perPage = $searchResponse->perPage;
         $fallbackUsed = $searchResponse->fallbackUsed;
@@ -248,7 +250,7 @@ class NoticeController extends Controller
         // Matched within the source these hits came from. An external id on its own cannot tell
         // Doffin's notice 123 from another register's notice 123, and answering "already saved"
         // on the strength of a shared number would be wrong in exactly the case that matters.
-        $sourceKey = $this->sourceAdapter->sourceKey();
+        $sourceKey = $this->discoverySourceKey();
         $savedExternalIds = $this->savedExternalIdsForSource(
             $this->activeSavedNoticeVisibleQuery($user),
             $sourceKey,
@@ -336,6 +338,41 @@ class NoticeController extends Controller
             ->with('success', 'Varsel slettet.');
     }
 
+    /**
+     * The register the public discovery surface runs against today.
+     *
+     * Named once, here, rather than spelled into a dozen call sites: when a second register is
+     * registered this becomes a choice — made from the request or the profile — and every caller
+     * below already asks a method rather than a constant.
+     */
+    private function discoverySourceKey(): string
+    {
+        return DoffinSourceAdapter::SOURCE_KEY;
+    }
+
+    /** The adapter for the discovery surface. Throws if that register is not registered at all. */
+    private function discoveryAdapter(): OpportunitySourceAdapter
+    {
+        return $this->sources->get($this->discoverySourceKey());
+    }
+
+    /**
+     * The adapter for a source that was recorded on a row, or null.
+     *
+     * Null rather than a default: a row from a register this installation has no adapter for must
+     * fall back on what it already stored, not on somebody else's URL builder. A null source is a
+     * public row written before the column existed, when the discovery register was the only one
+     * there was — those are read under that name, which is what keeps them working.
+     */
+    private function storedSourceAdapter(?string $source, bool $isPublicNotice): ?OpportunitySourceAdapter
+    {
+        if (! $isPublicNotice) {
+            return null;
+        }
+
+        return $this->sources->find($source ?? $this->discoverySourceKey());
+    }
+
     public function storeSavedNotice(Request $request): RedirectResponse
     {
         /** @var User $user */
@@ -404,7 +441,7 @@ class NoticeController extends Controller
             // recorded. It is matched too — otherwise saving the same notice again would create a
             // second case beside it and step straight past the archived-case guard below — and
             // named on the way past, so it only ever happens once per row.
-            $sourceKey = $this->sourceAdapter->sourceKey();
+            $sourceKey = $this->discoverySourceKey();
             $record = SavedNotice::query()
                 ->where('customer_id', $customerId)
                 ->where('external_id', $validated['notice_id'])
@@ -1451,7 +1488,7 @@ class NoticeController extends Controller
         // A legacy public case that predates the source column came from the only register there
         // was, which is the one the adapter speaks for. Read under that name so it keeps matching;
         // a row from any other register always names itself and is never folded in here.
-        $legacySource = $this->sourceAdapter->sourceKey();
+        $legacySource = $this->discoverySourceKey();
 
         return $query
             ->where(fn (Builder $scope) => $scope
@@ -1566,9 +1603,10 @@ class NoticeController extends Controller
         // Identity comes from the source, not from a Doffin id. For a Doffin record the two are
         // the same string, so the payload the frontend already reads is unchanged.
         $externalId = (string) $record->external_id;
-        // Compared against the adapter this controller is wired with, not against a Doffin
-        // constant: Phase 1 put the interface here precisely so the controller need not know.
-        $isCurrentSource = (string) $record->source === $this->sourceAdapter->sourceKey();
+        // The adapter for the register this record actually came from. A record from a register
+        // Procynia has no adapter for keeps whatever URL was stored with it and is offered
+        // nothing else — it is not handed another register's link because the ids look alike.
+        $recordAdapter = $this->sources->find((string) $record->source);
 
         return [
             'id' => $record->id,
@@ -1589,9 +1627,8 @@ class NoticeController extends Controller
             'saved_search_name' => null,
             'cpv_code' => $cpvCode !== '' ? $cpvCode : null,
             'is_new' => false,
-            // The stored URL is what the source actually gave us. The adapter is only a fallback,
-            // and only for the source it speaks for.
-            'external_url' => $record->external_url ?: ($isCurrentSource ? $this->sourceAdapter->sourceUrl($externalId) : null),
+            // The stored URL is what the source actually gave us; its own adapter is the fallback.
+            'external_url' => $record->external_url ?: $recordAdapter?->sourceUrl($externalId),
             // SavedNotice is still identified by a bare external id, so these compare like for like
             // only while Doffin is the only source. Making that comparison source-aware is Phase 3B.
             // Asked as an identity, not as a number: a record from another register that happens
@@ -2027,13 +2064,15 @@ class NoticeController extends Controller
         // what this has always done, and it stays — but only for a case from the register whose
         // ids `notices.notice_id` actually holds. Another register's id must not reach in here and
         // collect a Doffin notice's documents because the two happen to share a number.
-        $isCurrentOrLegacySource = $notice->source === null
-            ? $notice->isPublicNotice()
-            : (string) $notice->source === $this->sourceAdapter->sourceKey();
+        // The bare-id fallback only holds for the register whose ids `notices.notice_id` carries,
+        // which is the discovery register. Any other register's case reaches the imported notice
+        // through the link or not at all.
+        $matchesImportedIds = $this->storedSourceAdapter($notice->source, $notice->isPublicNotice())
+            ?->sourceKey() === $this->discoverySourceKey();
 
         $sourceNotice = $notice->notice_id !== null
             ? Notice::query()->whereKey($notice->notice_id)->with('documents')->first()
-            : ($isCurrentOrLegacySource
+            : ($matchesImportedIds
                 ? Notice::query()->where('notice_id', (string) $notice->external_id)->with('documents')->first()
                 : null);
 
@@ -2359,15 +2398,11 @@ class NoticeController extends Controller
             return $notice->external_url;
         }
 
-        // The stored URL first, because it is what the register actually gave us. The adapter is
-        // only a fallback, and only for the register it speaks for — a case from somewhere else
-        // must not be handed a Doffin link built from its own id. A null source is a case from
-        // before the column existed, when that register was the only one.
-        $belongsToCurrentSource = $notice->source === null
-            || (string) $notice->source === $this->sourceAdapter->sourceKey();
-
+        // The stored URL first, because it is what the register actually gave us. Its own adapter
+        // is the only fallback — a case from a register Procynia cannot speak to gets null rather
+        // than a link built by whichever adapter happened to be at hand.
         return $notice->external_url
-            ?: ($belongsToCurrentSource ? $this->sourceAdapter->sourceUrl($notice->external_id) : null);
+            ?: $this->storedSourceAdapter($notice->source, true)?->sourceUrl($notice->external_id);
     }
 
     private function emptySearchResult(): array
@@ -2416,8 +2451,8 @@ class NoticeController extends Controller
                 'label' => 'Historikk',
             ],
             default => [
-                'type' => $this->sourceAdapter->sourceKey().'_live_search',
-                'label' => $this->sourceAdapter->label(),
+                'type' => $this->discoverySourceKey().'_live_search',
+                'label' => $this->discoveryAdapter()->label(),
             ],
         };
     }

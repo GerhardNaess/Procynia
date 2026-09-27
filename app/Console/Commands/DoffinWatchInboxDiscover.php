@@ -2,8 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Doffin\DoffinWatchProfileInboxDiscoveryService;
+use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\Doffin\DoffinWatchInboxDigestService;
+use App\Services\OpportunitySources\WatchProfileInboxDiscoveryCoordinator;
 use Illuminate\Console\Command;
 use RuntimeException;
 
@@ -14,16 +15,29 @@ class DoffinWatchInboxDiscover extends Command
     protected $description = 'Run nightly Doffin live discovery for all active watch profiles and upsert scoped inbox records.';
 
     public function handle(
-        DoffinWatchProfileInboxDiscoveryService $service,
+        WatchProfileInboxDiscoveryCoordinator $coordinator,
         DoffinWatchInboxDigestService $digestService,
-    ): int
-    {
+    ): int {
         $trigger = $this->resolveTrigger();
 
         $this->line('Starting Doffin watch inbox discovery.');
         $this->line("trigger: {$trigger}");
 
-        $summary = $service->run(null, $trigger);
+        // The command stays Doffin's — it is named for it, scheduled for it, and reports it — but
+        // it no longer reaches for the Doffin worker itself. Going through the coordinator is what
+        // makes a second registered source a visible decision rather than a silent omission.
+        $result = $coordinator->run(null, $trigger);
+        $summary = $result['runs'][DoffinSourceAdapter::SOURCE_KEY] ?? null;
+
+        if ($summary === null) {
+            $this->error('Doffin is not a registered opportunity source; nothing was discovered.');
+
+            return self::FAILURE;
+        }
+
+        foreach ($result['sources_without_worker'] as $sourceKey) {
+            $this->warn("Registered source \"{$sourceKey}\" has no watch discovery worker and was not run.");
+        }
 
         if (($summary['status'] ?? null) === 'skipped') {
             $this->info('Doffin watch inbox discovery skipped.');
