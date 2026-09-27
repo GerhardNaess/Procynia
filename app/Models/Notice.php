@@ -69,6 +69,17 @@ class Notice extends Model
         return $this->hasMany(NoticeCpvCode::class);
     }
 
+    /**
+     * The external records that represent this notice — today exactly one, from Doffin.
+     *
+     * Nothing is required to read this yet: `notice_id` remains the Doffin id for every consumer
+     * that already asks for it. This is what a second source will attach to.
+     */
+    public function sources(): HasMany
+    {
+        return $this->hasMany(NoticeSource::class);
+    }
+
     public function lots(): HasMany
     {
         return $this->hasMany(NoticeLot::class);

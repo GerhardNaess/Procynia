@@ -16,8 +16,8 @@ class DoffinNoticePipelineService
         private readonly DoffinLotParseService $lotParseService,
         private readonly DoffinRelevanceService $relevanceService,
         private readonly DoffinImportService $importService,
-    ) {
-    }
+        private readonly DoffinNoticeSourceSyncService $sourceSyncService,
+    ) {}
 
     public function process(string $noticeId): array
     {
@@ -58,6 +58,12 @@ class DoffinNoticePipelineService
             $failedStep = 'update_department_visibility';
             $this->importService->updateDepartmentVisibility($notice->fresh('cpvCodes'));
             $completedSteps[] = 'update_department_visibility';
+
+            // The same sync the import already ran, now that parsing has established the
+            // publication date. An upsert, so this cannot duplicate what storeNoticeXml() wrote.
+            $failedStep = 'sync_notice_source';
+            $this->sourceSyncService->syncForNotice($notice->fresh());
+            $completedSteps[] = 'sync_notice_source';
 
             $result = [
                 'notice_id' => $noticeId,

@@ -14,8 +14,8 @@ class DoffinImportService
         private readonly DoffinClient $client,
         private readonly DoffinRelevanceService $relevanceService,
         private readonly DoffinNoticeAttentionService $attentionService,
-    ) {
-    }
+        private readonly DoffinNoticeSourceSyncService $sourceSyncService,
+    ) {}
 
     public function importFirstNotice(): array
     {
@@ -177,6 +177,11 @@ class DoffinImportService
                     'downloaded_at' => $downloadedAt,
                 ],
             );
+
+            // The moment Doffin handed us this record, inside the transaction that created the
+            // notice: either both exist or neither does. The publication date is not known yet on
+            // a first import — the pipeline fills that in once the XML has been parsed.
+            $this->sourceSyncService->syncForNotice($notice);
 
             return [
                 'notice' => $notice->fresh('rawXml'),
