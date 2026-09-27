@@ -245,15 +245,23 @@ class DoffinWatchProfileInboxDiscoveryService
             && $this->calculateRelevanceScore($watchProfile, $notice) > 0;
     }
 
+    /**
+     * Only what somebody can still bid on.
+     *
+     * Three cases, and the middle one is the reason this is not a single comparison. A register
+     * that says nothing about status tells us nothing to exclude on, and a hit is kept — that has
+     * always been the behaviour. A register that does say something must mean "open". And a word
+     * Procynia cannot read is not treated as open: an unrecognised status is a notice whose state
+     * we do not know, and putting it in somebody's watch inbox as if it were live would be a guess
+     * dressed up as a fact.
+     */
     private function hasEligibleStatus(NormalizedNotice $notice): bool
     {
-        $status = strtoupper(trim((string) ($notice->status ?? '')));
-
-        if ($status === '') {
+        if ($notice->providerStatusLabel() === null) {
             return true;
         }
 
-        return $status === 'ACTIVE';
+        return $notice->status === OpportunityStatus::Open;
     }
 
     private function publishedWithinLastDay(NormalizedNotice $notice): bool

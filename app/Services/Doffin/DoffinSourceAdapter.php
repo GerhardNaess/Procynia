@@ -94,7 +94,6 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
             ->unique()
             ->values()
             ->all();
-        $status = strtoupper(trim((string) ($hit['status'] ?? '')));
 
         return new NormalizedNotice(
             sourceKey: $this->sourceKey(),
@@ -104,7 +103,9 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
             buyerName: $buyers->isEmpty() ? null : $buyers->implode(', '),
             publicationDate: $this->stringOrNull($hit['publicationDate'] ?? $hit['issueDate'] ?? null),
             deadline: $this->stringOrNull($hit['deadline'] ?? null),
-            status: $status !== '' && $status !== 'ACTIVE' ? $status : ($this->stringOrNull($hit['status'] ?? null)),
+            // The meaning, typed. The register's own word stays in rawPayload, which is where
+            // the discovery payload still reads its badge label from.
+            status: $this->statusFromDoffin($hit['status'] ?? null),
             sourceUrl: $this->sourceUrl($externalId),
             cpvCodes: $cpvCodes,
             rawPayload: $hit,
@@ -149,6 +150,24 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
     private function doffinPublicationPeriod(?int $days): string
     {
         return in_array($days, [1, 7, 30, 90, 365], true) ? (string) $days : '';
+    }
+
+    /**
+     * Doffin's lifecycle word, read as the lifecycle it means.
+     *
+     * A word Doffin has not used before returns null rather than Open. Guessing the friendlier
+     * answer would put a notice nobody can bid on into a watch inbox as if it were live, and the
+     * caller would have no way to tell the guess from a real ACTIVE.
+     */
+    private function statusFromDoffin(mixed $value): ?OpportunityStatus
+    {
+        return match (strtoupper(trim((string) $value))) {
+            'ACTIVE' => OpportunityStatus::Open,
+            'EXPIRED' => OpportunityStatus::Expired,
+            'AWARDED' => OpportunityStatus::Awarded,
+            'CANCELLED' => OpportunityStatus::Cancelled,
+            default => null,
+        };
     }
 
     private function doffinStatus(?OpportunityStatus $status): string

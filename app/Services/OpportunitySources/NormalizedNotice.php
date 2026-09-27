@@ -19,11 +19,24 @@ class NormalizedNotice
         public readonly ?string $buyerName,
         public readonly ?string $publicationDate,
         public readonly ?string $deadline,
-        public readonly ?string $status,
+        public readonly ?OpportunityStatus $status,
         public readonly ?string $sourceUrl,
         public readonly array $cpvCodes = [],
         public readonly array $rawPayload = [],
     ) {}
+
+    /**
+     * What the register called this notice's status, verbatim.
+     *
+     * Read from the raw hit rather than reconstructed from the enum, so an unrecognised status is
+     * still shown to the user rather than disappearing because Procynia had no case for it.
+     */
+    public function providerStatusLabel(): ?string
+    {
+        $label = trim((string) ($this->rawPayload['status'] ?? ''));
+
+        return $label === '' ? null : $label;
+    }
 
     public function primaryCpvCode(): ?string
     {
@@ -47,7 +60,15 @@ class NormalizedNotice
             'summary' => $this->description,
             'publication_date' => $this->publicationDate,
             'deadline' => $this->deadline,
-            'status' => $this->status,
+            // The register's own word, not the enum's.
+            //
+            // The frontend prints this string straight into the status badge, so it is display
+            // text rather than a value — serialising the enum instead would relabel every card
+            // from ACTIVE to "open", which is a UI change and this phase has none. The meaning
+            // travels typed in $status; the label stays where it has always come from, which is
+            // the raw hit the register sent. Giving these labels a translated, source-neutral
+            // presentation is a UI job, and belongs with the phase that does UI.
+            'status' => $this->providerStatusLabel(),
             'relevance_level' => null,
             'score' => null,
             'department' => null,

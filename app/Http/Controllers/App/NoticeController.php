@@ -1602,15 +1602,10 @@ class NoticeController extends Controller
             ->map(fn (string $cpv): string => trim($cpv))
             ->values();
         $summary = trim((string) data_get($rawPayload, 'description', ''));
-        $status = strtoupper(trim((string) data_get($rawPayload, 'status', '')));
         $cpvCode = trim((string) data_get($rawPayload, 'mainCpvCode', ''));
 
         if ($cpvCode === '') {
             $cpvCode = (string) $cpvCodes->first();
-        }
-
-        if ($status === 'ACTIVE') {
-            $status = '';
         }
 
         // Identity comes from the source, not from a Doffin id. For a Doffin record the two are
@@ -1620,6 +1615,19 @@ class NoticeController extends Controller
         // Procynia has no adapter for keeps whatever URL was stored with it and is offered
         // nothing else — it is not handed another register's link because the ids look alike.
         $recordAdapter = $this->sources->find((string) $record->source);
+
+        // An open notice shows no status badge — the card says how long is left instead, and
+        // stamping "still open" on something that is obviously open is noise. Which stored word
+        // means open is the register's business, so the record's own adapter reads it; a record
+        // from a register Procynia cannot speak to keeps whatever word was stored with it.
+        $normalized = $recordAdapter?->normalizeLiveSearchHit($rawPayload);
+        $status = trim((string) data_get($rawPayload, 'status', ''));
+
+        if ($normalized !== null) {
+            $status = $normalized->status === OpportunityStatus::Open
+                ? ''
+                : (string) $normalized->providerStatusLabel();
+        }
 
         return [
             'id' => $record->id,
