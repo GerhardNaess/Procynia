@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Models\Customer;
+use App\Services\Doffin\DoffinSourceAdapter;
+use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -21,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(AiCallContextScope::class);
+        $this->app->bind(OpportunitySourceAdapter::class, DoffinSourceAdapter::class);
     }
 
     public function boot(): void

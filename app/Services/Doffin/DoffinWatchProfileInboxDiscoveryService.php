@@ -5,6 +5,7 @@ namespace App\Services\Doffin;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\BidWorkflowNotificationService;
+use App\Services\OpportunitySources\NormalizedNotice;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -14,7 +15,7 @@ use Throwable;
 class DoffinWatchProfileInboxDiscoveryService
 {
     public function __construct(
-        private readonly DoffinLiveSearchService $liveSearchService,
+        private readonly DoffinSourceAdapter $sourceAdapter,
         private readonly DoffinImportControlService $importControlService,
         private readonly BidWorkflowNotificationService $notifications,
     ) {}
@@ -123,10 +124,9 @@ class DoffinWatchProfileInboxDiscoveryService
         $lastPage = 1;
 
         do {
-            $response = $this->liveSearchService->search($filters, $page, $perPage);
-            $hits = collect($response['hits'] ?? [])
-                ->filter(fn (mixed $hit): bool => is_array($hit))
-                ->filter(fn (array $hit): bool => $this->shouldIncludeHit($watchProfile, $hit))
+            $response = $this->sourceAdapter->search($filters, $page, $perPage);
+            $hits = collect($response->notices)
+                ->filter(fn (NormalizedNotice $notice): bool => $this->shouldIncludeNotice($watchProfile, $notice))
                 ->values();
 
             $summary['records_seen'] += $hits->count();
@@ -149,7 +149,7 @@ class DoffinWatchProfileInboxDiscoveryService
                 }
             }
 
-            $total = (int) ($response['numHitsAccessible'] ?? $response['numHitsTotal'] ?? $hits->count());
+            $total = $response->numHitsAccessible > 0 ? $response->numHitsAccessible : $hits->count();
             $lastPage = max(1, (int) ceil($total / $perPage));
             $page++;
         } while ($page <= $lastPage && $hits->isNotEmpty());
@@ -166,9 +166,9 @@ class DoffinWatchProfileInboxDiscoveryService
         }
     }
 
-    private function upsertInboxRecord(WatchProfile $watchProfile, array $hit): ?array
+    private function upsertInboxRecord(WatchProfile $watchProfile, NormalizedNotice $notice): ?array
     {
-        $noticeId = $this->stringOrNull($hit['id'] ?? null);
+        $noticeId = $this->stringOrNull($notice->externalId);
 
         if ($noticeId === null) {
             return null;
@@ -185,15 +185,15 @@ class DoffinWatchProfileInboxDiscoveryService
             'customer_id' => $watchProfile->customer_id,
             'user_id' => $watchProfile->user_id,
             'department_id' => $watchProfile->department_id,
-            'title' => $this->stringOrNull($hit['heading'] ?? null) ?? $noticeId,
-            'buyer_name' => $this->buyerName($hit),
-            'publication_date' => $this->dateTimeOrNull($hit['publicationDate'] ?? $hit['issueDate'] ?? null),
-            'deadline' => $this->dateTimeOrNull($hit['deadline'] ?? null),
-            'external_url' => $this->publicNoticeUrl($noticeId),
-            'relevance_score' => $this->calculateRelevanceScore($watchProfile, $hit),
+            'title' => $notice->title ?? $noticeId,
+            'buyer_name' => $notice->buyerName,
+            'publication_date' => $this->dateTimeOrNull($notice->publicationDate),
+            'deadline' => $this->dateTimeOrNull($notice->deadline),
+            'external_url' => $notice->sourceUrl,
+            'relevance_score' => $this->calculateRelevanceScore($watchProfile, $notice),
             'discovered_at' => $record->discovered_at ?? $now,
             'last_seen_at' => $now,
-            'raw_payload' => $hit,
+            'raw_payload' => $notice->rawPayload,
         ]);
 
         $record->save();
@@ -224,16 +224,16 @@ class DoffinWatchProfileInboxDiscoveryService
         ];
     }
 
-    private function shouldIncludeHit(WatchProfile $watchProfile, array $hit): bool
+    private function shouldIncludeNotice(WatchProfile $watchProfile, NormalizedNotice $notice): bool
     {
-        return $this->hasEligibleStatus($hit)
-            && $this->publishedWithinLastDay($hit)
-            && $this->calculateRelevanceScore($watchProfile, $hit) > 0;
+        return $this->hasEligibleStatus($notice)
+            && $this->publishedWithinLastDay($notice)
+            && $this->calculateRelevanceScore($watchProfile, $notice) > 0;
     }
 
-    private function hasEligibleStatus(array $hit): bool
+    private function hasEligibleStatus(NormalizedNotice $notice): bool
     {
-        $status = strtoupper(trim((string) ($hit['status'] ?? '')));
+        $status = strtoupper(trim((string) ($notice->status ?? '')));
 
         if ($status === '') {
             return true;
@@ -242,9 +242,9 @@ class DoffinWatchProfileInboxDiscoveryService
         return $status === 'ACTIVE';
     }
 
-    private function publishedWithinLastDay(array $hit): bool
+    private function publishedWithinLastDay(NormalizedNotice $notice): bool
     {
-        $publicationDate = $this->dateTimeOrNull($hit['publicationDate'] ?? $hit['issueDate'] ?? null);
+        $publicationDate = $this->dateTimeOrNull($notice->publicationDate);
 
         if (! $publicationDate instanceof Carbon) {
             return false;
@@ -280,17 +280,17 @@ class DoffinWatchProfileInboxDiscoveryService
         return '';
     }
 
-    private function calculateRelevanceScore(WatchProfile $watchProfile, array $hit): int
+    private function calculateRelevanceScore(WatchProfile $watchProfile, NormalizedNotice $notice): int
     {
         $keywordMatches = 0;
         $cpvMatches = 0;
         $score = 0;
         $titleAndDescription = Str::lower(Str::squish(
-            trim((string) ($hit['heading'] ?? '')).' '.trim((string) ($hit['description'] ?? ''))
+            trim((string) ($notice->title ?? '')).' '.trim((string) ($notice->description ?? ''))
         ));
-        $buyerHaystack = Str::lower($this->buyerName($hit) ?? '');
+        $buyerHaystack = Str::lower($notice->buyerName ?? '');
         $keywords = collect($this->resolvedKeywords($watchProfile));
-        $hitCpvCodes = $this->hitCpvCodes($hit);
+        $hitCpvCodes = $this->noticeCpvCodes($notice);
 
         foreach ($keywords as $keyword) {
             $normalizedKeyword = Str::lower($keyword);
@@ -330,12 +330,9 @@ class DoffinWatchProfileInboxDiscoveryService
         return $score;
     }
 
-    private function hitCpvCodes(array $hit): Collection
+    private function noticeCpvCodes(NormalizedNotice $notice): Collection
     {
-        return collect([
-            ...((array) ($hit['cpvCodes'] ?? [])),
-            $hit['mainCpvCode'] ?? null,
-        ])
+        return collect($notice->cpvCodes)
             ->filter(fn (mixed $value): bool => is_scalar($value))
             ->map(fn (string|int|float|bool $value): string => preg_replace('/\D+/', '', (string) $value) ?? '')
             ->filter(fn (string $value): bool => $value !== '')
@@ -379,27 +376,6 @@ class DoffinWatchProfileInboxDiscoveryService
         }
 
         return [];
-    }
-
-    private function buyerName(array $hit): ?string
-    {
-        $buyers = collect($hit['buyer'] ?? [])
-            ->filter(fn (mixed $buyer): bool => is_array($buyer))
-            ->map(fn (array $buyer): string => trim((string) ($buyer['name'] ?? '')))
-            ->filter()
-            ->unique()
-            ->values();
-
-        return $buyers->isEmpty() ? null : $buyers->implode(', ');
-    }
-
-    private function publicNoticeUrl(string $noticeId): ?string
-    {
-        if ($noticeId === '') {
-            return null;
-        }
-
-        return sprintf((string) config('doffin.public_notice_url'), rawurlencode($noticeId));
     }
 
     private function dateTimeOrNull(mixed $value): ?Carbon

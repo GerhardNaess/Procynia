@@ -18,9 +18,9 @@ use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
-use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
@@ -43,7 +43,7 @@ class NoticeController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly CustomerNoticeCpvSearchService $cpvSearchService,
-        private readonly DoffinLiveSearchService $liveSearchService,
+        private readonly OpportunitySourceAdapter $sourceAdapter,
         private readonly DoffinNoticeDocumentService $documentService,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
@@ -185,22 +185,21 @@ class NoticeController extends Controller
             $searchFilters['keywords_mode'] = $keywordsMode;
         }
 
-        $searchResponse = $this->liveSearchService->search($searchFilters, $page, $perPage);
-        $page = max(1, (int) ($searchResponse['page'] ?? $page));
-        $perPage = max(1, (int) ($searchResponse['perPage'] ?? $perPage));
-        $fallbackUsed = (bool) ($searchResponse['fallback_used'] ?? false);
+        $searchResponse = $this->sourceAdapter->search($searchFilters, $page, $perPage);
+        $page = $searchResponse->page;
+        $perPage = $searchResponse->perPage;
+        $fallbackUsed = $searchResponse->fallbackUsed;
 
-        if (! ($searchResponse['ok'] ?? true)) {
-            $errorType = (string) ($searchResponse['error_type'] ?? 'unexpected_response');
+        if (! $searchResponse->ok) {
+            $errorType = (string) ($searchResponse->errorType ?? 'unexpected_response');
             $status = $this->liveSearchStatusCode($errorType);
-            $errorMessage = $this->liveSearchErrorMessage($errorType);
+            $errorMessage = $searchResponse->userMessage ?? 'Søket kunne ikke fullføres. Prøv igjen om litt.';
             $logLevel = $status >= HttpResponse::HTTP_INTERNAL_SERVER_ERROR ? 'error' : 'warning';
 
             Log::$logLevel('[DOFFIN][controller] Live notice search returned a controlled error response.', [
                 'error_type' => $errorType,
                 'mapped_status' => $status,
-                'upstream_status' => $searchResponse['upstream_status'] ?? null,
-                'request_id' => $searchResponse['meta']['request_id'] ?? null,
+                'upstream_status' => $searchResponse->upstreamStatus,
                 'fallback_used' => $fallbackUsed,
                 'customer_id' => $customerId,
                 'page' => $page,
@@ -230,8 +229,8 @@ class NoticeController extends Controller
                         [
                             'fallback_used' => $fallbackUsed,
                             'error_type' => $errorType,
-                            'error_message' => $searchResponse['error_message'] ?? $errorMessage,
-                            'upstream_status' => $searchResponse['upstream_status'] ?? null,
+                            'error_message' => $searchResponse->errorMessage ?? $errorMessage,
+                            'upstream_status' => $searchResponse->upstreamStatus,
                         ],
                     ),
                 ],
@@ -242,12 +241,10 @@ class NoticeController extends Controller
             ], $status);
         }
 
-        $hits = collect($this->liveSearchItems($searchResponse))
-            ->filter(fn (mixed $hit): bool => is_array($hit))
-            ->values();
-        $accessibleTotal = (int) ($searchResponse['numHitsAccessible'] ?? $searchResponse['numHitsTotal'] ?? $hits->count());
-        $total = (int) ($searchResponse['numHitsTotal'] ?? $accessibleTotal);
-        $hitExternalIds = $hits->pluck('id')->filter()->map(fn (mixed $id): string => (string) $id)->all();
+        $notices = collect($searchResponse->notices);
+        $accessibleTotal = $searchResponse->numHitsAccessible;
+        $total = $searchResponse->numHitsTotal;
+        $hitExternalIds = $notices->pluck('externalId')->filter()->map(fn (mixed $id): string => (string) $id)->all();
         $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user)
             ->whereIn('external_id', $hitExternalIds)
             ->pluck('external_id')
@@ -259,8 +256,8 @@ class NoticeController extends Controller
             ->map(fn (mixed $id): string => (string) $id)
             ->all();
 
-        $items = $hits
-            ->map(fn (array $hit): array => $this->liveNoticeListItem($hit, $savedExternalIds, $archivedExternalIds))
+        $items = $notices
+            ->map(fn ($notice): array => $notice->toDiscoveryPayload($savedExternalIds, $archivedExternalIds))
             ->all();
 
         Log::debug('[DOFFIN][ui-contract] Outgoing notice payload ready for frontend.', [
@@ -1473,7 +1470,7 @@ class NoticeController extends Controller
             'saved_search_name' => null,
             'cpv_code' => $cpvCode !== '' ? $cpvCode : null,
             'is_new' => false,
-            'external_url' => $record->external_url ?: $this->publicNoticeUrl($record->doffin_notice_id),
+            'external_url' => $record->external_url ?: $this->sourceAdapter->sourceUrl($record->doffin_notice_id),
             'is_saved' => in_array($record->doffin_notice_id, $savedExternalIds, true),
             'is_in_history' => in_array($record->doffin_notice_id, $archivedExternalIds, true),
             'watch_profile_name' => $record->watchProfile?->name,
@@ -2164,50 +2161,6 @@ class NoticeController extends Controller
         ];
     }
 
-    private function liveNoticeListItem(array $hit, array $savedExternalIds = [], array $archivedExternalIds = []): array
-    {
-        $buyers = collect($hit['buyer'] ?? [])
-            ->filter(fn (mixed $buyer): bool => is_array($buyer))
-            ->map(fn (array $buyer): string => trim((string) ($buyer['name'] ?? '')))
-            ->filter()
-            ->unique()
-            ->values();
-        $description = trim((string) ($hit['description'] ?? ''));
-        $cpvCodes = collect($hit['cpvCodes'] ?? [])
-            ->filter(fn (mixed $cpv): bool => is_string($cpv) && trim($cpv) !== '')
-            ->values();
-        $noticeId = (string) ($hit['id'] ?? '');
-        $publicationDate = $hit['publicationDate'] ?? $hit['issueDate'] ?? null;
-
-        return [
-            'id' => $noticeId,
-            'notice_id' => $noticeId,
-            'title' => trim((string) ($hit['heading'] ?? '')),
-            'buyer_name' => $buyers->implode(', '),
-            'summary' => $description !== '' ? Str::squish($description) : null,
-            'publication_date' => $publicationDate,
-            'deadline' => $hit['deadline'] ?? null,
-            'status' => $hit['status'] ?? null,
-            'relevance_level' => null,
-            'score' => null,
-            'department' => null,
-            'saved_search_name' => null,
-            'cpv_code' => $cpvCodes->first(),
-            'is_new' => false,
-            'external_url' => $this->publicNoticeUrl($noticeId),
-            'is_saved' => in_array($noticeId, $savedExternalIds, true),
-            'is_in_history' => in_array($noticeId, $archivedExternalIds, true),
-        ];
-    }
-
-    private function liveSearchItems(array $searchResponse): array
-    {
-        return collect($searchResponse['items'] ?? $searchResponse['hits'] ?? [])
-            ->filter(fn (mixed $item): bool => is_array($item))
-            ->values()
-            ->all();
-    }
-
     private function liveSearchStatusCode(string $errorType): int
     {
         return match ($errorType) {
@@ -2217,18 +2170,6 @@ class NoticeController extends Controller
             'connection_error' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
             'unexpected_response' => HttpResponse::HTTP_BAD_GATEWAY,
             default => HttpResponse::HTTP_BAD_GATEWAY,
-        };
-    }
-
-    private function liveSearchErrorMessage(string $errorType): string
-    {
-        return match ($errorType) {
-            'invalid_request' => 'Søket mot Doffin ble avvist. Kontroller filtrene og prøv igjen.',
-            'upstream_unavailable' => 'Doffin er midlertidig utilgjengelig. Prøv igjen om litt.',
-            'timeout' => 'Doffin svarte ikke i tide. Prøv igjen om litt.',
-            'connection_error' => 'Klarte ikke å koble til Doffin. Prøv igjen om litt.',
-            'unexpected_response' => 'Doffin returnerte et uventet svar. Prøv igjen om litt.',
-            default => 'Doffin-søket kunne ikke fullføres. Prøv igjen om litt.',
         };
     }
 
@@ -2268,22 +2209,13 @@ class NoticeController extends Controller
         return max(1, (int) ceil($accessibleTotal / $perPage));
     }
 
-    private function publicNoticeUrl(string $noticeId): ?string
-    {
-        if ($noticeId === '') {
-            return null;
-        }
-
-        return sprintf((string) config('doffin.public_notice_url'), rawurlencode($noticeId));
-    }
-
     private function savedNoticeExternalUrl(SavedNotice $notice): ?string
     {
         if ($notice->isPrivateRequest()) {
             return $notice->external_url;
         }
 
-        return $notice->external_url ?: $this->publicNoticeUrl($notice->external_id);
+        return $notice->external_url ?: $this->sourceAdapter->sourceUrl($notice->external_id);
     }
 
     private function emptySearchResult(): array
@@ -2332,8 +2264,8 @@ class NoticeController extends Controller
                 'label' => 'Historikk',
             ],
             default => [
-                'type' => 'doffin_live_search',
-                'label' => 'Live søk i Doffin',
+                'type' => $this->sourceAdapter->sourceKey().'_live_search',
+                'label' => $this->sourceAdapter->label(),
             ],
         };
     }

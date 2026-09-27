@@ -8,6 +8,7 @@ use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
@@ -378,7 +379,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new DoffinSourceAdapter($liveSearchService),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -466,7 +467,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new DoffinSourceAdapter($liveSearchService),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -534,7 +535,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new DoffinSourceAdapter($liveSearchService),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -592,7 +593,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new DoffinSourceAdapter($liveSearchService),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -680,7 +681,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new DoffinSourceAdapter($liveSearchService),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -733,7 +734,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             new CustomerNoticeCpvSearchService,
-            Mockery::mock(DoffinLiveSearchService::class),
+            new DoffinSourceAdapter(Mockery::mock(DoffinLiveSearchService::class)),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
@@ -973,7 +974,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         return new NoticeController(
             $customerContext,
             new CustomerNoticeCpvSearchService,
-            $liveSearchService,
+            new DoffinSourceAdapter($liveSearchService),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
