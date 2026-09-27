@@ -347,24 +347,24 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     };
 
     return (
-        <CustomerAppLayout title="Infosenter" showPageTitle={false}>
+        <CustomerAppLayout title="Oppfølging" showPageTitle={false}>
             <div className="space-y-7">
                 <section className={classNames('rounded-[28px] border p-6 shadow-[0_10px_26px_rgba(15,23,42,0.05)]', heroClassName)}>
                     <div className="flex flex-col gap-5">
                         <div className="space-y-4">
                             <div className="inline-flex items-center rounded-full border border-white/70 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 shadow-sm">
-                                {roleContext.label ?? 'Infosenter'}
+                                {roleContext.label ?? 'Oppfølging'}
                             </div>
                             <div className="space-y-2">
                                 <div className="flex items-center gap-3">
-                                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Infosenter</h1>
+                                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{ic.page_help_title ?? 'Oppfølging'}</h1>
                                     <PageHelpButton
                                         buttonLabel={ic.page_help_button ?? 'Hjelp'}
-                                        title={ic.page_help_title ?? 'Infosenter'}
+                                        title={ic.page_help_title ?? 'Oppfølging'}
                                         intro={ic.page_help_intro}
                                         sections={[
                                             {
-                                                title: ic.page_help_section_views ?? 'Fanene i Infosenteret',
+                                                title: ic.page_help_section_views ?? 'Panelene øverst på siden',
                                                 items: [
                                                     { title: ic.page_help_item_my_tasks_title ?? 'Mine oppgaver', text: ic.page_help_item_my_tasks_text ?? 'Viser åpne oppgaver og oppfølginger som er tildelt deg.' },
                                                     { title: ic.page_help_item_awaiting_title ?? 'Venter på svar', text: ic.page_help_item_awaiting_text ?? 'Viser oppfølginger du har sendt ut, men som fortsatt venter på respons.' },
@@ -376,7 +376,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                             {
                                                 title: ic.page_help_section_practical ?? 'Praktisk bruk',
                                                 items: [
-                                                    { title: ic.page_help_item_practical_title ?? 'Daglig oppfølging', text: ic.page_help_item_practical_text ?? 'Bruk Infosenteret som din daglige personlige oppfølgingsliste. Bruk Arbeidsliste og sakssider til selve anbudssakene.' },
+                                                    { title: ic.page_help_item_practical_title ?? 'Daglig oppfølging', text: ic.page_help_item_practical_text ?? 'Bruk Oppfølging som din daglige personlige oppfølgingsliste. Bruk Arbeidsliste og sakssider til selve anbudssakene.' },
                                                 ],
                                             },
                                         ]}
@@ -416,7 +416,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <h2 className="text-lg font-semibold text-slate-900">
-                                {activeOption?.label ?? 'Infosenter'}
+                                {activeOption?.label ?? 'Oppfølging'}
                             </h2>
                             <div className="mt-1 text-[1.7rem] font-semibold tracking-tight text-slate-950">
                                 {pagination.total ?? items.length}{' '}

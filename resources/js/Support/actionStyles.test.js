@@ -277,9 +277,15 @@ describe('primary borrows the tone of the active navigation item', () => {
         'utf8',
     );
 
-    /** The classes the top navigation gives its active item. */
+    /**
+     * The classes the top navigation gives its active item.
+     *
+     * Matched on the branch that carries a background, not merely on the first `isActive` ternary
+     * in the file: the nav item also sets aria-current from the same flag, and that one answers
+     * with the word "page". Anchoring on `bg-` keeps this pointing at the paint it is about.
+     */
     function activeNavigationClasses() {
-        const match = layout.match(/isActive\s*\n?\s*\?\s*'([^']+)'/);
+        const match = layout.match(/isActive\s*\n?\s*\?\s*'([^']*\bbg-[^']*)'/);
         assert.notEqual(match, null, 'the active navigation state is no longer recognisable');
 
         return match[1];

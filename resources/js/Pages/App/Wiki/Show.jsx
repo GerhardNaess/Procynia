@@ -87,7 +87,7 @@ function getWikiShowHelpSections(tw) {
                 },
                 {
                     title: tw.show_page_help_item_submit_title ?? 'Send til gjennomgang',
-                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør, som får beskjed og oppgaven i Infosenter. Dette er den vanlige flyten. For System Owner er den valgfri.',
+                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør, som får beskjed og oppgaven under Oppfølging. Dette er den vanlige flyten. For System Owner er den valgfri.',
                 },
                 {
                     title: tw.show_page_help_item_publish_title ?? 'Godkjenn og publiser',

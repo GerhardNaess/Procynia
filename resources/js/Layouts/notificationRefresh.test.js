@@ -68,7 +68,7 @@ describe('unread can be cleared without clearing the work', () => {
 /**
  * Clearing the bell without clearing the work.
  *
- * The bell holds messages; Infosenter holds work. Every control here removes messages and nothing
+ * The bell holds messages; Oppfølging holds work. Every control here removes messages and nothing
  * else — no request touches an assignment, a claim or a case, which is what keeps "I tidied my
  * inbox" from ever meaning "I finished my review".
  */
@@ -105,7 +105,7 @@ describe('the bell can be tidied', () => {
         assert.match(layout, /Slett alle uleste varsler\?/);
         assert.match(layout, /data-testid="notification-delete-unread-confirm"/);
         // The sentence people need: their work is not part of this.
-        assert.match(layout, /oppgaver i Infosenter påvirkes ikke/);
+        assert.match(layout, /oppgaver under Oppfølging påvirkes ikke/);
     });
 
     test('a single dismiss is not put behind a dialog', () => {

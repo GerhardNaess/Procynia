@@ -138,8 +138,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'suppliers';
         }
 
+        // Watch lists configure which notices reach the customer at all, so the area they belong
+        // to is Kunngjøringer. They keep their own route; only the navigation places them.
         if (pathname.startsWith('/app/watch-profiles')) {
-            return 'watch-profiles';
+            return 'procurements';
         }
 
         if (pathname.startsWith('/app/info-center')) {
@@ -181,26 +183,49 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             : 'Velg en sak først for å åpne I arbeid og AI instrukser.')
         : '';
 
+    /**
+     * The main menu is the bid workflow, in the order the work happens: see where the portfolio
+     * stands, find a notice, take it into the worklist, look things up, check the competition,
+     * write the response.
+     *
+     * Three things that used to sit here no longer do, because none of them is a step in that
+     * work. Watch lists is how Kunngjøringer is set up, so it belongs in that area's own tabs.
+     * Kundemiljø and Abonnement are administration, and live in the user menu. Infosenter is
+     * follow-up that cuts across every case, so it sits apart from the workflow rather than
+     * inside it — see followUpNavigation below. All four keep their routes and permissions
+     * exactly as they were; only where they are named has changed.
+     */
     const mainNavigation = [
         { key: 'overview', label: navigation.bid_status, href: '/app/dashboard' },
         { key: 'procurements', label: navigation.notices, href: '/app/notices' },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
-        { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
         { key: 'wiki', label: translations.wiki?.nav ?? 'Wiki', href: '/app/wiki' },
-        // Icon-only main-menu action, same level as the other central functions. The magnifying
-        // glass is the whole affordance, so the label is carried by title/aria-label instead.
-        {
-            key: 'wiki-ask',
-            label: translations.wiki?.ask_nav ?? 'Spør Wiki',
-            href: '/app/wiki/ask',
-            iconOnly: true,
-        },
-        { key: 'ai', label: navigation.ai, href: '/app/ai' },
         { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
-        ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
-        ...(environmentHref ? [{ key: 'environment', label: navigation.customer_environment, href: environmentHref }] : []),
-        ...(billingHref ? [{ key: 'billing', label: translations.billing?.nav ?? 'Abonnement', href: billingHref }] : []),
+        { key: 'ai', label: navigation.ai, href: '/app/ai' },
     ];
+
+    /**
+     * Ask Wiki, between the workflow and the follow-up group. The magnifying glass is the whole
+     * affordance, so the label is carried by title/aria-label instead.
+     */
+    const askWikiNavigation = {
+        key: 'wiki-ask',
+        label: translations.wiki?.ask_nav ?? 'Spør Wiki',
+        href: '/app/wiki/ask',
+    };
+
+    /**
+     * Follow-up, kept out of the workflow group on purpose.
+     *
+     * It is not a stage a case passes through — it is everything across every case that is waiting
+     * on somebody. Sitting it inside the workflow made it read as a sixth step; a divider and the
+     * company of the bell and the user menu say what it actually is.
+     */
+    const followUpNavigation = {
+        key: 'info-center',
+        label: translations.frontend.infosenter_nav,
+        href: '/app/info-center',
+    };
 
     const secondaryNavigation = (() => {
         if (activeMainArea === 'ai') {
@@ -215,6 +240,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return [
                 { key: 'live', label: navigation.live_search, href: '/app/notices' },
                 { key: 'alerts', label: translations.frontend.alerts_nav, href: buildHref('/app/notices', { tab: 'alerts' }) },
+                // Same permission gate as before, in a new place: a user who could not reach the
+                // page from the main menu still cannot reach it from here.
+                ...(watchProfilesHref
+                    ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }]
+                    : []),
             ];
         }
 
@@ -274,6 +304,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
 
         if (activeMainArea === 'procurements') {
+            if (pathname.startsWith('/app/watch-profiles')) {
+                return 'watch-profiles';
+            }
+
             if (noticeTab === 'alerts') {
                 return 'alerts';
             }
@@ -518,7 +552,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     />
                                 </Link>
 
-                                <nav className="flex flex-wrap items-center gap-1.5">
+                                <nav className="flex flex-wrap items-center gap-1.5" aria-label={navigation.workflow_aria ?? 'Arbeidsflyt'}>
                                     {mainNavigation.map((item) => {
                                         const isActive = activeMainArea === item.key;
 
@@ -526,49 +560,66 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                             <Link
                                                 key={item.key}
                                                 href={item.href}
-                                                title={item.iconOnly ? item.label : undefined}
-                                                aria-label={item.iconOnly ? item.label : undefined}
+                                                aria-current={isActive ? 'page' : undefined}
                                                 className={classNames(
-                                                    'rounded-xl text-base font-medium transition',
-                                                    item.iconOnly
-                                                        ? 'flex h-10 w-10 items-center justify-center'
-                                                        : 'px-3 py-2',
+                                                    'rounded-xl px-3 py-2 text-base font-medium transition',
                                                     isActive
                                                         ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
                                                         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
                                                 )}
                                             >
-                                                {item.iconOnly ? (
-                                                    <svg
-                                                        className="h-5 w-5"
-                                                        viewBox="0 0 20 20"
-                                                        fill="none"
-                                                        aria-hidden="true"
-                                                    >
-                                                        <circle
-                                                            cx="9"
-                                                            cy="9"
-                                                            r="5.25"
-                                                            stroke="currentColor"
-                                                            strokeWidth="1.75"
-                                                        />
-                                                        <path
-                                                            d="M13 13L17 17"
-                                                            stroke="currentColor"
-                                                            strokeWidth="1.75"
-                                                            strokeLinecap="round"
-                                                        />
-                                                    </svg>
-                                                ) : (
-                                                    item.label
-                                                )}
+                                                {item.label}
                                             </Link>
                                         );
                                     })}
                                 </nav>
                             </div>
 
-                            <div className="flex items-center justify-between gap-3 lg:justify-end">
+                            {/* Search, follow-up, the bell and the user, in that order. Allowed to wrap on a
+                                phone: the group grew by two controls, and on a narrow screen the
+                                user button would otherwise be pushed off the right edge. */}
+                            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:flex-nowrap lg:justify-end">
+                                <Link
+                                    href={askWikiNavigation.href}
+                                    title={askWikiNavigation.label}
+                                    aria-label={askWikiNavigation.label}
+                                    aria-current={activeMainArea === askWikiNavigation.key ? 'page' : undefined}
+                                    className={classNames(
+                                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition',
+                                        activeMainArea === askWikiNavigation.key
+                                            ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                                    )}
+                                >
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                        <circle cx="9" cy="9" r="5.25" stroke="currentColor" strokeWidth="1.75" />
+                                        <path d="M13 13L17 17" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+                                    </svg>
+                                </Link>
+
+                                {/* The line that says the workflow ends here. Hidden where the
+                                    header wraps, because a divider between two stacked rows
+                                    separates nothing. */}
+                                <span
+                                    aria-hidden="true"
+                                    data-testid="header-follow-up-divider"
+                                    className="hidden h-6 w-px shrink-0 bg-slate-200 lg:block"
+                                />
+
+                                <Link
+                                    href={followUpNavigation.href}
+                                    aria-current={activeMainArea === followUpNavigation.key ? 'page' : undefined}
+                                    data-testid="header-follow-up"
+                                    className={classNames(
+                                        'shrink-0 rounded-xl px-3 py-2 text-base font-medium transition',
+                                        activeMainArea === followUpNavigation.key
+                                            ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                                    )}
+                                >
+                                    {followUpNavigation.label}
+                                </Link>
+
                                 <NotificationBell
                                     menuRef={notificationsMenuRef}
                                     isOpen={isNotificationsOpen}
@@ -633,6 +684,31 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                                     </div>
                                                 ) : null}
                                             </div>
+                                            {/* Administration, not workflow. Both were main-menu
+                                                items; both are gated by exactly the capability
+                                                that gated them there, so a user who could not see
+                                                them before cannot see them here either. */}
+                                            {environmentHref || billingHref ? (
+                                                <div className="border-b border-slate-200 p-2" data-testid="user-menu-admin">
+                                                    {environmentHref ? (
+                                                        <Link
+                                                            href={environmentHref}
+                                                            className="flex w-full items-center rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                                                        >
+                                                            {navigation.customer_environment ?? 'Kundemiljø'}
+                                                        </Link>
+                                                    ) : null}
+                                                    {billingHref ? (
+                                                        <Link
+                                                            href={billingHref}
+                                                            className="flex w-full items-center rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                                                        >
+                                                            {translations.billing?.nav ?? 'Abonnement'}
+                                                        </Link>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
+
                                             <div className="p-2">
                                                 <button
                                                     type="button"
@@ -785,7 +861,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">
                     Dette fjerner alle uleste varsler fra listen. Leste varsler beholdes, og
-                    eventuelle oppgaver i Infosenter påvirkes ikke.
+                    eventuelle oppgaver under Oppfølging påvirkes ikke.
                 </p>
 
                 <div className="mt-6 flex flex-wrap gap-3">

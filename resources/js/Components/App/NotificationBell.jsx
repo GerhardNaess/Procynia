@@ -179,7 +179,7 @@ export default function NotificationBell({
                             <div className="text-base font-semibold text-slate-950">Varsler</div>
                             {/* Two different intents, so two buttons and no shared wording:
                                 marking read keeps the messages and clears the badge, deleting
-                                removes them. Neither touches the work in Infosenter. */}
+                                removes them. Neither touches the work under Oppfølging. */}
                             <div className="flex shrink-0 flex-wrap justify-end gap-2">
                                 <button
                                     type="button"
