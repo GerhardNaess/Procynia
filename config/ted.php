@@ -42,8 +42,15 @@ return [
 
     /*
      * TED returns nothing unless asked, and rejects the whole request for one unknown field name.
-     * These are the nine Procynia actually reads; every one was confirmed accepted by the live
+     * These are the eleven Procynia actually reads; every one was confirmed accepted by the live
      * API. `links` comes back whether or not it is asked for.
+     *
+     * The last two are the notice's identity, and they cost nothing: TED answers them in the same
+     * response as everything else, so knowing which procurement a hit belongs to is a matter of
+     * naming the fields rather than of asking a second time. Both were read back from the live API
+     * on 30 September 2026 and compared against Doffin's own records for the same procurements —
+     * procedure-identifier is Doffin's procedureId and notice-identifier is its eFormId, character
+     * for character. See OpportunityNoticeIdentity.
      *
      * Deliberately absent: notice-status. TED has no such field — the API rejects it — so the
      * closest signal about whether an opportunity is live is notice-type, and TedSourceAdapter
@@ -59,5 +66,7 @@ return [
         'classification-cpv',
         'notice-type',
         'links',
+        'procedure-identifier',
+        'notice-identifier',
     ],
 ];

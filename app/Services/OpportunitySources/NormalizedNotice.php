@@ -23,6 +23,15 @@ class NormalizedNotice
         public readonly ?string $sourceUrl,
         public readonly array $cpvCodes = [],
         public readonly array $rawPayload = [],
+        /**
+         * Who this notice is, as opposed to where Procynia read it.
+         *
+         * Always present, so nothing has to guard against a null before asking; empty when the
+         * register said nothing, which is a different answer from a wrong one. Nothing reads it
+         * yet — see OpportunityNoticeIdentity for what the two identifiers mean and why the TED
+         * publication number is not one of them.
+         */
+        public readonly OpportunityNoticeIdentity $identity = new OpportunityNoticeIdentity,
     ) {}
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Services\Doffin;
 
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunityNoticeIdentity;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceSearchResult;
@@ -109,6 +110,21 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
             sourceUrl: $this->sourceUrl($externalId),
             cpvCodes: $cpvCodes,
             rawPayload: $hit,
+            // Doffin knows exactly who this notice is, and does not say so here.
+            //
+            // procedureId and eFormId — the same two UUIDs TED publishes — are returned by the
+            // notices-api detail endpoint, and the search endpoint this adapter reads returns
+            // neither. Fetching them would be one request per hit on a page of results, which is
+            // a cost worth deciding on deliberately rather than acquiring by writing it into a
+            // mapper, so this phase does not.
+            //
+            // Read from the hit anyway, because a hit is whatever the register sent and this is
+            // the one place that is read. When the values are absent the identity is empty, which
+            // says Procynia does not know; it never says the notice has none.
+            identity: OpportunityNoticeIdentity::fromSource(
+                $hit['procedureId'] ?? null,
+                $hit['eFormId'] ?? null,
+            ),
         );
     }
 

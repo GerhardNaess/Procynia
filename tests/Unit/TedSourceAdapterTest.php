@@ -224,6 +224,23 @@ class TedSourceAdapterTest extends TestCase
         $this->assertSame(25, $captured['perPage']);
     }
 
+    /**
+     * TED returns nothing it was not asked for, so a notice's identity has to be requested.
+     *
+     * Asserted against the wire rather than against config, because config being right is not the
+     * same as the request carrying it — and a field quietly dropped here would not fail anything
+     * else: every notice would simply report an unknown procurement, which reads exactly like a
+     * register that does not publish one.
+     */
+    public function test_the_identity_fields_are_among_the_ones_asked_for(): void
+    {
+        $captured = null;
+        $this->adapterCapturing($captured)->search(new OpportunitySearchCriteria, 1, 15);
+
+        $this->assertContains('procedure-identifier', $captured['fields']);
+        $this->assertContains('notice-identifier', $captured['fields']);
+    }
+
     // --------------------------------------------------- TED result to NormalizedNotice
 
     public function test_a_ted_notice_becomes_a_normalized_notice(): void

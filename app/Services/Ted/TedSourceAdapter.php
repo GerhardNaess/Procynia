@@ -3,6 +3,7 @@
 namespace App\Services\Ted;
 
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunityNoticeIdentity;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceSearchResult;
@@ -138,6 +139,13 @@ class TedSourceAdapter implements OpportunitySourceAdapter
             sourceUrl: $this->resolveSourceUrl($hit, $externalId),
             cpvCodes: $this->cpvCodes($hit['classification-cpv'] ?? null),
             rawPayload: $hit,
+            // The publication number above is TED's own row; these two are the procurement and
+            // the document, and Doffin publishes the identical values for both. Read here rather
+            // than compared here — this phase only records who a notice is.
+            identity: OpportunityNoticeIdentity::fromSource(
+                $hit['procedure-identifier'] ?? null,
+                $hit['notice-identifier'] ?? null,
+            ),
         );
     }
 
