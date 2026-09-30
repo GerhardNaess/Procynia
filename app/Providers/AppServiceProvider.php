@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Models\Customer;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
+use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -33,6 +34,7 @@ class AppServiceProvider extends ServiceProvider
         // for the source it actually has.
         $this->app->singleton(OpportunitySourceRegistry::class, fn ($app): OpportunitySourceRegistry => new OpportunitySourceRegistry([
             $app->make(DoffinSourceAdapter::class),
+            $app->make(TedSourceAdapter::class),
         ]));
     }
 

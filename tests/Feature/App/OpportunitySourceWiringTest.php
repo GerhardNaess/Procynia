@@ -8,6 +8,7 @@ use App\Services\OpportunitySources\Exceptions\UnknownOpportunitySourceException
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\OpportunitySources\WatchProfileInboxDiscoveryCoordinator;
+use App\Services\Ted\TedSourceAdapter;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Mockery;
@@ -31,12 +32,23 @@ class OpportunitySourceWiringTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_the_registry_holds_doffin_and_only_doffin(): void
+    public function test_the_registry_holds_both_registered_sources(): void
     {
         $registry = app(OpportunitySourceRegistry::class);
 
-        $this->assertSame(['doffin'], $registry->keys());
+        $this->assertSame(['doffin', 'ted'], $registry->keys());
         $this->assertInstanceOf(DoffinSourceAdapter::class, $registry->get(DoffinSourceAdapter::SOURCE_KEY));
+        $this->assertInstanceOf(TedSourceAdapter::class, $registry->get(TedSourceAdapter::SOURCE_KEY));
+    }
+
+    /** Each answers for itself, which is the whole point of addressing them by key. */
+    public function test_each_source_answers_under_its_own_key(): void
+    {
+        $registry = app(OpportunitySourceRegistry::class);
+
+        $this->assertSame('doffin', $registry->get('doffin')->sourceKey());
+        $this->assertSame('ted', $registry->get('ted')->sourceKey());
+        $this->assertNotSame($registry->get('doffin'), $registry->get('ted'));
     }
 
     /**
@@ -51,13 +63,15 @@ class OpportunitySourceWiringTest extends TestCase
         app(OpportunitySourceAdapter::class);
     }
 
-    public function test_an_unknown_source_is_refused_rather_than_answered_with_doffin(): void
+    public function test_an_unknown_source_is_refused_rather_than_answered_with_a_registered_one(): void
     {
         $registry = app(OpportunitySourceRegistry::class);
 
         $this->expectException(UnknownOpportunitySourceException::class);
 
-        $registry->get('ted');
+        // A register Procynia does not have. 'ted' used to serve as the example here and no longer
+        // can, which is the most concrete evidence this phase changed anything.
+        $registry->get('eu-funding-and-tenders');
     }
 
     /** The registry is one object, so an adapter's state is not rebuilt per consumer. */
@@ -88,8 +102,11 @@ class OpportunitySourceWiringTest extends TestCase
         $result = $coordinator->run(null, 'scheduler');
 
         $this->assertSame(['doffin'], $result['sources_run']);
-        $this->assertSame([], $result['sources_without_worker']);
         $this->assertSame(1, $result['runs']['doffin']['profiles_processed']);
+        // TED is a registered source with no watch discovery worker, and the coordinator says so
+        // rather than quietly running nothing for it. This is the case it was built for.
+        $this->assertSame(['ted'], $result['sources_without_worker']);
+        $this->assertArrayNotHasKey('ted', $result['runs']);
     }
 
     public function test_the_watch_profile_id_and_trigger_reach_the_worker(): void

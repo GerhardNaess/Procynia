@@ -91,7 +91,7 @@ class NoticeController extends Controller
         if ($customerId === null) {
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => $user->isSuperAdmin(),
                     'message' => __('procynia.frontend.super_admin_context_required'),
@@ -123,7 +123,7 @@ class NoticeController extends Controller
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'tab' => $noticeTab,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => false,
                     'message' => null,
@@ -149,7 +149,7 @@ class NoticeController extends Controller
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'tab' => $noticeTab,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => false,
                     'message' => null,
@@ -200,7 +200,7 @@ class NoticeController extends Controller
             publishedWithinDays: $publicationPeriod !== '' ? (int) $publicationPeriod : null,
         );
 
-        $searchResponse = $this->discoveryAdapter()->search($criteria, $page, $perPage);
+        $searchResponse = $this->discoveryAdapter($request)->search($criteria, $page, $perPage);
         $page = $searchResponse->page;
         $perPage = $searchResponse->perPage;
         $fallbackUsed = $searchResponse->fallbackUsed;
@@ -225,7 +225,7 @@ class NoticeController extends Controller
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'tab' => $noticeTab,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => false,
                     'message' => null,
@@ -263,7 +263,7 @@ class NoticeController extends Controller
         // Matched within the source these hits came from. An external id on its own cannot tell
         // Doffin's notice 123 from another register's notice 123, and answering "already saved"
         // on the strength of a shared number would be wrong in exactly the case that matters.
-        $sourceKey = $this->discoverySourceKey();
+        $sourceKey = $this->discoverySourceKey($request);
         $savedExternalIds = $this->savedExternalIdsForSource(
             $this->activeSavedNoticeVisibleQuery($user),
             $sourceKey,
@@ -289,7 +289,7 @@ class NoticeController extends Controller
         return $this->renderNoticeIndexPage($request, [
             'mode' => $mode,
             'tab' => $noticeTab,
-            'source' => $this->discoverySource($mode),
+            'source' => $this->discoverySource($mode, $request),
             'supportMode' => [
                 'active' => false,
                 'message' => null,
@@ -352,21 +352,34 @@ class NoticeController extends Controller
     }
 
     /**
-     * The register the public discovery surface runs against today.
+     * The register that was the only one, for rows written before Procynia recorded which.
      *
-     * Named once, here, rather than spelled into a dozen call sites: when a second register is
-     * registered this becomes a choice — made from the request or the profile — and every caller
-     * below already asks a method rather than a constant.
+     * Not the same question as "which register is this request searching": a case saved in 2025
+     * came from Doffin whatever a 2026 request happens to ask for, and `notices.notice_id` holds
+     * Doffin's ids however many registers are wired up now.
      */
-    private function discoverySourceKey(): string
+    private const LEGACY_SOURCE_KEY = DoffinSourceAdapter::SOURCE_KEY;
+
+    /**
+     * The register this request is searching.
+     *
+     * A choice now that there are two. The UI does not offer it yet, so a request that says
+     * nothing gets Doffin — every existing link, saved search and bookmark keeps meaning what it
+     * meant. A request that does say something gets what it asked for, or nothing: an unknown key
+     * is refused by the registry rather than quietly answered by whichever adapter is at hand,
+     * which is the whole reason the registry refuses instead of defaulting.
+     */
+    private function discoverySourceKey(?Request $request = null): string
     {
-        return DoffinSourceAdapter::SOURCE_KEY;
+        $requested = trim((string) ($request?->string('source') ?? ''));
+
+        return $requested === '' ? DoffinSourceAdapter::SOURCE_KEY : $requested;
     }
 
-    /** The adapter for the discovery surface. Throws if that register is not registered at all. */
-    private function discoveryAdapter(): OpportunitySourceAdapter
+    /** The adapter for the register being searched. Throws if that register is not registered. */
+    private function discoveryAdapter(?Request $request = null): OpportunitySourceAdapter
     {
-        return $this->sources->get($this->discoverySourceKey());
+        return $this->sources->get($this->discoverySourceKey($request));
     }
 
     /**
@@ -383,7 +396,7 @@ class NoticeController extends Controller
             return null;
         }
 
-        return $this->sources->find($source ?? $this->discoverySourceKey());
+        return $this->sources->find($source ?? self::LEGACY_SOURCE_KEY);
     }
 
     public function storeSavedNotice(Request $request): RedirectResponse
@@ -454,7 +467,7 @@ class NoticeController extends Controller
             // recorded. It is matched too — otherwise saving the same notice again would create a
             // second case beside it and step straight past the archived-case guard below — and
             // named on the way past, so it only ever happens once per row.
-            $sourceKey = $this->discoverySourceKey();
+            $sourceKey = $this->discoverySourceKey($request);
             $record = SavedNotice::query()
                 ->where('customer_id', $customerId)
                 ->where('external_id', $validated['notice_id'])
@@ -1501,7 +1514,7 @@ class NoticeController extends Controller
         // A legacy public case that predates the source column came from the only register there
         // was, which is the one the adapter speaks for. Read under that name so it keeps matching;
         // a row from any other register always names itself and is never folded in here.
-        $legacySource = $this->discoverySourceKey();
+        $legacySource = self::LEGACY_SOURCE_KEY;
 
         return $query
             ->where(fn (Builder $scope) => $scope
@@ -2089,7 +2102,7 @@ class NoticeController extends Controller
         // which is the discovery register. Any other register's case reaches the imported notice
         // through the link or not at all.
         $matchesImportedIds = $this->storedSourceAdapter($notice->source, $notice->isPublicNotice())
-            ?->sourceKey() === $this->discoverySourceKey();
+            ?->sourceKey() === self::LEGACY_SOURCE_KEY;
 
         $sourceNotice = $notice->notice_id !== null
             ? Notice::query()->whereKey($notice->notice_id)->with('documents')->first()
@@ -2460,7 +2473,7 @@ class NoticeController extends Controller
         ];
     }
 
-    private function discoverySource(string $mode = 'live'): array
+    private function discoverySource(string $mode = 'live', ?Request $request = null): array
     {
         return match ($mode) {
             'saved' => [
@@ -2472,8 +2485,8 @@ class NoticeController extends Controller
                 'label' => 'Historikk',
             ],
             default => [
-                'type' => $this->discoverySourceKey().'_live_search',
-                'label' => $this->discoveryAdapter()->label(),
+                'type' => $this->discoverySourceKey($request).'_live_search',
+                'label' => $this->discoveryAdapter($request)->label(),
             ],
         };
     }
