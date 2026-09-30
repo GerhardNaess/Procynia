@@ -273,6 +273,11 @@ class SavedNotice extends Model
         // live search or a watch alert and never pass through the import pipeline, so this is a
         // link, not a requirement.
         'notice_id',
+        // The procurement this case is about, once a register has told Procynia which one it is.
+        // Null on every case saved before identity was recorded, and on every one saved from a
+        // register record whose identifiers we have not been given — those keep being found by
+        // (customer_id, source, external_id), exactly as before.
+        'opportunity_id',
         'title',
         'buyer_name',
         'external_url',
@@ -336,6 +341,17 @@ class SavedNotice extends Model
     public function notice(): BelongsTo
     {
         return $this->belongsTo(Notice::class);
+    }
+
+    /**
+     * The procurement this case is about, across every register that publishes it.
+     *
+     * Null is an ordinary answer and always will be for older cases: identity comes from the
+     * registers, and nothing invents it for a row that was saved before anyone asked.
+     */
+    public function opportunity(): BelongsTo
+    {
+        return $this->belongsTo(Opportunity::class);
     }
 
     public function savedBy(): BelongsTo

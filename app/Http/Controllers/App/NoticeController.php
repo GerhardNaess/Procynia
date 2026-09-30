@@ -21,6 +21,7 @@ use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
@@ -52,6 +53,7 @@ class NoticeController extends Controller
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
         private readonly GoNoGoDefaultTemplateService $goNoGoDefaultTemplateService,
+        private readonly OpportunityRegistrar $opportunities,
     ) {}
 
     public function index(Request $request): HttpResponse
@@ -416,6 +418,10 @@ class NoticeController extends Controller
             ? $sourceType
             : SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE;
 
+        // True unless a second register's record led us to a case that already exists. A private
+        // request has no register at all, so it is always its own record.
+        $isOwnRecord = true;
+
         if ($sourceType === SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST) {
             $validated = $request->validate([
                 'source_type' => ['nullable', 'string', Rule::in(SavedNotice::SOURCE_TYPES)],
@@ -462,27 +468,49 @@ class NoticeController extends Controller
             // The identity of a public case is the register plus what that register calls the
             // notice. The source comes from the adapter, so there is one spelling of it, and the
             // controller never has to know which register it is talking to.
-            //
+            $sourceKey = $this->discoverySourceKey($request);
+
+            // Which procurement this record is, if a register has told Procynia. This is the one
+            // place that is allowed to pay for the answer — for Doffin it costs a single detail
+            // request, once per record ever, and it buys the rule that one procurement is one
+            // case however many registers publish it. A null is ordinary: without an identifier
+            // nothing below changes, and the case is found the way it always was.
+            $opportunity = $this->opportunities->resolveWithLookup($sourceKey, (string) $validated['notice_id']);
+
             // A public case whose source is still null is a row from before the register was
             // recorded. It is matched too — otherwise saving the same notice again would create a
             // second case beside it and step straight past the archived-case guard below — and
             // named on the way past, so it only ever happens once per row.
-            $sourceKey = $this->discoverySourceKey($request);
-            $record = SavedNotice::query()
-                ->where('customer_id', $customerId)
-                ->where('external_id', $validated['notice_id'])
-                ->where(fn (Builder $query) => $query
-                    ->where('source', $sourceKey)
-                    ->orWhere(fn (Builder $legacy) => $legacy
-                        ->whereNull('source')
-                        ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
-                ->first()
+            $record = ($opportunity !== null ? $this->opportunities->caseFor($customerId, $opportunity) : null)
+                ?? SavedNotice::query()
+                    ->where('customer_id', $customerId)
+                    ->where('external_id', $validated['notice_id'])
+                    ->where(fn (Builder $query) => $query
+                        ->where('source', $sourceKey)
+                        ->orWhere(fn (Builder $legacy) => $legacy
+                            ->whereNull('source')
+                            ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+                    ->first()
                 ?? new SavedNotice([
                     'customer_id' => $customerId,
                     'external_id' => $validated['notice_id'],
                 ]);
 
-            $record->source = $sourceKey;
+            // Whether this save is about the register record the case was built from, or about a
+            // second register's record of the same procurement. The second kind is why the case
+            // was found at all, and it must not rewrite the case: TED's title for a Norwegian
+            // tender is its own translation, and the bid manager saved the one they saved.
+            $isOwnRecord = ! $record->exists
+                || ((string) $record->external_id === (string) $validated['notice_id']
+                    && ($record->source === null || $record->source === $sourceKey));
+
+            if ($isOwnRecord) {
+                $record->source = $sourceKey;
+            }
+
+            if ($opportunity !== null && $record->opportunity_id === null) {
+                $record->opportunity_id = $opportunity->id;
+            }
 
             // Link the imported notice when Procynia actually has one. Most public cases are saved
             // straight from a live search or a watch alert and never pass through the import
@@ -506,7 +534,13 @@ class NoticeController extends Controller
         $isNewRecord = ! $record->exists;
         $hadCaseAccess = ! $record->exists || $this->savedNoticeAccess->canView($user, $record);
 
-        $record->fill([
+        // Saving the other register's record of a procurement the customer is already working on
+        // reaches the case that exists and leaves its contents alone. Overwriting them would swap
+        // the title, the summary and the link for another register's version of the same tender —
+        // TED's title for a Norwegian notice is its own translation — which nobody asked for and
+        // which would read as data loss. Everything after this still runs: the person pressed save
+        // and gets the same access to the case they would have got by saving it first.
+        $record->fill($isOwnRecord ? [
             'source_type' => $sourceType,
             'title' => $validated['title'],
             'buyer_name' => $validated['buyer_name'] ?? null,
@@ -521,7 +555,7 @@ class NoticeController extends Controller
             'contact_person_email' => $validated['contact_person_email'] ?? null,
             'notes' => $validated['notes'] ?? null,
             'rfi_submission_deadline_at' => $validated['rfi_submission_deadline_at'] ?? null,
-        ]);
+        ] : []);
 
         if ($isNewRecord) {
             $record->saved_by_user_id = $user->id;

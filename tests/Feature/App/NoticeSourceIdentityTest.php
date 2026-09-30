@@ -358,8 +358,14 @@ class NoticeSourceIdentityTest extends TestCase
         // notice_source row.
         $this->assertFalse(Schema::hasColumn('saved_notices', 'notice_source_id'));
 
-        // And no domain rewrite happened underneath this phase.
-        $this->assertFalse(Schema::hasTable('opportunities'));
+        // Phase 5D built the opportunity layer, so its absence is no longer the thing to assert.
+        // What replaced it is stronger: that layer was put BESIDE these tables rather than into
+        // them. notices is the Doffin import's own table and stays that way — a procurement that
+        // two registers publish is recorded in opportunity_source_records, not by a second column
+        // here and not by a second notices row.
+        $this->assertTrue(Schema::hasTable('opportunities'));
+        $this->assertFalse(Schema::hasColumn('notices', 'opportunity_id'));
+        $this->assertFalse(Schema::hasColumn('notice_sources', 'opportunity_id'));
     }
 
     /** Deleting a notice takes its source records with it, and leaves nothing dangling. */

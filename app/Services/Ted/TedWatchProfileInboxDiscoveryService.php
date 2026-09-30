@@ -6,6 +6,7 @@ use App\Models\WatchProfile;
 use App\Services\BidWorkflowNotificationService;
 use App\Services\Doffin\DoffinImportControlService;
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\OpportunitySources\WatchProfileInboxDiscoveryService;
@@ -49,9 +50,10 @@ class TedWatchProfileInboxDiscoveryService extends WatchProfileInboxDiscoverySer
         TedSourceAdapter $sourceAdapter,
         WatchProfileRelevanceScorer $relevance,
         BidWorkflowNotificationService $notifications,
+        OpportunityRegistrar $opportunities,
         private readonly DoffinImportControlService $watchDiscoverySwitches,
     ) {
-        parent::__construct($sourceAdapter, $relevance, $notifications);
+        parent::__construct($sourceAdapter, $relevance, $notifications, $opportunities);
     }
 
     protected function logChannel(): string

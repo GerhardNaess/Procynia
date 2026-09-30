@@ -15,6 +15,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -39,6 +40,12 @@ class SavedNoticeSourceIdentityTest extends TestCase
     {
         parent::setUp();
         $this->withoutMiddleware(ValidateCsrfToken::class);
+
+        // Saving a public case now asks Doffin which procurement the notice is, so these tests
+        // would otherwise reach the live API. An empty detail is the ordinary "the register did
+        // not say" answer, and leaves every case below on the (source, external_id) path it has
+        // always taken.
+        Http::fake(['*' => Http::response([], 200)]);
     }
 
     private function migration(): object
@@ -276,7 +283,13 @@ class SavedNoticeSourceIdentityTest extends TestCase
     {
         $this->assertTrue(Schema::hasColumn('saved_notices', 'external_id'));
         $this->assertTrue(Schema::hasColumn('watch_profile_inbox_records', 'doffin_notice_id'));
-        $this->assertFalse(Schema::hasTable('opportunities'));
+
+        // Phase 5D added the procurement a case is about. It sits beside this phase's identity
+        // rather than replacing it: (source, external_id) is still what a case is found by when
+        // no register has said which procurement it is, which is every case saved before 5D.
+        $this->assertTrue(Schema::hasColumn('saved_notices', 'opportunity_id'));
+        $this->assertTrue(Schema::hasColumn('saved_notices', 'source'));
+        $this->assertTrue(Schema::hasColumn('saved_notices', 'external_id'));
     }
 
     // ------------------------------------------------- saved / history collisions

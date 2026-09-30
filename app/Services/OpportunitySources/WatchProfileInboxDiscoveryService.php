@@ -29,6 +29,7 @@ abstract class WatchProfileInboxDiscoveryService
         protected readonly OpportunitySourceAdapter $sourceAdapter,
         protected readonly WatchProfileRelevanceScorer $relevance,
         protected readonly BidWorkflowNotificationService $notifications,
+        protected readonly OpportunityRegistrar $opportunities,
     ) {}
 
     /** The log prefix this source writes under, e.g. '[DOFFIN][watch-inbox]'. */
@@ -307,10 +308,31 @@ abstract class WatchProfileInboxDiscoveryService
 
         $record->save();
 
+        // Write down which procurement this is, if the register said so. TED says so in every
+        // search result; Doffin says so nowhere in search, so this is free for one sweep and
+        // silent for the other. Deliberately register() and not the lookup: a nightly sweep walks
+        // thousands of hits, and a detail request per hit is exactly the hidden cost this phase
+        // refused to build. The registration is an aside — the inbox record is already saved, and
+        // a watch inbox must not fail because an identity table did.
+        $this->registerOpportunity($notice);
+
         return [
             'state' => $isNew ? 'created' : 'updated',
             'record_id' => (int) $record->id,
         ];
+    }
+
+    private function registerOpportunity(NormalizedNotice $notice): void
+    {
+        try {
+            $this->opportunities->register($notice);
+        } catch (Throwable $throwable) {
+            Log::warning($this->logChannel().' Could not register the opportunity identity.', [
+                'source' => $this->sourceAdapter->sourceKey(),
+                'external_id' => $notice->externalId,
+                'message' => $throwable->getMessage(),
+            ]);
+        }
     }
 
     protected function publishedWithinWindow(NormalizedNotice $notice): bool

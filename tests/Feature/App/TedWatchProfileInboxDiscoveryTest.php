@@ -6,6 +6,9 @@ use App\Models\Customer;
 use App\Models\DoffinImportSetting;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\Opportunity;
+use App\Models\OpportunityNotice;
+use App\Models\OpportunitySourceRecord;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WatchProfile;
@@ -215,6 +218,48 @@ class TedWatchProfileInboxDiscoveryTest extends TestCase
         $this->assertSame('2026-10-30', $record->deadline->toDateString());
         // The same scoring as Doffin's sweep: the keyword is in the description.
         $this->assertSame(20, $record->relevance_score);
+    }
+
+    /**
+     * The sweep writes down which procurement a hit is, because TED already told it.
+     *
+     * Free here and impossible for Doffin: TED returns both eForms identifiers in the search
+     * result, so no extra request is made, and none may be — a nightly sweep that asked a register
+     * one question per hit is the cost this whole design refused to take on.
+     */
+    public function test_a_ted_hit_registers_the_procurement_it_belongs_to(): void
+    {
+        $profile = $this->watchProfile();
+        $this->mockTed([$this->tedHit([
+            'procedure-identifier' => '19379be5-7821-4761-b6bf-30876e2f678e',
+            'notice-identifier' => '50859edc-926f-405a-a1ad-6590a08a5ba9',
+        ])]);
+
+        $this->discovery()->run($profile->id, 'scheduler');
+
+        $record = OpportunitySourceRecord::query()->where('external_id', '653637-2026')->sole();
+
+        $this->assertSame('ted', $record->source);
+        $this->assertSame(
+            '19379be5-7821-4761-b6bf-30876e2f678e',
+            Opportunity::query()->whereKey($record->opportunity_id)->value('procedure_identifier'),
+        );
+        $this->assertSame(
+            '50859edc-926f-405a-a1ad-6590a08a5ba9',
+            OpportunityNotice::query()->whereKey($record->opportunity_notice_id)->value('notice_identifier'),
+        );
+    }
+
+    /** A hit TED did not identify is an inbox record and nothing more. */
+    public function test_a_ted_hit_without_identifiers_registers_no_procurement(): void
+    {
+        $profile = $this->watchProfile();
+        $this->mockTed([$this->tedHit()]);
+
+        $this->discovery()->run($profile->id, 'scheduler');
+
+        $this->assertSame(1, WatchProfileInboxRecord::query()->where('watch_profile_id', $profile->id)->count());
+        $this->assertSame(0, OpportunitySourceRecord::query()->where('external_id', '653637-2026')->count());
     }
 
     /** CPV rules score a TED hit the same way they score a Doffin one. */

@@ -10,6 +10,7 @@ use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
@@ -405,6 +406,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -493,6 +495,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -561,6 +564,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -619,6 +623,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -709,6 +714,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -764,6 +770,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
 
         $request = Request::create('/app/notices/watch-alerts/1', 'DELETE');
@@ -1004,6 +1011,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
         );
     }
 

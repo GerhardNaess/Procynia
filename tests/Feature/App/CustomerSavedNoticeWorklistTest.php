@@ -18,6 +18,7 @@ use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -46,6 +47,12 @@ class CustomerSavedNoticeWorklistTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Saving a public case now asks Doffin which procurement the notice is, so these tests
+        // would otherwise reach the live API. An empty detail is the ordinary "the register did
+        // not say" answer, and leaves every case below on the (source, external_id) path it has
+        // always taken.
+        Http::fake(['*' => Http::response([], 200)]);
 
         $this->useProjectPostgresConnection();
         $this->ensureSavedNoticesTable();

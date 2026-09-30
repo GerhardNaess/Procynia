@@ -5,6 +5,7 @@ namespace App\Services\Doffin;
 use App\Models\WatchProfile;
 use App\Services\BidWorkflowNotificationService;
 use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\OpportunitySources\WatchProfileInboxDiscoveryService;
@@ -26,9 +27,10 @@ class DoffinWatchProfileInboxDiscoveryService extends WatchProfileInboxDiscovery
         DoffinSourceAdapter $sourceAdapter,
         WatchProfileRelevanceScorer $relevance,
         BidWorkflowNotificationService $notifications,
+        OpportunityRegistrar $opportunities,
         private readonly DoffinImportControlService $importControlService,
     ) {
-        parent::__construct($sourceAdapter, $relevance, $notifications);
+        parent::__construct($sourceAdapter, $relevance, $notifications, $opportunities);
     }
 
     protected function logChannel(): string

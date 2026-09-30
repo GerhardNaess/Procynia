@@ -14,6 +14,7 @@ use App\Services\Ted\TedSearchClient;
 use App\Services\Ted\TedSourceAdapter;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
@@ -36,6 +37,12 @@ class LiveSearchSourceSelectionTest extends TestCase
     {
         parent::setUp();
         $this->withoutMiddleware(ValidateCsrfToken::class);
+
+        // Saving a public case now asks Doffin which procurement the notice is, so these tests
+        // would otherwise reach the live API. An empty detail is the ordinary "the register did
+        // not say" answer, and leaves every case below on the (source, external_id) path it has
+        // always taken.
+        Http::fake(['*' => Http::response([], 200)]);
     }
 
     protected function tearDown(): void
