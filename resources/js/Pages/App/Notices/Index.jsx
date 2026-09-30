@@ -504,6 +504,15 @@ function noticeExternalLinkLabel(notice, text) {
         : text.openInDoffinLabel;
 }
 
+function watchAlertLinkLabel(alert, text) {
+    // A watch alert can come from any register now. "Open in Doffin" over a TED notice would be a
+    // plain untruth, so the register's name stays only where the register is Doffin. A record from
+    // before the inbox became source-aware has no source and is Doffin's.
+    return !alert.source || alert.source === 'doffin'
+        ? text.alertsOpenDoffin
+        : text.alertsOpenSource;
+}
+
 function noticeSourceBadgeClassName(notice) {
     return notice.source_type === 'private_request'
         ? 'bg-violet-100 text-violet-700 ring-violet-200'
@@ -732,6 +741,7 @@ export default function NoticeIndex({
         alertsDeleteLabel: nt.alerts_delete_label,
         alertsDeleteConfirm: nt.alerts_delete_confirm,
         alertsOpenDoffin: nt.alerts_open_doffin,
+        alertsOpenSource: nt.alerts_open_source,
         liveTitle: nt.live_title,
         liveDescription: nt.live_description,
         liveSearchPlaceholder: nt.live_search_placeholder,
@@ -1497,7 +1507,7 @@ export default function NoticeIndex({
                                                     rel="noreferrer"
                                                     className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                 >
-                                                    {noticesText.alertsOpenDoffin}
+                                                    {watchAlertLinkLabel(notice, noticesText)}
                                                 </a>
                                             ) : null
                                         }

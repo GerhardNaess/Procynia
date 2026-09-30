@@ -9,6 +9,7 @@ use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\OpportunitySources\WatchProfileInboxDiscoveryCoordinator;
 use App\Services\Ted\TedSourceAdapter;
+use App\Services\Ted\TedWatchProfileInboxDiscoveryService;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Mockery;
@@ -83,43 +84,55 @@ class OpportunitySourceWiringTest extends TestCase
     // ------------------------------------------------------------- orchestration
 
     /**
-     * One registered source, one run. The coordinator exists so that a second registered adapter
-     * becomes a decision somebody has to make, rather than an omission nobody notices.
+     * Every registered source with a worker runs, once, in one sweep.
+     *
+     * This asserted a single run and a TED reported as having no worker. TED has one now, which is
+     * the whole of phase 4C2 in one assertion — and the nightly sweep covering a second register
+     * is a change to what the coordinator does, not merely to what it reports.
      */
     public function test_discovery_runs_once_per_registered_source(): void
     {
-        $discovery = Mockery::mock(DoffinWatchProfileInboxDiscoveryService::class);
-        $discovery->shouldReceive('run')
+        $doffin = Mockery::mock(DoffinWatchProfileInboxDiscoveryService::class);
+        $doffin->shouldReceive('run')
+            ->once()
+            ->with(null, 'scheduler')
+            ->andReturn(['status' => 'success', 'profiles_processed' => 1]);
+
+        $ted = Mockery::mock(TedWatchProfileInboxDiscoveryService::class);
+        $ted->shouldReceive('run')
             ->once()
             ->with(null, 'scheduler')
             ->andReturn(['status' => 'success', 'profiles_processed' => 1]);
 
         $coordinator = new WatchProfileInboxDiscoveryCoordinator(
             app(OpportunitySourceRegistry::class),
-            $discovery,
+            $doffin,
+            $ted,
         );
 
         $result = $coordinator->run(null, 'scheduler');
 
-        $this->assertSame(['doffin'], $result['sources_run']);
+        $this->assertSame(['doffin', 'ted'], $result['sources_run']);
         $this->assertSame(1, $result['runs']['doffin']['profiles_processed']);
-        // TED is a registered source with no watch discovery worker, and the coordinator says so
-        // rather than quietly running nothing for it. This is the case it was built for.
-        $this->assertSame(['ted'], $result['sources_without_worker']);
-        $this->assertArrayNotHasKey('ted', $result['runs']);
+        $this->assertSame(1, $result['runs']['ted']['profiles_processed']);
+        $this->assertSame([], $result['sources_without_worker']);
     }
 
-    public function test_the_watch_profile_id_and_trigger_reach_the_worker(): void
+    public function test_the_watch_profile_id_and_trigger_reach_every_worker(): void
     {
-        $discovery = Mockery::mock(DoffinWatchProfileInboxDiscoveryService::class);
-        $discovery->shouldReceive('run')->once()->with(42, 'manual')->andReturn(['status' => 'success']);
+        $doffin = Mockery::mock(DoffinWatchProfileInboxDiscoveryService::class);
+        $doffin->shouldReceive('run')->once()->with(42, 'manual')->andReturn(['status' => 'success']);
+
+        $ted = Mockery::mock(TedWatchProfileInboxDiscoveryService::class);
+        $ted->shouldReceive('run')->once()->with(42, 'manual')->andReturn(['status' => 'success']);
 
         $coordinator = new WatchProfileInboxDiscoveryCoordinator(
             app(OpportunitySourceRegistry::class),
-            $discovery,
+            $doffin,
+            $ted,
         );
 
-        $this->assertSame(['doffin'], $coordinator->run(42, 'manual')['sources_run']);
+        $this->assertSame(['doffin', 'ted'], $coordinator->run(42, 'manual')['sources_run']);
     }
 
     /**
@@ -137,7 +150,10 @@ class OpportunitySourceWiringTest extends TestCase
         $discovery = Mockery::mock(DoffinWatchProfileInboxDiscoveryService::class);
         $discovery->shouldReceive('run')->once()->andReturn(['status' => 'success']);
 
-        $result = (new WatchProfileInboxDiscoveryCoordinator($registry, $discovery))->run();
+        $ted = Mockery::mock(TedWatchProfileInboxDiscoveryService::class);
+        $ted->shouldReceive('run')->never();
+
+        $result = (new WatchProfileInboxDiscoveryCoordinator($registry, $discovery, $ted))->run();
 
         $this->assertSame(['doffin'], $result['sources_run'], 'only the source with a worker runs');
         $this->assertSame(['some-register'], $result['sources_without_worker']);

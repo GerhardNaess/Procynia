@@ -703,6 +703,8 @@ return [
         'alerts_delete_label' => 'Slett',
         'alerts_delete_confirm' => 'Slette dette varselet?',
         'alerts_open_doffin' => 'Åpne i Doffin',
+        // A watch alert may come from any register. Only a Doffin hit is told to open in Doffin.
+        'alerts_open_source' => 'Åpne kunngjøringen',
         'live_title' => 'Live søk i Doffin',
         'live_description' => 'Søk direkte i Doffin etter tittel, oppdragsgiver, organisasjonsnummer og beskrivelse.',
         'live_search_placeholder' => 'Søk i tittel, oppdragsgiver, org.nr. eller beskrivelse',

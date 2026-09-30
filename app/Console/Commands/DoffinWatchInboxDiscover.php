@@ -5,14 +5,24 @@ namespace App\Console\Commands;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\Doffin\DoffinWatchInboxDigestService;
 use App\Services\OpportunitySources\WatchProfileInboxDiscoveryCoordinator;
+use App\Services\Ted\TedSourceAdapter;
 use Illuminate\Console\Command;
 use RuntimeException;
 
+/**
+ * The nightly watch sweep.
+ *
+ * Still named for Doffin, because the scheduler, the runbooks and the operators all know it by
+ * that name, and renaming a scheduled command is a migration of its own. What it does is no longer
+ * Doffin-only: it asks the coordinator to run every registered source that has a worker, reports
+ * each one separately, and hands every new record — whichever register found it — to the same
+ * digest.
+ */
 class DoffinWatchInboxDiscover extends Command
 {
     protected $signature = 'doffin:watch-inbox-discover {--trigger=manual}';
 
-    protected $description = 'Run nightly Doffin live discovery for all active watch profiles and upsert scoped inbox records.';
+    protected $description = 'Run the nightly watch discovery sweep for all active watch profiles, across every registered opportunity source, and upsert scoped inbox records.';
 
     public function handle(
         WatchProfileInboxDiscoveryCoordinator $coordinator,
@@ -23,9 +33,6 @@ class DoffinWatchInboxDiscover extends Command
         $this->line('Starting Doffin watch inbox discovery.');
         $this->line("trigger: {$trigger}");
 
-        // The command stays Doffin's — it is named for it, scheduled for it, and reports it — but
-        // it no longer reaches for the Doffin worker itself. Going through the coordinator is what
-        // makes a second registered source a visible decision rather than a silent omission.
         $result = $coordinator->run(null, $trigger);
         $summary = $result['runs'][DoffinSourceAdapter::SOURCE_KEY] ?? null;
 
@@ -42,18 +49,26 @@ class DoffinWatchInboxDiscover extends Command
         if (($summary['status'] ?? null) === 'skipped') {
             $this->info('Doffin watch inbox discovery skipped.');
             $this->line((string) ($summary['skip_reason_label'] ?? 'Watch inbox discovery is disabled.'));
-
-            return self::SUCCESS;
+        } else {
+            $this->info('Doffin watch inbox discovery completed.');
+            $this->line('profiles_processed: '.$summary['profiles_processed']);
+            $this->line('profiles_failed: '.$summary['profiles_failed']);
+            $this->line('records_seen: '.$summary['records_seen']);
+            $this->line('records_created: '.$summary['records_created']);
+            $this->line('records_updated: '.$summary['records_updated']);
         }
 
-        $digestSummary = $digestService->createAlertsForCreatedRecordIds($summary['created_record_ids'] ?? []);
+        $tedSummary = $result['runs'][TedSourceAdapter::SOURCE_KEY] ?? null;
 
-        $this->info('Doffin watch inbox discovery completed.');
-        $this->line('profiles_processed: '.$summary['profiles_processed']);
-        $this->line('profiles_failed: '.$summary['profiles_failed']);
-        $this->line('records_seen: '.$summary['records_seen']);
-        $this->line('records_created: '.$summary['records_created']);
-        $this->line('records_updated: '.$summary['records_updated']);
+        if ($tedSummary !== null) {
+            $this->reportTed($tedSummary);
+        }
+
+        // Every source's new records go into the same digest. A recipient gets one message about
+        // what turned up last night, not one per register — the inbox has never been organised by
+        // where a notice came from, and the digest should not be either.
+        $digestSummary = $digestService->createAlertsForCreatedRecordIds($this->createdRecordIds($result['runs']));
+
         $this->line('digest_records_considered: '.$digestSummary['records_considered']);
         $this->line('digest_watch_profiles_involved: '.$digestSummary['watch_profiles_involved']);
         $this->line('digest_records_skipped_no_recipient: '.$digestSummary['records_skipped_no_recipient']);
@@ -61,9 +76,44 @@ class DoffinWatchInboxDiscover extends Command
         $this->line('digest_alerts_created: '.$digestSummary['alerts_created']);
         $this->line('digest_alerts_failed: '.$digestSummary['alerts_failed']);
 
-        return $summary['profiles_failed'] > 0 || $digestSummary['alerts_failed'] > 0
+        $profilesFailed = collect($result['runs'])->sum(fn (array $run): int => (int) ($run['profiles_failed'] ?? 0));
+
+        return $profilesFailed > 0 || $digestSummary['alerts_failed'] > 0
             ? self::FAILURE
             : self::SUCCESS;
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function reportTed(array $summary): void
+    {
+        if (($summary['status'] ?? null) === 'skipped') {
+            $this->info('TED watch inbox discovery skipped.');
+            $this->line((string) ($summary['skip_reason_label'] ?? 'TED watch discovery is disabled.'));
+
+            return;
+        }
+
+        $this->info('TED watch inbox discovery completed.');
+        $this->line('ted_profiles_processed: '.$summary['profiles_processed']);
+        $this->line('ted_profiles_failed: '.$summary['profiles_failed']);
+        $this->line('ted_records_seen: '.$summary['records_seen']);
+        $this->line('ted_records_created: '.$summary['records_created']);
+        $this->line('ted_records_updated: '.$summary['records_updated']);
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $runs
+     * @return list<int>
+     */
+    private function createdRecordIds(array $runs): array
+    {
+        return collect($runs)
+            ->flatMap(fn (array $run): array => $run['created_record_ids'] ?? [])
+            ->map(fn (mixed $id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function resolveTrigger(): string

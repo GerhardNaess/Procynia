@@ -4,35 +4,32 @@ namespace App\Services\OpportunitySources;
 
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\Doffin\DoffinWatchProfileInboxDiscoveryService;
+use App\Services\Ted\TedSourceAdapter;
+use App\Services\Ted\TedWatchProfileInboxDiscoveryService;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Runs watch discovery once per source Procynia can discover from.
  *
- * Today that is one source, and the whole class is four lines of dispatch. It exists anyway, for
- * one reason: the moment a second adapter is registered, something has to decide whether it takes
- * part in the nightly sweep — and without a boundary that decision would be made by omission, in
- * a command that only ever knew how to call Doffin.
+ * It was built with one source and one worker, for the moment there would be two: without a
+ * boundary here, a second register taking part in the nightly sweep would have been decided by
+ * omission, inside a command that only ever knew how to call Doffin. That moment has arrived, and
+ * the change it needed was a line.
  *
- * WHY THE WORKER IS STILL SOURCE-SPECIFIC.
+ * Both registers now have a worker, so `sources_without_worker` is empty — which does not make it
+ * pointless. It is what separates "this source's discovery has not been built" from "this source
+ * ran and found nothing", and the next register registered will be reported by it on the day it is
+ * registered rather than on the day somebody notices.
  *
- * DoffinWatchProfileInboxDiscoveryService looks generic — it scores against NormalizedNotice and
- * upserts source-aware records — but the filters it builds are Doffin's vocabulary:
- * `publication_period`, `keywords_mode`, `status => 'ACTIVE'`, a CPV list joined with commas.
- * OpportunitySourceAdapter::search() takes an untyped array, so that vocabulary is the contract in
- * practice. Making the worker source-neutral therefore means designing a source-neutral filter
- * contract, which is a real piece of design and belongs with the second adapter that would give it
- * its second data point — not invented ahead of one.
- *
- * So the worker stays Doffin's, and this names that fact instead of hiding it: a registered source
- * with no discovery worker is reported, not silently skipped. That is the difference between
- * "TED discovery is not built yet" and "TED discovery ran and found nothing".
+ * A worker deciding it may not run — a switch that is off, a register with no credentials — is not
+ * the same thing. That is a run with status 'skipped' and a reason, and it belongs to the worker.
  */
 class WatchProfileInboxDiscoveryCoordinator
 {
     public function __construct(
         private readonly OpportunitySourceRegistry $sources,
         private readonly DoffinWatchProfileInboxDiscoveryService $doffinDiscovery,
+        private readonly TedWatchProfileInboxDiscoveryService $tedDiscovery,
     ) {}
 
     /**
@@ -76,15 +73,13 @@ class WatchProfileInboxDiscoveryCoordinator
     /**
      * The discovery worker for one source, or null when none is built.
      *
-     * A match rather than a lookup table: there is one entry, and a table of one would only make
-     * the single case harder to read.
-     *
      * @return null|callable(?int, string): array<string, mixed>
      */
     private function workerFor(string $sourceKey): ?callable
     {
         return match ($sourceKey) {
             DoffinSourceAdapter::SOURCE_KEY => fn (?int $watchProfileId, string $trigger): array => $this->doffinDiscovery->run($watchProfileId, $trigger),
+            TedSourceAdapter::SOURCE_KEY => fn (?int $watchProfileId, string $trigger): array => $this->tedDiscovery->run($watchProfileId, $trigger),
             default => null,
         };
     }

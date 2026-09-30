@@ -704,6 +704,8 @@ return [
         'alerts_delete_label' => 'Delete',
         'alerts_delete_confirm' => 'Delete this alert?',
         'alerts_open_doffin' => 'Open in Doffin',
+        // A watch alert may come from any register. Only a Doffin hit is told to open in Doffin.
+        'alerts_open_source' => 'Open the notice',
         'live_title' => 'Live search in Doffin',
         'live_description' => 'Search directly in Doffin by title, buyer, organisation number, and description.',
         'live_search_placeholder' => 'Search by title, buyer, org. number or description',
