@@ -35,6 +35,33 @@ class NormalizedNotice
     ) {}
 
     /**
+     * The same notice, said to be someone in particular.
+     *
+     * Identity can arrive later than the notice does — Doffin publishes the eForms identifiers on
+     * a different endpoint than the one discovery reads — so there has to be a way to add it
+     * without rebuilding a notice field by field at the call site, where a forgotten argument
+     * would silently drop a title. Everything else is carried over unchanged; only who this is
+     * changes, and only for the copy returned.
+     */
+    public function withIdentity(OpportunityNoticeIdentity $identity): self
+    {
+        return new self(
+            sourceKey: $this->sourceKey,
+            externalId: $this->externalId,
+            title: $this->title,
+            description: $this->description,
+            buyerName: $this->buyerName,
+            publicationDate: $this->publicationDate,
+            deadline: $this->deadline,
+            status: $this->status,
+            sourceUrl: $this->sourceUrl,
+            cpvCodes: $this->cpvCodes,
+            rawPayload: $this->rawPayload,
+            identity: $identity,
+        );
+    }
+
+    /**
      * What the register called this notice's status, verbatim.
      *
      * Read from the raw hit rather than reconstructed from the enum, so an unrecognised status is
