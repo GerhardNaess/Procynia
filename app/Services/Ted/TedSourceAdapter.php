@@ -66,6 +66,11 @@ class TedSourceAdapter implements OpportunitySourceAdapter
         return 'Live søk i TED';
     }
 
+    public function registerName(): string
+    {
+        return 'TED';
+    }
+
     public function search(OpportunitySearchCriteria $criteria, int $page, int $perPage): OpportunitySourceSearchResult
     {
         $response = $this->client->search(

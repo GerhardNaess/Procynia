@@ -1189,6 +1189,7 @@ return [
         'hint_risk_level' => 'Risk level shows how sensitive the requirement is in the bid work. The assessment is based on complexity, coverage, and how reliable the documentation basis is. High risk means the requirement should be prioritised and manually reviewed before the answer is used.',
     ],
     'saved_notice' => [
+        'sources_label' => 'Sources',
         'archived' => 'Archived',
         'page_help_button' => 'Help',
         'page_help_title' => 'About this case',

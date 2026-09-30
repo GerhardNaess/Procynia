@@ -8,6 +8,7 @@ use App\Models\GoNoGoAssessmentCriterion;
 use App\Models\Notice;
 use App\Models\NoticeAttention;
 use App\Models\NoticeDocument;
+use App\Models\OpportunitySourceRecord;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticeInfoItem;
@@ -21,6 +22,7 @@ use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\LiveSearchOpportunityLinker;
 use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
@@ -54,6 +56,7 @@ class NoticeController extends Controller
         private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
         private readonly GoNoGoDefaultTemplateService $goNoGoDefaultTemplateService,
         private readonly OpportunityRegistrar $opportunities,
+        private readonly LiveSearchOpportunityLinker $opportunityLinks,
     ) {}
 
     public function index(Request $request): HttpResponse
@@ -276,6 +279,27 @@ class NoticeController extends Controller
             $sourceKey,
             $hitExternalIds,
         );
+
+        // And the same question asked of the procurement rather than the record.
+        //
+        // A case opened from Doffin is the same case when TED publishes the tender, so a hit whose
+        // procurement this customer already works on is already saved — offering it again would
+        // hand them a second case for one tender, which is the thing this whole model exists to
+        // prevent. Matched only on the identifiers the registers publish themselves; a hit nobody
+        // can identify is simply not matched, and falls back on the source-aware answer above.
+        $opportunityLinks = $this->opportunityLinks->linkHits(
+            $sourceKey,
+            $notices->all(),
+            $this->caseOpportunityIds($user),
+        );
+        $savedExternalIds = array_values(array_unique(array_merge(
+            $savedExternalIds,
+            $this->opportunityLinks->coveredExternalIds($opportunityLinks, $this->activeSavedNoticeVisibleQuery($user)),
+        )));
+        $archivedExternalIds = array_values(array_unique(array_merge(
+            $archivedExternalIds,
+            $this->opportunityLinks->coveredExternalIds($opportunityLinks, $this->archivedSavedNoticeVisibleQuery($user)),
+        )));
 
         $items = $notices
             ->map(fn ($notice): array => $notice->toDiscoveryPayload($savedExternalIds, $archivedExternalIds))
@@ -810,6 +834,9 @@ class NoticeController extends Controller
         $record = $this->customerSavedNoticeVisibleQuery($user)
             ->whereKey($savedNotice->id)
             ->with([
+                // Which registers publish this procurement. Null for a case with no identity,
+                // which is every case saved before the identifiers were recorded.
+                'opportunity.sourceRecords',
                 'opportunityOwner:id,name,bid_role',
                 'bidManager:id,name,bid_role',
                 'businessReviews:id,saved_notice_id,business_review_at',
@@ -1571,6 +1598,25 @@ class NoticeController extends Controller
         return $source."\n".$externalId;
     }
 
+    /**
+     * The procurements this user can see a case for, open or archived.
+     *
+     * Read through the ordinary visibility query, so a case somebody else in the customer keeps
+     * private stays private here too — a hit must not read as "already saved" on the strength of
+     * a case the person looking is not allowed to know about.
+     *
+     * @return array<int, int>
+     */
+    private function caseOpportunityIds(User $user): array
+    {
+        return $this->customerSavedNoticeVisibleQuery($user)
+            ->whereNotNull('opportunity_id')
+            ->distinct()
+            ->pluck('opportunity_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+    }
+
     private function customerSavedNoticeManageableQuery(User $user): Builder
     {
         return $this->savedNoticeAccess->manageableQueryFor($user);
@@ -1834,6 +1880,83 @@ class NoticeController extends Controller
         ];
     }
 
+    /**
+     * The registers a case's procurement is published in.
+     *
+     * Provenance, shown rather than folded away. Doffin and TED both publishing one tender is the
+     * ordinary situation for anything over the EEA threshold, and a bid manager who saved it from
+     * one of them should be able to see that the other has it too — not least because the two
+     * records carry different reference numbers, and somebody will eventually be given the one
+     * that is not in the case.
+     *
+     * Deduplicated by register, because a register can hold several records of one procurement:
+     * TED republishes, and a procurement's change notice and award notice are separate rows. Two
+     * "TED" entries would say nothing the first one does not.
+     *
+     * A case with no identity gets the one register it was saved from, which is the whole truth
+     * about it. A private request gets nothing — it has no register.
+     *
+     * @return array<int, array{key: string, label: string, external_id: string, url: ?string, is_case_origin: bool}>
+     */
+    private function caseSourcesPayload(SavedNotice $notice): array
+    {
+        if ($notice->source_type !== SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE) {
+            return [];
+        }
+
+        $ownSource = $notice->source ?? self::LEGACY_SOURCE_KEY;
+        $ownEntry = [
+            'key' => $ownSource,
+            'label' => $this->registerName($ownSource),
+            'external_id' => (string) $notice->external_id,
+            'url' => $this->savedNoticeExternalUrl($notice),
+            'is_case_origin' => true,
+        ];
+
+        $sources = collect($notice->opportunity?->sourceRecords ?? [])
+            ->filter(fn (OpportunitySourceRecord $record): bool => trim((string) $record->source) !== '')
+            ->sortBy(fn (OpportunitySourceRecord $record): string => (string) $record->source)
+            ->unique(fn (OpportunitySourceRecord $record): string => (string) $record->source)
+            ->map(fn (OpportunitySourceRecord $record): array => [
+                'key' => (string) $record->source,
+                'label' => $this->registerName((string) $record->source),
+                'external_id' => (string) $record->external_id,
+                'url' => $this->sourceRecordUrl($record),
+                'is_case_origin' => (string) $record->source === $ownSource,
+            ])
+            ->values()
+            ->all();
+
+        if ($sources === []) {
+            return [$ownEntry];
+        }
+
+        // The case's own register goes first and is never missing from the list: it is where the
+        // title, the deadline and the documents in front of the reader actually came from.
+        $own = array_values(array_filter($sources, fn (array $source): bool => $source['is_case_origin']));
+        $others = array_values(array_filter($sources, fn (array $source): bool => ! $source['is_case_origin']));
+
+        return [...($own === [] ? [$ownEntry] : $own), ...$others];
+    }
+
+    /** The register's own short name, or its key when this installation has no adapter for it. */
+    private function registerName(string $sourceKey): string
+    {
+        return $this->sources->find($sourceKey)?->registerName() ?? Str::upper($sourceKey);
+    }
+
+    /** What the register stored, or what its adapter would build now. */
+    private function sourceRecordUrl(OpportunitySourceRecord $record): ?string
+    {
+        $stored = trim((string) $record->source_url);
+
+        if ($stored !== '') {
+            return $stored;
+        }
+
+        return $this->sources->find((string) $record->source)?->sourceUrl((string) $record->external_id);
+    }
+
     private function savedNoticeCasePayload(
         SavedNotice $notice,
         bool $canManageCase,
@@ -1858,6 +1981,8 @@ class NoticeController extends Controller
             'source_notice_id' => $notice->notice_id,
             'source_type' => $notice->source_type,
             'source_type_label' => $notice->source_type_label,
+            // The registers this procurement is published in, the case's own first.
+            'sources' => $this->caseSourcesPayload($notice),
             'title' => $notice->title,
             'organization_name' => $notice->buyer_name,
             'external_url' => $this->savedNoticeExternalUrl($notice),

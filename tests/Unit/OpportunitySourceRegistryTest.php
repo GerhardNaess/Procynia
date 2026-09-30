@@ -42,6 +42,11 @@ class OpportunitySourceRegistryTest extends TestCase
                 return 'Stand-in for '.$this->key;
             }
 
+            public function registerName(): string
+            {
+                return strtoupper($this->key);
+            }
+
             public function search(OpportunitySearchCriteria $criteria, int $page, int $perPage): OpportunitySourceSearchResult
             {
                 return new OpportunitySourceSearchResult(

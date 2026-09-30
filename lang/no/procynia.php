@@ -1188,6 +1188,7 @@ return [
         'hint_risk_level' => 'Risikonivå viser hvor sårbart kravet er i tilbudsarbeidet. Vurderingen bygger på kompleksitet, dekningsgrad og hvor sikkert dokumentasjonsgrunnlaget er. Høy risiko betyr at kravet bør prioriteres og kontrolleres manuelt før svaret brukes.',
     ],
     'saved_notice' => [
+        'sources_label' => 'Kilder',
         'archived' => 'Arkivert',
         'page_help_button' => 'Hjelp',
         'page_help_title' => 'Om denne saken',

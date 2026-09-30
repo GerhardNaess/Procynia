@@ -10,6 +10,7 @@ use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\LiveSearchOpportunityLinker;
 use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\SavedNoticeAccessService;
@@ -58,6 +59,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->string('source_type')->default('public_notice');
             // The identity, as of 2026_09_27_000003; external_id stays as legacy compatibility.
             $table->string('source', 50)->nullable();
+            // The procurement behind the register record, as of 2026_09_30_000002. Null is the
+            // ordinary value: it is only known when a register published the eForms identifiers.
+            $table->unsignedBigInteger('opportunity_id')->nullable();
             $table->unsignedBigInteger('notice_id')->nullable();
             $table->string('external_id');
             $table->string('title');
@@ -85,6 +89,43 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->timestamps();
 
             $table->unique(['customer_id', 'external_id']);
+        });
+
+        // The identity layer, as of 2026_09_30_000001. Discovery reads it to answer whether a hit
+        // belongs to a procurement the customer already has a case for, so the tables have to be
+        // here even though nothing in this file has an identity to put in them.
+        Schema::dropIfExists('opportunity_source_records');
+        Schema::dropIfExists('opportunity_notices');
+        Schema::dropIfExists('opportunities');
+        Schema::create('opportunities', function (Blueprint $table): void {
+            $table->id();
+            $table->string('procedure_identifier', 255)->unique();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('opportunity_notices', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('opportunity_id');
+            $table->string('notice_identifier', 255)->unique();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('opportunity_source_records', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('opportunity_id');
+            $table->unsignedBigInteger('opportunity_notice_id')->nullable();
+            $table->string('source', 50);
+            $table->string('external_id');
+            $table->string('source_url', 1000)->nullable();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['source', 'external_id']);
         });
 
         Schema::dropIfExists('saved_notice_user_access');
@@ -173,6 +214,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     {
         Schema::dropIfExists('watch_profile_inbox_records');
         Schema::dropIfExists('watch_profiles');
+        Schema::dropIfExists('opportunity_source_records');
+        Schema::dropIfExists('opportunity_notices');
+        Schema::dropIfExists('opportunities');
         Schema::dropIfExists('saved_notice_user_access');
         Schema::dropIfExists('watch_profile_cpv_codes');
         Schema::dropIfExists('departments');
@@ -407,6 +451,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -496,6 +541,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -565,6 +611,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -624,6 +671,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -715,6 +763,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -771,6 +820,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
 
         $request = Request::create('/app/notices/watch-alerts/1', 'DELETE');
@@ -1012,6 +1062,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
             app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
     }
 

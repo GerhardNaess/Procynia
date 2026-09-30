@@ -28,6 +28,11 @@ class DoffinSourceAdapter implements OpportunitySourceAdapter
         return 'Live søk i Doffin';
     }
 
+    public function registerName(): string
+    {
+        return 'Doffin';
+    }
+
     public function search(OpportunitySearchCriteria $criteria, int $page, int $perPage): OpportunitySourceSearchResult
     {
         $response = $this->liveSearchService->search($this->toDoffinFilters($criteria), $page, $perPage);
