@@ -198,16 +198,15 @@ class WatchProfileRelevanceScorerTest extends TestCase
     }
 
     /**
-     * Punctuation is ignored on both sides — and the check digit is not.
+     * How a code is written down is not part of the code — on either side of the comparison.
      *
-     * Matching reduces each code to its digits, so "90.910.000" and "90 910 000" are the same code
-     * as "90910000", while "90910000-9" becomes the nine-digit string "909100009" and matches
-     * nothing. That is how scoring has always worked and how OpportunitySearchCriteria normalises
-     * codes too, so it is stated here rather than quietly changed: both the CPV catalogue and the
-     * stored watch rules hold bare eight-digit codes, so nothing in Procynia hits it today. A
-     * register that started returning codes with their check digit would, silently.
+     * This test used to assert the opposite for the check digit, because that is what the code did:
+     * matching reduced each value to its digits, so "90910000-9" became "909100009" and matched
+     * nothing. Nothing in Procynia hit it, since both the catalogue and the stored watch rules hold
+     * bare eight-digit codes — but a register that began returning the written form would have
+     * scored every one of its hits at zero and left the watch inbox looking simply empty.
      */
-    public function test_cpv_matching_ignores_punctuation_but_not_the_check_digit(): void
+    public function test_cpv_matching_ignores_punctuation_and_the_check_digit(): void
     {
         $profile = $this->profile([], [['cpv_code' => '90.910.000', 'weight' => 15]]);
 
@@ -215,10 +214,44 @@ class WatchProfileRelevanceScorerTest extends TestCase
             'title' => 'Renhold',
             'cpv_codes' => ['90910000'],
         ])));
-        $this->assertSame(0, $this->scorer()->score($profile, $this->notice([
+        $this->assertSame(15, $this->scorer()->score($profile, $this->notice([
             'title' => 'Renhold',
             'cpv_codes' => ['90910000-9'],
         ])));
+    }
+
+    /** And the same code, whichever side carries the check digit. */
+    public function test_a_rule_written_with_a_check_digit_matches_a_bare_code(): void
+    {
+        $profile = $this->profile([], [['cpv_code' => '90910000-9', 'weight' => 15]]);
+
+        $this->assertSame(15, $this->scorer()->score($profile, $this->notice([
+            'title' => 'Renhold',
+            'cpv_codes' => ['90910000'],
+        ])));
+    }
+
+    /** A rule that is not a code matches nothing, rather than matching by prefix. */
+    public function test_a_rule_that_is_not_a_cpv_code_scores_nothing(): void
+    {
+        $profile = $this->profile([], [['cpv_code' => '909', 'weight' => 15]]);
+
+        $this->assertSame(0, $this->scorer()->score($profile, $this->notice([
+            'title' => 'Renhold',
+            'cpv_codes' => ['90910000'],
+        ])));
+    }
+
+    /** The register's search is asked for the classification, not the written form. */
+    public function test_search_cpv_codes_drop_the_check_digit(): void
+    {
+        $profile = $this->profile([], [
+            ['cpv_code' => '90910000-9', 'weight' => 15],
+            ['cpv_code' => '72.222.300', 'weight' => 5],
+        ]);
+
+        // Canonicalising because the order is the relation's, not this rule's.
+        $this->assertEqualsCanonicalizing(['90910000', '72222300'], $this->scorer()->searchCpvCodes($profile));
     }
 
     // ------------------------------------------------------------------ the two keyword readings

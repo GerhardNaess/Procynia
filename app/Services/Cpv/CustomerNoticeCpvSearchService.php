@@ -2,6 +2,7 @@
 
 namespace App\Services\Cpv;
 
+use App\Support\CpvCodeNormalizer;
 use Illuminate\Support\Str;
 
 class CustomerNoticeCpvSearchService
@@ -49,6 +50,9 @@ class CustomerNoticeCpvSearchService
             return $this->popular(array_keys($selected), $limit);
         }
 
+        // Not CpvCodeNormalizer, on purpose: somebody typing "909" into the picker is searching for
+        // codes that begin that way, not naming one. This is a substring of a code, and the shared
+        // rule would correctly refuse it as not being a code at all.
         $digitsQuery = preg_replace('/\D+/', '', $query) ?? '';
         $synonymPositions = array_flip($this->matchedSynonymCodes($normalizedQuery));
         $matches = [];
@@ -300,12 +304,7 @@ class CustomerNoticeCpvSearchService
      */
     private function normalizeCodes(array $codes): array
     {
-        return collect($codes)
-            ->map(fn (string $code): string => preg_replace('/\D+/', '', $code) ?? '')
-            ->filter(fn (string $code): bool => $code !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return CpvCodeNormalizer::normalizeMany($codes);
     }
 
     private function normalize(string $value): string

@@ -5,6 +5,7 @@ namespace App\Services\Doffin;
 use App\Models\Notice;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileMatch;
+use App\Support\CpvCodeNormalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -14,8 +15,7 @@ class DoffinWatchProfileMatchService
 {
     public function __construct(
         private readonly DoffinRelevanceService $relevanceService,
-    ) {
-    }
+    ) {}
 
     public function run(?int $customerId = null, ?int $watchProfileId = null): array
     {
@@ -203,14 +203,16 @@ class DoffinWatchProfileMatchService
         ], static fn (mixed $value): bool => is_string($value) && trim($value) !== ''))));
     }
 
+    /**
+     * Both a stored notice code and a watch rule come through here, which is why this can change.
+     *
+     * It trimmed and compared the strings as written, so the two sides matched only when they had
+     * been written identically — "90910000" against "90910000-9" was a miss. Both sides now read by
+     * the same rule, so eight-digit codes, which is all Procynia's catalogue holds, behave exactly
+     * as before, and a written check digit no longer hides a match.
+     */
     private function normalizeCpvCode(mixed $value): ?string
     {
-        if (! is_string($value)) {
-            return null;
-        }
-
-        $normalized = trim($value);
-
-        return $normalized === '' ? null : $normalized;
+        return CpvCodeNormalizer::normalize($value);
     }
 }

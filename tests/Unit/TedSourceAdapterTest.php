@@ -128,6 +128,22 @@ class TedSourceAdapterTest extends TestCase
         $this->assertStringContainsString('classification-cpv IN (72000000 48000000)', $query);
     }
 
+    /**
+     * TED classifies by the eight digits, so that is what it is asked about.
+     *
+     * The adapter does no normalising of its own — criteria arrive normalised, which is why a code
+     * written with its check digit anywhere upstream reaches the query as the classification rather
+     * than as a nine-digit string TED has no notices under.
+     */
+    public function test_a_written_check_digit_never_reaches_the_query(): void
+    {
+        $query = $this->queryFor(OpportunitySearchCriteria::fromArray([
+            'cpv_codes' => ['72000000-5', '48.000.000'],
+        ]));
+
+        $this->assertStringContainsString('classification-cpv IN (72000000 48000000)', $query);
+    }
+
     public function test_keywords_honour_all_or_any(): void
     {
         $all = $this->queryFor(new OpportunitySearchCriteria(keywords: ['renhold', 'vask'], matchAllKeywords: true));

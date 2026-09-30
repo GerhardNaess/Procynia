@@ -73,14 +73,29 @@ class OpportunitySearchCriteriaTest extends TestCase
     /**
      * A CPV code is a number however it is written down, and it stays a separate code — joining
      * them is a wire format, and belongs to whoever owns the wire.
+     *
+     * This asserted that "90910000-9" became "909100009", which is what the code did and not what
+     * anybody wanted: nine digits name no classification, so a register asked for one answered with
+     * nothing. The check digit is dropped now, which makes the first and third entries the same
+     * code — and therefore one entry.
      */
-    public function test_cpv_codes_are_structured_and_reduced_to_digits(): void
+    public function test_cpv_codes_are_structured_and_reduced_to_the_classification(): void
     {
         $criteria = OpportunitySearchCriteria::fromArray([
             'cpv_codes' => '90910000-9, 72.222.300; 90910000',
         ]);
 
-        $this->assertSame(['909100009', '72222300', '90910000'], $criteria->cpvCodes);
+        $this->assertSame(['90910000', '72222300'], $criteria->cpvCodes);
+    }
+
+    /** A value that is not a code is left out rather than passed on to be asked about. */
+    public function test_something_that_is_not_a_cpv_code_never_reaches_a_register(): void
+    {
+        $criteria = OpportunitySearchCriteria::fromArray([
+            'cpv_codes' => '909, renhold, 90910000',
+        ]);
+
+        $this->assertSame(['90910000'], $criteria->cpvCodes);
     }
 
     public function test_a_rolling_window_must_be_a_positive_number_of_days(): void

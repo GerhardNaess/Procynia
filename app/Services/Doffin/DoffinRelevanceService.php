@@ -7,6 +7,7 @@ use App\Models\Notice;
 use App\Models\SyncLog;
 use App\Models\User;
 use App\Models\WatchProfile;
+use App\Support\CpvCodeNormalizer;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -136,7 +137,7 @@ class DoffinRelevanceService
         $cpvRules = [];
 
         foreach ($watchProfile->cpvCodes as $cpvCode) {
-            $code = $this->normalizeText($cpvCode->cpv_code);
+            $code = CpvCodeNormalizer::normalize($cpvCode->cpv_code);
 
             if ($code === null) {
                 continue;
@@ -205,13 +206,20 @@ class DoffinRelevanceService
         ?WatchProfile $watchProfile,
         array $inputs,
     ): array {
-        $noticeCpvCodes = $notice->cpvCodes
+        // Two readings of the same column, because they are asked two different questions.
+        //
+        // Rule matching happens in memory and compares a classification to a classification, so it
+        // reads both sides through CpvCodeNormalizer. The learning lookup is a SQL whereIn against
+        // the stored strings, which nothing normalises on the way in; feeding it eight-digit codes
+        // would stop it finding rows written in any other form. So it keeps the values as stored.
+        $storedCpvCodes = $notice->cpvCodes
             ->pluck('cpv_code')
             ->map(fn ($code) => $this->normalizeText($code))
             ->filter()
             ->unique()
             ->values()
             ->all();
+        $noticeCpvCodes = CpvCodeNormalizer::normalizeMany($storedCpvCodes);
         $cpvRuleMap = $this->cpvRulesMap($inputs['cpv_rules'] ?? []);
 
         $matchedCpvCodes = [];
@@ -298,7 +306,7 @@ class DoffinRelevanceService
                 $appliedRules[] = "notice_type_competition={$typeBonus}";
             }
 
-            $learningData = $this->learningAdjustment($notice, $noticeCpvCodes, $department);
+            $learningData = $this->learningAdjustment($notice, $storedCpvCodes, $department);
             $learningAdjustment = $learningData['adjustment'];
 
             if ($learningAdjustment !== 0) {
@@ -421,7 +429,7 @@ class DoffinRelevanceService
         $ruleMap = [];
 
         foreach ($cpvRules as $cpvRule) {
-            $code = $this->normalizeText(data_get($cpvRule, 'code'));
+            $code = CpvCodeNormalizer::normalize(data_get($cpvRule, 'code'));
 
             if ($code === null) {
                 continue;

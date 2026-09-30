@@ -3,6 +3,7 @@
 namespace App\Services\OpportunitySources;
 
 use App\Models\WatchProfile;
+use App\Support\CpvCodeNormalizer;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -74,9 +75,9 @@ class WatchProfileRelevanceScorer
         }
 
         foreach ($watchProfile->cpvCodes as $cpvRule) {
-            $cpvCode = preg_replace('/\D+/', '', (string) $cpvRule->cpv_code) ?? '';
+            $cpvCode = CpvCodeNormalizer::normalize($cpvRule->cpv_code);
 
-            if ($cpvCode === '' || ! $hitCpvCodes->contains($cpvCode)) {
+            if ($cpvCode === null || ! $hitCpvCodes->contains($cpvCode)) {
                 continue;
             }
 
@@ -185,15 +186,18 @@ class WatchProfileRelevanceScorer
         return '';
     }
 
-    /** @return Collection<int, string> */
+    /**
+     * The hit's codes, read by the same rule as the profile's rules.
+     *
+     * Both sides go through CpvCodeNormalizer, which is what makes the comparison meaningful: a
+     * register that writes a code with its check digit and a watch rule that stores the bare eight
+     * are now the same classification, as they always were in fact.
+     *
+     * @return Collection<int, string>
+     */
     private function noticeCpvCodes(NormalizedNotice $notice): Collection
     {
-        return collect($notice->cpvCodes)
-            ->filter(fn (mixed $value): bool => is_scalar($value))
-            ->map(fn (string|int|float|bool $value): string => preg_replace('/\D+/', '', (string) $value) ?? '')
-            ->filter(fn (string $value): bool => $value !== '')
-            ->unique()
-            ->values();
+        return collect(CpvCodeNormalizer::normalizeMany($notice->cpvCodes));
     }
 
     /**

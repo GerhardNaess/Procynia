@@ -2,6 +2,7 @@
 
 namespace App\Services\OpportunitySources;
 
+use App\Support\CpvCodeNormalizer;
 use Illuminate\Support\Str;
 
 /**
@@ -27,9 +28,10 @@ class OpportunitySearchCriteria
 {
     /**
      * @param  list<string>  $keywords  each already trimmed and non-empty
-     * @param  list<string>  $cpvCodes  digits only, deduplicated — structured rather than one
-     *                                  comma-separated string, because joining them is a wire
-     *                                  format and belongs to whoever owns the wire
+     * @param  list<string>  $cpvCodes  eight digits each, deduplicated, check digit dropped —
+     *                                  structured rather than one comma-separated string,
+     *                                  because joining them is a wire format and belongs to
+     *                                  whoever owns the wire
      * @param  bool  $matchAllKeywords  true when every keyword must appear, false when any will do
      * @param  string|null  $publishedFrom  ISO date, inclusive
      * @param  string|null  $publishedTo  ISO date, inclusive
@@ -107,19 +109,18 @@ class OpportunitySearchCriteria
     }
 
     /**
-     * Digits only, because a CPV code is a number however it is written down — "72000000",
-     * "72.000.000" and "72000000-5" are the same classification.
+     * A CPV code is a number however it is written down — "72000000", "72.000.000" and "72000000-5"
+     * are the same classification, and CpvCodeNormalizer is where that is decided.
+     *
+     * This used to reduce a code to its digits here, which got the punctuation right and the check
+     * digit wrong: "72000000-5" became "720000005" and was then asked of a register as if it were a
+     * classification. A register has no such code, so it answered with nothing.
      *
      * @return list<string>
      */
     private static function cpvCodes(mixed $value): array
     {
-        return collect(self::stringList($value))
-            ->map(fn (string $code): string => preg_replace('/\D+/', '', $code) ?? '')
-            ->filter(fn (string $code): bool => $code !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return CpvCodeNormalizer::normalizeMany(self::stringList($value));
     }
 
     private static function positiveInt(mixed $value): ?int

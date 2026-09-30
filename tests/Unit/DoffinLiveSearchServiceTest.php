@@ -312,6 +312,33 @@ class DoffinLiveSearchServiceTest extends TestCase
         });
     }
 
+    /**
+     * Doffin's cpvCodesId facet takes whole codes, so it is given whole codes.
+     *
+     * The filter string is user input and arrives in whatever form somebody pasted. "90910000-9"
+     * used to be handed to Doffin as "909100009", a facet id no notice carries, which narrowed the
+     * search to nothing and looked to the user like a search that simply had no results.
+     */
+    public function test_a_cpv_filter_written_with_a_check_digit_asks_doffin_for_the_classification(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'numHitsTotal' => 0,
+                'numHitsAccessible' => 0,
+                'hits' => [],
+            ], 200),
+        ]);
+
+        app(DoffinLiveSearchService::class)->search([
+            'q' => 'renhold',
+            'cpv' => '90910000-9, 90.911.000, 909, renhold',
+        ], 1, 15);
+
+        Http::assertSent(function ($request): bool {
+            return ($request['facets']['cpvCodesId']['checkedItems'] ?? null) === ['90910000', '90911000'];
+        });
+    }
+
     public function test_it_maps_the_combined_live_search_request_to_text_and_structured_filters_and_harvests_keyword_pages(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-05 12:00:00'));
