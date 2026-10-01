@@ -116,6 +116,10 @@ class HandleInertiaRequests extends Middleware
                 'billing' => __('procynia.billing'),
                 'ai_quota' => __('procynia.ai_quota'),
                 'wiki' => __('procynia.wiki'),
+                // The Kvalitet module's own namespace. Shared as a block: the module is one page
+                // whose every string belongs to it, so naming them individually would only
+                // repeat the lang file.
+                'quality' => __('procynia.quality'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
                 'customer_env' => __('procynia.customer_env'),

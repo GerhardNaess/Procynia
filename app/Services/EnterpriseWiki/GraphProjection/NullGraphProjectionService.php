@@ -24,8 +24,17 @@ class NullGraphProjectionService implements GraphProjectionService
         //
     }
 
-    public function replaceCustomerWikiGraph(int $customerId, array $pages, array $links): void
+    public function replaceOutgoingQualityRelations(int $customerId, int $fromPageId, array $relations): void
     {
+        //
+    }
+
+    public function replaceCustomerWikiGraph(
+        int $customerId,
+        array $pages,
+        array $links,
+        array $qualityRelations = [],
+    ): void {
         //
     }
 }

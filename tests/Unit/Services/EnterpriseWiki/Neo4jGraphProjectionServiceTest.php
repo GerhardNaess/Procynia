@@ -29,6 +29,9 @@ class Neo4jGraphProjectionServiceTest extends TestCase
             'title' => 'Incident Management',
             'page_type' => 'article',
             'status' => 'approved',
+            // Present and null for an unclassified page: the upsert reads it to decide whether
+            // the node keeps the :QualityItem label, so it is never simply left out.
+            'quality_type' => null,
             'current_version_id' => 30,
             'updated_at' => '2026-10-01T10:00:00+00:00',
         ]);
@@ -37,6 +40,126 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $this->assertStringContainsString('MERGE (p:EnterpriseWikiPage {customer_id: $customer_id, page_id: $page_id})', $client->runs[0]['statement']);
         $this->assertSame(10, $client->runs[0]['parameters']['customer_id']);
         $this->assertSame(20, $client->runs[0]['parameters']['page_id']);
+    }
+
+    public function test_it_labels_a_classified_page_as_a_quality_item_on_the_same_node(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->upsertWikiPage($this->page(['quality_type' => 'policy']));
+
+        $statement = $client->runs[0]['statement'];
+
+        // Kvalitet is a layer on the Wiki node, not a node of its own: the same MERGE, a secondary
+        // label and one more property.
+        $this->assertStringContainsString('MERGE (p:EnterpriseWikiPage {customer_id: $customer_id, page_id: $page_id})', $statement);
+        $this->assertStringContainsString('p.quality_type = $quality_type', $statement);
+        $this->assertStringContainsString('SET p:QualityItem', $statement);
+        $this->assertStringContainsString('REMOVE p:QualityItem', $statement);
+        $this->assertSame('policy', $client->runs[0]['parameters']['quality_type']);
+    }
+
+    public function test_it_clears_the_quality_label_when_a_page_has_no_classification(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->upsertWikiPage($this->page(['quality_type' => null]));
+
+        // Unclassifying must actually strip the label, which is why the REMOVE branch is part of
+        // the ordinary page upsert rather than a separate call nobody would remember to make.
+        $this->assertStringContainsString('REMOVE p:QualityItem', $client->runs[0]['statement']);
+        $this->assertNull($client->runs[0]['parameters']['quality_type']);
+    }
+
+    public function test_it_projects_quality_relations_as_typed_edges(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceOutgoingQualityRelations(10, 20, [$this->qualityRelation()]);
+
+        $statements = array_column($client->runs, 'statement');
+        $merge = array_values(array_filter($statements, static fn (string $statement): bool => str_contains($statement, 'MERGE')));
+
+        // A real relationship type, not a property on a generic edge: `(:QualityItem)-[:GOVERNS]->()`
+        // is the question the quality graph exists to answer.
+        $this->assertCount(1, $merge);
+        $this->assertStringContainsString('MERGE (from)-[rel:GOVERNS]->(to)', $merge[0]);
+    }
+
+    public function test_it_deletes_every_quality_edge_type_before_writing_the_new_set(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceOutgoingQualityRelations(10, 20, []);
+
+        $statements = implode("\n", array_column($client->runs, 'statement'));
+
+        // A relation removed in SQL leaves no payload behind to carry its own removal, so every
+        // type has to be cleared — including the ones the new set does not mention.
+        foreach (['GOVERNS', 'USES', 'VERIFIES', 'DEPENDS_ON'] as $relationshipType) {
+            $this->assertStringContainsString("[old:{$relationshipType}]", $statements);
+        }
+
+        $this->assertSame(1, $client->writeTransactions);
+    }
+
+    public function test_it_refuses_a_quality_relation_type_it_has_no_cypher_name_for(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $this->expectException(InvalidArgumentException::class);
+
+        $service->replaceOutgoingQualityRelations(10, 20, [$this->qualityRelation(['relation_type' => 'supersedes'])]);
+    }
+
+    public function test_a_customer_rebuild_refuses_an_unknown_relation_type_before_emptying_the_graph(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        try {
+            $service->replaceCustomerWikiGraph(10, [$this->page()], [], [$this->qualityRelation(['relation_type' => 'supersedes'])]);
+            $this->fail('An unknown relation type must abort the rebuild.');
+        } catch (InvalidArgumentException) {
+            // The rebuild deletes the customer's nodes first, so failing afterwards would leave an
+            // emptied graph behind.
+            $this->assertSame([], $client->runs);
+        }
+    }
+
+    public function test_a_customer_rebuild_carries_the_quality_relations(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceCustomerWikiGraph(10, [$this->page(['quality_type' => 'policy'])], [], [$this->qualityRelation()]);
+
+        $statements = implode("\n", array_column($client->runs, 'statement'));
+
+        $this->assertStringContainsString('MERGE (from)-[rel:GOVERNS]->(to)', $statements);
+        $this->assertStringContainsString('SET p:QualityItem', $statements);
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function qualityRelation(array $overrides = []): array
+    {
+        return array_merge([
+            'relation_id' => 1,
+            'customer_id' => 10,
+            'from_page_id' => 20,
+            'to_page_id' => 21,
+            'relation_type' => 'governs',
+            'source' => 'manual',
+            'updated_at' => '2026-10-01T10:00:00+00:00',
+        ], $overrides);
     }
 
     public function test_it_replaces_outgoing_wikilinks_with_customer_scoped_edges(): void
@@ -243,6 +366,9 @@ class Neo4jGraphProjectionServiceTest extends TestCase
             'title' => 'Incident Management',
             'page_type' => 'article',
             'status' => 'approved',
+            // Present and null for an unclassified page: the upsert reads it to decide whether
+            // the node keeps the :QualityItem label, so it is never simply left out.
+            'quality_type' => null,
             'current_version_id' => 30,
             'updated_at' => '2026-10-01T10:00:00+00:00',
         ]], []);
@@ -276,6 +402,9 @@ class Neo4jGraphProjectionServiceTest extends TestCase
             'title' => 'Incident Management',
             'page_type' => 'article',
             'status' => 'approved',
+            // Present and null for an unclassified page: the upsert reads it to decide whether
+            // the node keeps the :QualityItem label, so it is never simply left out.
+            'quality_type' => null,
             'current_version_id' => 30,
             'updated_at' => '2026-10-01T10:00:00+00:00',
         ], $overrides);

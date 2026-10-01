@@ -171,9 +171,16 @@ Route::prefix('app')
         // until Hjem became cross-module, which is why its path moved rather than its content.
         Route::get('/bid-status', [DashboardController::class, 'index'])->name('bid-status');
 
-        // The Kvalitet module's landing page. Navigation only for now; the quality work it will
-        // gather still lives in Wiki review and claim approval.
-        Route::get('/quality', QualityController::class)->name('quality.index');
+        // Kvalitet. Every route here is named under `app.quality.`, which config/procynia_modules.php
+        // maps to the `quality` module — so the write actions are entitlement-gated by the group's
+        // customer.module middleware exactly as the page itself is.
+        Route::prefix('/quality')->name('quality.')->group(function (): void {
+            Route::get('/', [QualityController::class, 'index'])->name('index');
+            Route::post('/classifications', [QualityController::class, 'storeClassification'])->name('classifications.store');
+            Route::delete('/classifications/{classification}', [QualityController::class, 'destroyClassification'])->name('classifications.destroy');
+            Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
+            Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
+        });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');

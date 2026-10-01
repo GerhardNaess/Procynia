@@ -15,7 +15,10 @@ class RecordingGraphProjectionService implements GraphProjectionService
     /** @var list<array{customer_id: int, from_page_id: int, links: list<array<string, mixed>>}> */
     public array $replacedOutgoing = [];
 
-    /** @var list<array{customer_id: int, pages: list<array<string, mixed>>, links: list<array<string, mixed>>}> */
+    /** @var list<array{customer_id: int, from_page_id: int, relations: list<array<string, mixed>>}> */
+    public array $replacedOutgoingQualityRelations = [];
+
+    /** @var list<array{customer_id: int, pages: list<array<string, mixed>>, links: list<array<string, mixed>>, quality_relations: list<array<string, mixed>>}> */
     public array $rebuilds = [];
 
     /**
@@ -60,12 +63,31 @@ class RecordingGraphProjectionService implements GraphProjectionService
         ];
     }
 
-    public function replaceCustomerWikiGraph(int $customerId, array $pages, array $links): void
+    public function replaceOutgoingQualityRelations(int $customerId, int $fromPageId, array $relations): void
     {
+        $this->replacedOutgoingQualityRelations[] = [
+            'customer_id' => $customerId,
+            'from_page_id' => $fromPageId,
+            'relations' => $relations,
+        ];
+        $this->calls[] = [
+            'method' => 'replaceOutgoingQualityRelations',
+            'customer_id' => $customerId,
+            'from_page_id' => $fromPageId,
+        ];
+    }
+
+    public function replaceCustomerWikiGraph(
+        int $customerId,
+        array $pages,
+        array $links,
+        array $qualityRelations = [],
+    ): void {
         $this->rebuilds[] = [
             'customer_id' => $customerId,
             'pages' => $pages,
             'links' => $links,
+            'quality_relations' => $qualityRelations,
         ];
         $this->calls[] = ['method' => 'replaceCustomerWikiGraph', 'customer_id' => $customerId];
     }

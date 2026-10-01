@@ -137,6 +137,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     // entitlements. The rail presents it; the routes enforce it.
     const activeModules = page.props.entitlements?.modules ?? [];
     const tw = translations?.wiki ?? {};
+    const tq = translations?.quality ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -158,6 +159,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
     const wikiTab = searchParams.get('tab') ?? 'pages';
+    const qualityTab = searchParams.get('tab') ?? 'overview';
     const currentAiCaseId = page.props.case?.id ?? null;
     const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
         ? String(page.props.analysisCases[0].id)
@@ -376,6 +378,17 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             ];
         }
 
+        if (activeMainArea === 'quality') {
+            // Same shape as Wiki's tabs: Kvalitet has no work areas of its own, so these sit in
+            // the header directly under the rail's selection.
+            return [
+                { key: 'quality-overview', label: tq.tab_overview ?? 'Oversikt', href: buildHref('/app/quality', { tab: 'overview' }) },
+                { key: 'quality-processes', label: tq.tab_processes ?? 'Prosesser', href: buildHref('/app/quality', { tab: 'processes' }) },
+                { key: 'quality-controls', label: tq.tab_controls ?? 'Kontroller', href: buildHref('/app/quality', { tab: 'controls' }) },
+                { key: 'quality-checklists', label: tq.tab_checklists ?? 'Sjekklister', href: buildHref('/app/quality', { tab: 'checklists' }) },
+            ];
+        }
+
         if (activeMainArea === 'environment') {
             const items = [];
             if (environmentHref) {
@@ -424,6 +437,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 return 'go-no-go-templates';
             }
             return 'env-settings';
+        }
+
+        if (activeMainArea === 'quality') {
+            return `quality-${qualityTab}`;
         }
 
         if (activeMainArea === 'wiki') {

@@ -22,8 +22,22 @@ interface GraphProjectionService
     public function replaceOutgoingWikilinks(int $customerId, int $fromPageId, array $links): void;
 
     /**
+     * The quality edges that leave one page, as the complete set. Called with an empty list to
+     * clear them, exactly like replaceOutgoingWikilinks.
+     *
+     * @param  list<array<string, mixed>>  $relations
+     */
+    public function replaceOutgoingQualityRelations(int $customerId, int $fromPageId, array $relations): void;
+
+    /**
      * @param  list<array<string, mixed>>  $pages
      * @param  list<array<string, mixed>>  $links
+     * @param  list<array<string, mixed>>  $qualityRelations
      */
-    public function replaceCustomerWikiGraph(int $customerId, array $pages, array $links): void;
+    public function replaceCustomerWikiGraph(
+        int $customerId,
+        array $pages,
+        array $links,
+        array $qualityRelations = [],
+    ): void;
 }

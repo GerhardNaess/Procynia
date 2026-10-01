@@ -16,6 +16,27 @@ class Neo4jGraphProjectionService implements GraphProjectionService
      */
     private const METADATA_JSON_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
 
+    /**
+     * Quality relation type -> Cypher relationship type.
+     *
+     * Quality edges get real typed relationships rather than the property-carrying single type
+     * WIKILINK uses, because that is the whole point of the quality layer: `(:QualityItem)-[:GOVERNS]->()`
+     * is a question the graph can answer directly. The price is that the type must be a literal in
+     * the query string, which is what this whitelist is for — nothing outside it ever reaches Cypher.
+     *
+     * The keys are QualityRelation::TYPES. They are repeated rather than imported so that the graph
+     * writer never silently projects a relation type nobody has decided a Cypher name for; adding a
+     * type to the domain and forgetting this map raises here instead.
+     *
+     * @var array<string, string>
+     */
+    private const QUALITY_RELATIONSHIP_TYPES = [
+        'governs' => 'GOVERNS',
+        'uses' => 'USES',
+        'verifies' => 'VERIFIES',
+        'depends_on' => 'DEPENDS_ON',
+    ];
+
     private readonly Neo4jConnection $connection;
 
     public function __construct(
@@ -46,14 +67,16 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         $this->assertProjectableProperties($page, 'EnterpriseWikiPage');
 
         $this->client()->run(
-            <<<'CYPHER'
-            MERGE (p:EnterpriseWikiPage {customer_id: $customer_id, page_id: $page_id})
-            SET p.slug = $slug,
-                p.title = $title,
-                p.page_type = $page_type,
-                p.status = $status,
-                p.current_version_id = $current_version_id,
-                p.updated_at = $updated_at
+            <<<CYPHER
+            MERGE (p:EnterpriseWikiPage {customer_id: \$customer_id, page_id: \$page_id})
+            SET p.slug = \$slug,
+                p.title = \$title,
+                p.page_type = \$page_type,
+                p.status = \$status,
+                p.quality_type = \$quality_type,
+                p.current_version_id = \$current_version_id,
+                p.updated_at = \$updated_at
+            {$this->qualityLabelClause('p', '$quality_type')}
             CYPHER,
             $page,
         );
@@ -104,18 +127,81 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         );
     }
 
-    public function replaceCustomerWikiGraph(int $customerId, array $pages, array $links): void
+    /**
+     * The quality edges that leave one page, as the complete set.
+     *
+     * Grouped by relation type because the Cypher relationship type cannot be a parameter. The
+     * literal comes from relationshipTypeFor(), which only ever returns a value from a fixed
+     * whitelist — a type the domain does not know raises rather than reaching the query string.
+     */
+    public function replaceOutgoingQualityRelations(int $customerId, int $fromPageId, array $relations): void
     {
+        $grouped = [];
+
+        foreach ($relations as $relation) {
+            $this->assertProjectableProperties($relation, 'QUALITY_RELATION');
+
+            $grouped[(string) ($relation['relation_type'] ?? '')][] = $relation;
+        }
+
+        // Deleting every typed quality edge first is what makes this a replace rather than an
+        // append: a relation removed in SQL has no payload left to carry its own removal.
+        $this->client()->writeTransaction(
+            function (TransactionInterface $tsx) use ($customerId, $fromPageId, $grouped): void {
+                foreach (self::QUALITY_RELATIONSHIP_TYPES as $relationshipType) {
+                    $tsx->run(
+                        <<<CYPHER
+                        MATCH (from:EnterpriseWikiPage {customer_id: \$customer_id, page_id: \$from_page_id})
+                              -[old:{$relationshipType}]->(:EnterpriseWikiPage {customer_id: \$customer_id})
+                        DELETE old
+                        CYPHER,
+                        [
+                            'customer_id' => $customerId,
+                            'from_page_id' => $fromPageId,
+                        ],
+                    );
+                }
+
+                foreach ($grouped as $relationType => $typedRelations) {
+                    $tsx->run(
+                        $this->qualityRelationMergeQuery($this->relationshipTypeFor($relationType)),
+                        ['relations' => array_values($typedRelations)],
+                    );
+                }
+            },
+        );
+    }
+
+    public function replaceCustomerWikiGraph(
+        int $customerId,
+        array $pages,
+        array $links,
+        array $qualityRelations = [],
+    ): void {
         foreach ($pages as $page) {
             $this->assertProjectableProperties($page, 'EnterpriseWikiPage');
         }
 
         $encodedLinks = $this->encodeLinkMetadata($links);
 
+        $groupedRelations = [];
+
+        foreach ($qualityRelations as $relation) {
+            $this->assertProjectableProperties($relation, 'QUALITY_RELATION');
+
+            $groupedRelations[(string) ($relation['relation_type'] ?? '')][] = $relation;
+        }
+
+        // Validated before the transaction opens: an unknown relation type must abort the rebuild
+        // rather than empty the customer's graph and then fail on the way back up.
+        foreach (array_keys($groupedRelations) as $relationType) {
+            $this->relationshipTypeFor($relationType);
+        }
+
         // One write transaction: a failure halfway through must not leave the customer with an
         // emptied or half-rebuilt graph.
         $this->client()->writeTransaction(
-            function (TransactionInterface $tsx) use ($customerId, $pages, $encodedLinks): void {
+            function (TransactionInterface $tsx) use ($customerId, $pages, $encodedLinks, $groupedRelations): void {
                 $tsx->run(
                     <<<'CYPHER'
                     MATCH (p:EnterpriseWikiPage {customer_id: $customer_id})
@@ -125,15 +211,17 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                 );
 
                 $tsx->run(
-                    <<<'CYPHER'
-                    UNWIND $pages AS page
+                    <<<CYPHER
+                    UNWIND \$pages AS page
                     MERGE (p:EnterpriseWikiPage {customer_id: page.customer_id, page_id: page.page_id})
                     SET p.slug = page.slug,
                         p.title = page.title,
                         p.page_type = page.page_type,
                         p.status = page.status,
+                        p.quality_type = page.quality_type,
                         p.current_version_id = page.current_version_id,
                         p.updated_at = page.updated_at
+                    {$this->qualityLabelClause('p', 'page.quality_type')}
                     CYPHER,
                     ['pages' => $pages],
                 );
@@ -158,8 +246,64 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                     CYPHER,
                     ['links' => $encodedLinks],
                 );
+
+                foreach ($groupedRelations as $relationType => $typedRelations) {
+                    $tsx->run(
+                        $this->qualityRelationMergeQuery($this->relationshipTypeFor($relationType)),
+                        ['relations' => array_values($typedRelations)],
+                    );
+                }
             },
         );
+    }
+
+    /**
+     * Sets or clears the :QualityItem secondary label from the payload's quality_type.
+     *
+     * A quality page is the same node as the Wiki page it classifies — Kvalitet is a layer on the
+     * Wiki, not a parallel graph, and duplicating the node would mean two things to keep in step.
+     * FOREACH over a CASE is the plain-Cypher way to make a label conditional; APOC is not assumed.
+     */
+    private function qualityLabelClause(string $nodeVariable, string $qualityTypeExpression): string
+    {
+        return sprintf(
+            'FOREACH (_ IN CASE WHEN %2$s IS NULL THEN [] ELSE [1] END | SET %1$s:QualityItem) '
+            .'FOREACH (_ IN CASE WHEN %2$s IS NULL THEN [1] ELSE [] END | REMOVE %1$s:QualityItem)',
+            $nodeVariable,
+            $qualityTypeExpression,
+        );
+    }
+
+    private function qualityRelationMergeQuery(string $relationshipType): string
+    {
+        return <<<CYPHER
+        UNWIND \$relations AS relation
+        MATCH (from:EnterpriseWikiPage {customer_id: relation.customer_id, page_id: relation.from_page_id})
+        MATCH (to:EnterpriseWikiPage {customer_id: relation.customer_id, page_id: relation.to_page_id})
+        MERGE (from)-[rel:{$relationshipType}]->(to)
+        SET rel.relation_id = relation.relation_id,
+            rel.customer_id = relation.customer_id,
+            rel.from_page_id = relation.from_page_id,
+            rel.to_page_id = relation.to_page_id,
+            rel.relation_type = relation.relation_type,
+            rel.source = relation.source,
+            rel.updated_at = relation.updated_at
+        CYPHER;
+    }
+
+    private function relationshipTypeFor(string $relationType): string
+    {
+        $relationshipType = self::QUALITY_RELATIONSHIP_TYPES[$relationType] ?? null;
+
+        if ($relationshipType === null) {
+            throw new InvalidArgumentException(sprintf(
+                'Unknown quality relation type [%s]. A Cypher relationship type cannot be parameterised, '
+                .'so every type must be declared in Neo4jGraphProjectionService::QUALITY_RELATIONSHIP_TYPES.',
+                $relationType,
+            ));
+        }
+
+        return $relationshipType;
     }
 
     /**

@@ -113,6 +113,17 @@ class EnterpriseWikiPage extends Model
     }
 
     /**
+     * What kind of styrende dokument this page is in the kvalitetssystem, if it is one at all.
+     *
+     * Null for most pages and that is the normal case — Kvalitet classifies a deliberate subset of
+     * the Wiki, and nothing in the Wiki pipeline reads this.
+     */
+    public function qualityClassification(): HasOne
+    {
+        return $this->hasOne(QualityPageClassification::class, 'enterprise_wiki_page_id');
+    }
+
+    /**
      * The version the pipeline is working on — what QA, lint, link building, patching and claim
      * extraction operate against. Being current says nothing about whether anyone has approved it.
      */
