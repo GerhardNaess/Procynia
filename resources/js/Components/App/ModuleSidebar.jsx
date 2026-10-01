@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { APP_MODULES } from '../../Support/appModules';
+import { partitionModules } from '../../Support/appModules';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -30,12 +30,12 @@ const MODULE_ICONS = {
     settings: 'M10 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z M16.2 12.1a1.3 1.3 0 0 0 .26 1.43l.05.05a1.5 1.5 0 1 1-2.13 2.13l-.05-.05a1.3 1.3 0 0 0-1.43-.26 1.3 1.3 0 0 0-.79 1.19v.14a1.5 1.5 0 1 1-3 0v-.07a1.3 1.3 0 0 0-.85-1.19 1.3 1.3 0 0 0-1.43.26l-.05.05a1.5 1.5 0 1 1-2.13-2.13l.05-.05a1.3 1.3 0 0 0 .26-1.43 1.3 1.3 0 0 0-1.19-.79h-.14a1.5 1.5 0 1 1 0-3h.07a1.3 1.3 0 0 0 1.19-.85 1.3 1.3 0 0 0-.26-1.43l-.05-.05a1.5 1.5 0 1 1 2.13-2.13l.05.05a1.3 1.3 0 0 0 1.43.26h.06a1.3 1.3 0 0 0 .79-1.19v-.14a1.5 1.5 0 1 1 3 0v.07a1.3 1.3 0 0 0 .79 1.19 1.3 1.3 0 0 0 1.43-.26l.05-.05a1.5 1.5 0 1 1 2.13 2.13l-.05.05a1.3 1.3 0 0 0-.26 1.43v.06a1.3 1.3 0 0 0 1.19.79h.14a1.5 1.5 0 1 1 0 3h-.07a1.3 1.3 0 0 0-1.19.79Z',
 };
 
-function ModuleIcon({ moduleKey }) {
+export function ModuleIcon({ moduleKey, className = 'h-5 w-5 shrink-0' }) {
     const paths = (MODULE_ICONS[moduleKey] ?? '').split(' M').map((part, index) => (index === 0 ? part : `M${part}`));
 
     return (
         <svg
-            className="h-5 w-5 shrink-0"
+            className={className}
             viewBox="0 0 20 20"
             fill="none"
             stroke="currentColor"
@@ -52,58 +52,129 @@ function ModuleIcon({ moduleKey }) {
 }
 
 /**
- * The module rail.
- *
- * Two groups, separated on purpose. Above the line is what the system can do today — normal
- * contrast, clickable, one of them selected. Below it is the planned structure: same names and
- * icons so the shape of the product is readable, but dimmed, not focusable, and captioned
- * "Planlagt" so there is no question about why clicking does nothing. Dimming alone would read as
- * a bug; the caption is what turns it into information.
+ * The collapse control's own icon — a chevron that points the way the rail is about to move.
  */
-export default function ModuleSidebar({ modules = {}, activeKey = null, sections = [], activeSectionKey = null }) {
-    const available = APP_MODULES.filter((module) => module.available);
-    const planned = APP_MODULES.filter((module) => ! module.available);
+function CollapseIcon({ collapsed }) {
+    return (
+        <svg
+            className="h-4 w-4"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            {collapsed ? (
+                <>
+                    <path d="M8 5.5 12.5 10 8 14.5" />
+                    <path d="M13.5 5.5V14.5" />
+                </>
+            ) : (
+                <>
+                    <path d="M12 5.5 7.5 10 12 14.5" />
+                    <path d="M6.5 5.5V14.5" />
+                </>
+            )}
+        </svg>
+    );
+}
 
-    const renderSections = (moduleKey) => {
-        if (moduleKey !== activeKey || sections.length === 0) {
-            return null;
-        }
+/**
+ * The module rail — a module picker, and nothing else.
+ *
+ * Three groups, separated on purpose, and each separation carries information.
+ *
+ * At the top is what this customer can use today — normal contrast, clickable, one of them
+ * selected. Below it, "Ikke bestilt": modules that are finished and could be switched on tonight,
+ * but that this customer has not bought. Below that, "Planlagt": the structure that does not exist
+ * yet. Both lower groups are dimmed and inert, but they are not the same statement, and collapsing
+ * them into one caption would tell a customer that Anbud is unfinished when it is simply unsold.
+ *
+ * What is active is decided in the backend, from the customer's package entitlements, and arrives
+ * as `activeModules`. The rail renders that verdict and never computes one of its own — the same
+ * data drives the Abonnement page's "Aktiv / Bestill" column, so the two cannot drift apart.
+ * This is presentation only: every gated route is enforced server-side as well.
+ *
+ * What the rail deliberately does not carry is the level below a module. Wiki never put its work
+ * areas here, and Anbud nesting its four under "Anbud" made one module look structurally unlike
+ * every other. The areas live in the header's module navigation instead, where Wiki's always were.
+ *
+ * Collapsing is a desktop-only affordance, and it is done in CSS rather than by branching on a
+ * measured viewport. Every label stays in the markup; `lg:sr-only` is what takes it out of the
+ * layout from `lg` up, which keeps the accessible name intact (unlike `hidden`) and keeps the
+ * narrow rail from ever reaching a phone. Below `lg` the rail is a full-width block above the
+ * page and must stay fully legible — it is the only module navigation there — so the collapse
+ * control itself is hidden and the collapsed classes simply do not apply.
+ */
+export default function ModuleSidebar({ modules = {}, activeModules = [], activeKey = null, collapsed = false, onToggleCollapsed = null }) {
+    const groups = partitionModules(activeModules);
+    const plannedHint = modules.planned_hint ?? 'Ikke tilgjengelig ennå';
+    const notOrderedHint = modules.not_ordered_hint ?? 'Ikke bestilt — kan bestilles under Abonnement';
+    const toggleLabel = collapsed
+        ? (modules.expand ?? 'Utvid menyen')
+        : (modules.collapse ?? 'Slå sammen menyen');
 
-        return (
-            <ul className="mt-1 space-y-0.5 border-l border-slate-200 pl-3 ml-4">
-                {sections.map((section) => {
-                    const isActive = activeSectionKey === section.key;
+    // Only meaningful while collapsed, and only at lg+ — but a title on a visible label costs
+    // nothing, and touch screens have no hover to trigger it.
+    const labelClass = collapsed ? 'leading-snug lg:sr-only' : 'leading-snug';
+    const rowClass = collapsed
+        ? 'flex items-center gap-3 rounded-xl px-3 py-2 lg:justify-center lg:gap-0 lg:px-0'
+        : 'flex items-center gap-3 rounded-xl px-3 py-2';
+
+    /**
+     * One dimmed group, used for both "Ikke bestilt" and "Planlagt". They differ only in caption
+     * and hint, so sharing the markup is what keeps them from drifting apart visually.
+     */
+    const renderUnavailableGroup = (items, { testId, caption, hint }) => (items.length === 0 ? null : (
+        <>
+            <p
+                data-testid={testId}
+                className={classNames(
+                    'mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400',
+                    collapsed ? 'lg:sr-only' : '',
+                )}
+            >
+                {caption}
+            </p>
+
+            <ul className={classNames('space-y-0.5', collapsed ? 'lg:mt-4 lg:border-t lg:border-slate-200/80 lg:pt-3' : '')}>
+                {items.map((module) => {
+                    const label = module.label(modules);
 
                     return (
-                        <li key={section.key}>
-                            <Link
-                                href={section.href}
-                                aria-current={isActive ? 'page' : undefined}
+                        <li key={module.key}>
+                            <span
+                                data-testid={`module-${module.key}`}
+                                aria-disabled="true"
+                                title={collapsed ? `${label} — ${hint}` : hint}
                                 className={classNames(
-                                    'block rounded-lg px-2.5 py-1.5 text-sm font-medium transition',
-                                    isActive
-                                        ? 'text-violet-700'
-                                        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                                    rowClass,
+                                    'cursor-not-allowed select-none text-base font-medium text-slate-400',
                                 )}
                             >
-                                {section.label}
-                            </Link>
+                                <ModuleIcon moduleKey={module.key} />
+                                <span className={labelClass}>{label}</span>
+                            </span>
                         </li>
                     );
                 })}
             </ul>
-        );
-    };
+        </>
+    ));
 
     return (
         <nav
             data-testid="module-sidebar"
+            data-collapsed={collapsed ? 'true' : 'false'}
             aria-label={modules.aria ?? 'Moduler'}
             className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
         >
             <ul className="space-y-0.5">
-                {available.map((module) => {
+                {groups.active.map((module) => {
                     const isActive = activeKey === module.key;
+                    const label = module.label(modules);
 
                     return (
                         <li key={module.key}>
@@ -111,44 +182,57 @@ export default function ModuleSidebar({ modules = {}, activeKey = null, sections
                                 href={module.href}
                                 data-testid={`module-${module.key}`}
                                 aria-current={isActive ? 'page' : undefined}
+                                title={collapsed ? label : undefined}
                                 className={classNames(
-                                    'flex items-center gap-3 rounded-xl px-3 py-2 text-base font-medium transition',
+                                    rowClass,
+                                    'text-base font-medium transition',
                                     isActive
                                         ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
                                         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
                                 )}
                             >
                                 <ModuleIcon moduleKey={module.key} />
-                                <span className="leading-snug">{module.label(modules)}</span>
+                                <span className={labelClass}>{label}</span>
                             </Link>
-                            {renderSections(module.key)}
                         </li>
                     );
                 })}
             </ul>
 
-            <p
-                data-testid="module-sidebar-planned-caption"
-                className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400"
-            >
-                {modules.planned_caption ?? 'Planlagt'}
-            </p>
+            {renderUnavailableGroup(groups.not_ordered, {
+                testId: 'module-sidebar-not-ordered-caption',
+                caption: modules.not_ordered_caption ?? 'Ikke bestilt',
+                hint: notOrderedHint,
+            })}
 
-            <ul className="space-y-0.5">
-                {planned.map((module) => (
-                    <li key={module.key}>
-                        <span
-                            data-testid={`module-${module.key}`}
-                            aria-disabled="true"
-                            title={modules.planned_hint ?? 'Ikke tilgjengelig ennå'}
-                            className="flex cursor-not-allowed select-none items-center gap-3 rounded-xl px-3 py-2 text-base font-medium text-slate-400"
-                        >
-                            <ModuleIcon moduleKey={module.key} />
-                            <span className="leading-snug">{module.label(modules)}</span>
-                        </span>
-                    </li>
-                ))}
-            </ul>
+            {renderUnavailableGroup(groups.planned, {
+                testId: 'module-sidebar-planned-caption',
+                caption: modules.planned_caption ?? 'Planlagt',
+                hint: plannedHint,
+            })}
+
+            {/* Discreet, and desktop-only: on a phone the rail is the only module navigation
+                there is, so nothing may fold it away. */}
+            {onToggleCollapsed ? (
+                <div
+                    className={classNames(
+                        'mt-3 hidden border-t border-slate-200/80 pt-2 lg:flex',
+                        collapsed ? 'lg:justify-center' : 'lg:justify-end',
+                    )}
+                >
+                    <button
+                        type="button"
+                        data-testid="module-sidebar-toggle"
+                        onClick={onToggleCollapsed}
+                        aria-expanded={! collapsed}
+                        aria-label={toggleLabel}
+                        title={toggleLabel}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                    >
+                        <CollapseIcon collapsed={collapsed} />
+                    </button>
+                </div>
+            ) : null}
         </nav>
     );
 }

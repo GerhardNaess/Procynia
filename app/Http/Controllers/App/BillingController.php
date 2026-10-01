@@ -7,6 +7,7 @@ use App\Models\BillingProduct;
 use App\Models\Customer;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
 use App\Services\Billing\BillingService;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -98,7 +99,42 @@ class BillingController extends Controller
             // The same commercial state the hard stop enforces, so the page can never claim the
             // customer has capacity that the guard would refuse.
             'ai_quota' => app(AiQuotaStatusService::class)->forCustomer($customer)->toArray(),
+            // Resolved server-side: the page renders this verdict rather than deciding for itself
+            // which packages are active.
+            'module_packages' => app(ModuleEntitlementService::class)->overviewFor($customer),
+            'active_modules' => app(ModuleEntitlementService::class)->modulesFor($customer),
         ]);
+    }
+
+    /**
+     * Register interest in a commercial package. This starts no payment and activates nothing —
+     * it records the order so Procynia can follow it up, and the page reflects that state.
+     */
+    public function requestPackage(Request $request, string $package): RedirectResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user->canManageCustomerBilling(), 403);
+
+        $customer = $user->customer;
+        abort_unless($customer instanceof Customer, 404);
+
+        $service = app(ModuleEntitlementService::class);
+        $catalogEntry = $service->package($package);
+
+        abort_unless($catalogEntry !== null && $catalogEntry['orderable'], 404);
+
+        if ($service->hasPackage($customer, $package)) {
+            return redirect()
+                ->route('app.billing.index')
+                ->with('error', __('procynia.billing.modules.order_already_active'));
+        }
+
+        $service->requestPackage($customer, $package, $user);
+
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', __('procynia.billing.modules.order_success'));
     }
 
     public function cancel(Request $request): RedirectResponse

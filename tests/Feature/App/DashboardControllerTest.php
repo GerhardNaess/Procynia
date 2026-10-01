@@ -127,7 +127,7 @@ class DashboardControllerTest extends TestCase
         ]);
         $this->createSavedNotice($otherCustomer->id, '2026-600004', 'Foreign Saved Notice', organizationalDepartmentId: $otherDepartment->id, bidStatus: SavedNotice::BID_STATUS_WON);
 
-        $page = $this->inertiaPage($this->actingAs($userA)->get('/app/dashboard'));
+        $page = $this->inertiaPage($this->actingAs($userA)->get('/app/bid-status'));
 
         $this->assertSame('App/Dashboard/Index', $page['component']);
         $this->assertArrayHasKey('cockpit', $page['props']);
@@ -212,7 +212,7 @@ class DashboardControllerTest extends TestCase
         $personalProfile = $this->createWatchProfile($customer->id, 'Personal Profile', $user->id, null, true);
         $departmentProfile = $this->createWatchProfile($customer->id, 'Department Profile', null, $department->id, true);
 
-        $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+        $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
 
         $this->assertSame(0, $page['props']['stats']['worklist']['value']);
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_personal_count']);
@@ -237,7 +237,7 @@ class DashboardControllerTest extends TestCase
                 opportunityOwnerUserId: $user->id,
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $items = collect($page['props']['cockpit']['deadlines']['items'])
                 ->where('title', 'Offisiell frist');
 
@@ -269,7 +269,7 @@ class DashboardControllerTest extends TestCase
                 opportunityOwnerUserId: $user->id,
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $items = collect($page['props']['cockpit']['deadlines']['items'])
                 ->where('saved_notice_id', $savedNotice->id);
 
@@ -305,7 +305,7 @@ class DashboardControllerTest extends TestCase
                 opportunityOwnerUserId: $user->id,
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $types = collect($page['props']['cockpit']['deadlines']['items'])
                 ->where('saved_notice_id', $savedNotice->id)
                 ->pluck('deadline_type');
@@ -343,7 +343,7 @@ class DashboardControllerTest extends TestCase
                 opportunityOwnerUserId: $user->id,
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $attention = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
 
             $titles = array_column($attention['deadline-soon']['items'] ?? [], 'title');
@@ -376,7 +376,7 @@ class DashboardControllerTest extends TestCase
                 opportunityOwnerUserId: $user->id,
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $entries = collect($page['props']['cockpit']['deadlines']['items'])
                 ->where('saved_notice_id', $savedNotice->id)
                 ->pluck('deadline_type_label', 'deadline_type');
@@ -420,7 +420,7 @@ class DashboardControllerTest extends TestCase
                 'updated_at' => now(),
             ]);
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
 
             $deadlineItems = $page['props']['cockpit']['deadlines']['items'];
             $businessReviewItem = collect($deadlineItems)->firstWhere('deadline_type', 'business_review');
@@ -555,7 +555,7 @@ class DashboardControllerTest extends TestCase
                 deadlineAt: now()->addDays(7)->toDateTimeString(),
             );
 
-            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/dashboard'));
+            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/bid-status'));
             $regularResponsibility = $regularPage['props']['cockpit']['responsibility_activity'];
 
             $this->assertSame(1, $regularResponsibility['bid_manager_cases_count']);
@@ -566,7 +566,7 @@ class DashboardControllerTest extends TestCase
             $this->assertSame(3, $regularResponsibility['activity']['activity_count_14_days']);
             $this->assertSame(0, $regularResponsibility['activity']['inactive_7_days_count']);
 
-            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/dashboard'));
+            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/bid-status'));
             $bidManagerResponsibility = $bidManagerPage['props']['cockpit']['responsibility_activity'];
 
             $this->assertSame(2, $bidManagerResponsibility['bid_manager_cases_count']);
@@ -577,7 +577,7 @@ class DashboardControllerTest extends TestCase
             $this->assertSame(7, $bidManagerResponsibility['activity']['activity_count_14_days']);
             $this->assertSame(1, $bidManagerResponsibility['activity']['inactive_7_days_count']);
 
-            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/dashboard'));
+            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/bid-status'));
             $systemOwnerResponsibility = $systemOwnerPage['props']['cockpit']['responsibility_activity'];
 
             $this->assertSame(2, $systemOwnerResponsibility['bid_manager_cases_count']);
@@ -657,7 +657,7 @@ class DashboardControllerTest extends TestCase
                 bidManagerUserId: $otherUser->id,
             );
 
-            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/dashboard'));
+            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/bid-status'));
             $regularAttention = collect($regularPage['props']['cockpit']['attention']['items'])->keyBy('key');
 
             $this->assertSame(5, $regularAttention->count());
@@ -689,7 +689,7 @@ class DashboardControllerTest extends TestCase
                 array_column($regularPage['props']['cockpit']['deadlines']['items'], 'title'),
             );
 
-            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/dashboard'));
+            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/bid-status'));
             $bidManagerAttention = collect($bidManagerPage['props']['cockpit']['attention']['items'])->keyBy('key');
 
             $this->assertSame(5, $bidManagerAttention->count());
@@ -728,7 +728,7 @@ class DashboardControllerTest extends TestCase
                 array_column($bidManagerPage['props']['cockpit']['deadlines']['items'], 'title'),
             );
 
-            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/dashboard'));
+            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/bid-status'));
             $systemOwnerAttention = collect($systemOwnerPage['props']['cockpit']['attention']['items'])->keyBy('key');
 
             $this->assertSame(5, $systemOwnerAttention->count());
@@ -833,7 +833,7 @@ class DashboardControllerTest extends TestCase
                 updatedAt: now()->subDays(10)->toDateTimeString(),
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $attentionItems = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
 
             $this->assertAttentionCategoryPayload(
@@ -960,7 +960,7 @@ class DashboardControllerTest extends TestCase
                 deadlineAt: now()->copy()->subDays(20)->startOfDay()->toDateTimeString(),
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $attentionItems = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
 
             $this->assertSame(2, $attentionItems['deadline-soon']['count']);
@@ -1083,7 +1083,7 @@ class DashboardControllerTest extends TestCase
                 archivedAt: '2026-01-15 08:00:00',
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $bidQuality = collect($page['props']['cockpit']['bid_quality']['items'])->keyBy('key');
 
             $this->assertSame(
@@ -1194,7 +1194,7 @@ class DashboardControllerTest extends TestCase
                 archivedAt: '2026-03-15 08:00:00',
             );
 
-            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
             $metric = $page['props']['cockpit']['bid_quality']['items'][3];
 
             $this->assertSame('win_rate_90d', $metric['key']);
@@ -1215,7 +1215,7 @@ class DashboardControllerTest extends TestCase
         $user->departments()->attach($department->id);
         $departmentProfile = $this->createWatchProfile($customer->id, 'Department Profile', null, $department->id, true);
 
-        $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+        $page = $this->inertiaPage($this->actingAs($user)->get('/app/bid-status'));
 
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_department_count']);
         $this->assertEqualsCanonicalizing(

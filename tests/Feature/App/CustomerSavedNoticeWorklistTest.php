@@ -324,7 +324,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->createSavedNotice($secondary['customer']->id, '2026-pipeline-foreign-2', 'Skjult trukket', bidStatus: SavedNotice::BID_STATUS_WITHDRAWN);
 
         $page = $this->inertiaPage(
-            $this->actingAs($primary['admin'])->get('/app/dashboard'),
+            $this->actingAs($primary['admin'])->get('/app/bid-status'),
         );
 
         $pipeline = $page['props']['pipeline'];

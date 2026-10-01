@@ -8,6 +8,7 @@ use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
+use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
@@ -155,11 +156,20 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::prefix('app')
-    ->middleware(['auth', 'customer.frontend'])
+    // customer.module gates the routes listed in config/procynia_modules.php -> route_modules
+    // against the customer's package entitlements. It is applied to the whole group rather than
+    // to each route, because the map it reads is keyed by route name.
+    ->middleware(['auth', 'customer.frontend', 'customer.module'])
     ->name('app.')
     ->group(function (): void {
         Route::redirect('/', '/app/notices?mode=saved');
-        Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+        // Hjem: Procynia across its modules. Keeps the /app/dashboard path the rail and the logo
+        // have always pointed at; only what the path renders has changed.
+        Route::get('/dashboard', HomeController::class)->name('dashboard');
+
+        // The bid cockpit, unchanged, now under the module it belongs to. It was the home page
+        // until Hjem became cross-module, which is why its path moved rather than its content.
+        Route::get('/bid-status', [DashboardController::class, 'index'])->name('bid-status');
 
         // The Kvalitet module's landing page. Navigation only for now; the quality work it will
         // gather still lives in Wiki review and claim approval.
@@ -275,6 +285,8 @@ Route::prefix('app')
         Route::post('/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
         Route::post('/billing/resume', [BillingController::class, 'resume'])->name('billing.resume');
         Route::post('/billing/change-plan', [BillingController::class, 'changePlan'])->name('billing.change-plan');
+        Route::post('/billing/packages/{package}/request', [BillingController::class, 'requestPackage'])
+            ->name('billing.packages.request');
 
         // Go/No-go template admin (System Owner only)
         Route::prefix('/go-no-go-templates')->name('go-no-go-templates.')->group(function (): void {

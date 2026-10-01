@@ -6,6 +6,7 @@ import NotificationBell from '../Components/App/NotificationBell';
 import ModuleSidebar from '../Components/App/ModuleSidebar';
 import { activeModuleKey } from '../Support/appModules';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
+import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -66,17 +67,84 @@ function emptyNotificationsState() {
  */
 const NOTIFICATION_POLL_MS = 60000;
 
+/**
+ * One row of navigation pills.
+ *
+ * Rendered twice — once as the header's module navigation, once as the page's own level — because
+ * the two are the same control at different depths. Giving the lower one its own markup would have
+ * let the pill, the active state and the disabled state drift apart between them.
+ */
+function NavigationRow({ items, activeKey, disabledHint = '' }) {
+    return (
+        <nav className="flex flex-wrap items-center gap-2">
+            {items.map((item) => {
+                const isActive = activeKey === item.key;
+                const classes = classNames(
+                    'rounded-xl px-3 py-2 text-base font-medium transition',
+                    isActive
+                        ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                );
+
+                if (!item.href) {
+                    return (
+                        <span
+                            key={item.key}
+                            className={classNames('rounded-xl px-3 py-2 text-base font-medium cursor-default text-slate-500 select-none')}
+                            aria-current={isActive ? 'page' : undefined}
+                            aria-disabled="true"
+                            title={disabledHint || undefined}
+                        >
+                            {item.label}
+                        </span>
+                    );
+                }
+
+                if (item.isAnchor) {
+                    return (
+                        <a
+                            key={item.key}
+                            href={item.href}
+                            className={classes}
+                            aria-current={isActive ? 'page' : undefined}
+                        >
+                            {item.label}
+                        </a>
+                    );
+                }
+
+                return (
+                    <Link
+                        key={item.key}
+                        href={item.href}
+                        className={classes}
+                        aria-current={isActive ? 'page' : undefined}
+                    >
+                        {item.label}
+                    </Link>
+                );
+            })}
+        </nav>
+    );
+}
+
 export default function CustomerAppLayout({ children, title, showPageTitle = true }) {
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
     const navigation = translations?.navigation ?? {};
     const modules = navigation.modules ?? {};
+    // Which technical modules this customer holds, resolved server-side from their package
+    // entitlements. The rail presents it; the routes enforce it.
+    const activeModules = page.props.entitlements?.modules ?? [];
     const tw = translations?.wiki ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
     const [isDeleteUnreadOpen, setIsDeleteUnreadOpen] = useState(false);
     const [notificationState, setNotificationState] = useState(page.props.notifications ?? emptyNotificationsState());
+    // Read once at mount rather than in an effect: the app renders client-side only, so there is
+    // no server pass to disagree with and no frame where the rail opens and then snaps shut.
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(readModuleSidebarCollapsed);
     const userMenuRef = useRef(null);
     const notificationsMenuRef = useRef(null);
     const currentUrl = page.url ?? '';
@@ -124,6 +192,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         if (pathname === '/app/dashboard') {
             return 'overview';
+        }
+
+        // The bid cockpit. It was /app/dashboard until Hjem became cross-module; it is Anbud's
+        // own overview now, so it resolves to a Anbud area rather than to Hjem.
+        if (pathname === '/app/bid-status') {
+            return 'bid-status';
         }
 
         if (pathname === '/app/notices' || pathname.startsWith('/app/notices/')) {
@@ -192,18 +266,30 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : '';
 
     /**
-     * The module rail's second level: the work areas inside Anbud.
+     * The work areas inside Anbud.
      *
-     * These four were the main menu until the rail took over module navigation. They are not
-     * modules — they are the stages one bid passes through, plus the competitor view that informs
-     * them — so they belong under Anbud rather than beside Wiki and Kvalitet. Routes, labels and
-     * permissions are exactly what they were; only the place they are named has moved. Tabs inside
-     * each stage stay in the header's second row, where they always were.
+     * These four are the stages one bid passes through, plus the competitor view that informs
+     * them. They are the level below the module, not modules themselves — the same relation
+     * Kildedokumenter, Kjøringer, Wiki-sider and Grafvisning have to Wiki. Routes, labels and
+     * permissions are exactly what they were; only the place they are named has moved.
      */
     const activeModule = activeModuleKey(activeMainArea);
 
+    const toggleSidebarCollapsed = () => {
+        setSidebarCollapsed((current) => {
+            const next = ! current;
+
+            writeModuleSidebarCollapsed(next);
+
+            return next;
+        });
+    };
+
     const moduleSections = activeModule === 'tenders'
         ? [
+            // Bid Status is the view across the four stages below it, so it comes first. It is
+            // the only item here that is not itself a stage.
+            { key: 'bid-status', label: navigation.bid_status, href: '/app/bid-status' },
             { key: 'procurements', label: navigation.notices, href: '/app/notices' },
             { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
             { key: 'ai', label: navigation.ai, href: '/app/ai' },
@@ -236,6 +322,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             ?? 'Oppgaver, beslutninger og avklaringer som krever oppfølging',
     };
 
+    /**
+     * The tabs inside one area. Where they are rendered depends on the module: inside Anbud they
+     * are a third level and land on the page, while Wiki and Kundemiljø have no area level above
+     * them, so theirs are the module navigation itself. See `hasModuleAreas` below.
+     */
     const secondaryNavigation = (() => {
         if (activeMainArea === 'ai') {
             return [
@@ -349,6 +440,26 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         return null;
     })();
+
+    /**
+     * Two levels, decided by one fact: whether the active module has work areas of its own.
+     *
+     * Wiki has none, so its tabs *are* its module navigation — they sit in the header, directly
+     * below the rail's selection. That is the pattern, and Anbud now follows it: the header carries
+     * Kunngjøringer, Saksliste, Besvarelse and Konkurrenter, and the tabs belonging to whichever of
+     * those is open drop one level further down, onto the page. Kunngjøringer is where the
+     * difference is visible — Live søk, Varsler and Watch lists are a level inside it, not a peer
+     * of it, and the page is where that reads correctly.
+     *
+     * Both lists are the ones that already existed. Nothing here adds, removes or re-gates an item.
+     */
+    const hasModuleAreas = moduleSections.length > 0;
+
+    const moduleNavigation = hasModuleAreas ? moduleSections : secondaryNavigation;
+    const activeModuleNavigationKey = hasModuleAreas ? activeMainArea : activeSecondaryKey;
+
+    const pageNavigation = hasModuleAreas ? secondaryNavigation : [];
+    const activePageNavigationKey = hasModuleAreas ? activeSecondaryKey : null;
 
     useEffect(() => {
         if (!flash?.success) {
@@ -743,62 +854,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             </div>
                         </div>
 
-                        {secondaryNavigation.length > 0 ? (
-                            <div className="mt-2 border-t border-slate-200/80 pt-2">
-                                <nav className="flex flex-wrap items-center gap-2">
-                                    {secondaryNavigation.map((item) => {
-                                        const isActive = activeSecondaryKey === item.key;
-                                        const classes = classNames(
-                                            'rounded-xl px-3 py-2 text-base font-medium transition',
-                                            isActive
-                                                ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                        );
-
-                                        if (!item.href) {
-                                            return (
-                                                <span
-                                                    key={item.key}
-                                                    className={classNames('rounded-xl px-3 py-2 text-base font-medium cursor-default text-slate-500 select-none')}
-                                                    aria-current={isActive ? 'page' : undefined}
-                                                    aria-disabled="true"
-                                                    title={aiCaseNavigationHint || undefined}
-                                                >
-                                                    {item.label}
-                                                </span>
-                                            );
-                                        }
-
-                                        if (item.isAnchor) {
-                                            return (
-                                                <a
-                                                    key={item.key}
-                                                    href={item.href}
-                                                    className={classes}
-                                                    aria-current={isActive ? 'page' : undefined}
-                                                >
-                                                    {item.label}
-                                                </a>
-                                            );
-                                        }
-
-                                        return (
-                                            <Link
-                                                key={item.key}
-                                                href={item.href}
-                                                className={classes}
-                                                aria-current={isActive ? 'page' : undefined}
-                                            >
-                                                {item.label}
-                                            </Link>
-                                        );
-                                    })}
-                                </nav>
-                                {aiCaseNavigationHint !== '' ? (
-                                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                                        {aiCaseNavigationHint}
-                                    </p>
-                                ) : null}
+                        {/* The module navigation: what the selected module contains. Anbud's work
+                            areas and Wiki's tabs sit in exactly the same place, because they are
+                            the same level — the first step inside a module. */}
+                        {moduleNavigation.length > 0 ? (
+                            <div className="mt-2 border-t border-slate-200/80 pt-2" data-testid="module-navigation">
+                                <NavigationRow
+                                    items={moduleNavigation}
+                                    activeKey={activeModuleNavigationKey}
+                                />
                             </div>
                         ) : null}
                     </div>
@@ -809,18 +873,47 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     while a long page scrolls; on a phone it simply sits above the page, because
                     the modules are the only navigation left and must not become unreachable. */}
                 <div className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-7 sm:px-6 lg:flex-row lg:px-8">
-                    <aside className="w-full shrink-0 lg:w-64">
+                    <aside
+                        data-testid="module-rail"
+                        className={classNames(
+                            'w-full shrink-0 transition-[width] duration-200',
+                            sidebarCollapsed ? 'lg:w-[4.5rem]' : 'lg:w-64',
+                        )}
+                    >
                         <div className="lg:sticky lg:top-24">
                             <ModuleSidebar
                                 modules={modules}
+                                activeModules={activeModules}
                                 activeKey={activeModule}
-                                sections={moduleSections}
-                                activeSectionKey={activeMainArea}
+                                collapsed={sidebarCollapsed}
+                                onToggleCollapsed={toggleSidebarCollapsed}
                             />
                         </div>
                     </aside>
 
                     <main className="min-w-0 flex-1">
+                    {/* The level inside an area — Live søk, Varsler and Watch lists inside
+                        Kunngjøringer, and the equivalents inside Saksliste and Besvarelse. It sits
+                        on the page rather than in the header because it belongs to one area, not
+                        to the module, and the header already names which area that is. */}
+                    {pageNavigation.length > 0 ? (
+                        <div
+                            data-testid="page-navigation"
+                            className="mb-6 rounded-2xl border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                        >
+                            <NavigationRow
+                                items={pageNavigation}
+                                activeKey={activePageNavigationKey}
+                                disabledHint={aiCaseNavigationHint}
+                            />
+                            {aiCaseNavigationHint !== '' ? (
+                                <p className="mt-2 px-1 pb-1 text-sm leading-6 text-slate-600">
+                                    {aiCaseNavigationHint}
+                                </p>
+                            ) : null}
+                        </div>
+                    ) : null}
+
                     {flash?.success && showSuccess ? (
                         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-base text-emerald-800 shadow-lg">
                             {flash.success}

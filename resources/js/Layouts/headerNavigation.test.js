@@ -36,11 +36,13 @@ const element = (testId, end) => {
  * 390 px.
  */
 describe('the workflow moved into the Anbud module, and only moved', () => {
-    test('the four work areas are there, in the order the work happens', () => {
+    test('the four work areas are there, in the order the work happens, behind Bid Status', () => {
         const sections = block('const moduleSections = activeModule === \'tenders\'', '];');
         const keys = [...sections.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
 
-        assert.deepEqual(keys, ['procurements', 'worklist', 'ai', 'suppliers']);
+        // Bid Status leads because it is the view across the four, not a fifth stage. It was the
+        // home page until Hjem became cross-module; Anbud is where its numbers mean something.
+        assert.deepEqual(keys, ['bid-status', 'procurements', 'worklist', 'ai', 'suppliers']);
     });
 
     test('nothing that is not a step in the work is in it', () => {
@@ -54,7 +56,7 @@ describe('the workflow moved into the Anbud module, and only moved', () => {
     test('every item keeps the href it always had', () => {
         const sections = block('const moduleSections = activeModule === \'tenders\'', '];');
 
-        for (const href of ["'/app/notices'", "'/app/ai'", "'/app/suppliers'"]) {
+        for (const href of ["'/app/notices'", "'/app/ai'", "'/app/suppliers'", "'/app/bid-status'"]) {
             assert.ok(sections.includes(href), href);
         }
 
@@ -183,5 +185,75 @@ describe('the header does not grow to fit the change', () => {
     test('the follow-up link and the search icon never shrink away', () => {
         assert.match(layout, /flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition/);
         assert.match(layout, /'shrink-0 rounded-xl px-3 py-2 text-base font-medium transition'/);
+    });
+});
+
+/**
+ * Three levels, and each one named in exactly one place.
+ *
+ * Wiki is the reference: the rail picks the module, the header names what is inside it, and the
+ * page carries whatever is inside that. Anbud used to put its four work areas in the rail, which
+ * made Anbud the only module with a second level in the left-hand column — Wiki's equivalent four
+ * were in the header all along. The areas moved up to the header and the area's own tabs moved
+ * down onto the page; no route, label or permission changed with them. Driven in a browser at
+ * 1680, 1280, 1024 and 390 px on /app/notices, /app/dashboard and /app/wiki.
+ */
+describe('the navigation hierarchy is the same shape in every module', () => {
+    test('one fact decides the split: does the module have work areas', () => {
+        assert.match(layout, /const hasModuleAreas = moduleSections\.length > 0;/);
+    });
+
+    test('a module with work areas shows them in the header, and its tabs on the page', () => {
+        assert.match(layout, /const moduleNavigation = hasModuleAreas \? moduleSections : secondaryNavigation;/);
+        assert.match(layout, /const pageNavigation = hasModuleAreas \? secondaryNavigation : \[\];/);
+    });
+
+    test('a module without them — Wiki — keeps its tabs in the header, untouched', () => {
+        const wiki = block("if (activeMainArea === 'wiki') {\n            return [", '];');
+        const keys = [...wiki.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+
+        assert.deepEqual(keys, ['wiki-sources', 'wiki-runs', 'wiki-pages', 'wiki-graph']);
+    });
+
+    test('Anbud shows its overview and its four areas in the header', () => {
+        const sections = block("const moduleSections = activeModule === 'tenders'", '];');
+        const keys = [...sections.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+
+        assert.deepEqual(keys, ['bid-status', 'procurements', 'worklist', 'ai', 'suppliers']);
+        assert.match(layout, /data-testid="module-navigation"/);
+    });
+
+    test('Kunngjøringer keeps its own three, one level further down', () => {
+        const sub = block("if (activeMainArea === 'procurements') {\n            return [", '];');
+        const keys = [...sub.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+
+        assert.deepEqual(keys, ['live', 'alerts', 'watch-profiles']);
+        assert.match(layout, /data-testid="page-navigation"/);
+    });
+
+    test('both levels are the same control, so they cannot drift apart', () => {
+        assert.match(layout, /function NavigationRow\(\{ items, activeKey, disabledHint = '' \}\)/);
+        assert.match(layout, /<NavigationRow\s*\n\s*items=\{moduleNavigation\}/);
+        assert.match(layout, /<NavigationRow\s*\n\s*items=\{pageNavigation\}/);
+    });
+
+    test('active state is read off the URL on both levels', () => {
+        assert.match(layout, /const activeModuleNavigationKey = hasModuleAreas \? activeMainArea : activeSecondaryKey;/);
+        assert.match(layout, /const activePageNavigationKey = hasModuleAreas \? activeSecondaryKey : null;/);
+        // activeMainArea and activeSecondaryKey are both derived from pathname/searchParams.
+        assert.match(layout, /const \{ pathname, searchParams \} = splitUrl\(currentUrl\);/);
+    });
+
+    test('the page level stacks above the page content, and wraps on a phone', () => {
+        const row = layout.slice(layout.indexOf('data-testid="page-navigation"'));
+
+        assert.match(row, /mb-6 rounded-2xl border border-slate-200\/80 bg-white/);
+        assert.match(layout, /<nav className="flex flex-wrap items-center gap-2">/);
+    });
+
+    test('the AI case hint followed the AI tabs down to the page', () => {
+        const row = layout.slice(layout.indexOf('data-testid="page-navigation"'));
+
+        assert.match(row, /disabledHint=\{aiCaseNavigationHint\}/);
     });
 });

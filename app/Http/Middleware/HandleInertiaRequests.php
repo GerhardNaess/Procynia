@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\UserNotificationService;
 use App\Support\CustomerContext;
 use Illuminate\Http\Request;
@@ -15,6 +16,7 @@ class HandleInertiaRequests extends Middleware
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly UserNotificationService $notificationService,
+        private readonly ModuleEntitlementService $moduleEntitlements,
     ) {}
 
     public function version(Request $request): ?string
@@ -67,6 +69,15 @@ class HandleInertiaRequests extends Middleware
                     ] : null,
                 ] : null,
             ],
+            // What this customer is entitled to, as technical module keys. The left rail renders
+            // this instead of a hardcoded availability list, and EnsureModuleIsEnabled enforces
+            // the same resolution on every gated route — one source, so the menu and the guard
+            // cannot disagree.
+            'entitlements' => [
+                'modules' => $customer !== null
+                    ? $this->moduleEntitlements->modulesFor($customer)
+                    : [],
+            ],
             'notifications' => $user instanceof User
                 ? $this->notificationService->panelPayload($user)
                 : null,
@@ -97,6 +108,7 @@ class HandleInertiaRequests extends Middleware
                     'registered_notices' => __('procynia.navigation.registered_notices'),
                     'history' => __('procynia.navigation.history'),
                 ],
+                'home' => __('procynia.home'),
                 'dashboard' => __('procynia.dashboard'),
                 'notices' => __('procynia.notices'),
                 'ai' => __('procynia.ai'),

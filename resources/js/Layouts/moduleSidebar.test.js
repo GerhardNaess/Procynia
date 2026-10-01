@@ -8,6 +8,7 @@ import { APP_MODULES, activeModuleKey } from '../Support/appModules.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const sidebar = readFileSync(join(here, '..', 'Components', 'App', 'ModuleSidebar.jsx'), 'utf8');
 const layout = readFileSync(join(here, 'CustomerAppLayout.jsx'), 'utf8');
+const state = readFileSync(join(here, '..', 'Support', 'moduleSidebarState.js'), 'utf8');
 
 /**
  * The rail is the product structure, so the thing worth guarding is that it keeps showing all of
@@ -19,7 +20,7 @@ describe('the rail shows the whole planned product structure', () => {
         assert.deepEqual(
             APP_MODULES.map((module) => module.key),
             [
-                'home', 'tenders', 'wiki', 'quality',
+                'home', 'wiki', 'tenders', 'quality',
                 'risk', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
@@ -29,10 +30,10 @@ describe('the rail shows the whole planned product structure', () => {
     test('exactly four are available, and they are the four that have pages', () => {
         const available = APP_MODULES.filter((module) => module.available);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'tenders', 'wiki', 'quality']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/notices', '/app/wiki', '/app/quality'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality'],
         );
     });
 
@@ -76,6 +77,7 @@ describe('available and planned look different, and say why', () => {
 describe('the selected module follows the page', () => {
     test('each area resolves to the module it belongs to', () => {
         assert.equal(activeModuleKey('overview'), 'home');
+        assert.equal(activeModuleKey('bid-status'), 'tenders');
         assert.equal(activeModuleKey('procurements'), 'tenders');
         assert.equal(activeModuleKey('worklist'), 'tenders');
         assert.equal(activeModuleKey('ai'), 'tenders');
@@ -91,6 +93,14 @@ describe('the selected module follows the page', () => {
         }
     });
 
+    test('Hjem is its own page, not the bid cockpit it used to be', () => {
+        // The rail still points at /app/dashboard — only what that path renders changed — and the
+        // cockpit resolves to an Anbud area so clicking Hjem can never land inside Anbud again.
+        assert.match(layout, /if \(pathname === '\/app\/dashboard'\) \{\s*\n\s*return 'overview';/);
+        assert.match(layout, /if \(pathname === '\/app\/bid-status'\) \{\s*\n\s*return 'bid-status';/);
+        assert.deepEqual(APP_MODULES.find((module) => module.key === 'home').areas, ['overview']);
+    });
+
     test('/app/quality is what puts the rail on Kvalitet', () => {
         assert.match(layout, /if \(pathname\.startsWith\('\/app\/quality'\)\) \{\s*\n\s*return 'quality';/);
     });
@@ -98,11 +108,88 @@ describe('the selected module follows the page', () => {
 
 describe('the rail does not take navigation away from anyone', () => {
     test('it is rendered beside the page, and stacks above it on a phone', () => {
-        assert.match(layout, /<aside className="w-full shrink-0 lg:w-64">/);
+        assert.match(layout, /sidebarCollapsed \? 'lg:w-\[4\.5rem\]' : 'lg:w-64',/);
         assert.match(layout, /flex max-w-\[1600px\] flex-col gap-6 .* lg:flex-row/);
     });
 
-    test('the work areas only appear under the module that owns them', () => {
-        assert.match(sidebar, /if \(moduleKey !== activeKey \|\| sections\.length === 0\) \{\s*\n\s*return null;/);
+    test('the rail is a module picker and nothing else', () => {
+        // Anbud used to nest its four work areas here, which made one module structurally unlike
+        // every other. Wiki never did, and Wiki is the pattern.
+        assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a second level');
+        assert.ok(! sidebar.includes('activeSectionKey'), 'the rail takes no section state');
+        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeKey = null, collapsed = false, onToggleCollapsed = null \}\)/);
+        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeKey=\{activeModule\}/);
+    });
+});
+
+/**
+ * Collapsing is a width change, not a different rail.
+ *
+ * The thing that can quietly break here is the one that matters most: a collapsed rail that also
+ * collapses on a phone, where it is the only module navigation there is. That is why the test
+ * below checks the breakpoint prefixes rather than only that labels can hide — `sr-only` with no
+ * `lg:` in front of it would hide the labels everywhere.
+ */
+describe('the rail can be collapsed to icons, on desktop only', () => {
+    test('the layout hands the rail its state and a way to change it', () => {
+        assert.match(layout, /const \[sidebarCollapsed, setSidebarCollapsed\] = useState\(readModuleSidebarCollapsed\)/);
+        assert.match(layout, /collapsed=\{sidebarCollapsed\}/);
+        assert.match(layout, /onToggleCollapsed=\{toggleSidebarCollapsed\}/);
+    });
+
+    test('the choice is remembered in localStorage, and survives storage being unavailable', () => {
+        assert.match(state, /const STORAGE_KEY = 'procynia\.app\.moduleSidebarCollapsed'/);
+        assert.match(state, /window\.localStorage\.getItem\(STORAGE_KEY\) === '1'/);
+        assert.match(state, /window\.localStorage\.setItem\(STORAGE_KEY, collapsed \? '1' : '0'\)/);
+
+        // Both accessors swallow a throwing localStorage; reading falls back to expanded.
+        assert.equal((state.match(/catch \{/g) ?? []).length, 2);
+        assert.match(state, /\} catch \{\s*\n\s*return false;/);
+    });
+
+    test('toggling writes through, so a reload comes back the same way', () => {
+        assert.match(layout, /const toggleSidebarCollapsed = \(\) => \{[\s\S]*?writeModuleSidebarCollapsed\(next\);/);
+    });
+
+    test('collapsing takes the labels out of the layout from lg up, and nowhere else', () => {
+        assert.match(sidebar, /const labelClass = collapsed \? 'leading-snug lg:sr-only' : 'leading-snug';/);
+        assert.ok(! /(?<!lg:)\bsr-only/.test(sidebar.replace(/lg:sr-only/g, '')), 'no label may be hidden below lg');
+    });
+
+    test('a collapsed row centres its icon instead of shrinking the label', () => {
+        assert.match(sidebar, /lg:justify-center lg:gap-0 lg:px-0/);
+    });
+
+    test('the icons carry a tooltip once the labels are gone', () => {
+        assert.match(sidebar, /title=\{collapsed \? label : undefined\}/);
+        assert.match(sidebar, /title=\{collapsed \? `\$\{label\} — \$\{plannedHint\}` : plannedHint\}/);
+    });
+
+    test('the active module keeps its pill, and planned modules keep their dimming', () => {
+        // Both states are driven by the same expressions in either width, so collapsing cannot
+        // silently drop one: rowClass only adds spacing, never colour.
+        assert.match(sidebar, /rowClass,\s*\n\s*'text-base font-medium transition',\s*\n\s*isActive/);
+        assert.match(sidebar, /rowClass,\s*\n\s*'cursor-not-allowed select-none text-base font-medium text-slate-400',/);
+    });
+
+    test('the control is discreet, labelled, and absent on a phone', () => {
+        assert.match(sidebar, /data-testid="module-sidebar-toggle"/);
+        assert.match(sidebar, /aria-expanded=\{! collapsed\}/);
+        assert.match(sidebar, /modules\.expand \?\? 'Utvid menyen'/);
+        assert.match(sidebar, /modules\.collapse \?\? 'Slå sammen menyen'/);
+        assert.match(sidebar, /'mt-3 hidden border-t border-slate-200\/80 pt-2 lg:flex',/);
+    });
+
+    test('the planned caption folds away with the labels rather than overflowing the narrow rail', () => {
+        assert.match(sidebar, /collapsed \? 'lg:sr-only' : '',/);
+    });
+
+    test('both translations exist in both languages', () => {
+        for (const [lang, expected] of [['no', ['Slå sammen menyen', 'Utvid menyen']], ['en', ['Collapse menu', 'Expand menu']]]) {
+            const file = readFileSync(join(here, '..', '..', '..', 'lang', lang, 'procynia.php'), 'utf8');
+
+            assert.ok(file.includes(`'collapse' => '${expected[0]}'`), `${lang} collapse`);
+            assert.ok(file.includes(`'expand' => '${expected[1]}'`), `${lang} expand`);
+        }
     });
 });
