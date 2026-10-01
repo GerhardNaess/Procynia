@@ -35,30 +35,34 @@ const element = (testId, end) => {
  * used elsewhere in this suite; the header itself was driven in a browser at 1680, 1280, 1024 and
  * 390 px.
  */
-describe('the main menu is the workflow, in order', () => {
-    test('six items, and these six', () => {
-        const nav = block('const mainNavigation = [', '];');
-        const keys = [...nav.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+describe('the workflow moved into the Anbud module, and only moved', () => {
+    test('the four work areas are there, in the order the work happens', () => {
+        const sections = block('const moduleSections = activeModule === \'tenders\'', '];');
+        const keys = [...sections.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
 
-        assert.deepEqual(keys, ['overview', 'procurements', 'worklist', 'wiki', 'suppliers', 'ai']);
+        assert.deepEqual(keys, ['procurements', 'worklist', 'ai', 'suppliers']);
     });
 
-    test('nothing that is not a step in the work is left in it', () => {
-        const nav = block('const mainNavigation = [', '];');
+    test('nothing that is not a step in the work is in it', () => {
+        const sections = block('const moduleSections = activeModule === \'tenders\'', '];');
 
-        for (const key of ['info-center', 'watch-profiles', 'environment', 'billing', 'wiki-ask']) {
-            assert.ok(! nav.includes(`key: '${key}'`), `${key} must not be a workflow item`);
+        for (const key of ['info-center', 'watch-profiles', 'environment', 'billing', 'wiki-ask', 'wiki']) {
+            assert.ok(! sections.includes(`key: '${key}'`), `${key} must not be a work area`);
         }
     });
 
     test('every item keeps the href it always had', () => {
-        const nav = block('const mainNavigation = [', '];');
+        const sections = block('const moduleSections = activeModule === \'tenders\'', '];');
 
-        for (const href of ["'/app/dashboard'", "'/app/notices'", "'/app/wiki'", "'/app/suppliers'", "'/app/ai'"]) {
-            assert.ok(nav.includes(href), href);
+        for (const href of ["'/app/notices'", "'/app/ai'", "'/app/suppliers'"]) {
+            assert.ok(sections.includes(href), href);
         }
 
-        assert.match(nav, /buildHref\('\/app\/notices', \{ mode: 'saved' \}\)/);
+        assert.match(sections, /buildHref\('\/app\/notices', \{ mode: 'saved' \}\)/);
+    });
+
+    test('the header no longer carries the workflow row', () => {
+        assert.ok(! layout.includes('const mainNavigation = ['), 'the workflow row moved to the rail');
     });
 
     test('the active pill is unchanged', () => {
@@ -82,9 +86,8 @@ describe('follow-up sits beside the workflow, not inside it', () => {
         assert.match(divider, /hidden h-6 w-px shrink-0 bg-slate-200 lg:block/);
     });
 
-    test('the order across the bar is workflow, search, divider, follow-up, bell, user', () => {
+    test('the order across the bar is search, divider, follow-up, bell, user', () => {
         const order = [
-            'const mainNavigation = [',
             'href={askWikiNavigation.href}',
             'data-testid="header-follow-up-divider"',
             'data-testid="header-follow-up"',
@@ -158,9 +161,9 @@ describe('administration moved to the user menu, and only moved', () => {
 
 describe('"AI" is only the menu label that changed', () => {
     test('the item still points at the AI workspace', () => {
-        const nav = block('const mainNavigation = [', '];');
+        const sections = block('const moduleSections = activeModule === \'tenders\'', '];');
 
-        assert.match(nav, /\{ key: 'ai', label: navigation\.ai, href: '\/app\/ai' \}/);
+        assert.match(sections, /\{ key: 'ai', label: navigation\.ai, href: '\/app\/ai' \}/);
     });
 
     test('the AI area, its tabs and its case routing are untouched', () => {
