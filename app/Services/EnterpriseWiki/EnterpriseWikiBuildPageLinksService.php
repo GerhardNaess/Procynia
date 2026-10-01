@@ -2,12 +2,15 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\ProjectEnterpriseWikiPageToGraph;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Builds the EnterpriseWikiPageLink graph for Enterprise Wiki pages.
@@ -322,7 +325,7 @@ class EnterpriseWikiBuildPageLinksService
         $parsed = $this->linkParser->parse($markdown);
         $resolution = $this->linkResolver->resolve($page->customer_id, $page, $parsed);
 
-        return DB::transaction(function () use ($page, $currentVersion, $ingestRunId, $resolution) {
+        $result = DB::transaction(function () use ($page, $currentVersion, $ingestRunId, $resolution) {
             if ($ingestRunId !== null) {
                 $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($ingestRunId);
 
@@ -401,6 +404,31 @@ class EnterpriseWikiBuildPageLinksService
                 'stale_links_removed' => $staleRemoved,
             ];
         });
+
+        $this->dispatchGraphProjectionAfterCommit($page->id);
+
+        return $result;
+    }
+
+    private function dispatchGraphProjectionAfterCommit(int $pageId): void
+    {
+        try {
+            DB::afterCommit(function () use ($pageId): void {
+                try {
+                    ProjectEnterpriseWikiPageToGraph::dispatch($pageId)->afterCommit();
+                } catch (Throwable $e) {
+                    Log::error('[WIKI_GRAPH_PROJECTION] Failed to dispatch page projection job after SQL commit.', [
+                        'page_id' => $pageId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            });
+        } catch (Throwable $e) {
+            Log::error('[WIKI_GRAPH_PROJECTION] Failed to register page projection dispatch callback.', [
+                'page_id' => $pageId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

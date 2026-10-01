@@ -4,6 +4,9 @@ namespace App\Providers;
 
 use App\Models\Customer;
 use App\Services\Doffin\DoffinSourceAdapter;
+use App\Services\EnterpriseWiki\GraphProjection\GraphProjectionService;
+use App\Services\EnterpriseWiki\GraphProjection\Neo4jGraphProjectionService;
+use App\Services\EnterpriseWiki\GraphProjection\NullGraphProjectionService;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
@@ -36,6 +39,22 @@ class AppServiceProvider extends ServiceProvider
             $app->make(DoffinSourceAdapter::class),
             $app->make(TedSourceAdapter::class),
         ]));
+
+        $this->app->singleton(GraphProjectionService::class, function (): GraphProjectionService {
+            /** @var array{enabled?: bool, uri?: string, database?: ?string, username?: ?string, password?: ?string} $config */
+            $config = config('services.neo4j', []);
+
+            if (! (bool) ($config['enabled'] ?? false)) {
+                return new NullGraphProjectionService;
+            }
+
+            return new Neo4jGraphProjectionService(
+                uri: (string) ($config['uri'] ?? 'bolt://localhost:7687'),
+                database: $config['database'] ?? null,
+                username: $config['username'] ?? null,
+                password: $config['password'] ?? null,
+            );
+        });
     }
 
     public function boot(): void

@@ -114,6 +114,57 @@ services:
             start_period: 5s
         restart: unless-stopped
 
+    # Neo4j backs the Enterprise Wiki graph projection pilot. PostgreSQL remains the source of
+    # truth; everything here is rebuildable from SQL with `php artisan wiki:graph-project`.
+    #
+    # Opt-in via profile: `docker compose --profile neo4j up -d neo4j`. The projection is gated by
+    # NEO4J_ENABLED and defaults to off, so this must not start — or break compose — for anyone
+    # who is not working on the pilot.
+    neo4j:
+        image: neo4j:5.26-community
+        container_name: procynia-neo4j
+        profiles:
+            - neo4j
+        environment:
+            # Interpolated from the developer's own .env, so the value is never committed. The
+            # fail-closed ${VAR:?} form used for REDIS_PASSWORD is not available here: compose
+            # interpolates every service, including ones a profile excludes, so it would break the
+            # whole file for developers without the variable. The entrypoint fails closed instead.
+            #
+            # Deliberately not named NEO4J_PASSWORD: the image turns every NEO4J_-prefixed variable
+            # into a server setting, and an unrecognised `password` setting aborts startup.
+            PROCYNIA_NEO4J_PASSWORD: "${NEO4J_PASSWORD:-}"
+            TZ: Europe/Oslo
+        entrypoint:
+            - /bin/bash
+            - -c
+            - |
+                if [ -z "$$PROCYNIA_NEO4J_PASSWORD" ]; then
+                    printf '%s\n' '[Procynia][Neo4j] NEO4J_PASSWORD is not set in .env — refusing to start an unauthenticated graph database.' >&2
+                    exit 1
+                fi
+                export NEO4J_AUTH="neo4j/$$PROCYNIA_NEO4J_PASSWORD"
+                exec tini -g -- /startup/docker-entrypoint.sh "$$@"
+            - procynia-neo4j
+        command:
+            - neo4j
+        # Loopback-only, and only in local development: 7474 is the browser UI, 7687 is Bolt.
+        ports:
+            - "127.0.0.1:7474:7474"
+            - "127.0.0.1:7687:7687"
+        volumes:
+            - procynia_neo4j_data:/data
+        # Must authenticate, or the container reports unhealthy even though Neo4j is fine.
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - cypher-shell -u neo4j -p "$$PROCYNIA_NEO4J_PASSWORD" "RETURN 1" > /dev/null 2>&1
+            interval: 10s
+            timeout: 10s
+            retries: 10
+            start_period: 30s
+        restart: unless-stopped
+
     queue:
         build:
             context: .
@@ -549,3 +600,4 @@ services:
 volumes:
     procynia_postgres_data:
     procynia_redis_data:
+    procynia_neo4j_data:

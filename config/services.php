@@ -81,6 +81,14 @@ return [
         'url' => env('UPTIME_KUMA_URL', ''),
     ],
 
+    'neo4j' => [
+        'enabled' => (bool) env('NEO4J_ENABLED', false),
+        'uri' => env('NEO4J_URI', 'bolt://localhost:7687'),
+        'database' => env('NEO4J_DATABASE', 'neo4j'),
+        'username' => env('NEO4J_USERNAME'),
+        'password' => env('NEO4J_PASSWORD'),
+    ],
+
     'enterprise_wiki' => [
         'ai_enabled' => (bool) env('ENTERPRISE_WIKI_AI_ENABLED', false),
 

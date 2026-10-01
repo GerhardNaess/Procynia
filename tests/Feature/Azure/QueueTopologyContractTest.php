@@ -17,6 +17,7 @@ use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiClaimVerification;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiMaintainerDecisionBatches;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
+use App\Jobs\EnterpriseWiki\ProjectEnterpriseWikiPageToGraph;
 use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiMaintainerDecisionBatch;
@@ -80,6 +81,7 @@ class QueueTopologyContractTest extends TestCase
             ProcessEnterpriseWikiIngest::class,
             ProcessEnterpriseWikiSection::class,
             FinalizeEnterpriseWikiIngest::class,
+            ProjectEnterpriseWikiPageToGraph::class,
         ],
         'enterprise-wiki-reconciliation' => [
             ReconcileEnterpriseWikiClaimSourcesForDocument::class,
