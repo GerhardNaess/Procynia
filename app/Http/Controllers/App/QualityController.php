@@ -4,51 +4,51 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiPage;
-use App\Models\QualityPageClassification;
-use App\Models\QualityRelation;
+use App\Models\QualityControlDetail;
+use App\Models\QualityItem;
+use App\Models\QualityItemRelation;
+use App\Models\QualityItemWikiLink;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
-use App\Services\Quality\QualityStructureService;
+use App\Services\Quality\QualityItemService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Kvalitet — the faglig view of the Wiki.
+ * Kvalitet — the virksomhet's styrende dokumenter as objects of their own.
  *
- * The module owns no content. Every document it lists is a Wiki page, with Wiki's owner, status,
- * review and version history; Kvalitet adds what kind of styrende dokument each one is and how they
- * govern each other, and then presents them the way a kvalitetsleder needs to read them rather than
- * the way the Wiki pipeline produced them.
+ * The module owns its content now. A policy, a process, a control is a row here, with its own owner,
+ * number, status and review cycle, and it exists whether or not anybody has written it up in the
+ * Wiki. Wiki is reached into for the knowledge behind a document — see the link endpoints — and
+ * learns nothing from being reached into: no quality type is ever written onto a Wiki page.
  *
  * Entitlement is not checked here. Every route in this controller is named under `app.quality.`,
  * and config/procynia_modules.php maps that prefix to the `quality` module, so EnsureModuleIsEnabled
- * has already refused the request if the customer has not bought it — including the write actions.
+ * has already refused the request if the customer has not bought it — the write actions included.
  */
 class QualityController extends Controller
 {
     private const TABS = ['overview', 'processes', 'controls', 'checklists'];
 
     /**
-     * Which quality types each tab shows. Oversikt deliberately shows all of them: it is the whole
-     * document hierarchy in one place, and it is the only tab policies, procedures and
-     * arbeidsinstrukser appear on.
+     * Which types each tab shows. Oversikt deliberately shows all of them: it is the whole document
+     * hierarchy in one place, and the only tab policies, procedures and arbeidsinstrukser appear on.
      *
      * @var array<string, list<string>>
      */
     private const TAB_TYPES = [
-        'overview' => QualityPageClassification::TYPES,
-        'processes' => [QualityPageClassification::TYPE_PROCESS],
-        'controls' => [QualityPageClassification::TYPE_CONTROL],
-        'checklists' => [QualityPageClassification::TYPE_CHECKLIST],
+        'overview' => QualityItem::TYPES,
+        'processes' => [QualityItem::TYPE_PROCESS],
+        'controls' => [QualityItem::TYPE_CONTROL],
+        'checklists' => [QualityItem::TYPE_CHECKLIST],
     ];
 
     public function __construct(
         private readonly CustomerContext $customerContext,
-        private readonly QualityStructureService $structure,
+        private readonly QualityItemService $items,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
     ) {}
 
@@ -59,40 +59,51 @@ class QualityController extends Controller
 
         $tab = in_array($request->query('tab'), self::TABS, true) ? $request->query('tab') : 'overview';
 
-        $documents = $this->documentRows($customerId, $user, self::TAB_TYPES[$tab]);
-
-        $props = [
+        return Inertia::render('App/Quality/Index', [
             'active_tab' => $tab,
-            // Classifying a page and drawing a relation are statements about the kvalitetssystem,
-            // so they use the same authority that already vouches for Wiki content — System Owner,
-            // or a role the customer has given Wiki claim approval to. No new permission was added.
+            // Creating a styrende dokument and drawing a relation between two are statements about
+            // the kvalitetssystem, so they use the same authority that already vouches for Wiki
+            // content — System Owner, or a role the customer has given Wiki claim approval to. No
+            // new permission was introduced.
             'can_manage' => $user?->canApproveWikiClaims() ?? false,
-            'documents' => $documents,
+            'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab]),
             'type_counts' => $this->typeCounts($customerId),
-            'quality_types' => QualityPageClassification::TYPES,
+            'quality_types' => QualityItem::TYPES,
+            'statuses' => QualityItem::STATUSES,
             'relation_types' => $this->relationTypeMatrix(),
-        ];
-
-        if ($tab === 'overview') {
-            $props += [
-                'relations' => $this->relationRows($customerId),
-                'unclassified_pages' => $this->unclassifiedPages($customerId, $user, $request),
-                'unclassified_search' => trim((string) $request->query('search', '')),
-                // Only classified pages can be an end of a relation, so the form offers exactly
-                // those — with their type, so the UI can narrow each select to the matrix.
-                'relation_page_options' => $documents->map(static fn (array $row): array => [
-                    'page_id' => $row['page_id'],
-                    'title' => $row['title'],
-                    'quality_type' => $row['quality_type'],
-                    'quality_code' => $row['quality_code'],
-                ])->values()->all(),
-            ];
-        }
-
-        return Inertia::render('App/Quality/Index', $props);
+            'relations' => $tab === 'overview' ? $this->relationRows($customerId) : [],
+            'relation_item_options' => $tab === 'overview' ? $this->relationItemOptions($customerId) : [],
+            'owner_options' => $this->ownerOptions($customerId),
+        ]);
     }
 
-    public function storeClassification(Request $request): RedirectResponse
+    /**
+     * One quality item, with the structure its type carries and the Wiki pages behind it.
+     */
+    public function show(Request $request, QualityItem $item): Response
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $item->loadMissing(['owner', 'processSteps', 'processIo', 'checklistItems', 'controlDetail']);
+
+        return Inertia::render('App/Quality/Item', [
+            'item' => $this->itemDetail($item),
+            'can_manage' => $user?->canApproveWikiClaims() ?? false,
+            'statuses' => QualityItem::STATUSES,
+            'frequencies' => QualityControlDetail::FREQUENCIES,
+            'link_types' => QualityItemWikiLink::LINK_TYPES,
+            'owner_options' => $this->ownerOptions($customerId),
+            'wiki_links' => $this->wikiLinkRows($item, $user),
+            'wiki_page_options' => $this->wikiPageOptions($customerId, $user, $request),
+            'wiki_search' => trim((string) $request->query('wiki_search', '')),
+            'relations' => $this->relationsForItem($customerId, (int) $item->id),
+        ]);
+    }
+
+    public function storeItem(Request $request): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
@@ -100,37 +111,116 @@ class QualityController extends Controller
         $this->authorizeManagement($user);
 
         $validated = $request->validate([
-            'page_id' => ['required', 'integer'],
             'quality_type' => ['required', 'string'],
-            'quality_code' => ['nullable', 'string', 'max:50'],
+            'title' => ['required', 'string', 'max:255'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'purpose' => ['nullable', 'string', 'max:5000'],
+            'owner_user_id' => ['nullable', 'integer'],
+            'status' => ['nullable', 'string'],
+            'review_interval_months' => ['nullable', 'integer', 'min:1', 'max:120'],
+            'last_reviewed_at' => ['nullable', 'date'],
         ]);
 
-        $page = EnterpriseWikiPage::query()
-            ->where('customer_id', $customerId)
-            ->findOrFail($validated['page_id']);
+        $item = $this->items->createItem((int) $customerId, $validated, $user);
 
-        $this->structure->classify(
-            $customerId,
-            $page,
-            $validated['quality_type'],
-            $validated['quality_code'] ?? null,
-            $user,
-        );
-
-        return back()->with('success', __('procynia.quality.flash.classified'));
+        return redirect()
+            ->route('app.quality.items.show', ['item' => $item->id])
+            ->with('success', __('procynia.quality.flash.item_created'));
     }
 
-    public function destroyClassification(QualityPageClassification $classification): RedirectResponse
+    public function updateItem(Request $request, QualityItem $item): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
         $this->authorizeManagement($user);
-        $this->assertOwnedByCustomer((int) $classification->customer_id, $customerId);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
-        $this->structure->unclassify($customerId, $classification);
+        $validated = $request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:255'],
+            'code' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'purpose' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'owner_user_id' => ['sometimes', 'nullable', 'integer'],
+            'status' => ['sometimes', 'nullable', 'string'],
+            'review_interval_months' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:120'],
+            'last_reviewed_at' => ['sometimes', 'nullable', 'date'],
+        ]);
 
-        return back()->with('success', __('procynia.quality.flash.unclassified'));
+        $this->items->updateItem((int) $customerId, $item, $validated, $user);
+
+        return back()->with('success', __('procynia.quality.flash.item_updated'));
+    }
+
+    public function destroyItem(QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $this->items->deleteItem((int) $customerId, $item);
+
+        return redirect()
+            ->route('app.quality.index')
+            ->with('success', __('procynia.quality.flash.item_deleted'));
+    }
+
+    /**
+     * Process structure, written as a set. See QualityItemService::replaceProcessSteps for why the
+     * whole list travels rather than one row at a time.
+     */
+    public function updateStructure(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'steps' => ['sometimes', 'array'],
+            'steps.*.title' => ['nullable', 'string', 'max:255'],
+            'steps.*.description' => ['nullable', 'string', 'max:5000'],
+            'steps.*.responsibility' => ['nullable', 'string', 'max:255'],
+            'inputs' => ['sometimes', 'array'],
+            'inputs.*.label' => ['nullable', 'string', 'max:255'],
+            'inputs.*.description' => ['nullable', 'string', 'max:2000'],
+            'outputs' => ['sometimes', 'array'],
+            'outputs.*.label' => ['nullable', 'string', 'max:255'],
+            'outputs.*.description' => ['nullable', 'string', 'max:2000'],
+            'checklist_items' => ['sometimes', 'array'],
+            'checklist_items.*.text' => ['nullable', 'string', 'max:2000'],
+            'checklist_items.*.guidance' => ['nullable', 'string', 'max:2000'],
+            'checklist_items.*.is_required' => ['nullable', 'boolean'],
+            'control' => ['sometimes', 'array'],
+            'control.criterion' => ['nullable', 'string', 'max:5000'],
+            'control.responsibility' => ['nullable', 'string', 'max:255'],
+            'control.frequency' => ['nullable', 'string'],
+            'control.method' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        if (array_key_exists('steps', $validated)) {
+            $this->items->replaceProcessSteps((int) $customerId, $item, $validated['steps']);
+        }
+
+        if (array_key_exists('inputs', $validated)) {
+            $this->items->replaceProcessIo((int) $customerId, $item, 'input', $validated['inputs']);
+        }
+
+        if (array_key_exists('outputs', $validated)) {
+            $this->items->replaceProcessIo((int) $customerId, $item, 'output', $validated['outputs']);
+        }
+
+        if (array_key_exists('checklist_items', $validated)) {
+            $this->items->replaceChecklistItems((int) $customerId, $item, $validated['checklist_items']);
+        }
+
+        if (array_key_exists('control', $validated)) {
+            $this->items->updateControlDetail((int) $customerId, $item, $validated['control']);
+        }
+
+        return back()->with('success', __('procynia.quality.flash.structure_updated'));
     }
 
     public function storeRelation(Request $request): RedirectResponse
@@ -141,28 +231,28 @@ class QualityController extends Controller
         $this->authorizeManagement($user);
 
         $validated = $request->validate([
-            'from_page_id' => ['required', 'integer'],
-            'to_page_id' => ['required', 'integer'],
+            'from_item_id' => ['required', 'integer'],
+            'to_item_id' => ['required', 'integer'],
             'relation_type' => ['required', 'string'],
         ]);
 
-        $pages = EnterpriseWikiPage::query()
+        $items = QualityItem::query()
             ->where('customer_id', $customerId)
-            ->whereIn('id', [$validated['from_page_id'], $validated['to_page_id']])
+            ->whereIn('id', [$validated['from_item_id'], $validated['to_item_id']])
             ->get()
             ->keyBy('id');
 
-        $fromPage = $pages->get($validated['from_page_id']);
-        $toPage = $pages->get($validated['to_page_id']);
+        $fromItem = $items->get($validated['from_item_id']);
+        $toItem = $items->get($validated['to_item_id']);
 
-        abort_if($fromPage === null || $toPage === null, 404);
+        abort_if($fromItem === null || $toItem === null, 404);
 
-        $this->structure->relate($customerId, $fromPage, $toPage, $validated['relation_type'], $user);
+        $this->items->relate((int) $customerId, $fromItem, $toItem, $validated['relation_type'], $user);
 
         return back()->with('success', __('procynia.quality.flash.related'));
     }
 
-    public function destroyRelation(QualityRelation $relation): RedirectResponse
+    public function destroyRelation(QualityItemRelation $relation): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
@@ -170,65 +260,83 @@ class QualityController extends Controller
         $this->authorizeManagement($user);
         $this->assertOwnedByCustomer((int) $relation->customer_id, $customerId);
 
-        $this->structure->unrelate($customerId, $relation);
+        $this->items->unrelate((int) $customerId, $relation);
 
         return back()->with('success', __('procynia.quality.flash.unrelated'));
     }
 
-    /**
-     * One row per classified page: the quality facts, plus the Wiki facts read straight off the
-     * page rather than copied into the quality tables.
-     *
-     * @param  list<string>  $types
-     * @return Collection<int, array<string, mixed>>
-     */
-    private function documentRows(?int $customerId, ?User $user, array $types): Collection
+    public function storeWikiLink(Request $request, QualityItem $item): RedirectResponse
     {
-        $classifications = QualityPageClassification::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('quality_type', $types)
-            ->whereHas('page', fn ($query) => $query->whereIn('status', $this->visibleStatuses($user)))
-            ->with([
-                'page.owner',
-                'page.currentVersion',
-                'page.publishedVersion',
-            ])
-            ->get();
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
 
-        $relationsByPage = $this->relationsByPage(
-            $customerId,
-            $classifications->pluck('enterprise_wiki_page_id')->map(fn ($id): int => (int) $id)->all(),
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'enterprise_wiki_page_id' => ['required', 'integer'],
+            'link_type' => ['nullable', 'string'],
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->findOrFail($validated['enterprise_wiki_page_id']);
+
+        $this->items->linkWikiPage(
+            (int) $customerId,
+            $item,
+            $page,
+            $validated['link_type'] ?? QualityItemWikiLink::LINK_TYPE_DOCUMENTS,
+            $validated['note'] ?? null,
+            $user,
         );
 
-        $typeOrder = array_flip(QualityPageClassification::TYPES);
+        return back()->with('success', __('procynia.quality.flash.wiki_linked'));
+    }
 
-        return $classifications
-            ->map(function (QualityPageClassification $classification) use ($relationsByPage): array {
-                $page = $classification->page;
-                $pageId = (int) $classification->enterprise_wiki_page_id;
+    public function destroyWikiLink(QualityItemWikiLink $link): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
 
-                return [
-                    'id' => $classification->id,
-                    'page_id' => $pageId,
-                    'quality_type' => $classification->quality_type,
-                    'quality_code' => $classification->quality_code,
-                    'title' => $page?->title,
-                    'slug' => $page?->slug,
-                    // The row's whole purpose is to lead back to the Wiki page that holds the
-                    // content; Kvalitet never becomes a second place to read it.
-                    'wiki_url' => $page !== null ? route('app.wiki.show', ['slug' => $page->slug]) : null,
-                    'page_type' => $page?->page_type,
-                    'status' => $page?->status,
-                    'owner_name' => $page?->owner?->name,
-                    // The same presenter the Wiki list and the Wiki page use, so a document cannot
-                    // read as approved in Kvalitet and in review in Wiki.
-                    'publication' => $page !== null
-                        ? $this->publicationStatus->forPage($page, $page->currentVersion)
-                        : null,
-                    'relations' => $relationsByPage[$pageId] ?? [],
-                    'updated_at' => $page?->updated_at,
-                ];
-            })
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $link->customer_id, $customerId);
+
+        $this->items->unlinkWikiPage((int) $customerId, $link);
+
+        return back()->with('success', __('procynia.quality.flash.wiki_unlinked'));
+    }
+
+    // -----------------------------------------------------------------
+    // Payloads
+    // -----------------------------------------------------------------
+
+    /**
+     * @param  list<string>  $types
+     * @return list<array<string, mixed>>
+     */
+    private function itemRows(?int $customerId, array $types): array
+    {
+        $typeOrder = array_flip(QualityItem::TYPES);
+
+        return QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_type', $types)
+            ->with(['owner:id,name'])
+            ->withCount('wikiLinks')
+            ->get()
+            ->map(static fn (QualityItem $item): array => [
+                'id' => (int) $item->id,
+                'quality_type' => $item->quality_type,
+                'title' => $item->title,
+                'code' => $item->code,
+                'status' => $item->status,
+                'owner_name' => $item->owner?->name,
+                'next_review_at' => $item->next_review_at?->toDateString(),
+                'wiki_link_count' => (int) $item->wiki_links_count,
+                'url' => route('app.quality.items.show', ['item' => $item->id]),
+            ])
             // Governing documents first, then alphabetically within each type — the order a
             // kvalitetshåndbok is read in, not the order rows happened to be created in.
             ->sortBy(static fn (array $row): string => sprintf(
@@ -236,102 +344,131 @@ class QualityController extends Controller
                 $typeOrder[$row['quality_type']] ?? 99,
                 mb_strtolower((string) $row['title']),
             ))
-            ->values();
+            ->values()
+            ->all();
     }
 
     /**
-     * Both directions of every relation that touches these pages, keyed by page id.
-     *
-     * Stored rows are one-directional — see QualityRelation — so the incoming side is produced here
-     * for presentation only. A row knows which end it is looking from, because "styres av" and
-     * "styrer" are not the same statement.
-     *
-     * @param  list<int>  $pageIds
-     * @return array<int, list<array<string, mixed>>>
+     * @return array<string, mixed>
      */
-    private function relationsByPage(?int $customerId, array $pageIds): array
+    private function itemDetail(QualityItem $item): array
     {
-        if ($pageIds === []) {
-            return [];
-        }
-
-        $relations = QualityRelation::query()
-            ->where('customer_id', $customerId)
-            ->where(fn ($query) => $query->whereIn('from_page_id', $pageIds)->orWhereIn('to_page_id', $pageIds))
-            ->with(['fromPage:id,title,slug', 'toPage:id,title,slug'])
-            ->orderBy('id')
-            ->get();
-
-        $byPage = [];
-
-        foreach ($relations as $relation) {
-            $fromId = (int) $relation->from_page_id;
-            $toId = (int) $relation->to_page_id;
-
-            $byPage[$fromId][] = [
-                'id' => $relation->id,
-                'relation_type' => $relation->relation_type,
-                'direction' => 'outgoing',
-                'other_page_id' => $toId,
-                'other_page_title' => $relation->toPage?->title,
-                'other_page_slug' => $relation->toPage?->slug,
-            ];
-
-            $byPage[$toId][] = [
-                'id' => $relation->id,
-                'relation_type' => $relation->relation_type,
-                'direction' => 'incoming',
-                'other_page_id' => $fromId,
-                'other_page_title' => $relation->fromPage?->title,
-                'other_page_slug' => $relation->fromPage?->slug,
-            ];
-        }
-
-        return $byPage;
+        return [
+            'id' => (int) $item->id,
+            'quality_type' => $item->quality_type,
+            'title' => $item->title,
+            'code' => $item->code,
+            'purpose' => $item->purpose,
+            'status' => $item->status,
+            'owner_user_id' => $item->owner_user_id !== null ? (int) $item->owner_user_id : null,
+            'owner_name' => $item->owner?->name,
+            'review_interval_months' => $item->review_interval_months,
+            'last_reviewed_at' => $item->last_reviewed_at?->toDateString(),
+            'next_review_at' => $item->next_review_at?->toDateString(),
+            'steps' => $item->processSteps
+                ->map(static fn ($step): array => [
+                    'id' => (int) $step->id,
+                    'position' => (int) $step->position,
+                    'title' => $step->title,
+                    'description' => $step->description,
+                    'responsibility' => $step->responsibility,
+                ])
+                ->values()
+                ->all(),
+            'inputs' => $this->ioRows($item, 'input'),
+            'outputs' => $this->ioRows($item, 'output'),
+            'checklist_items' => $item->checklistItems
+                ->map(static fn ($entry): array => [
+                    'id' => (int) $entry->id,
+                    'position' => (int) $entry->position,
+                    'text' => $entry->text,
+                    'guidance' => $entry->guidance,
+                    'is_required' => (bool) $entry->is_required,
+                ])
+                ->values()
+                ->all(),
+            'control' => $item->controlDetail !== null ? [
+                'criterion' => $item->controlDetail->criterion,
+                'responsibility' => $item->controlDetail->responsibility,
+                'frequency' => $item->controlDetail->frequency,
+                'method' => $item->controlDetail->method,
+            ] : null,
+        ];
     }
 
     /**
      * @return list<array<string, mixed>>
      */
-    private function relationRows(?int $customerId): array
+    private function ioRows(QualityItem $item, string $direction): array
     {
-        return QualityRelation::query()
-            ->where('customer_id', $customerId)
-            ->with(['fromPage:id,title,slug', 'toPage:id,title,slug'])
-            ->orderBy('relation_type')
-            ->orderBy('id')
-            ->get()
-            ->map(static fn (QualityRelation $relation): array => [
-                'id' => $relation->id,
-                'relation_type' => $relation->relation_type,
-                'from_page_id' => (int) $relation->from_page_id,
-                'from_title' => $relation->fromPage?->title,
-                'to_page_id' => (int) $relation->to_page_id,
-                'to_title' => $relation->toPage?->title,
+        return $item->processIo
+            ->where('direction', $direction)
+            ->map(static fn ($entry): array => [
+                'id' => (int) $entry->id,
+                'position' => (int) $entry->position,
+                'label' => $entry->label,
+                'description' => $entry->description,
             ])
             ->values()
             ->all();
     }
 
     /**
-     * Wiki pages that are not part of the kvalitetssystem yet.
+     * The Wiki pages behind one quality item.
      *
-     * Capped and searchable rather than complete: a mature Wiki has thousands of pages and almost
-     * none of them are styrende dokumenter, so this is a picker, not a list to work through.
+     * Read access follows Wiki's own: a page the reader could not open in Wiki is not listed here
+     * either. The link row still exists — this is a visibility filter, not a deletion — so another
+     * reader with wider access sees the full picture.
      *
      * @return list<array<string, mixed>>
      */
-    private function unclassifiedPages(?int $customerId, ?User $user, Request $request): array
+    private function wikiLinkRows(QualityItem $item, ?User $user): array
     {
-        $search = trim((string) $request->query('search', ''));
+        return QualityItemWikiLink::query()
+            ->where('quality_item_id', $item->id)
+            ->whereHas('page', fn ($query) => $query->whereIn('status', $this->visibleStatuses($user)))
+            ->with(['page.currentVersion'])
+            ->orderBy('id')
+            ->get()
+            ->map(fn (QualityItemWikiLink $link): array => [
+                'id' => (int) $link->id,
+                'link_type' => $link->link_type,
+                'note' => $link->note,
+                'page_id' => (int) $link->enterprise_wiki_page_id,
+                'page_title' => $link->page?->title,
+                'page_url' => $link->page !== null
+                    ? route('app.wiki.show', ['slug' => $link->page->slug])
+                    : null,
+                // The same presenter the Wiki list and the Wiki page use, so a document cannot read
+                // as approved in Kvalitet and in review in Wiki.
+                'publication' => $link->page !== null
+                    ? $this->publicationStatus->forPage($link->page, $link->page->currentVersion)
+                    : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Wiki pages that can be attached.
+     *
+     * Capped and searchable rather than complete: a mature Wiki has thousands of pages, and unlike
+     * the retired classification model there is nothing to work through here — this is a picker.
+     * Already-linked pages are not excluded, because a page may legitimately back the same item in
+     * two ways; the unique index refuses a true duplicate.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function wikiPageOptions(?int $customerId, ?User $user, Request $request): array
+    {
+        $search = trim((string) $request->query('wiki_search', ''));
 
         $query = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->whereIn('status', $this->visibleStatuses($user))
-            ->whereDoesntHave('qualityClassification');
+            ->whereIn('status', $this->visibleStatuses($user));
 
         if ($search !== '') {
-            $searchLower = strtolower($search);
+            $searchLower = mb_strtolower($search);
             $query->where(fn ($sub) => $sub
                 ->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
                 ->orWhereRaw('LOWER(slug) LIKE ?', ["%{$searchLower}%"])
@@ -354,11 +491,91 @@ class QualityController extends Controller
     }
 
     /**
+     * Both directions of every relation touching one item.
+     *
+     * Stored rows are one-directional — see QualityItemRelation — so the incoming side is produced
+     * here for presentation only. A row knows which end it is looking from, because "styres av" and
+     * "styrer" are not the same statement.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function relationsForItem(?int $customerId, int $itemId): array
+    {
+        return QualityItemRelation::query()
+            ->where('customer_id', $customerId)
+            ->where(fn ($query) => $query->where('from_item_id', $itemId)->orWhere('to_item_id', $itemId))
+            ->with(['fromItem:id,title,quality_type,code', 'toItem:id,title,quality_type,code'])
+            ->orderBy('id')
+            ->get()
+            ->map(static function (QualityItemRelation $relation) use ($itemId): array {
+                $outgoing = (int) $relation->from_item_id === $itemId;
+                $other = $outgoing ? $relation->toItem : $relation->fromItem;
+
+                return [
+                    'id' => (int) $relation->id,
+                    'relation_type' => $relation->relation_type,
+                    'direction' => $outgoing ? 'outgoing' : 'incoming',
+                    'other_item_id' => (int) ($outgoing ? $relation->to_item_id : $relation->from_item_id),
+                    'other_title' => $other?->title,
+                    'other_code' => $other?->code,
+                    'other_quality_type' => $other?->quality_type,
+                    'other_url' => $other !== null
+                        ? route('app.quality.items.show', ['item' => $other->id])
+                        : null,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function relationRows(?int $customerId): array
+    {
+        return QualityItemRelation::query()
+            ->where('customer_id', $customerId)
+            ->with(['fromItem:id,title,quality_type', 'toItem:id,title,quality_type'])
+            ->orderBy('relation_type')
+            ->orderBy('id')
+            ->get()
+            ->map(static fn (QualityItemRelation $relation): array => [
+                'id' => (int) $relation->id,
+                'relation_type' => $relation->relation_type,
+                'from_item_id' => (int) $relation->from_item_id,
+                'from_title' => $relation->fromItem?->title,
+                'to_item_id' => (int) $relation->to_item_id,
+                'to_title' => $relation->toItem?->title,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function relationItemOptions(?int $customerId): array
+    {
+        return QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->orderBy('title')
+            ->get(['id', 'title', 'code', 'quality_type'])
+            ->map(static fn (QualityItem $item): array => [
+                'id' => (int) $item->id,
+                'title' => $item->title,
+                'code' => $item->code,
+                'quality_type' => $item->quality_type,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return array<string, int>
      */
     private function typeCounts(?int $customerId): array
     {
-        $counts = QualityPageClassification::query()
+        $counts = QualityItem::query()
             ->where('customer_id', $customerId)
             ->selectRaw('quality_type, COUNT(*) AS total')
             ->groupBy('quality_type')
@@ -366,7 +583,7 @@ class QualityController extends Controller
 
         $result = [];
 
-        foreach (QualityPageClassification::TYPES as $type) {
+        foreach (QualityItem::TYPES as $type) {
             $result[$type] = (int) ($counts[$type] ?? 0);
         }
 
@@ -375,8 +592,8 @@ class QualityController extends Controller
 
     /**
      * The relation matrix, shipped to the client so the relation form can offer only legal pairs.
-     * The backend still enforces it — this is what keeps the form from proposing work the service
-     * will refuse.
+     * The backend still enforces it — this only keeps the form from proposing work the service will
+     * refuse.
      *
      * @return list<array<string, mixed>>
      */
@@ -384,9 +601,35 @@ class QualityController extends Controller
     {
         return array_map(static fn (string $type): array => [
             'key' => $type,
-            'from_types' => QualityRelation::allowedFromTypes($type),
-            'to_types' => QualityRelation::allowedToTypes($type),
-        ], QualityRelation::TYPES);
+            'pairs' => array_map(
+                static fn (array $pair): array => ['from' => $pair[0], 'to' => $pair[1]],
+                QualityItemRelation::TYPE_MATRIX[$type],
+            ),
+            'from_types' => QualityItemRelation::allowedFromTypes($type),
+            'to_types' => QualityItemRelation::allowedToTypes($type),
+        ], QualityItemRelation::TYPES);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function ownerOptions(?int $customerId): array
+    {
+        if ($customerId === null) {
+            return [];
+        }
+
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(static fn (User $user): array => [
+                'id' => (int) $user->id,
+                'name' => $user->name,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

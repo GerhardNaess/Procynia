@@ -24,7 +24,22 @@ class NullGraphProjectionService implements GraphProjectionService
         //
     }
 
-    public function replaceOutgoingQualityRelations(int $customerId, int $fromPageId, array $relations): void
+    public function upsertQualityItem(array $item): void
+    {
+        //
+    }
+
+    public function deleteQualityItem(int $customerId, int $qualityItemId): void
+    {
+        //
+    }
+
+    public function replaceOutgoingQualityItemRelations(int $customerId, int $fromItemId, array $relations): void
+    {
+        //
+    }
+
+    public function replaceQualityItemWikiLinks(int $customerId, int $qualityItemId, array $links): void
     {
         //
     }
@@ -33,7 +48,9 @@ class NullGraphProjectionService implements GraphProjectionService
         int $customerId,
         array $pages,
         array $links,
-        array $qualityRelations = [],
+        array $qualityItems = [],
+        array $qualityItemRelations = [],
+        array $qualityWikiLinks = [],
     ): void {
         //
     }

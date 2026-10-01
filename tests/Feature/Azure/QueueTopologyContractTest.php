@@ -23,7 +23,7 @@ use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiMaintainerDecisionBatch;
 use App\Jobs\EnterpriseWiki\RunPostIngestQa;
 use App\Jobs\EnterpriseWiki\VerifyEnterpriseWikiClaim;
-use App\Jobs\Quality\ProjectQualityPageToGraph;
+use App\Jobs\Quality\ProjectQualityItemToGraph;
 use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionClass;
 use Tests\TestCase;
@@ -83,7 +83,7 @@ class QueueTopologyContractTest extends TestCase
             ProcessEnterpriseWikiSection::class,
             FinalizeEnterpriseWikiIngest::class,
             ProjectEnterpriseWikiPageToGraph::class,
-            ProjectQualityPageToGraph::class,
+            ProjectQualityItemToGraph::class,
         ],
         'enterprise-wiki-reconciliation' => [
             ReconcileEnterpriseWikiClaimSourcesForDocument::class,

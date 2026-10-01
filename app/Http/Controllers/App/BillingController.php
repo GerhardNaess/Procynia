@@ -107,8 +107,9 @@ class BillingController extends Controller
     }
 
     /**
-     * Register interest in a commercial package. This starts no payment and activates nothing —
-     * it records the order so Procynia can follow it up, and the page reflects that state.
+     * Order a commercial package. Self-service ordering completes in this request: the entitlement
+     * is written active, so the left rail, the Abonnement page and EnsureModuleIsEnabled all agree
+     * on the next response. No payment is started here.
      */
     public function requestPackage(Request $request, string $package): RedirectResponse
     {
@@ -130,8 +131,10 @@ class BillingController extends Controller
                 ->with('error', __('procynia.billing.modules.order_already_active'));
         }
 
-        $service->requestPackage($customer, $package, $user);
+        $service->activatePackage($customer, $package, $user);
 
+        // The redirect is what refreshes the shared entitlement props: the rail reads
+        // `entitlements.modules` from HandleInertiaRequests, which is recomputed on this GET.
         return redirect()
             ->route('app.billing.index')
             ->with('success', __('procynia.billing.modules.order_success'));

@@ -5,7 +5,9 @@ namespace App\Services\EnterpriseWiki\GraphProjection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
-use App\Models\QualityRelation;
+use App\Models\QualityItem;
+use App\Models\QualityItemRelation;
+use App\Models\QualityItemWikiLink;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -17,7 +19,7 @@ class EnterpriseWikiGraphProjector
 
     public function projectPage(int $pageId): void
     {
-        $page = EnterpriseWikiPage::query()->with('qualityClassification')->find($pageId);
+        $page = EnterpriseWikiPage::query()->find($pageId);
 
         if (! $page instanceof EnterpriseWikiPage) {
             return;
@@ -60,59 +62,16 @@ class EnterpriseWikiGraphProjector
     }
 
     /**
-     * Project the quality layer for one page: its classification onto the node, and the quality
-     * edges that leave it.
+     * Rebuild everything this customer has in the graph, from SQL.
      *
-     * Separate entry point from projectPage() because the two are triggered by different things —
-     * the Wiki pipeline moves pages and links, Kvalitet moves classifications and relations — and
-     * neither should have to rebuild the other's half to touch its own.
+     * Quality travels with the Wiki rebuild rather than in a call of its own because
+     * replaceCustomerWikiGraph deletes the customer's nodes first: quality left out here would be
+     * dropped by a routine Wiki rebuild and never come back.
      */
-    public function projectPageQuality(int $pageId): void
-    {
-        $page = EnterpriseWikiPage::query()->with('qualityClassification')->find($pageId);
-
-        if (! $page instanceof EnterpriseWikiPage) {
-            return;
-        }
-
-        $customerId = (int) $page->customer_id;
-        $pageId = (int) $page->id;
-
-        $this->projection->upsertWikiPage($this->pagePayload($page));
-
-        $relations = QualityRelation::query()
-            ->where('customer_id', $customerId)
-            ->where('from_page_id', $pageId)
-            ->orderBy('id')
-            ->get();
-
-        // Same reason as projectPage(): the graph writer matches the target instead of creating it,
-        // so an edge to a page that has not been projected yet would vanish without a trace.
-        $projectableTargetIds = [];
-
-        foreach ($this->existingTargetPages($customerId, $relations->pluck('to_page_id')->all()) as $target) {
-            $projectableTargetIds[(int) $target->id] = true;
-
-            if ((int) $target->id !== $pageId) {
-                $this->projection->upsertWikiPage($this->pagePayload($target));
-            }
-        }
-
-        $payloads = $relations
-            ->filter(fn (QualityRelation $relation): bool => isset($projectableTargetIds[(int) $relation->to_page_id]))
-            ->map(fn (QualityRelation $relation): array => $this->qualityRelationPayload($relation))
-            ->values()
-            ->all();
-
-        // Always called, including with an empty list: this is what removes stale edges.
-        $this->projection->replaceOutgoingQualityRelations($customerId, $pageId, $payloads);
-    }
-
     public function rebuildCustomer(int $customerId): void
     {
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->with('qualityClassification')
             ->orderBy('id')
             ->get()
             ->map(fn (EnterpriseWikiPage $page): array => $this->pagePayload($page))
@@ -130,20 +89,46 @@ class EnterpriseWikiGraphProjector
             ->values()
             ->all();
 
-        // Rebuilt together with the pages and wikilinks, not alongside them: replaceCustomerWikiGraph
-        // deletes the customer's nodes first, so quality edges left out here would be dropped by a
-        // routine Wiki rebuild and never come back.
-        $qualityRelations = QualityRelation::query()
+        $items = QualityItem::query()
             ->where('customer_id', $customerId)
-            ->whereIn('from_page_id', $pageIds)
-            ->whereIn('to_page_id', $pageIds)
             ->orderBy('id')
             ->get()
-            ->map(fn (QualityRelation $relation): array => $this->qualityRelationPayload($relation))
+            ->map(fn (QualityItem $item): array => $this->qualityItemPayload($item))
             ->values()
             ->all();
 
-        $this->projection->replaceCustomerWikiGraph($customerId, $pages, $links, $qualityRelations);
+        $itemIds = collect($items)->pluck('quality_item_id')->all();
+
+        $qualityRelations = QualityItemRelation::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('from_item_id', $itemIds)
+            ->whereIn('to_item_id', $itemIds)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (QualityItemRelation $relation): array => $this->qualityRelationPayload($relation))
+            ->values()
+            ->all();
+
+        // Both ends must be in the rebuild, or the MERGE would silently match nothing. A link to a
+        // page outside this customer cannot exist in SQL, but a page the Wiki query skipped can.
+        $qualityWikiLinks = QualityItemWikiLink::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $itemIds)
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (QualityItemWikiLink $link): array => $this->qualityWikiLinkPayload($link))
+            ->values()
+            ->all();
+
+        $this->projection->replaceCustomerWikiGraph(
+            $customerId,
+            $pages,
+            $links,
+            $items,
+            $qualityRelations,
+            $qualityWikiLinks,
+        );
     }
 
     private function pagePayload(EnterpriseWikiPage $page): array
@@ -160,26 +145,62 @@ class EnterpriseWikiGraphProjector
             'title' => $page->title,
             'page_type' => $page->page_type,
             'status' => $page->status,
-            // Null for every page Kvalitet has not classified, which is most of them. The graph
-            // writer reads it to decide whether the node carries the :QualityItem label, so it must
-            // be present in the payload even when it is null — a missing key would leave a stale
-            // label behind after an unclassify.
-            'quality_type' => $page->qualityClassification?->quality_type,
             'current_version_id' => $currentVersionId !== null ? (int) $currentVersionId : null,
             'updated_at' => $page->updated_at?->toIso8601String(),
         ];
     }
 
-    private function qualityRelationPayload(QualityRelation $relation): array
+    /**
+     * A quality item projects as its own node. It carries only what the graph is asked questions
+     * about — type, title, number, state, ownership, when it is next due. The purpose text and the
+     * authored structure stay in SQL, which is where they are read from.
+     *
+     * @return array<string, mixed>
+     */
+    private function qualityItemPayload(QualityItem $item): array
+    {
+        return [
+            'customer_id' => (int) $item->customer_id,
+            'quality_item_id' => (int) $item->id,
+            'quality_type' => $item->quality_type,
+            'title' => $item->title,
+            'code' => $item->code,
+            'status' => $item->status,
+            'owner_user_id' => $item->owner_user_id !== null ? (int) $item->owner_user_id : null,
+            'next_review_at' => $item->next_review_at?->toDateString(),
+            'updated_at' => $item->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function qualityRelationPayload(QualityItemRelation $relation): array
     {
         return [
             'relation_id' => (int) $relation->id,
             'customer_id' => (int) $relation->customer_id,
-            'from_page_id' => (int) $relation->from_page_id,
-            'to_page_id' => (int) $relation->to_page_id,
+            'from_item_id' => (int) $relation->from_item_id,
+            'to_item_id' => (int) $relation->to_item_id,
             'relation_type' => $relation->relation_type,
             'source' => $relation->source,
             'updated_at' => $relation->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function qualityWikiLinkPayload(QualityItemWikiLink $link): array
+    {
+        return [
+            'link_id' => (int) $link->id,
+            'customer_id' => (int) $link->customer_id,
+            'quality_item_id' => (int) $link->quality_item_id,
+            'page_id' => (int) $link->enterprise_wiki_page_id,
+            'link_type' => $link->link_type,
+            'source' => $link->source,
+            'updated_at' => $link->updated_at?->toIso8601String(),
         ];
     }
 
@@ -198,9 +219,6 @@ class EnterpriseWikiGraphProjector
         return EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('id', $targetPageIds)
-            // pagePayload() reads it for every node it writes, so eager-load rather than pay one
-            // lazy query per target page.
-            ->with('qualityClassification')
             ->orderBy('id')
             ->get();
     }

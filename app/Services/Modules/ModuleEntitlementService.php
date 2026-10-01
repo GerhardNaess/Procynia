@@ -138,8 +138,12 @@ class ModuleEntitlementService
     }
 
     /**
-     * Record a customer's interest in a package. No payment, no activation — this only moves the
-     * package from "orderable" to "ordered" so Procynia can follow it up.
+     * Record a customer's interest in a package without granting it.
+     *
+     * This is the admin-mediated path: an order Procynia has to act on before access follows. It
+     * is not what the Abonnement page does — self-service ordering activates immediately via
+     * activatePackage() — but the state it writes is still a real one, because a package can be
+     * registered, turned down or withdrawn outside the self-service flow.
      *
      * Re-requesting an already active package is a no-op rather than an error: the page should
      * never be able to downgrade live access by double-clicking.
@@ -168,11 +172,51 @@ class ModuleEntitlementService
     }
 
     /**
+     * Grant a package there and then.
+     *
+     * Self-service ordering has no approval step: the customer presses Bestill and the package is
+     * theirs, so the entitlement is written active in the same request. Anything else leaves the
+     * three surfaces disagreeing — the Abonnement page would say "Bestilt", the left rail "Ikke
+     * bestilt" and the route guard would still refuse — which is exactly the state this replaces.
+     *
+     * The order is still recorded: requested_at and requested_by are kept (first order wins, so a
+     * later re-activation does not rewrite who originally ordered it), and activated_at says when
+     * access began. A previously revoked or declined row is reactivated in place rather than
+     * duplicated, and deactivated_at is cleared so the row cannot read as both live and withdrawn.
+     */
+    public function activatePackage(Customer $customer, string $packageKey, ?User $activatedBy = null): CustomerPackageEntitlement
+    {
+        $package = $this->package($packageKey);
+
+        if ($package === null || ! $package['orderable']) {
+            throw new InvalidArgumentException("Package [{$packageKey}] cannot be ordered.");
+        }
+
+        $entitlement = $customer->packageEntitlements()->firstOrNew(['package_key' => $packageKey]);
+
+        if ($entitlement->exists && $entitlement->isActive()) {
+            return $entitlement;
+        }
+
+        $now = Carbon::now();
+
+        $entitlement->fill([
+            'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
+            'requested_by' => $entitlement->requested_by ?? $activatedBy?->id,
+            'requested_at' => $entitlement->requested_at ?? $now,
+            'activated_at' => $now,
+            'deactivated_at' => null,
+        ])->save();
+
+        return $entitlement->refresh();
+    }
+
+    /**
      * The catalog as the Abonnement page needs it: one entry per package, each already told
      * whether it is included, active, ordered or orderable. The page renders this verdict; it does
      * not compute one of its own.
      *
-     * @return list<array{key: string, mandatory: bool, orderable: bool, status: string, can_order: bool, modules: list<string>, requested_at: ?string}>
+     * @return list<array{key: string, mandatory: bool, orderable: bool, status: string, can_order: bool, modules: list<string>, requested_at: ?string, activated_at: ?string}>
      */
     public function overviewFor(Customer $customer): array
     {
@@ -199,6 +243,7 @@ class ModuleEntitlementService
                 'can_order' => $package['orderable'] && in_array($status, ['available', 'declined'], true),
                 'modules' => $package['modules'],
                 'requested_at' => $entitlement?->requested_at?->toDateString(),
+                'activated_at' => $entitlement?->activated_at?->toDateString(),
             ];
         }
 

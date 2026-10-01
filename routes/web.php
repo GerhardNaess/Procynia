@@ -176,8 +176,25 @@ Route::prefix('app')
         // customer.module middleware exactly as the page itself is.
         Route::prefix('/quality')->name('quality.')->group(function (): void {
             Route::get('/', [QualityController::class, 'index'])->name('index');
-            Route::post('/classifications', [QualityController::class, 'storeClassification'])->name('classifications.store');
-            Route::delete('/classifications/{classification}', [QualityController::class, 'destroyClassification'])->name('classifications.destroy');
+
+            // Quality items are the domain's own objects, so they are bound by their own id — not
+            // by a Wiki page, which is what the retired classification model did.
+            Route::post('/items', [QualityController::class, 'storeItem'])->name('items.store');
+            Route::get('/items/{item}', [QualityController::class, 'show'])->name('items.show');
+            Route::patch('/items/{item}', [QualityController::class, 'updateItem'])->name('items.update');
+            Route::delete('/items/{item}', [QualityController::class, 'destroyItem'])->name('items.destroy');
+
+            // Steps, input/output, checklist lines and control fields all travel as a set — see
+            // QualityItemService for why structure is written wholesale rather than row by row.
+            Route::put('/items/{item}/structure', [QualityController::class, 'updateStructure'])
+                ->name('items.structure.update');
+
+            // The seam to Wiki. Attaching a page changes nothing about the page.
+            Route::post('/items/{item}/wiki-links', [QualityController::class, 'storeWikiLink'])
+                ->name('items.wiki-links.store');
+            Route::delete('/wiki-links/{link}', [QualityController::class, 'destroyWikiLink'])
+                ->name('wiki-links.destroy');
+
             Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
             Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
         });

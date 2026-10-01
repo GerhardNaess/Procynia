@@ -27,8 +27,8 @@ describe('the rail shows the whole planned product structure', () => {
         );
     });
 
-    test('exactly four are available, and they are the four that have pages', () => {
-        const available = APP_MODULES.filter((module) => module.available);
+    test('exactly four are built, and they are the four that have pages', () => {
+        const available = APP_MODULES.filter((module) => module.built);
 
         assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality']);
         assert.deepEqual(
@@ -38,7 +38,7 @@ describe('the rail shows the whole planned product structure', () => {
     });
 
     test('a planned module carries no href at all, so there is nothing to click', () => {
-        for (const module of APP_MODULES.filter((m) => ! m.available)) {
+        for (const module of APP_MODULES.filter((m) => ! m.built)) {
             assert.equal(module.href, undefined, `${module.key} must not be reachable`);
             assert.deepEqual(module.areas, undefined, `${module.key} cannot be an active area`);
         }

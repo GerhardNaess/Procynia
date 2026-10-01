@@ -589,6 +589,11 @@ export default function BillingIndex() {
                                                         {(modulesText.requested_at ?? 'Bestilt :date').replace(':date', formatDate(entry.requested_at))}
                                                     </div>
                                                 )}
+                                                {entry.status === 'active' && entry.activated_at && (
+                                                    <div className="mt-1 text-base leading-6 text-slate-600">
+                                                        {(modulesText.activated_at ?? 'Aktivert :date').replace(':date', formatDate(entry.activated_at))}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="py-3 align-top">
                                                 {entry.can_order ? (

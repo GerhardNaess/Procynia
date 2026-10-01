@@ -242,6 +242,29 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertFalse($customer->fresh()->hasModule('tender'));
     }
 
+    public function test_activating_a_package_reuses_a_revoked_row_and_keeps_the_original_order(): void
+    {
+        $context = $this->systemOwnerContext();
+        $customer = $context['customer'];
+
+        $customer->packageEntitlements()->create([
+            'package_key' => 'quality',
+            'status' => CustomerPackageEntitlement::STATUS_REVOKED,
+            'requested_by' => $context['owner']->id,
+            'requested_at' => now()->subYear(),
+            'deactivated_at' => now()->subMonth(),
+        ]);
+
+        $entitlement = app(ModuleEntitlementService::class)->activatePackage($customer->fresh(), 'quality');
+
+        $this->assertSame(1, $customer->packageEntitlements()->where('package_key', 'quality')->count());
+        $this->assertSame(CustomerPackageEntitlement::STATUS_ACTIVE, $entitlement->status);
+        $this->assertNull($entitlement->deactivated_at);
+        $this->assertSame($context['owner']->id, $entitlement->requested_by);
+        $this->assertTrue($entitlement->requested_at->isBefore(now()->subMonths(6)));
+        $this->assertTrue($customer->fresh()->hasModule('quality'));
+    }
+
     public function test_requesting_an_active_package_leaves_it_active(): void
     {
         $customer = $this->createCustomer();
@@ -266,8 +289,56 @@ class CustomerModuleEntitlementTest extends TestCase
         $entitlement = $context['customer']->packageEntitlements()->firstWhere('package_key', 'grc');
 
         $this->assertNotNull($entitlement);
-        $this->assertSame(CustomerPackageEntitlement::STATUS_REQUESTED, $entitlement->status);
-        $this->assertFalse($context['customer']->fresh()->hasModule('risk'));
+        $this->assertSame(CustomerPackageEntitlement::STATUS_ACTIVE, $entitlement->status);
+        $this->assertNotNull($entitlement->activated_at);
+        $this->assertSame($context['owner']->id, $entitlement->requested_by);
+
+        // GRC is the compound package: ordering it must switch on every module it maps to, not
+        // just the one with pages.
+        $customer = $context['customer']->fresh();
+
+        $this->assertTrue($customer->hasModule('quality'));
+        $this->assertTrue($customer->hasModule('risk'));
+        $this->assertTrue($customer->hasModule('audit_compliance'));
+    }
+
+    public function test_ordering_quality_opens_the_module_on_the_next_request(): void
+    {
+        $context = $this->systemOwnerContext();
+
+        // Before the order the guard sends the request to Hjem — that is the state being fixed.
+        $this->actingAs($context['owner'])
+            ->get('/app/quality')
+            ->assertRedirect(route('app.dashboard'));
+
+        $this->actingAs($context['owner'])
+            ->post('/app/billing/packages/quality/request')
+            ->assertRedirect(route('app.billing.index'));
+
+        $this->assertTrue($context['customer']->fresh()->hasModule('quality'));
+
+        // No logout, no cache clearing: the very next request reaches the page.
+        $this->actingAs($context['owner'])
+            ->get('/app/quality')
+            ->assertOk();
+    }
+
+    public function test_ordering_refreshes_the_shared_entitlements_the_left_rail_reads(): void
+    {
+        $context = $this->systemOwnerContext();
+
+        $before = $this->actingAs($context['owner'])->get('/app/billing')->viewData('page')['props'];
+
+        $this->assertNotContains('quality', $before['entitlements']['modules']);
+
+        $this->actingAs($context['owner'])->post('/app/billing/packages/quality/request');
+
+        // The rail renders `entitlements.modules`; the redirect's GET is what has to carry the
+        // new value, or the menu keeps saying "Ikke bestilt" while the route is already open.
+        $after = $this->actingAs($context['owner'])->get('/app/billing')->viewData('page')['props'];
+
+        $this->assertContains('quality', $after['entitlements']['modules']);
+        $this->assertContains('quality', $after['active_modules']);
     }
 
     public function test_the_mandatory_package_has_no_order_endpoint(): void
@@ -333,7 +404,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertArrayHasKey('ai_quota', $props);
     }
 
-    public function test_an_ordered_package_shows_as_ordered_and_cannot_be_ordered_again(): void
+    public function test_an_ordered_package_shows_as_active_and_cannot_be_ordered_again(): void
     {
         $context = $this->systemOwnerContext();
 
@@ -342,9 +413,26 @@ class CustomerModuleEntitlementTest extends TestCase
         $props = $this->actingAs($context['owner'])->get('/app/billing')->viewData('page')['props'];
         $quality = collect($props['module_packages'])->firstWhere('key', 'quality');
 
-        $this->assertSame('requested', $quality['status']);
+        $this->assertSame('active', $quality['status']);
         $this->assertFalse($quality['can_order']);
         $this->assertNotNull($quality['requested_at']);
+        $this->assertNotNull($quality['activated_at']);
+    }
+
+    public function test_ordering_an_already_active_package_is_refused_without_touching_it(): void
+    {
+        $context = $this->systemOwnerContext();
+        $granted = $this->grant($context['customer'], 'quality');
+
+        $this->actingAs($context['owner'])
+            ->post('/app/billing/packages/quality/request')
+            ->assertSessionHas('error');
+
+        $this->assertSame(
+            $granted->activated_at->toDateTimeString(),
+            $granted->fresh()->activated_at->toDateTimeString(),
+        );
+        $this->assertTrue($context['customer']->fresh()->hasModule('quality'));
     }
 
     // ---------------------------------------------------------------------

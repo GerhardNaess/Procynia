@@ -15,17 +15,26 @@ class RecordingGraphProjectionService implements GraphProjectionService
     /** @var list<array{customer_id: int, from_page_id: int, links: list<array<string, mixed>>}> */
     public array $replacedOutgoing = [];
 
-    /** @var list<array{customer_id: int, from_page_id: int, relations: list<array<string, mixed>>}> */
-    public array $replacedOutgoingQualityRelations = [];
+    /** @var list<array<string, mixed>> */
+    public array $upsertedQualityItems = [];
 
-    /** @var list<array{customer_id: int, pages: list<array<string, mixed>>, links: list<array<string, mixed>>, quality_relations: list<array<string, mixed>>}> */
+    /** @var list<array{customer_id: int, quality_item_id: int}> */
+    public array $deletedQualityItems = [];
+
+    /** @var list<array{customer_id: int, from_item_id: int, relations: list<array<string, mixed>>}> */
+    public array $replacedQualityItemRelations = [];
+
+    /** @var list<array{customer_id: int, quality_item_id: int, links: list<array<string, mixed>>}> */
+    public array $replacedQualityWikiLinks = [];
+
+    /** @var list<array<string, mixed>> */
     public array $rebuilds = [];
 
     /**
      * Every call in the order it was made, so a test can assert that a target node was projected
      * before the edge pointing at it.
      *
-     * @var list<array{method: string, page_id?: int, customer_id?: int, from_page_id?: int}>
+     * @var list<array<string, mixed>>
      */
     public array $calls = [];
 
@@ -63,17 +72,47 @@ class RecordingGraphProjectionService implements GraphProjectionService
         ];
     }
 
-    public function replaceOutgoingQualityRelations(int $customerId, int $fromPageId, array $relations): void
+    public function upsertQualityItem(array $item): void
     {
-        $this->replacedOutgoingQualityRelations[] = [
+        $this->upsertedQualityItems[] = $item;
+        $this->calls[] = ['method' => 'upsertQualityItem', 'quality_item_id' => (int) $item['quality_item_id']];
+    }
+
+    public function deleteQualityItem(int $customerId, int $qualityItemId): void
+    {
+        $this->deletedQualityItems[] = ['customer_id' => $customerId, 'quality_item_id' => $qualityItemId];
+        $this->calls[] = [
+            'method' => 'deleteQualityItem',
             'customer_id' => $customerId,
-            'from_page_id' => $fromPageId,
+            'quality_item_id' => $qualityItemId,
+        ];
+    }
+
+    public function replaceOutgoingQualityItemRelations(int $customerId, int $fromItemId, array $relations): void
+    {
+        $this->replacedQualityItemRelations[] = [
+            'customer_id' => $customerId,
+            'from_item_id' => $fromItemId,
             'relations' => $relations,
         ];
         $this->calls[] = [
-            'method' => 'replaceOutgoingQualityRelations',
+            'method' => 'replaceOutgoingQualityItemRelations',
             'customer_id' => $customerId,
-            'from_page_id' => $fromPageId,
+            'from_item_id' => $fromItemId,
+        ];
+    }
+
+    public function replaceQualityItemWikiLinks(int $customerId, int $qualityItemId, array $links): void
+    {
+        $this->replacedQualityWikiLinks[] = [
+            'customer_id' => $customerId,
+            'quality_item_id' => $qualityItemId,
+            'links' => $links,
+        ];
+        $this->calls[] = [
+            'method' => 'replaceQualityItemWikiLinks',
+            'customer_id' => $customerId,
+            'quality_item_id' => $qualityItemId,
         ];
     }
 
@@ -81,13 +120,17 @@ class RecordingGraphProjectionService implements GraphProjectionService
         int $customerId,
         array $pages,
         array $links,
-        array $qualityRelations = [],
+        array $qualityItems = [],
+        array $qualityItemRelations = [],
+        array $qualityWikiLinks = [],
     ): void {
         $this->rebuilds[] = [
             'customer_id' => $customerId,
             'pages' => $pages,
             'links' => $links,
-            'quality_relations' => $qualityRelations,
+            'quality_items' => $qualityItems,
+            'quality_item_relations' => $qualityItemRelations,
+            'quality_wiki_links' => $qualityWikiLinks,
         ];
         $this->calls[] = ['method' => 'replaceCustomerWikiGraph', 'customer_id' => $customerId];
     }

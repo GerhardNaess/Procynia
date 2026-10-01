@@ -1,92 +1,98 @@
-import { test, describe } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import {
     candidatesForRelationEnd,
-    documentLabel,
+    candidatesForRelationStart,
+    itemLabel,
     relationTypeIsUsable,
 } from './qualityStructure.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const page = readFileSync(join(here, '..', 'Pages', 'App', 'Quality', 'Index.jsx'), 'utf8');
-
 /**
- * The matrix shipped from PHP is what the form reads. These tests hold the client to it — not as
- * the rule (QualityStructureService is), but so the form never proposes a pair the service will
- * reject and then blames the user for it.
+ * These helpers exist so the relation form stops offering work the backend would refuse. What is
+ * worth holding is the thing two independent type lists got wrong: the ends of a relation are not
+ * independent, and `uses` is the proof.
  */
+
 const RELATION_TYPES = [
-    { key: 'governs', from_types: ['policy'], to_types: ['process'] },
-    { key: 'uses', from_types: ['process'], to_types: ['checklist'] },
-    { key: 'verifies', from_types: ['control'], to_types: ['process'] },
-    { key: 'depends_on', from_types: ['process'], to_types: ['process'] },
+    {
+        key: 'governs',
+        pairs: [{ from: 'policy', to: 'process' }],
+    },
+    {
+        key: 'uses',
+        pairs: [
+            { from: 'procedure', to: 'work_instruction' },
+            { from: 'process', to: 'checklist' },
+            { from: 'procedure', to: 'checklist' },
+        ],
+    },
+    {
+        key: 'verifies',
+        pairs: [{ from: 'control', to: 'process' }],
+    },
 ];
 
-const DOCUMENTS = [
-    { page_id: 1, title: 'Innkjøpspolicy', quality_type: 'policy', quality_code: 'POL-01' },
-    { page_id: 2, title: 'Anskaffelsesprosess', quality_type: 'process', quality_code: null },
-    { page_id: 3, title: 'Tilbudssjekkliste', quality_type: 'checklist', quality_code: null },
+const ITEMS = [
+    { id: 1, title: 'Innkjøpspolicy', code: 'POL-01', quality_type: 'policy' },
+    { id: 2, title: 'Anskaffelsesprosess', code: null, quality_type: 'process' },
+    { id: 3, title: 'Leverandørvurdering', code: 'RUT-02', quality_type: 'procedure' },
+    { id: 4, title: 'Sjekkliste tilbud', code: null, quality_type: 'checklist' },
+    { id: 5, title: 'Signering i ERP', code: null, quality_type: 'work_instruction' },
+    { id: 6, title: 'Stikkprøve innkjøp', code: 'K-01', quality_type: 'control' },
 ];
 
-describe('the relation form offers only pairs the matrix allows', () => {
-    test('each end is narrowed to its own allowed types', () => {
-        assert.deepEqual(
-            candidatesForRelationEnd(DOCUMENTS, RELATION_TYPES, 'governs', 'from').map((d) => d.page_id),
-            [1],
-        );
-        assert.deepEqual(
-            candidatesForRelationEnd(DOCUMENTS, RELATION_TYPES, 'governs', 'to').map((d) => d.page_id),
-            [2],
-        );
+describe('candidatesForRelationStart', () => {
+    test('offers only the types that may begin the relation', () => {
+        assert.deepEqual(candidatesForRelationStart(ITEMS, RELATION_TYPES, 'governs').map((i) => i.id), [1]);
+        assert.deepEqual(candidatesForRelationStart(ITEMS, RELATION_TYPES, 'verifies').map((i) => i.id), [6]);
     });
 
-    test('direction is not symmetric — a process is never the governing end', () => {
-        const governingEnd = candidatesForRelationEnd(DOCUMENTS, RELATION_TYPES, 'governs', 'from');
-
-        assert.equal(governingEnd.some((d) => d.quality_type === 'process'), false);
-    });
-
-    test('an unknown relation type offers nothing rather than everything', () => {
-        assert.deepEqual(candidatesForRelationEnd(DOCUMENTS, RELATION_TYPES, 'supersedes', 'from'), []);
-    });
-
-    test('a relation with no document at one end is not offered at all', () => {
-        // No control is classified, so "control verifies process" is unusable and saying so beats
-        // an empty select.
-        assert.equal(relationTypeIsUsable(DOCUMENTS, RELATION_TYPES, 'verifies'), false);
-        assert.equal(relationTypeIsUsable(DOCUMENTS, RELATION_TYPES, 'governs'), true);
-    });
-
-    test('one process alone cannot depend on another', () => {
-        const single = [DOCUMENTS[1]];
-
-        // Both ends are populated, so the helper allows it; the self-reference is the backend's
-        // refusal, which is exactly why this helper is not the rule.
-        assert.equal(relationTypeIsUsable(single, RELATION_TYPES, 'depends_on'), true);
+    test('returns nothing for a relation type the backend did not ship', () => {
+        assert.deepEqual(candidatesForRelationStart(ITEMS, RELATION_TYPES, 'invented'), []);
     });
 });
 
-describe('documents are labelled the way people cite them', () => {
-    test('the document number leads when there is one', () => {
-        assert.equal(documentLabel(DOCUMENTS[0]), 'POL-01 — Innkjøpspolicy');
-        assert.equal(documentLabel(DOCUMENTS[1]), 'Anskaffelsesprosess');
+describe('candidatesForRelationEnd', () => {
+    test('narrows the end to what the chosen start actually allows', () => {
+        // The case independent from/to lists got wrong: a process reaches a work instruction
+        // through its procedure, never directly.
+        const fromProcess = candidatesForRelationEnd(ITEMS, RELATION_TYPES, 'uses', 'process');
+        const fromProcedure = candidatesForRelationEnd(ITEMS, RELATION_TYPES, 'uses', 'procedure');
+
+        assert.deepEqual(fromProcess.map((i) => i.quality_type), ['checklist']);
+        assert.deepEqual(fromProcedure.map((i) => i.quality_type), ['checklist', 'work_instruction']);
     });
 
-    test('a missing document is an empty label, not a crash', () => {
-        assert.equal(documentLabel(null), '');
+    test('offers every legal end before a start is chosen', () => {
+        const types = candidatesForRelationEnd(ITEMS, RELATION_TYPES, 'uses')
+            .map((i) => i.quality_type)
+            .sort();
+
+        assert.deepEqual(types, ['checklist', 'work_instruction']);
     });
 });
 
-describe('the Kvalitet page stays a view onto Wiki', () => {
-    test('every row leads back to the Wiki page rather than rendering content', () => {
-        assert.match(page, /document\.wiki_url/);
-        assert.equal(/react-markdown/.test(page), false, 'Kvalitet must not become a second place to read a page.');
+describe('relationTypeIsUsable', () => {
+    test('is false when no single legal pair can be filled', () => {
+        const onlyPolicies = [ITEMS[0]];
+
+        assert.strictEqual(relationTypeIsUsable(onlyPolicies, RELATION_TYPES, 'governs'), false);
+        assert.strictEqual(relationTypeIsUsable(ITEMS, RELATION_TYPES, 'governs'), true);
     });
 
-    test('the write affordances are hidden without can_manage', () => {
-        // The backend refuses regardless; this keeps the UI from offering work it knows will fail.
-        assert.match(page, /canManage &&/);
+    test('is false when both ends exist but never in the same pair', () => {
+        // A process and a work instruction are both present, and both appear in `uses` — but not
+        // together. Checking type membership end by end would wrongly call this usable.
+        const processAndInstruction = [ITEMS[1], ITEMS[4]];
+
+        assert.strictEqual(relationTypeIsUsable(processAndInstruction, RELATION_TYPES, 'uses'), false);
+    });
+});
+
+describe('itemLabel', () => {
+    test('leads with the document number when there is one', () => {
+        assert.strictEqual(itemLabel(ITEMS[0]), 'POL-01 — Innkjøpspolicy');
+        assert.strictEqual(itemLabel(ITEMS[1]), 'Anskaffelsesprosess');
+        assert.strictEqual(itemLabel(null), '');
     });
 });

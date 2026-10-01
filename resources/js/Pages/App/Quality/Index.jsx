@@ -1,20 +1,21 @@
 import { useMemo, useState } from 'react';
-import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import {
     candidatesForRelationEnd,
-    documentLabel,
+    candidatesForRelationStart,
+    itemLabel,
     relationTypeIsUsable,
 } from '../../../Support/qualityStructure';
 
 /**
- * Kvalitet — the faglig view of the Wiki.
+ * Kvalitet — the virksomhet's styrende dokumenter.
  *
- * Every row here is a Wiki page. The module shows what kind of styrende dokument it is and how it
- * relates to the others, and then hands the reader back to Wiki for the content itself; it never
- * becomes a second place to read or edit a page.
+ * Every row is a quality object of its own, with its own owner, number, status and review cycle. A
+ * row leads to the document's page in Kvalitet, where its structure is edited and the Wiki pages
+ * behind it are attached. Wiki is never typed or relabelled by any of this.
  */
 
 const TYPE_TONES = {
@@ -26,41 +27,39 @@ const TYPE_TONES = {
     control: 'amber',
 };
 
-const PUBLICATION_TONES = {
-    published: 'green',
-    published_with_changes: 'emerald',
-    in_review: 'blue',
-    changes_requested: 'amber',
+const STATUS_TONES = {
     draft: 'slate',
-    archived: 'slate',
-    no_version: 'rose',
+    active: 'green',
+    under_review: 'blue',
+    retired: 'slate',
 };
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const LABEL = 'block text-sm font-semibold text-slate-700';
 const PRIMARY_BUTTON = 'inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50';
 const QUIET_BUTTON = 'inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950';
+
+const TABS = ['overview', 'processes', 'controls', 'checklists'];
 
 export default function QualityIndex() {
     const {
         translations = {},
         active_tab: activeTab = 'overview',
         can_manage: canManage = false,
-        documents = [],
+        items = [],
         type_counts: typeCounts = {},
         quality_types: qualityTypes = [],
+        statuses = [],
         relation_types: relationTypes = [],
         relations = [],
-        unclassified_pages: unclassifiedPages = [],
-        unclassified_search: unclassifiedSearch = '',
-        relation_page_options: relationPageOptions = [],
+        relation_item_options: relationItemOptions = [],
+        owner_options: ownerOptions = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
     const typeLabels = tq.types ?? {};
-    const typeLabelsPlural = tq.types_plural ?? {};
-    const relationLabels = tq.relation_types ?? {};
-    const relationLabelsIncoming = tq.relation_types_incoming ?? {};
+    const statusLabels = tq.statuses ?? {};
 
     return (
         <CustomerAppLayout title={tq.index_title ?? 'Kvalitet'} showPageTitle={false}>
@@ -71,45 +70,50 @@ export default function QualityIndex() {
                     </h1>
                     <p className="max-w-3xl text-base leading-6 text-slate-600">
                         {tq.index_description
-                            ?? 'Styrende dokumenter, prosesser og kontroller — bygget på godkjent innhold i Wiki.'}
+                            ?? 'Styrende dokumenter, prosesser og kontroller — med eier, status og revisjon.'}
                     </p>
                 </header>
 
                 {activeTab === 'overview' && (
-                    <TypeCounts
-                        counts={typeCounts}
-                        qualityTypes={qualityTypes}
-                        typeLabelsPlural={typeLabelsPlural}
-                    />
+                    <TypeCounts counts={typeCounts} types={qualityTypes} labels={tq.types_plural ?? {}} />
                 )}
 
-                <DocumentTable
-                    documents={documents}
-                    canManage={canManage}
+                <Tabs activeTab={activeTab} tq={tq} />
+
+                {! canManage && (
+                    <p className="text-sm text-slate-500">
+                        {tq.manage_denied ?? 'Du kan se kvalitetssystemet, men ikke endre det.'}
+                    </p>
+                )}
+
+                <ItemTable
+                    items={items}
                     tq={tq}
                     typeLabels={typeLabels}
-                    relationLabels={relationLabels}
-                    relationLabelsIncoming={relationLabelsIncoming}
+                    statusLabels={statusLabels}
                 />
 
                 {activeTab === 'overview' && (
                     <>
-                        <RelationsCard
+                        <RelationPanel
+                            tq={tq}
+                            canManage={canManage}
                             relations={relations}
                             relationTypes={relationTypes}
-                            documents={relationPageOptions}
-                            canManage={canManage}
-                            tq={tq}
-                            relationLabels={relationLabels}
-                        />
-                        <ClassifyCard
-                            pages={unclassifiedPages}
-                            search={unclassifiedSearch}
-                            qualityTypes={qualityTypes}
-                            canManage={canManage}
-                            tq={tq}
+                            itemOptions={relationItemOptions}
                             typeLabels={typeLabels}
                         />
+
+                        {canManage && (
+                            <CreateItemPanel
+                                tq={tq}
+                                qualityTypes={qualityTypes}
+                                statuses={statuses}
+                                ownerOptions={ownerOptions}
+                                typeLabels={typeLabels}
+                                statusLabels={statusLabels}
+                            />
+                        )}
                     </>
                 )}
             </div>
@@ -117,71 +121,92 @@ export default function QualityIndex() {
     );
 }
 
-/**
- * The document hierarchy as counts, governing first. Reading left to right is reading downwards
- * through the kvalitetssystem, which is why the order comes from the backend rather than from
- * whatever order the counts arrive in.
- */
-function TypeCounts({ counts, qualityTypes, typeLabelsPlural }) {
+function TypeCounts({ counts, types, labels }) {
     return (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {qualityTypes.map((type) => (
-                <div key={type} className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="text-3xl font-semibold tracking-tight text-slate-950">
-                        {counts?.[type] ?? 0}
-                    </div>
-                    <div className="mt-1 text-base leading-6 text-slate-600">
-                        {typeLabelsPlural?.[type] ?? type}
-                    </div>
+            {types.map((type) => (
+                <div key={type} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <p className="text-2xl font-semibold text-slate-950">{counts?.[type] ?? 0}</p>
+                    <p className="text-sm text-slate-600">{labels?.[type] ?? type}</p>
                 </div>
             ))}
         </div>
     );
 }
 
-function DocumentTable({ documents, canManage, tq, typeLabels, relationLabels, relationLabelsIncoming }) {
-    if (documents.length === 0) {
+function Tabs({ activeTab, tq }) {
+    return (
+        <nav className="flex flex-wrap gap-2">
+            {TABS.map((tab) => (
+                <Link
+                    key={tab}
+                    href={`/app/quality?tab=${tab}`}
+                    className={
+                        tab === activeTab
+                            ? 'rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white'
+                            : QUIET_BUTTON
+                    }
+                >
+                    {tq[`tab_${tab}`] ?? tab}
+                </Link>
+            ))}
+        </nav>
+    );
+}
+
+function ItemTable({ items, tq, typeLabels, statusLabels }) {
+    const table = tq.table ?? {};
+
+    if (items.length === 0) {
         return (
             <EmptyStateBox
-                title={tq.documents_heading ?? 'Styrende dokumenter'}
-                description={tq.documents_empty
-                    ?? 'Ingen Wiki-sider er klassifisert ennå. Klassifiser sidene som utgjør kvalitetssystemet nedenfor.'}
+                title={tq.items_heading ?? 'Styrende dokumenter'}
+                description={tq.items_empty ?? 'Ingen styrende dokumenter er registrert ennå.'}
             />
         );
     }
 
-    const table = tq.table ?? {};
-
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">
-                {tq.documents_heading ?? 'Styrende dokumenter'}
-            </h2>
-
+            <h2 className="text-xl font-semibold text-slate-950">{tq.items_heading ?? 'Styrende dokumenter'}</h2>
             <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-separate border-spacing-y-2 text-left">
-                    <thead>
-                        <tr className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                            <th scope="col" className="px-3 py-2">{table.document ?? 'Dokument'}</th>
-                            <th scope="col" className="px-3 py-2">{table.type ?? 'Type'}</th>
-                            <th scope="col" className="px-3 py-2">{table.code ?? 'Dokumentnr.'}</th>
-                            <th scope="col" className="px-3 py-2">{table.owner ?? 'Eier'}</th>
-                            <th scope="col" className="px-3 py-2">{table.status ?? 'Status'}</th>
-                            <th scope="col" className="px-3 py-2">{table.relations ?? 'Relasjoner'}</th>
-                            {canManage && <th scope="col" className="px-3 py-2">{table.actions ?? 'Handling'}</th>}
+                <table className="w-full min-w-[720px] text-left text-base">
+                    <thead className="text-sm uppercase tracking-wide text-slate-500">
+                        <tr>
+                            <th className="pb-2">{table.document ?? 'Dokument'}</th>
+                            <th className="pb-2">{table.type ?? 'Type'}</th>
+                            <th className="pb-2">{table.owner ?? 'Eier'}</th>
+                            <th className="pb-2">{table.status ?? 'Status'}</th>
+                            <th className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
+                            <th className="pb-2">{table.wiki ?? 'Wiki'}</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {documents.map((document) => (
-                            <DocumentRow
-                                key={document.id}
-                                document={document}
-                                canManage={canManage}
-                                tq={tq}
-                                typeLabels={typeLabels}
-                                relationLabels={relationLabels}
-                                relationLabelsIncoming={relationLabelsIncoming}
-                            />
+                    <tbody className="divide-y divide-slate-100">
+                        {items.map((item) => (
+                            <tr key={item.id} className="align-top">
+                                <td className="py-3 pr-4">
+                                    <Link href={item.url} className="font-semibold text-slate-950 hover:underline">
+                                        {itemLabel(item)}
+                                    </Link>
+                                </td>
+                                <td className="py-3 pr-4">
+                                    <StatusBadge tone={TYPE_TONES[item.quality_type] ?? 'slate'}>
+                                        {typeLabels?.[item.quality_type] ?? item.quality_type}
+                                    </StatusBadge>
+                                </td>
+                                <td className="py-3 pr-4 text-slate-700">
+                                    {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
+                                </td>
+                                <td className="py-3 pr-4">
+                                    <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
+                                        {statusLabels?.[item.status] ?? item.status}
+                                    </StatusBadge>
+                                </td>
+                                <td className="py-3 pr-4 text-slate-700">
+                                    {item.next_review_at ?? (tq.no_review ?? 'Ingen revisjonssyklus')}
+                                </td>
+                                <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
+                            </tr>
                         ))}
                     </tbody>
                 </table>
@@ -190,144 +215,179 @@ function DocumentTable({ documents, canManage, tq, typeLabels, relationLabels, r
     );
 }
 
-function DocumentRow({ document, canManage, tq, typeLabels, relationLabels, relationLabelsIncoming }) {
-    const unclassify = () => {
-        if (! window.confirm(tq.unclassify_confirm
-            ?? 'Fjern klassifiseringen? Relasjoner til og fra dokumentet blir også fjernet. Wiki-siden beholdes.')) {
-            return;
-        }
+function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels, statusLabels }) {
+    const { data, setData, post, processing, errors, reset } = useForm({
+        quality_type: '',
+        title: '',
+        code: '',
+        purpose: '',
+        owner_user_id: '',
+        status: 'draft',
+        review_interval_months: '',
+        last_reviewed_at: '',
+    });
 
-        router.delete(`/app/quality/classifications/${document.id}`, { preserveScroll: true });
-    };
-
-    return (
-        <tr className="align-top text-base text-slate-700 [&>td]:bg-slate-50/60 [&>td]:px-3 [&>td]:py-3 [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl">
-            <td>
-                {/* The row leads back to Wiki, which holds the content. Kvalitet classifies it. */}
-                <a href={document.wiki_url ?? '#'} className="font-semibold text-slate-950 underline-offset-2 hover:underline">
-                    {document.title}
-                </a>
-            </td>
-            <td>
-                <StatusBadge tone={TYPE_TONES[document.quality_type] ?? 'slate'}>
-                    {typeLabels?.[document.quality_type] ?? document.quality_type}
-                </StatusBadge>
-            </td>
-            <td className="whitespace-nowrap">{document.quality_code ?? '—'}</td>
-            <td>{document.owner_name ?? (tq.no_owner ?? 'Ingen eier')}</td>
-            <td>
-                {document.publication ? (
-                    <StatusBadge tone={PUBLICATION_TONES[document.publication.state] ?? 'slate'}>
-                        {document.publication.state_label}
-                    </StatusBadge>
-                ) : '—'}
-            </td>
-            <td>
-                <RelationChips
-                    relations={document.relations ?? []}
-                    tq={tq}
-                    relationLabels={relationLabels}
-                    relationLabelsIncoming={relationLabelsIncoming}
-                />
-            </td>
-            {canManage && (
-                <td className="whitespace-nowrap">
-                    <button type="button" onClick={unclassify} className={QUIET_BUTTON}>
-                        {tq.unclassify ?? 'Fjern klassifisering'}
-                    </button>
-                </td>
-            )}
-        </tr>
-    );
-}
-
-/**
- * Both directions, each worded from this document's point of view — "styrer" and "styres av" are
- * different statements, and a chip that said only "styrer" on both ends would be wrong on one.
- */
-function RelationChips({ relations, tq, relationLabels, relationLabelsIncoming }) {
-    if (relations.length === 0) {
-        return <span className="text-slate-500">{tq.no_relations ?? 'Ingen relasjoner'}</span>;
+    function submit(event) {
+        event.preventDefault();
+        post('/app/quality/items', { onSuccess: () => reset() });
     }
 
     return (
-        <ul className="space-y-1">
-            {relations.map((relation) => {
-                const labels = relation.direction === 'outgoing' ? relationLabels : relationLabelsIncoming;
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tq.create_heading ?? 'Nytt styrende dokument'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tq.create_help ?? ''}</p>
 
-                return (
-                    <li key={`${relation.id}-${relation.direction}`} className="leading-6">
-                        <span className="font-semibold text-slate-600">
-                            {labels?.[relation.relation_type] ?? relation.relation_type}
-                        </span>
-                        {' '}
-                        <Link
-                            href={`/app/wiki/${relation.other_page_slug}`}
-                            className="text-slate-900 underline-offset-2 hover:underline"
-                        >
-                            {relation.other_page_title}
-                        </Link>
-                    </li>
-                );
-            })}
-        </ul>
+            <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field label={tq.field_type ?? 'Type'} error={errors.quality_type}>
+                    <select
+                        className={INPUT}
+                        value={data.quality_type}
+                        onChange={(event) => setData('quality_type', event.target.value)}
+                    >
+                        <option value="">{tq.field_type_placeholder ?? 'Velg type …'}</option>
+                        {qualityTypes.map((type) => (
+                            <option key={type} value={type}>{typeLabels?.[type] ?? type}</option>
+                        ))}
+                    </select>
+                </Field>
+
+                <Field label={tq.field_title ?? 'Tittel'} error={errors.title}>
+                    <input
+                        className={INPUT}
+                        value={data.title}
+                        onChange={(event) => setData('title', event.target.value)}
+                    />
+                </Field>
+
+                <Field label={tq.field_code ?? 'Dokumentnr.'} error={errors.code}>
+                    <input
+                        className={INPUT}
+                        value={data.code}
+                        onChange={(event) => setData('code', event.target.value)}
+                    />
+                </Field>
+
+                <Field label={tq.field_owner ?? 'Eier'} error={errors.owner_user_id}>
+                    <select
+                        className={INPUT}
+                        value={data.owner_user_id}
+                        onChange={(event) => setData('owner_user_id', event.target.value)}
+                    >
+                        <option value="">{tq.field_owner_placeholder ?? 'Ingen eier'}</option>
+                        {ownerOptions.map((owner) => (
+                            <option key={owner.id} value={owner.id}>{owner.name}</option>
+                        ))}
+                    </select>
+                </Field>
+
+                <Field label={tq.field_status ?? 'Status'} error={errors.status}>
+                    <select
+                        className={INPUT}
+                        value={data.status}
+                        onChange={(event) => setData('status', event.target.value)}
+                    >
+                        {statuses.map((status) => (
+                            <option key={status} value={status}>{statusLabels?.[status] ?? status}</option>
+                        ))}
+                    </select>
+                </Field>
+
+                <Field label={tq.field_review_interval ?? 'Revisjonsintervall (måneder)'} error={errors.review_interval_months}>
+                    <input
+                        type="number"
+                        min="1"
+                        max="120"
+                        className={INPUT}
+                        value={data.review_interval_months}
+                        onChange={(event) => setData('review_interval_months', event.target.value)}
+                    />
+                </Field>
+
+                <Field label={tq.field_last_reviewed ?? 'Sist revidert'} error={errors.last_reviewed_at}>
+                    <input
+                        type="date"
+                        className={INPUT}
+                        value={data.last_reviewed_at}
+                        onChange={(event) => setData('last_reviewed_at', event.target.value)}
+                    />
+                </Field>
+
+                <div className="md:col-span-2">
+                    <Field label={tq.field_purpose ?? 'Formål'} error={errors.purpose}>
+                        <textarea
+                            rows={3}
+                            className={INPUT}
+                            value={data.purpose}
+                            onChange={(event) => setData('purpose', event.target.value)}
+                        />
+                    </Field>
+                </div>
+
+                <div className="md:col-span-2">
+                    <button type="submit" className={PRIMARY_BUTTON} disabled={processing}>
+                        {tq.create_submit ?? 'Opprett'}
+                    </button>
+                </div>
+            </form>
+        </section>
     );
 }
 
-function RelationsCard({ relations, relationTypes, documents, canManage, tq, relationLabels }) {
+function RelationPanel({ tq, canManage, relations, relationTypes, itemOptions, typeLabels }) {
+    const relationLabels = tq.relation_types ?? {};
     const usableTypes = useMemo(
-        () => relationTypes.filter((entry) => relationTypeIsUsable(documents, relationTypes, entry.key)),
-        [documents, relationTypes],
+        () => relationTypes.filter((entry) => relationTypeIsUsable(itemOptions, relationTypes, entry.key)),
+        [relationTypes, itemOptions],
     );
+
+    const [relationType, setRelationType] = useState(usableTypes[0]?.key ?? '');
+    const { data, setData, post, delete: destroy, processing, errors, reset } = useForm({
+        from_item_id: '',
+        to_item_id: '',
+        relation_type: '',
+    });
+
+    const fromCandidates = candidatesForRelationStart(itemOptions, relationTypes, relationType);
+    const fromItem = fromCandidates.find((item) => String(item.id) === String(data.from_item_id)) ?? null;
+    const toCandidates = candidatesForRelationEnd(
+        itemOptions,
+        relationTypes,
+        relationType,
+        fromItem?.quality_type ?? null,
+    );
+
+    function submit(event) {
+        event.preventDefault();
+        post('/app/quality/relations', {
+            data: { ...data, relation_type: relationType },
+            onSuccess: () => reset(),
+        });
+    }
 
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tq.relations_heading ?? 'Relasjoner'}</h2>
-            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
-                {tq.relations_help
-                    ?? 'Relasjoner sier hvordan dokumentene styrer hverandre. Bare kombinasjoner kvalitetssystemet tillater kan velges.'}
-            </p>
-
-            {canManage && (
-                <RelationForm
-                    relationTypes={relationTypes}
-                    usableTypes={usableTypes}
-                    documents={documents}
-                    tq={tq}
-                    relationLabels={relationLabels}
-                />
-            )}
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tq.relations_help ?? ''}</p>
 
             {relations.length === 0 ? (
-                <p className="mt-4 text-base leading-6 text-slate-500">
-                    {tq.relations_empty ?? 'Ingen relasjoner er opprettet ennå.'}
-                </p>
+                <p className="mt-4 text-base text-slate-600">{tq.relations_empty ?? 'Ingen relasjoner er opprettet ennå.'}</p>
             ) : (
-                <ul className="mt-4 space-y-2">
+                <ul className="mt-4 divide-y divide-slate-100">
                     {relations.map((relation) => (
-                        <li
-                            key={relation.id}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50/60 px-3 py-2 text-base text-slate-700"
-                        >
-                            <span>
-                                <span className="font-semibold text-slate-950">{relation.from_title}</span>
-                                {' '}
-                                <span className="text-slate-600">
-                                    {relationLabels?.[relation.relation_type] ?? relation.relation_type}
-                                </span>
-                                {' '}
-                                <span className="font-semibold text-slate-950">{relation.to_title}</span>
+                        <li key={relation.id} className="flex flex-wrap items-center gap-2 py-2 text-base text-slate-800">
+                            <span className="font-semibold">{relation.from_title}</span>
+                            <span className="text-slate-500">
+                                {relationLabels?.[relation.relation_type] ?? relation.relation_type}
                             </span>
+                            <span className="font-semibold">{relation.to_title}</span>
                             {canManage && (
                                 <button
                                     type="button"
-                                    className={QUIET_BUTTON}
+                                    className="ml-auto text-sm font-semibold text-rose-600 hover:underline"
                                     onClick={() => {
-                                        if (! window.confirm(tq.relation_delete_confirm ?? 'Fjern relasjonen?')) {
-                                            return;
+                                        if (window.confirm(tq.relation_delete_confirm ?? 'Fjern relasjonen?')) {
+                                            destroy(`/app/quality/relations/${relation.id}`);
                                         }
-
-                                        router.delete(`/app/quality/relations/${relation.id}`, { preserveScroll: true });
                                     }}
                                 >
                                     {tq.relation_delete ?? 'Fjern'}
@@ -337,219 +397,77 @@ function RelationsCard({ relations, relationTypes, documents, canManage, tq, rel
                     ))}
                 </ul>
             )}
-        </section>
-    );
-}
 
-/**
- * The form offers only pairs the matrix allows, so choosing a relation type narrows both selects.
- * The backend enforces the same matrix — this spares the user a rejection, it does not replace it.
- */
-function RelationForm({ relationTypes, usableTypes, documents, tq, relationLabels }) {
-    const [relationType, setRelationType] = useState('');
-    const form = useForm({ from_page_id: '', to_page_id: '', relation_type: '' });
+            {canManage && (
+                usableTypes.length === 0 ? (
+                    <p className="mt-4 text-sm text-slate-500">
+                        {tq.relation_no_candidates ?? 'Ingen dokumenter er registrert slik at denne relasjonen kan brukes.'}
+                    </p>
+                ) : (
+                    <form onSubmit={submit} className="mt-6 grid gap-4 md:grid-cols-4">
+                        <Field label={tq.relation_type ?? 'Relasjon'} error={errors.relation_type}>
+                            <select
+                                className={INPUT}
+                                value={relationType}
+                                onChange={(event) => {
+                                    setRelationType(event.target.value);
+                                    setData({ from_item_id: '', to_item_id: '', relation_type: '' });
+                                }}
+                            >
+                                {usableTypes.map((entry) => (
+                                    <option key={entry.key} value={entry.key}>
+                                        {relationLabels?.[entry.key] ?? entry.key}
+                                    </option>
+                                ))}
+                            </select>
+                        </Field>
 
-    // Resolved at render rather than held in state: which types are usable depends on what is
-    // classified, and that changes under the form. A selection that is no longer offered falls
-    // back to the first one that is, instead of silently posting a type the select stopped showing.
-    const activeType = usableTypes.some((entry) => entry.key === relationType)
-        ? relationType
-        : (usableTypes[0]?.key ?? '');
+                        <Field label={tq.relation_from ?? 'Fra'} error={errors.from_item_id}>
+                            <select
+                                className={INPUT}
+                                value={data.from_item_id}
+                                onChange={(event) => setData({ ...data, from_item_id: event.target.value, to_item_id: '' })}
+                            >
+                                <option value="">—</option>
+                                {fromCandidates.map((item) => (
+                                    <option key={item.id} value={item.id}>{itemLabel(item)}</option>
+                                ))}
+                            </select>
+                        </Field>
 
-    const fromCandidates = candidatesForRelationEnd(documents, relationTypes, activeType, 'from');
-    const toCandidates = candidatesForRelationEnd(documents, relationTypes, activeType, 'to');
+                        <Field label={tq.relation_to ?? 'Til'} error={errors.to_item_id}>
+                            <select
+                                className={INPUT}
+                                value={data.to_item_id}
+                                onChange={(event) => setData('to_item_id', event.target.value)}
+                            >
+                                <option value="">—</option>
+                                {toCandidates.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                        {itemLabel(item)} ({typeLabels?.[item.quality_type] ?? item.quality_type})
+                                    </option>
+                                ))}
+                            </select>
+                        </Field>
 
-    if (usableTypes.length === 0) {
-        return (
-            <p className="mt-4 text-base leading-6 text-slate-500">
-                {tq.relation_no_candidates
-                    ?? 'Ingen dokumenter er klassifisert slik at denne relasjonen kan brukes.'}
-            </p>
-        );
-    }
-
-    const submit = (event) => {
-        event.preventDefault();
-
-        form.transform((data) => ({ ...data, relation_type: activeType }))
-            .post('/app/quality/relations', {
-                preserveScroll: true,
-                onSuccess: () => form.reset('from_page_id', 'to_page_id'),
-            });
-    };
-
-    return (
-        <form onSubmit={submit} className="mt-4 grid gap-3 sm:grid-cols-4">
-            <label className="space-y-1">
-                <span className="text-sm font-semibold text-slate-600">{tq.relation_from ?? 'Fra'}</span>
-                <select
-                    className={INPUT}
-                    value={form.data.from_page_id}
-                    onChange={(event) => form.setData('from_page_id', event.target.value)}
-                >
-                    <option value="">—</option>
-                    {fromCandidates.map((document) => (
-                        <option key={document.page_id} value={document.page_id}>{documentLabel(document)}</option>
-                    ))}
-                </select>
-            </label>
-
-            <label className="space-y-1">
-                <span className="text-sm font-semibold text-slate-600">{tq.relation_type ?? 'Relasjon'}</span>
-                <select
-                    className={INPUT}
-                    value={activeType}
-                    onChange={(event) => {
-                        setRelationType(event.target.value);
-                        // The old selections almost certainly fail the new type's matrix, and a
-                        // stale id in a hidden select is exactly how an invalid pair gets posted.
-                        form.setData({ ...form.data, from_page_id: '', to_page_id: '' });
-                    }}
-                >
-                    {usableTypes.map((entry) => (
-                        <option key={entry.key} value={entry.key}>
-                            {relationLabels?.[entry.key] ?? entry.key}
-                        </option>
-                    ))}
-                </select>
-            </label>
-
-            <label className="space-y-1">
-                <span className="text-sm font-semibold text-slate-600">{tq.relation_to ?? 'Til'}</span>
-                <select
-                    className={INPUT}
-                    value={form.data.to_page_id}
-                    onChange={(event) => form.setData('to_page_id', event.target.value)}
-                >
-                    <option value="">—</option>
-                    {toCandidates.map((document) => (
-                        <option key={document.page_id} value={document.page_id}>{documentLabel(document)}</option>
-                    ))}
-                </select>
-            </label>
-
-            <div className="flex items-end">
-                <button
-                    type="submit"
-                    className={PRIMARY_BUTTON}
-                    disabled={form.processing || ! form.data.from_page_id || ! form.data.to_page_id}
-                >
-                    {tq.relation_submit ?? 'Legg til relasjon'}
-                </button>
-            </div>
-
-            {Object.values(form.errors).length > 0 && (
-                <p className="sm:col-span-4 text-base leading-6 text-rose-700">
-                    {Object.values(form.errors)[0]}
-                </p>
-            )}
-        </form>
-    );
-}
-
-function ClassifyCard({ pages, search, qualityTypes, canManage, tq, typeLabels }) {
-    const [query, setQuery] = useState(search ?? '');
-
-    return (
-        <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">
-                {tq.classify_heading ?? 'Klassifiser Wiki-sider'}
-            </h2>
-            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
-                {tq.classify_help
-                    ?? 'Kvalitet legger faglig struktur oppå Wiki. Innholdet, eieren og godkjenningen blir værende i Wiki-siden.'}
-            </p>
-
-            <form
-                className="mt-4 flex flex-wrap gap-3"
-                onSubmit={(event) => {
-                    event.preventDefault();
-                    router.get('/app/quality', { tab: 'overview', search: query }, {
-                        preserveState: true,
-                        preserveScroll: true,
-                    });
-                }}
-            >
-                <input
-                    type="search"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder={tq.classify_search_placeholder ?? 'Søk etter Wiki-side …'}
-                    className={`${INPUT} sm:max-w-sm`}
-                />
-                <button type="submit" className={QUIET_BUTTON}>
-                    {tq.classify_search_submit ?? 'Søk'}
-                </button>
-            </form>
-
-            {pages.length === 0 ? (
-                <p className="mt-4 text-base leading-6 text-slate-500">
-                    {tq.classify_empty ?? 'Alle synlige Wiki-sider er klassifisert, eller søket ga ingen treff.'}
-                </p>
-            ) : (
-                <ul className="mt-4 space-y-2">
-                    {pages.map((page) => (
-                        <ClassifyRow
-                            key={page.page_id}
-                            page={page}
-                            qualityTypes={qualityTypes}
-                            canManage={canManage}
-                            tq={tq}
-                            typeLabels={typeLabels}
-                        />
-                    ))}
-                </ul>
+                        <div className="flex items-end">
+                            <button type="submit" className={PRIMARY_BUTTON} disabled={processing}>
+                                {tq.relation_submit ?? 'Legg til relasjon'}
+                            </button>
+                        </div>
+                    </form>
+                )
             )}
         </section>
     );
 }
 
-function ClassifyRow({ page, qualityTypes, canManage, tq, typeLabels }) {
-    const form = useForm({ page_id: page.page_id, quality_type: '', quality_code: '' });
-
+function Field({ label, error, children }) {
     return (
-        <li className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50/60 px-3 py-2">
-            <Link
-                href={`/app/wiki/${page.slug}`}
-                className="min-w-48 flex-1 text-base font-semibold text-slate-950 underline-offset-2 hover:underline"
-            >
-                {page.title}
-            </Link>
-
-            {canManage ? (
-                <form
-                    className="flex flex-wrap items-center gap-2"
-                    onSubmit={(event) => {
-                        event.preventDefault();
-                        form.post('/app/quality/classifications', { preserveScroll: true });
-                    }}
-                >
-                    <select
-                        className={`${INPUT} w-auto`}
-                        value={form.data.quality_type}
-                        onChange={(event) => form.setData('quality_type', event.target.value)}
-                    >
-                        <option value="">{tq.classify_type_placeholder ?? 'Velg type …'}</option>
-                        {qualityTypes.map((type) => (
-                            <option key={type} value={type}>{typeLabels?.[type] ?? type}</option>
-                        ))}
-                    </select>
-                    <input
-                        type="text"
-                        className={`${INPUT} w-32`}
-                        value={form.data.quality_code}
-                        onChange={(event) => form.setData('quality_code', event.target.value)}
-                        placeholder={tq.classify_code_placeholder ?? 'Dokumentnr.'}
-                    />
-                    <button type="submit" className={PRIMARY_BUTTON} disabled={form.processing || ! form.data.quality_type}>
-                        {tq.classify_submit ?? 'Klassifiser'}
-                    </button>
-                </form>
-            ) : (
-                <span className="text-base text-slate-500">
-                    {tq.manage_denied ?? 'Du kan se kvalitetssystemet, men ikke endre klassifisering eller relasjoner.'}
-                </span>
-            )}
-        </li>
+        <label className="block space-y-1">
+            <span className={LABEL}>{label}</span>
+            {children}
+            {error && <span className="block text-sm text-rose-600">{error}</span>}
+        </label>
     );
 }

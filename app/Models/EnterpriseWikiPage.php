@@ -113,14 +113,16 @@ class EnterpriseWikiPage extends Model
     }
 
     /**
-     * What kind of styrende dokument this page is in the kvalitetssystem, if it is one at all.
+     * The quality items this page backs, if any.
      *
-     * Null for most pages and that is the normal case — Kvalitet classifies a deliberate subset of
-     * the Wiki, and nothing in the Wiki pipeline reads this.
+     * Empty for most pages, and that is the normal case. The relation is deliberately one-way in
+     * meaning: Kvalitet reaches into Wiki for evidence, Wiki learns nothing about itself from being
+     * reached into. Nothing in the Wiki pipeline reads this, and a page is never typed, labelled or
+     * hidden because a quality item points at it.
      */
-    public function qualityClassification(): HasOne
+    public function qualityItemLinks(): HasMany
     {
-        return $this->hasOne(QualityPageClassification::class, 'enterprise_wiki_page_id');
+        return $this->hasMany(QualityItemWikiLink::class, 'enterprise_wiki_page_id');
     }
 
     /**
