@@ -183,16 +183,139 @@ class LiveSearchSourceSelectionTest extends TestCase
     }
 
     /**
-     * An unknown register is refused, not quietly answered by whichever adapter is at hand. That
-     * refusal is the reason the registry throws instead of defaulting.
+     * An unknown register is refused, not quietly answered by whichever adapter is at hand.
+     *
+     * The refusal is the reason the registry throws instead of defaulting, and it still refuses.
+     * What changed with the selector is where the refusal lands: the register is a control on the
+     * page now, so an unknown one is a state a person reaches by editing the URL, and a stack
+     * trace is not an answer to that. The page comes back with the selector on it and a message,
+     * and the status says the register is not there rather than blaming one that is.
      */
     public function test_an_unknown_source_is_refused_rather_than_silently_becoming_doffin(): void
     {
         $this->mockDoffin();
+        $this->mockTed();
 
-        $this->actingAs($this->user())
+        $response = $this->actingAs($this->user())
             ->get('/app/notices?mode=live&source=eu-funding-and-tenders')
-            ->assertServerError();
+            ->assertNotFound();
+
+        $props = $response->viewData('page')['props'];
+
+        $this->assertSame([], $props['notices']['data'], 'nothing was searched');
+        $this->assertSame('unknown_source', $props['notices']['meta']['error_type']);
+        $this->assertNotSame('', trim((string) $props['notices']['error']));
+        // No register claims the key, so the page names none — and still offers the ones it has.
+        $this->assertNull($props['source']['label']);
+        $this->assertNull($props['source']['name']);
+        $this->assertSame(['doffin', 'ted'], array_column($props['source']['options'], 'key'));
+    }
+
+    // ------------------------------------------------------------------ the selector
+
+    /**
+     * The selector is built from the registry, so a register Procynia can speak to is one it
+     * offers. Doffin first, because a request that names none still gets Doffin.
+     */
+    public function test_the_page_offers_the_registers_procynia_can_search(): void
+    {
+        $this->mockDoffin();
+        $this->mockTed();
+
+        $source = $this->liveSearch($this->user())['source'];
+
+        $this->assertSame('doffin', $source['key']);
+        $this->assertSame('Doffin', $source['name']);
+        $this->assertSame('Live søk i Doffin', $source['label']);
+        $this->assertSame(['doffin', 'ted'], array_column($source['options'], 'key'));
+        $this->assertSame(['Doffin', 'TED'], array_column($source['options'], 'name'));
+        $this->assertSame(['Live søk i Doffin', 'Live søk i TED'], array_column($source['options'], 'label'));
+    }
+
+    /** Choosing TED searches TED, and the page says so in its own name for the register. */
+    public function test_choosing_ted_names_ted(): void
+    {
+        $this->mockDoffin();
+        $this->mockTed();
+
+        $source = $this->liveSearch($this->user(), ['source' => 'ted'])['source'];
+
+        $this->assertSame('ted', $source['key']);
+        $this->assertSame('TED', $source['name']);
+        $this->assertSame('Live søk i TED', $source['label']);
+        // Both are still offered: choosing one register is not losing the other.
+        $this->assertSame(['doffin', 'ted'], array_column($source['options'], 'key'));
+    }
+
+    /**
+     * Switching register keeps the question.
+     *
+     * The criteria the adapters are given name no register's parameters, so a filter survives the
+     * switch as far as the next register supports it — and the filters come back on the page, so
+     * the user is not quietly searching something else.
+     */
+    public function test_switching_register_keeps_the_filters_that_both_registers_take(): void
+    {
+        $this->mockDoffin();
+        $this->mockTed();
+
+        $query = [
+            'q' => 'sikkerhetsventilasjon',
+            'organization_name' => 'Sykehusinnkjøp',
+            'cpv' => '50400000',
+            'status' => 'ACTIVE',
+        ];
+
+        $onDoffin = $this->liveSearch($this->user(), $query);
+        $onTed = $this->liveSearch($this->user(), $query + ['source' => 'ted']);
+
+        $this->assertSame('doffin', $onDoffin['source']['key']);
+        $this->assertSame('ted', $onTed['source']['key']);
+        $this->assertSame('TED notice', $onTed['notices']['data'][0]['title']);
+
+        foreach (array_keys($query) as $field) {
+            $this->assertSame($query[$field], $onTed['filters'][$field], $field.' survived the switch');
+        }
+    }
+
+    /**
+     * Every register-dependent string leaves a place for the register rather than naming one.
+     *
+     * The page fills it from the register the search ran in, so this is the one thing that can go
+     * wrong silently: a string that still says "Doffin" reads as a fact about a page of TED
+     * results, and nothing about it looks broken.
+     */
+    public function test_the_live_search_texts_name_no_register_of_their_own(): void
+    {
+        $registerDependent = [
+            'live_title',
+            'live_description',
+            'live_search_hits_title',
+            'hits_suffix',
+            'open_in_source_label',
+            'live_capped_warning',
+            'live_fallback_banner',
+            'live_search_error_title',
+            'no_results_live_title',
+            'no_results_live_body',
+            'no_results_filtered_title',
+            'no_results_live_search_error_title',
+            'filters_description',
+            'relevance_disabled_help',
+        ];
+
+        foreach (['no', 'en'] as $language) {
+            $notices = __('procynia.notices', [], $language);
+
+            foreach ($registerDependent as $key) {
+                $this->assertArrayHasKey($key, $notices, $language.'.'.$key);
+                $this->assertStringContainsString(':source', $notices[$key], $language.'.'.$key);
+                $this->assertStringNotContainsString('Doffin', $notices[$key], $language.'.'.$key);
+            }
+
+            // The page ingress too: it introduced the page as Doffin's before there were two.
+            $this->assertStringContainsString(':source', __('procynia.frontend.procurements_subtitle', [], $language));
+        }
     }
 
     // ------------------------------------------------------------------ collision

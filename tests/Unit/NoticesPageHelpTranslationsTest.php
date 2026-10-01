@@ -127,13 +127,15 @@ class NoticesPageHelpTranslationsTest extends TestCase
         $this->assertStringContainsString('Åpne sak', $norwegian['page_help_item_open_case_title']);
         $this->assertStringContainsString('Rediger frister', $norwegian['page_help_item_deadlines_title']);
         $this->assertStringContainsString('Flytt til historikk', $norwegian['page_help_item_history_move_title']);
-        $this->assertStringContainsString('Åpne i Doffin', $norwegian['page_help_item_doffin_title']);
+        // The help is read in every mode, including ones where no register is being searched, so
+        // this one entry names none — the live search names the register it is actually in.
+        $this->assertStringContainsString('Åpne hos kilden', $norwegian['page_help_item_doffin_title']);
 
         $english = $this->noticeStrings('en');
         $this->assertStringContainsString('Open case', $english['page_help_item_open_case_title']);
         $this->assertStringContainsString('Edit deadlines', $english['page_help_item_deadlines_title']);
         $this->assertStringContainsString('Move to history', $english['page_help_item_history_move_title']);
-        $this->assertStringContainsString('Open in Doffin', $english['page_help_item_doffin_title']);
+        $this->assertStringContainsString('Open at the source', $english['page_help_item_doffin_title']);
     }
 
     public function test_the_history_help_states_that_moving_a_case_there_is_final(): void

@@ -27,6 +27,7 @@ use App\Services\OpportunitySources\OpportunityRegistrar;
 use App\Services\OpportunitySources\OpportunitySearchCriteria;
 use App\Services\OpportunitySources\OpportunitySourceAdapter;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
+use App\Services\OpportunitySources\OpportunitySourceSearchResult;
 use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
@@ -205,7 +206,15 @@ class NoticeController extends Controller
             publishedWithinDays: $publicationPeriod !== '' ? (int) $publicationPeriod : null,
         );
 
-        $searchResponse = $this->discoveryAdapter($request)->search($criteria, $page, $perPage);
+        // A register nobody speaks for is answered, not crashed on.
+        //
+        // The source is a control on the page now, which makes an unknown one a state the user can
+        // reach by editing the URL. The registry still refuses to pick a stand-in — that refusal is
+        // the point of it — so the refusal is turned into the same controlled error the registers
+        // themselves produce, and the page comes back with the selector intact.
+        $searchResponse = $this->sources->find($this->discoverySourceKey($request)) !== null
+            ? $this->discoveryAdapter($request)->search($criteria, $page, $perPage)
+            : $this->unknownSourceResult($this->discoverySourceKey($request), $page, $perPage);
         $page = $searchResponse->page;
         $perPage = $searchResponse->perPage;
         $fallbackUsed = $searchResponse->fallbackUsed;
@@ -2537,9 +2546,30 @@ class NoticeController extends Controller
         ];
     }
 
+    /** A search of a register this installation has no adapter for. */
+    private function unknownSourceResult(string $sourceKey, int $page, int $perPage): OpportunitySourceSearchResult
+    {
+        return new OpportunitySourceSearchResult(
+            ok: false,
+            notices: [],
+            page: $page,
+            perPage: $perPage,
+            numHitsTotal: 0,
+            numHitsAccessible: 0,
+            fallbackUsed: false,
+            errorType: 'unknown_source',
+            // For the log. The user message says nothing about the key they typed.
+            errorMessage: sprintf('No adapter claims the source key "%s".', $sourceKey),
+            userMessage: __('procynia.notices.live_unknown_source'),
+        );
+    }
+
     private function liveSearchStatusCode(string $errorType): int
     {
         return match ($errorType) {
+            // Not the register's fault and not a register that exists: the request named one that
+            // is not there, which is the only one of these that is about the URL.
+            'unknown_source' => HttpResponse::HTTP_NOT_FOUND,
             'invalid_request' => HttpResponse::HTTP_UNPROCESSABLE_ENTITY,
             'upstream_unavailable' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
             'timeout' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
@@ -2643,11 +2673,42 @@ class NoticeController extends Controller
                 'type' => 'saved_notice_history',
                 'label' => 'Historikk',
             ],
-            default => [
-                'type' => $this->discoverySourceKey($request).'_live_search',
-                'label' => $this->discoveryAdapter($request)->label(),
-            ],
+            default => $this->liveDiscoverySource($request),
         };
+    }
+
+    /**
+     * Which register this search is in, and which ones it could be in.
+     *
+     * The options are read from the registry rather than listed here, so a register Procynia can
+     * speak to is a register the selector offers — there is no second list to forget to update.
+     *
+     * Label and name are null for a key no adapter claims. That is a page the user can reach by
+     * editing the URL, and it renders with the selector intact so there is a way back; naming it
+     * after whichever register happened to be first would be the silent default the registry
+     * exists to refuse.
+     *
+     * @return array<string, mixed>
+     */
+    private function liveDiscoverySource(?Request $request): array
+    {
+        $sourceKey = $this->discoverySourceKey($request);
+        $adapter = $this->sources->find($sourceKey);
+
+        return [
+            'type' => $sourceKey.'_live_search',
+            'key' => $sourceKey,
+            'name' => $adapter?->registerName(),
+            'label' => $adapter?->label(),
+            'options' => collect($this->sources->all())
+                ->map(fn (OpportunitySourceAdapter $option): array => [
+                    'key' => $option->sourceKey(),
+                    'name' => $option->registerName(),
+                    'label' => $option->label(),
+                ])
+                ->values()
+                ->all(),
+        ];
     }
 
     private function cpvSelectorPayload(string $cpvFilter): array
