@@ -7,6 +7,9 @@ use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\EnterpriseWiki\GraphProjection\GraphProjectionService;
 use App\Services\EnterpriseWiki\GraphProjection\Neo4jGraphProjectionService;
 use App\Services\EnterpriseWiki\GraphProjection\NullGraphProjectionService;
+use App\Services\EnterpriseWiki\GraphQuery\GraphQueryService;
+use App\Services\EnterpriseWiki\GraphQuery\Neo4jGraphQueryService;
+use App\Services\EnterpriseWiki\GraphQuery\NullGraphQueryService;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
@@ -49,6 +52,25 @@ class AppServiceProvider extends ServiceProvider
             }
 
             return new Neo4jGraphProjectionService(
+                uri: (string) ($config['uri'] ?? 'bolt://localhost:7687'),
+                database: $config['database'] ?? null,
+                username: $config['username'] ?? null,
+                password: $config['password'] ?? null,
+            );
+        });
+
+        // The read side of the same pilot, bound separately: a deployment may well project the
+        // graph long before anything is allowed to read from it, and the null reader keeps the
+        // SQL-backed graph entirely unaffected when Neo4j is off.
+        $this->app->singleton(GraphQueryService::class, function (): GraphQueryService {
+            /** @var array{enabled?: bool, uri?: string, database?: ?string, username?: ?string, password?: ?string} $config */
+            $config = config('services.neo4j', []);
+
+            if (! (bool) ($config['enabled'] ?? false)) {
+                return new NullGraphQueryService;
+            }
+
+            return new Neo4jGraphQueryService(
                 uri: (string) ($config['uri'] ?? 'bolt://localhost:7687'),
                 database: $config['database'] ?? null,
                 username: $config['username'] ?? null,

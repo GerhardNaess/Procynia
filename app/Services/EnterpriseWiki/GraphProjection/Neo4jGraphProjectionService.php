@@ -2,13 +2,10 @@
 
 namespace App\Services\EnterpriseWiki\GraphProjection;
 
+use App\Services\EnterpriseWiki\Graph\Neo4jConnection;
 use InvalidArgumentException;
-use Laudis\Neo4j\Authentication\Authenticate;
-use Laudis\Neo4j\ClientBuilder;
-use Laudis\Neo4j\Contracts\AuthenticateInterface;
 use Laudis\Neo4j\Contracts\ClientInterface;
 use Laudis\Neo4j\Contracts\TransactionInterface;
-use Laudis\Neo4j\Databags\SessionConfiguration;
 
 class Neo4jGraphProjectionService implements GraphProjectionService
 {
@@ -19,16 +16,16 @@ class Neo4jGraphProjectionService implements GraphProjectionService
      */
     private const METADATA_JSON_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
 
-    private ?ClientInterface $client = null;
+    private readonly Neo4jConnection $connection;
 
     public function __construct(
-        private readonly string $uri,
-        private readonly ?string $database,
-        private readonly ?string $username,
-        private readonly ?string $password,
+        string $uri,
+        ?string $database,
+        ?string $username,
+        ?string $password,
         ?ClientInterface $client = null,
     ) {
-        $this->client = $client;
+        $this->connection = new Neo4jConnection($uri, $database, $username, $password, $client);
     }
 
     public function ensureSchema(): void
@@ -268,27 +265,6 @@ class Neo4jGraphProjectionService implements GraphProjectionService
 
     private function client(): ClientInterface
     {
-        if ($this->client instanceof ClientInterface) {
-            return $this->client;
-        }
-
-        $builder = ClientBuilder::create()
-            ->withDriver('default', $this->uri, $this->authentication())
-            ->withDefaultDriver('default');
-
-        if ($this->database !== null && $this->database !== '') {
-            $builder = $builder->withDefaultSessionConfiguration(SessionConfiguration::default()->withDatabase($this->database));
-        }
-
-        return $this->client = $builder->build();
-    }
-
-    private function authentication(): AuthenticateInterface
-    {
-        if ($this->username === null || $this->username === '') {
-            return Authenticate::disabled();
-        }
-
-        return Authenticate::basic($this->username, (string) $this->password);
+        return $this->connection->client();
     }
 }

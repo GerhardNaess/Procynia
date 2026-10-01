@@ -21,6 +21,7 @@ use App\Http\Controllers\App\WikiController;
 use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
+use App\Http\Controllers\App\WikiGraphFocusController;
 use App\Http\Controllers\App\WikiSourceController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EntraAuthController;
@@ -299,6 +300,9 @@ Route::prefix('app')
             Route::get('/sources/{document}/download', [WikiSourceController::class, 'download'])->name('sources.download');
             Route::get('/sources/{document}/images/{imageKey}', [WikiSourceController::class, 'image'])->name('sources.image');
             Route::get('/graph-data', [WikiGraphDataController::class, '__invoke'])->name('graph.data');
+            // Neo4j-backed focus traversal. Separate from /graph-data on purpose: that endpoint is
+            // the SQL-backed graph and must keep answering whether or not the projection runs.
+            Route::get('/graph-focus', [WikiGraphFocusController::class, '__invoke'])->name('graph.focus');
             Route::get('/graph', [WikiGraphController::class, '__invoke'])->name('graph');
             // "Spør Wiki" — read-only Q&A. Must stay above the /{slug} catch-all below, or "ask"
             // would be resolved as a page slug.
