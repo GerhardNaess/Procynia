@@ -8,7 +8,11 @@ use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\LiveSearchOpportunityLinker;
+use App\Services\OpportunitySources\OpportunityRegistrar;
+use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
@@ -50,6 +54,15 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
             $table->unsignedBigInteger('bid_manager_user_id')->nullable();
             $table->unsignedBigInteger('organizational_department_id')->nullable();
+            // Public notice or private request — NOT NULL in production, and what tells a case
+            // that predates the source column apart from a private request.
+            $table->string('source_type')->default('public_notice');
+            // The identity, as of 2026_09_27_000003; external_id stays as legacy compatibility.
+            $table->string('source', 50)->nullable();
+            // The procurement behind the register record, as of 2026_09_30_000002. Null is the
+            // ordinary value: it is only known when a register published the eForms identifiers.
+            $table->unsignedBigInteger('opportunity_id')->nullable();
+            $table->unsignedBigInteger('notice_id')->nullable();
             $table->string('external_id');
             $table->string('title');
             $table->string('buyer_name')->nullable();
@@ -76,6 +89,43 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->timestamps();
 
             $table->unique(['customer_id', 'external_id']);
+        });
+
+        // The identity layer, as of 2026_09_30_000001. Discovery reads it to answer whether a hit
+        // belongs to a procurement the customer already has a case for, so the tables have to be
+        // here even though nothing in this file has an identity to put in them.
+        Schema::dropIfExists('opportunity_source_records');
+        Schema::dropIfExists('opportunity_notices');
+        Schema::dropIfExists('opportunities');
+        Schema::create('opportunities', function (Blueprint $table): void {
+            $table->id();
+            $table->string('procedure_identifier', 255)->unique();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('opportunity_notices', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('opportunity_id');
+            $table->string('notice_identifier', 255)->unique();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('opportunity_source_records', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('opportunity_id');
+            $table->unsignedBigInteger('opportunity_notice_id')->nullable();
+            $table->string('source', 50);
+            $table->string('external_id');
+            $table->string('source_url', 1000)->nullable();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['source', 'external_id']);
         });
 
         Schema::dropIfExists('saved_notice_user_access');
@@ -143,7 +193,10 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
-            $table->string('doffin_notice_id');
+            // The identity, as of 2026_09_27_000002; the Doffin column is legacy and nullable.
+            $table->string('source', 50);
+            $table->string('external_id');
+            $table->string('doffin_notice_id')->nullable();
             $table->string('title');
             $table->string('buyer_name')->nullable();
             $table->timestamp('publication_date')->nullable();
@@ -161,6 +214,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     {
         Schema::dropIfExists('watch_profile_inbox_records');
         Schema::dropIfExists('watch_profiles');
+        Schema::dropIfExists('opportunity_source_records');
+        Schema::dropIfExists('opportunity_notices');
+        Schema::dropIfExists('opportunities');
         Schema::dropIfExists('saved_notice_user_access');
         Schema::dropIfExists('watch_profile_cpv_codes');
         Schema::dropIfExists('departments');
@@ -187,20 +243,25 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $liveSearchService
             ->shouldReceive('search')
             ->once()
+            // What reaches Doffin's own client, now that the controller asks in source-neutral
+            // terms and DoffinSourceAdapter translates.
+            //
+            // Two differences from the pre-4B1 array, neither of them a change in what is
+            // searched for. watch_list_id, relevance, bid_status, history_type and cockpit_scope
+            // filter saved cases inside Procynia; they were passed here and silently ignored, and
+            // are no longer part of the question. And the keywords arrive newline-separated
+            // rather than comma-separated — the service splits on [,;\n]+ either way, so both
+            // spellings parse to the same two keywords.
             ->with([
                 'q' => 'Domstoladministrasjonen',
                 'organization_name' => '',
                 'cpv' => '90910000,72222300',
-                'keywords' => 'renhold, tingrett',
-                'watch_list_id' => '1',
+                'keywords' => "renhold\ntingrett",
+                'keywords_mode' => 'all',
                 'publication_date_from' => '2026-03-01',
                 'publication_date_to' => '2026-03-31',
                 'publication_period' => '',
                 'status' => 'ACTIVE',
-                'relevance' => '',
-                'bid_status' => '',
-                'history_type' => '',
-                'cockpit_scope' => '',
             ], 1, 15)
             ->andReturn([
                 'numHitsTotal' => 1,
@@ -288,6 +349,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'opportunity_owner_user_id' => null,
                 'bid_manager_user_id' => null,
                 'organizational_department_id' => null,
+                'source_type' => 'public_notice',
+                'source' => 'doffin',
                 'external_id' => '2026-100002',
                 'title' => 'Test 2',
                 'buyer_name' => 'Oppdragsgiver 2',
@@ -308,6 +371,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => 23,
                 'department_id' => null,
+                'source' => 'doffin',
+                'external_id' => '2026-100001',
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
                 'buyer_name' => 'Oppdragsgiver 1',
@@ -333,6 +398,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => null,
                 'department_id' => 8,
+                'source' => 'doffin',
+                'external_id' => '2026-100002',
                 'doffin_notice_id' => '2026-100002',
                 'title' => 'Test 2',
                 'buyer_name' => 'Oppdragsgiver 2',
@@ -378,11 +445,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -466,11 +535,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -534,11 +605,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -592,11 +665,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -641,6 +716,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => 23,
                 'department_id' => null,
+                'source' => 'doffin',
+                'external_id' => '2026-100001',
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
                 'buyer_name' => 'Oppdragsgiver 1',
@@ -680,11 +757,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             $cpvSearchService,
-            $liveSearchService,
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             $documentService,
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -717,6 +796,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'customer_id' => 1,
                 'user_id' => 23,
                 'department_id' => null,
+                'source' => 'doffin',
+                'external_id' => '2026-100001',
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
                 'discovered_at' => now()->subHours(6),
@@ -733,11 +814,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $controller = new NoticeController(
             $customerContext,
             new CustomerNoticeCpvSearchService,
-            Mockery::mock(DoffinLiveSearchService::class),
+            new OpportunitySourceRegistry([new DoffinSourceAdapter(Mockery::mock(DoffinLiveSearchService::class))]),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
 
         $request = Request::create('/app/notices/watch-alerts/1', 'DELETE');
@@ -973,11 +1056,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         return new NoticeController(
             $customerContext,
             new CustomerNoticeCpvSearchService,
-            $liveSearchService,
+            new OpportunitySourceRegistry([new DoffinSourceAdapter($liveSearchService)]),
             Mockery::mock(DoffinNoticeDocumentService::class),
             new SavedNoticeAccessService,
             new SavedNoticeNoGoDecisionService,
             new GoNoGoDefaultTemplateService,
+            app(OpportunityRegistrar::class),
+            app(LiveSearchOpportunityLinker::class),
         );
     }
 

@@ -13,6 +13,11 @@ class WatchProfileInboxRecord extends Model
         'customer_id',
         'user_id',
         'department_id',
+        // The identity: which source, and what that source calls it.
+        'source',
+        'external_id',
+        // Legacy compatibility, dual-written for Doffin only. Never the identity, and null for a
+        // record that came from anywhere else.
         'doffin_notice_id',
         'title',
         'buyer_name',

@@ -3,422 +3,122 @@
 namespace App\Services\Doffin;
 
 use App\Models\WatchProfile;
-use App\Models\WatchProfileInboxRecord;
 use App\Services\BidWorkflowNotificationService;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use Throwable;
+use App\Services\OpportunitySources\NormalizedNotice;
+use App\Services\OpportunitySources\OpportunityRegistrar;
+use App\Services\OpportunitySources\OpportunitySearchCriteria;
+use App\Services\OpportunitySources\OpportunityStatus;
+use App\Services\OpportunitySources\WatchProfileInboxDiscoveryService;
+use App\Services\OpportunitySources\WatchProfileRelevanceScorer;
 
-class DoffinWatchProfileInboxDiscoveryService
+/**
+ * The nightly Doffin sweep — now only the parts that are actually Doffin's.
+ *
+ * The run loop, the pagination, the upsert and the notification moved to the base class unchanged,
+ * and the relevance scoring moved to WatchProfileRelevanceScorer unchanged. What stays here is the
+ * three things a second register answers differently: which switches decide whether it may run,
+ * what its criteria look like, and what counts as something somebody can still bid on.
+ *
+ * Behaviour is identical to before the extraction, down to the log messages and the summary keys.
+ */
+class DoffinWatchProfileInboxDiscoveryService extends WatchProfileInboxDiscoveryService
 {
     public function __construct(
-        private readonly DoffinLiveSearchService $liveSearchService,
+        DoffinSourceAdapter $sourceAdapter,
+        WatchProfileRelevanceScorer $relevance,
+        BidWorkflowNotificationService $notifications,
+        OpportunityRegistrar $opportunities,
         private readonly DoffinImportControlService $importControlService,
-        private readonly BidWorkflowNotificationService $notifications,
-    ) {}
-
-    public function run(?int $watchProfileId = null, string $trigger = 'manual'): array
-    {
-        $skipReason = $this->importControlService->watchInboxDiscoverySkipReason();
-
-        if ($skipReason !== null) {
-            $environmentEnabled = $this->importControlService->isWatchInboxDiscoveryEnvironmentEnabled();
-            $adminEnabled = $environmentEnabled ? $this->importControlService->isWatchInboxDiscoveryAdminEnabled() : null;
-            $apiConfigured = $environmentEnabled && $adminEnabled
-                ? $this->importControlService->hasRequiredWatchInboxDiscoveryApiConfiguration()
-                : null;
-
-            Log::info('[DOFFIN][watch-inbox] Scheduled watch inbox discovery skipped.', [
-                'trigger' => $trigger,
-                'watch_profile_id' => $watchProfileId,
-                'skip_reason' => $skipReason,
-                'skip_reason_label' => $this->importControlService->watchInboxDiscoverySkipReasonLabel($skipReason),
-                'environment_enabled' => $environmentEnabled,
-                'admin_enabled' => $adminEnabled,
-                'api_configured' => $apiConfigured,
-            ]);
-
-            return [
-                'status' => 'skipped',
-                'skip_reason' => $skipReason,
-                'skip_reason_label' => $this->importControlService->watchInboxDiscoverySkipReasonLabel($skipReason),
-                'trigger' => $trigger,
-                'profiles_processed' => 0,
-                'profiles_failed' => 0,
-                'records_seen' => 0,
-                'records_created' => 0,
-                'records_updated' => 0,
-                'created_record_ids' => [],
-            ];
-        }
-
-        $summary = [
-            'status' => 'success',
-            'skip_reason' => null,
-            'skip_reason_label' => null,
-            'trigger' => $trigger,
-            'profiles_processed' => 0,
-            'profiles_failed' => 0,
-            'records_seen' => 0,
-            'records_created' => 0,
-            'records_updated' => 0,
-            'created_record_ids' => [],
-        ];
-
-        WatchProfile::query()
-            ->with(['cpvCodes', 'user:id,name', 'department:id,name'])
-            ->active()
-            ->when($watchProfileId !== null, fn ($query) => $query->whereKey($watchProfileId))
-            ->orderBy('id')
-            ->get()
-            ->each(function (WatchProfile $watchProfile) use (&$summary): void {
-                if ($watchProfile->ownerScope() === null) {
-                    Log::warning('[DOFFIN][watch-inbox] Skipping active watch profile without explicit owner scope.', [
-                        'watch_profile_id' => $watchProfile->id,
-                    ]);
-
-                    return;
-                }
-
-                $summary['profiles_processed']++;
-
-                try {
-                    $profileSummary = $this->discoverWatchProfile($watchProfile);
-
-                    $summary['records_seen'] += $profileSummary['records_seen'];
-                    $summary['records_created'] += $profileSummary['records_created'];
-                    $summary['records_updated'] += $profileSummary['records_updated'];
-                    $summary['created_record_ids'] = [
-                        ...$summary['created_record_ids'],
-                        ...$profileSummary['created_record_ids'],
-                    ];
-                } catch (Throwable $throwable) {
-                    $summary['profiles_failed']++;
-
-                    report($throwable);
-
-                    Log::error('[DOFFIN][watch-inbox] Watch profile discovery failed.', [
-                        'watch_profile_id' => $watchProfile->id,
-                        'message' => $throwable->getMessage(),
-                    ]);
-                }
-            });
-
-        return $summary;
+    ) {
+        parent::__construct($sourceAdapter, $relevance, $notifications, $opportunities);
     }
 
-    public function discoverWatchProfile(WatchProfile $watchProfile): array
+    protected function logChannel(): string
     {
-        $filters = $this->buildFilters($watchProfile);
-        $summary = [
-            'records_seen' => 0,
-            'records_created' => 0,
-            'records_updated' => 0,
-            'created_record_ids' => [],
-        ];
-        $page = 1;
-        $perPage = 50;
-        $lastPage = 1;
-
-        do {
-            $response = $this->liveSearchService->search($filters, $page, $perPage);
-            $hits = collect($response['hits'] ?? [])
-                ->filter(fn (mixed $hit): bool => is_array($hit))
-                ->filter(fn (array $hit): bool => $this->shouldIncludeHit($watchProfile, $hit))
-                ->values();
-
-            $summary['records_seen'] += $hits->count();
-
-            foreach ($hits as $hit) {
-                $result = $this->upsertInboxRecord($watchProfile, $hit);
-
-                if (($result['state'] ?? null) === 'created') {
-                    $summary['records_created']++;
-                    $summary['created_record_ids'][] = $result['record_id'];
-
-                    // The one point where "new" is actually known: the insert, not the re-sighting.
-                    // A notice seen again on tomorrow's sweep takes the 'updated' branch and says
-                    // nothing, which is what keeps a standing watch from becoming a daily alarm.
-                    $this->notifyNewMatch($watchProfile, (int) $result['record_id']);
-                }
-
-                if (($result['state'] ?? null) === 'updated') {
-                    $summary['records_updated']++;
-                }
-            }
-
-            $total = (int) ($response['numHitsAccessible'] ?? $response['numHitsTotal'] ?? $hits->count());
-            $lastPage = max(1, (int) ceil($total / $perPage));
-            $page++;
-        } while ($page <= $lastPage && $hits->isNotEmpty());
-
-        return $summary;
+        return '[DOFFIN][watch-inbox]';
     }
 
-    private function notifyNewMatch(WatchProfile $watchProfile, int $recordId): void
+    protected function skipReason(): ?string
     {
-        $record = WatchProfileInboxRecord::query()->find($recordId);
-
-        if ($record instanceof WatchProfileInboxRecord) {
-            $this->notifications->watchProfileMatched($watchProfile, $record);
-        }
+        return $this->importControlService->watchInboxDiscoverySkipReason();
     }
 
-    private function upsertInboxRecord(WatchProfile $watchProfile, array $hit): ?array
+    protected function skipReasonLabel(?string $reason): ?string
     {
-        $noticeId = $this->stringOrNull($hit['id'] ?? null);
+        return $this->importControlService->watchInboxDiscoverySkipReasonLabel($reason);
+    }
 
-        if ($noticeId === null) {
-            return null;
-        }
-
-        $now = now();
-        $record = WatchProfileInboxRecord::query()->firstOrNew([
-            'watch_profile_id' => $watchProfile->id,
-            'doffin_notice_id' => $noticeId,
-        ]);
-        $isNew = ! $record->exists;
-
-        $record->fill([
-            'customer_id' => $watchProfile->customer_id,
-            'user_id' => $watchProfile->user_id,
-            'department_id' => $watchProfile->department_id,
-            'title' => $this->stringOrNull($hit['heading'] ?? null) ?? $noticeId,
-            'buyer_name' => $this->buyerName($hit),
-            'publication_date' => $this->dateTimeOrNull($hit['publicationDate'] ?? $hit['issueDate'] ?? null),
-            'deadline' => $this->dateTimeOrNull($hit['deadline'] ?? null),
-            'external_url' => $this->publicNoticeUrl($noticeId),
-            'relevance_score' => $this->calculateRelevanceScore($watchProfile, $hit),
-            'discovered_at' => $record->discovered_at ?? $now,
-            'last_seen_at' => $now,
-            'raw_payload' => $hit,
-        ]);
-
-        $record->save();
+    /** @return array<string, mixed> */
+    protected function skipLogContext(string $reason): array
+    {
+        $environmentEnabled = $this->importControlService->isWatchInboxDiscoveryEnvironmentEnabled();
+        $adminEnabled = $environmentEnabled ? $this->importControlService->isWatchInboxDiscoveryAdminEnabled() : null;
+        $apiConfigured = $environmentEnabled && $adminEnabled
+            ? $this->importControlService->hasRequiredWatchInboxDiscoveryApiConfiguration()
+            : null;
 
         return [
-            'state' => $isNew ? 'created' : 'updated',
-            'record_id' => (int) $record->id,
+            'environment_enabled' => $environmentEnabled,
+            'admin_enabled' => $adminEnabled,
+            'api_configured' => $apiConfigured,
         ];
     }
 
-    private function buildFilters(WatchProfile $watchProfile): array
+    /**
+     * What this watch profile is watching for, said without naming a register.
+     *
+     * The three settings that used to be written in Doffin's own words — keywords_mode 'any',
+     * publication_period '1', status 'ACTIVE' — are the same three questions here: match any of
+     * the keywords, published in the last day, still open for offers. What changes is that the
+     * adapter now decides how to say them, which is what lets a second register answer the same
+     * profile without Doffin's parameter names being part of the contract.
+     */
+    protected function buildCriteria(WatchProfile $watchProfile): OpportunitySearchCriteria
     {
-        return [
-            'q' => '',
-            'organization_name' => '',
-            'cpv' => $watchProfile->cpvCodes
-                ->pluck('cpv_code')
-                ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-                ->map(fn (string $value): string => trim($value))
-                ->unique()
-                ->sort()
-                ->values()
-                ->implode(','),
-            'keywords' => $this->keywordsFilter($watchProfile),
-            'keywords_mode' => 'any',
-            'publication_period' => '1',
-            'status' => 'ACTIVE',
-        ];
+        return new OpportunitySearchCriteria(
+            keywords: $this->relevance->searchKeywords($watchProfile),
+            // A watch profile casts a net: any keyword is a hit, not all of them.
+            matchAllKeywords: false,
+            cpvCodes: $this->relevance->searchCpvCodes($watchProfile),
+            // Only what is still open, and only what appeared since the last nightly sweep.
+            status: OpportunityStatus::Open,
+            publishedWithinDays: $this->publicationWindowDays(),
+        );
     }
 
-    private function shouldIncludeHit(WatchProfile $watchProfile, array $hit): bool
+    protected function shouldIncludeNotice(WatchProfile $watchProfile, NormalizedNotice $notice): bool
     {
-        return $this->hasEligibleStatus($hit)
-            && $this->publishedWithinLastDay($hit)
-            && $this->calculateRelevanceScore($watchProfile, $hit) > 0;
+        return $this->hasEligibleStatus($notice)
+            && $this->publishedWithinWindow($notice)
+            && $this->relevance->score($watchProfile, $notice) > 0;
     }
 
-    private function hasEligibleStatus(array $hit): bool
+    /**
+     * Only what somebody can still bid on.
+     *
+     * Three cases, and the middle one is the reason this is not a single comparison. A register
+     * that says nothing about status tells us nothing to exclude on, and a hit is kept — that has
+     * always been the behaviour. A register that does say something must mean "open". And a word
+     * Procynia cannot read is not treated as open: an unrecognised status is a notice whose state
+     * we do not know, and putting it in somebody's watch inbox as if it were live would be a guess
+     * dressed up as a fact.
+     *
+     * This reading belongs to Doffin, not to watch discovery in general. It rests on Doffin having
+     * a status field at all; TED does not, so TedWatchProfileInboxDiscoveryService answers the
+     * same question from different evidence rather than inheriting an assumption that would let
+     * every award notice in.
+     */
+    protected function hasEligibleStatus(NormalizedNotice $notice): bool
     {
-        $status = strtoupper(trim((string) ($hit['status'] ?? '')));
-
-        if ($status === '') {
+        if ($notice->providerStatusLabel() === null) {
             return true;
         }
 
-        return $status === 'ACTIVE';
+        return $notice->status === OpportunityStatus::Open;
     }
 
-    private function publishedWithinLastDay(array $hit): bool
+    protected function legacyDoffinNoticeId(string $externalId): ?string
     {
-        $publicationDate = $this->dateTimeOrNull($hit['publicationDate'] ?? $hit['issueDate'] ?? null);
-
-        if (! $publicationDate instanceof Carbon) {
-            return false;
-        }
-
-        return $publicationDate->greaterThanOrEqualTo(now()->subDay());
-    }
-
-    private function keywordsFilter(WatchProfile $watchProfile): string
-    {
-        $rawKeywords = $watchProfile->getRawOriginal('keywords');
-
-        if (is_string($rawKeywords)) {
-            $trimmed = trim($rawKeywords);
-
-            if ($trimmed === '') {
-                return '';
-            }
-
-            $decoded = json_decode($trimmed, true);
-
-            if (is_array($decoded)) {
-                return implode("\n", $this->meaningfulStringValues($decoded));
-            }
-
-            return $trimmed;
-        }
-
-        if (is_array($watchProfile->keywords)) {
-            return implode("\n", $this->meaningfulStringValues($watchProfile->keywords));
-        }
-
-        return '';
-    }
-
-    private function calculateRelevanceScore(WatchProfile $watchProfile, array $hit): int
-    {
-        $keywordMatches = 0;
-        $cpvMatches = 0;
-        $score = 0;
-        $titleAndDescription = Str::lower(Str::squish(
-            trim((string) ($hit['heading'] ?? '')).' '.trim((string) ($hit['description'] ?? ''))
-        ));
-        $buyerHaystack = Str::lower($this->buyerName($hit) ?? '');
-        $keywords = collect($this->resolvedKeywords($watchProfile));
-        $hitCpvCodes = $this->hitCpvCodes($hit);
-
-        foreach ($keywords as $keyword) {
-            $normalizedKeyword = Str::lower($keyword);
-
-            if ($normalizedKeyword === '') {
-                continue;
-            }
-
-            if (str_contains($titleAndDescription, $normalizedKeyword)) {
-                $keywordMatches++;
-                $score += 20;
-
-                continue;
-            }
-
-            if ($buyerHaystack !== '' && str_contains($buyerHaystack, $normalizedKeyword)) {
-                $keywordMatches++;
-                $score += 8;
-            }
-        }
-
-        foreach ($watchProfile->cpvCodes as $cpvRule) {
-            $cpvCode = preg_replace('/\D+/', '', (string) $cpvRule->cpv_code) ?? '';
-
-            if ($cpvCode === '' || ! $hitCpvCodes->contains($cpvCode)) {
-                continue;
-            }
-
-            $cpvMatches++;
-            $score += max(1, (int) $cpvRule->weight);
-        }
-
-        if ($keywordMatches > 0 && $cpvMatches > 0) {
-            $score += 10;
-        }
-
-        return $score;
-    }
-
-    private function hitCpvCodes(array $hit): Collection
-    {
-        return collect([
-            ...((array) ($hit['cpvCodes'] ?? [])),
-            $hit['mainCpvCode'] ?? null,
-        ])
-            ->filter(fn (mixed $value): bool => is_scalar($value))
-            ->map(fn (string|int|float|bool $value): string => preg_replace('/\D+/', '', (string) $value) ?? '')
-            ->filter(fn (string $value): bool => $value !== '')
-            ->unique()
-            ->values();
-    }
-
-    private function meaningfulStringValues(array $values): array
-    {
-        return collect($values)
-            ->filter(fn (mixed $value): bool => is_scalar($value))
-            ->map(fn (string|int|float|bool $value): string => trim((string) $value))
-            ->filter(fn (string $value): bool => $value !== '')
-            ->unique()
-            ->values()
-            ->all();
-    }
-
-    private function resolvedKeywords(WatchProfile $watchProfile): array
-    {
-        $rawKeywords = $watchProfile->getRawOriginal('keywords');
-
-        if (is_string($rawKeywords)) {
-            $trimmed = trim($rawKeywords);
-
-            if ($trimmed === '') {
-                return [];
-            }
-
-            $decoded = json_decode($trimmed, true);
-
-            if (is_array($decoded)) {
-                return $this->meaningfulStringValues($decoded);
-            }
-
-            return [$trimmed];
-        }
-
-        if (is_array($watchProfile->keywords)) {
-            return $this->meaningfulStringValues($watchProfile->keywords);
-        }
-
-        return [];
-    }
-
-    private function buyerName(array $hit): ?string
-    {
-        $buyers = collect($hit['buyer'] ?? [])
-            ->filter(fn (mixed $buyer): bool => is_array($buyer))
-            ->map(fn (array $buyer): string => trim((string) ($buyer['name'] ?? '')))
-            ->filter()
-            ->unique()
-            ->values();
-
-        return $buyers->isEmpty() ? null : $buyers->implode(', ');
-    }
-
-    private function publicNoticeUrl(string $noticeId): ?string
-    {
-        if ($noticeId === '') {
-            return null;
-        }
-
-        return sprintf((string) config('doffin.public_notice_url'), rawurlencode($noticeId));
-    }
-
-    private function dateTimeOrNull(mixed $value): ?Carbon
-    {
-        if (! is_string($value) || trim($value) === '') {
-            return null;
-        }
-
-        return Carbon::parse($value);
-    }
-
-    private function stringOrNull(mixed $value): ?string
-    {
-        if (! is_string($value)) {
-            return null;
-        }
-
-        $trimmed = trim($value);
-
-        return $trimmed === '' ? null : $trimmed;
+        return $externalId;
     }
 }

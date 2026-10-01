@@ -600,6 +600,9 @@ export default function SavedNoticeShow({ notice }) {
     const phaseCommentStoreUrl = notice.phase_comments?.store_url ?? null;
     const canCommentOnCase = Boolean(notice.phase_comments?.can_comment);
     const isPrivateRequest = notice.source_type === 'private_request';
+    // Which registers publish this procurement. One entry for a case Procynia only knows from one
+    // of them, which is every case saved before the identifiers were recorded.
+    const caseSources = Array.isArray(notice.sources) ? notice.sources : [];
     const sourceTypeLabel = noticeSourceTypeLabel(notice, tsn);
     const externalLinkLabel = noticeExternalLinkLabel(notice, tsn);
     const sourceBadgeClassName = noticeSourceBadgeClassName(notice);
@@ -973,6 +976,31 @@ export default function SavedNoticeShow({ notice }) {
                                 <p className="max-w-3xl text-base leading-7 text-slate-600">
                                     {notice.organization_name || tsn.organization_unknown}
                                 </p>
+                                {caseSources.length > 0 ? (
+                                    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm leading-6 text-slate-500">
+                                        <span>{tsn.sources_label ?? 'Kilder'}:</span>
+                                        {caseSources.map((source, index) => (
+                                            <span key={source.key} className="inline-flex items-center gap-1.5">
+                                                {index > 0 ? <span aria-hidden="true">·</span> : null}
+                                                {source.url ? (
+                                                    <a
+                                                        href={source.url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        title={source.external_id}
+                                                        className="font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-900"
+                                                    >
+                                                        {source.label}
+                                                    </a>
+                                                ) : (
+                                                    <span className="font-medium text-slate-600" title={source.external_id}>
+                                                        {source.label}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        ))}
+                                    </p>
+                                ) : null}
                             </div>
                         </div>
 

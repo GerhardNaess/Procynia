@@ -3,8 +3,8 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\DoffinImportSetting;
 use App\Models\Department;
+use App\Models\DoffinImportSetting;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Services\Doffin\DoffinLiveSearchService;
@@ -396,7 +396,11 @@ class WatchInboxDigestNotificationTest extends TestCase
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
-            $table->string('doffin_notice_id');
+            // The identity, as of 2026_09_27_000002. doffin_notice_id stays as legacy
+            // compatibility and is nullable, because a non-Doffin record has none.
+            $table->string('source', 50);
+            $table->string('external_id');
+            $table->string('doffin_notice_id')->nullable();
             $table->string('title');
             $table->string('buyer_name')->nullable();
             $table->timestamp('publication_date')->nullable();

@@ -6,6 +6,7 @@ import { DISCLOSURE_INLINE, PRIMARY_COLOURS, SECONDARY_ACTION } from '../../../S
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
+import { withRegisterName } from './registerName';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import ActionDialog from '../../../Components/App/ActionDialog';
 
@@ -35,7 +36,7 @@ function getNoticesHelpSections(nt) {
             items: [
                 {
                     title: nt.page_help_item_live_title ?? 'Live-søk',
-                    text: nt.page_help_item_live_text ?? 'Søk direkte mot Doffin med filtre på frist, CPV, nøkkelord og relevans. Resultater oppdateres per filter.',
+                    text: nt.page_help_item_live_text ?? 'Søk direkte mot én kilde om gangen – Doffin eller TED – med filtre på frist, CPV, nøkkelord og relevans. Resultater oppdateres per filter.',
                 },
                 {
                     title: nt.page_help_item_alerts_title ?? 'Varsler',
@@ -43,7 +44,7 @@ function getNoticesHelpSections(nt) {
                 },
                 {
                     title: nt.page_help_item_private_request_title ?? 'Privat forespørsel',
-                    text: nt.page_help_item_private_request_text ?? 'Muligheter som ikke kommer fra Doffin registrerer du selv som privat forespørsel. De følges opp på samme måte som offentlige kunngjøringer.',
+                    text: nt.page_help_item_private_request_text ?? 'Muligheter som ikke kommer fra et offentlig register registrerer du selv som privat forespørsel. De følges opp på samme måte som offentlige kunngjøringer.',
                 },
                 {
                     title: nt.page_help_item_save_title ?? 'Lagre en kunngjøring',
@@ -99,10 +100,10 @@ function getNoticesHelpSections(nt) {
             ],
         },
         {
-            title: nt.page_help_section_doffin ?? 'Doffin',
+            title: nt.page_help_section_doffin ?? 'Kilden',
             items: [
                 {
-                    title: nt.page_help_item_doffin_title ?? 'Åpne i Doffin',
+                    title: nt.page_help_item_doffin_title ?? 'Åpne hos kilden',
                     text: nt.page_help_item_doffin_text ?? 'Åpner den originale kunngjøringen hos kilden, slik at du kan sjekke fullstendig tekst og vedlegg.',
                 },
             ],
@@ -504,6 +505,15 @@ function noticeExternalLinkLabel(notice, text) {
         : text.openInDoffinLabel;
 }
 
+function watchAlertLinkLabel(alert, text) {
+    // A watch alert can come from any register now. "Open in Doffin" over a TED notice would be a
+    // plain untruth, so the register's name stays only where the register is Doffin. A record from
+    // before the inbox became source-aware has no source and is Doffin's.
+    return !alert.source || alert.source === 'doffin'
+        ? text.alertsOpenDoffin
+        : text.alertsOpenSource;
+}
+
 function noticeSourceBadgeClassName(notice) {
     return notice.source_type === 'private_request'
         ? 'bg-violet-100 text-violet-700 ring-violet-200'
@@ -656,10 +666,18 @@ export default function NoticeIndex({
     watchAlerts = {},
 }) {
     const { locale, translations } = usePage().props;
-    const tf = translations?.frontend ?? {};
+    // Which register the results on this page came from. Named by the backend from the adapter
+    // that ran the search; the raw key when the URL asked for a register Procynia has none for,
+    // and Doffin outside live search, where no register is being searched at all.
+    const registerName = source?.name ?? source?.key ?? 'Doffin';
+    // A request that names no register still gets Doffin, so every link and bookmark that existed
+    // before the selector did keeps meaning what it meant.
+    const activeSourceKey = source?.key ?? 'doffin';
+    const sourceOptions = Array.isArray(source?.options) ? source.options : [];
+    const tf = withRegisterName(translations?.frontend ?? {}, registerName);
     const common = translations?.common ?? {};
     const navigation = translations?.navigation ?? {};
-    const nt = translations?.notices ?? {};
+    const nt = withRegisterName(translations?.notices ?? {}, registerName);
     const noticesCardText = nt.card ?? {};
     const noticesText = {
         pageSubtitleSaved: nt.page_subtitle_saved,
@@ -681,6 +699,7 @@ export default function NoticeIndex({
         sourcePublishedLabel: nt.source_published_label,
         openLinkLabel: nt.open_link_label,
         openInDoffinLabel: nt.open_in_doffin_label,
+        openInSourceLabel: nt.open_in_source_label,
         externalLinkLabel: nt.external_link_label,
         questionsRfiLabel: nt.questions_rfi_label,
         rfiLabel: nt.rfi_label,
@@ -732,7 +751,9 @@ export default function NoticeIndex({
         alertsDeleteLabel: nt.alerts_delete_label,
         alertsDeleteConfirm: nt.alerts_delete_confirm,
         alertsOpenDoffin: nt.alerts_open_doffin,
+        alertsOpenSource: nt.alerts_open_source,
         liveTitle: nt.live_title,
+        liveSourceLabel: nt.live_source_label,
         liveDescription: nt.live_description,
         liveSearchPlaceholder: nt.live_search_placeholder,
         filtersDescription: nt.filters_description,
@@ -1284,22 +1305,56 @@ export default function NoticeIndex({
         return false;
     };
 
+    /**
+     * The live search as the URL says it, register included.
+     *
+     * The register is part of the search, not a mode the page remembers on the side: leave it out
+     * of a filter apply and the next request falls back to the default, quietly moving a TED user
+     * to Doffin the moment they press a filter.
+     */
+    const liveSearchQuery = (overrides = {}) => buildNoticeQuery({
+        mode: 'live',
+        source: activeSourceKey,
+        q: searchQuery,
+        organization_name: organizationName,
+        cpv: selectedCpvItems.map((item) => item.code).join(','),
+        keywords: submittedKeywords,
+        watch_list_id: selectedWatchListId,
+        publication_date_from: publicationDateFrom,
+        publication_date_to: publicationDateTo,
+        status,
+        keywords_mode: useWatchListKeywords ? 'any' : '',
+        cockpit_scope: filters.cockpit_scope,
+        ...overrides,
+    });
+
     const applyFilters = () => {
         router.get(
             '/app/notices',
-            buildNoticeQuery({
-                mode: 'live',
-                q: searchQuery,
-                organization_name: organizationName,
-                cpv: selectedCpvItems.map((item) => item.code).join(','),
-                keywords: submittedKeywords,
-                watch_list_id: selectedWatchListId,
-                publication_date_from: publicationDateFrom,
-                publication_date_to: publicationDateTo,
-                status,
-                keywords_mode: useWatchListKeywords ? 'any' : '',
-                cockpit_scope: filters.cockpit_scope,
-            }),
+            liveSearchQuery(),
+            {
+                preserveState: true,
+                replace: true,
+                onHttpException: handleLiveSearchHttpException,
+            },
+        );
+    };
+
+    /**
+     * Search the other register, with the same question.
+     *
+     * The filters are carried over as far as both registers take them — the criteria the adapters
+     * are given are source-neutral, and each one translates what it can. Nothing is merged: this
+     * is one register replacing the other, and the URL says which.
+     */
+    const changeSource = (nextSource) => {
+        if (nextSource === activeSourceKey) {
+            return;
+        }
+
+        router.get(
+            '/app/notices',
+            liveSearchQuery({ source: nextSource }),
             {
                 preserveState: true,
                 replace: true,
@@ -1323,10 +1378,12 @@ export default function NoticeIndex({
 
         router.get(
             '/app/notices',
-            {
+            buildNoticeQuery({
                 mode: 'live',
+                // Clearing the filters is not changing register.
+                source: activeSourceKey,
                 cockpit_scope: filters.cockpit_scope,
-            },
+            }),
             {
                 preserveState: true,
                 replace: true,
@@ -1497,7 +1554,7 @@ export default function NoticeIndex({
                                                     rel="noreferrer"
                                                     className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                 >
-                                                    {noticesText.alertsOpenDoffin}
+                                                    {watchAlertLinkLabel(notice, noticesText)}
                                                 </a>
                                             ) : null
                                         }
@@ -1543,11 +1600,47 @@ export default function NoticeIndex({
                         {isLiveMode ? (
                             <>
                                 <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-5">
-                                <div className="mb-3">
-                                <div className="text-base font-medium text-slate-900">{noticesText.liveTitle}</div>
-                                <p className="mt-1 text-base leading-6 text-slate-600">
-                                    {noticesText.liveDescription}
-                                </p>
+                                <div className="mb-3 flex flex-wrap items-start justify-between gap-x-5 gap-y-3">
+                                <div className="min-w-0">
+                                    <div className="text-base font-medium text-slate-900">{noticesText.liveTitle}</div>
+                                    <p className="mt-1 text-base leading-6 text-slate-600">
+                                        {noticesText.liveDescription}
+                                    </p>
+                                </div>
+                                {sourceOptions.length > 1 ? (
+                                    <div className="flex shrink-0 items-center gap-2.5">
+                                        <span className="text-base font-medium text-slate-700">
+                                            {noticesText.liveSourceLabel ?? 'Kilde'}
+                                        </span>
+                                        <div
+                                            role="group"
+                                            aria-label={noticesText.liveSourceLabel ?? 'Kilde'}
+                                            className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1"
+                                        >
+                                            {sourceOptions.map((option) => {
+                                                const isActiveSource = option.key === activeSourceKey;
+
+                                                return (
+                                                    <button
+                                                        key={option.key}
+                                                        type="button"
+                                                        onClick={() => changeSource(option.key)}
+                                                        aria-pressed={isActiveSource}
+                                                        title={option.label}
+                                                        className={classNames(
+                                                            'min-h-9 rounded-lg px-4 py-1.5 text-base font-semibold transition',
+                                                            isActiveSource
+                                                                ? 'bg-white text-violet-800 shadow-sm ring-1 ring-inset ring-slate-200'
+                                                                : 'text-slate-600 hover:text-slate-900',
+                                                        )}
+                                                    >
+                                                        {option.name}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                             <form
                                 onSubmit={(event) => {
@@ -2066,7 +2159,7 @@ export default function NoticeIndex({
                                                                 rel="noreferrer"
                                                                 className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                             >
-                                                                {noticesText.openInDoffinLabel}
+                                                                {noticesText.openInSourceLabel ?? noticesText.openInDoffinLabel}
                                                             </a>
                                                         ) : null
                                                     }

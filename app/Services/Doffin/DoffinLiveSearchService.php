@@ -2,6 +2,7 @@
 
 namespace App\Services\Doffin;
 
+use App\Support\CpvCodeNormalizer;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -154,14 +155,16 @@ class DoffinLiveSearchService
         ];
     }
 
+    /**
+     * The filter string, split into codes Doffin can be asked about.
+     *
+     * Doffin's cpvCodesId facet takes whole codes, so a value that is not one buys nothing by being
+     * passed along: it is dropped by CpvCodeNormalizer rather than sent as a facet that can only
+     * fail to match.
+     */
     private function normalizeCpvCodes(string $value): array
     {
-        return collect(preg_split('/[\s,;]+/', $value) ?: [])
-            ->map(fn (string $code): string => preg_replace('/\D+/', '', $code) ?? '')
-            ->filter(fn (string $code): bool => $code !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return CpvCodeNormalizer::normalizeMany(preg_split('/[\s,;]+/', $value) ?: []);
     }
 
     private function normalizeKeywords(string $value): array
@@ -404,8 +407,7 @@ class DoffinLiveSearchService
         int $perPage,
         bool $fallbackUsed = false,
         string $keywordsMode = 'all',
-    ): array
-    {
+    ): array {
         $searchResult = $this->harvestSearchPages($payload, $perPage, $fallbackUsed);
 
         if (! ($searchResult['ok'] ?? true)) {
@@ -433,8 +435,7 @@ class DoffinLiveSearchService
         array $keywords,
         int $perPage,
         bool $fallbackUsed = false,
-    ): array
-    {
+    ): array {
         $allHits = [];
         $meta = [];
 

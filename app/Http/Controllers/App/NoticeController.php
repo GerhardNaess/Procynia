@@ -8,6 +8,7 @@ use App\Models\GoNoGoAssessmentCriterion;
 use App\Models\Notice;
 use App\Models\NoticeAttention;
 use App\Models\NoticeDocument;
+use App\Models\OpportunitySourceRecord;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticeInfoItem;
@@ -18,9 +19,16 @@ use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
-use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
+use App\Services\OpportunitySources\LiveSearchOpportunityLinker;
+use App\Services\OpportunitySources\OpportunityRegistrar;
+use App\Services\OpportunitySources\OpportunitySearchCriteria;
+use App\Services\OpportunitySources\OpportunitySourceAdapter;
+use App\Services\OpportunitySources\OpportunitySourceRegistry;
+use App\Services\OpportunitySources\OpportunitySourceSearchResult;
+use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
@@ -43,11 +51,13 @@ class NoticeController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly CustomerNoticeCpvSearchService $cpvSearchService,
-        private readonly DoffinLiveSearchService $liveSearchService,
+        private readonly OpportunitySourceRegistry $sources,
         private readonly DoffinNoticeDocumentService $documentService,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
         private readonly GoNoGoDefaultTemplateService $goNoGoDefaultTemplateService,
+        private readonly OpportunityRegistrar $opportunities,
+        private readonly LiveSearchOpportunityLinker $opportunityLinks,
     ) {}
 
     public function index(Request $request): HttpResponse
@@ -87,7 +97,7 @@ class NoticeController extends Controller
         if ($customerId === null) {
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => $user->isSuperAdmin(),
                     'message' => __('procynia.frontend.super_admin_context_required'),
@@ -119,7 +129,7 @@ class NoticeController extends Controller
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'tab' => $noticeTab,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => false,
                     'message' => null,
@@ -145,7 +155,7 @@ class NoticeController extends Controller
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'tab' => $noticeTab,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => false,
                     'message' => null,
@@ -179,28 +189,46 @@ class NoticeController extends Controller
             'customer_id' => $customerId,
         ]);
 
-        $searchFilters = $filters;
+        // What the user asked for, said without naming a register. Five of the keys in $filters —
+        // watch_list_id, relevance, bid_status, history_type, cockpit_scope — filter saved cases
+        // inside Procynia and never reached the register at all; they were passed to search() and
+        // silently ignored. They are simply not part of the question any more.
+        $criteria = new OpportunitySearchCriteria(
+            query: $filters['q'] !== '' ? $filters['q'] : null,
+            keywords: OpportunitySearchCriteria::fromArray(['keywords' => $filters['keywords']])->keywords,
+            // The dropdown offers all-or-any and defaults to all, exactly as before.
+            matchAllKeywords: $keywordsMode !== 'any',
+            buyerName: $filters['organization_name'] !== '' ? $filters['organization_name'] : null,
+            cpvCodes: OpportunitySearchCriteria::fromArray(['cpv_codes' => $filters['cpv']])->cpvCodes,
+            status: OpportunityStatus::fromRequestValue($filters['status']),
+            publishedFrom: $publicationDateFrom !== '' ? $publicationDateFrom : null,
+            publishedTo: $publicationDateTo !== '' ? $publicationDateTo : null,
+            publishedWithinDays: $publicationPeriod !== '' ? (int) $publicationPeriod : null,
+        );
 
-        if ($keywordsMode !== '') {
-            $searchFilters['keywords_mode'] = $keywordsMode;
-        }
+        // A register nobody speaks for is answered, not crashed on.
+        //
+        // The source is a control on the page now, which makes an unknown one a state the user can
+        // reach by editing the URL. The registry still refuses to pick a stand-in — that refusal is
+        // the point of it — so the refusal is turned into the same controlled error the registers
+        // themselves produce, and the page comes back with the selector intact.
+        $searchResponse = $this->sources->find($this->discoverySourceKey($request)) !== null
+            ? $this->discoveryAdapter($request)->search($criteria, $page, $perPage)
+            : $this->unknownSourceResult($this->discoverySourceKey($request), $page, $perPage);
+        $page = $searchResponse->page;
+        $perPage = $searchResponse->perPage;
+        $fallbackUsed = $searchResponse->fallbackUsed;
 
-        $searchResponse = $this->liveSearchService->search($searchFilters, $page, $perPage);
-        $page = max(1, (int) ($searchResponse['page'] ?? $page));
-        $perPage = max(1, (int) ($searchResponse['perPage'] ?? $perPage));
-        $fallbackUsed = (bool) ($searchResponse['fallback_used'] ?? false);
-
-        if (! ($searchResponse['ok'] ?? true)) {
-            $errorType = (string) ($searchResponse['error_type'] ?? 'unexpected_response');
+        if (! $searchResponse->ok) {
+            $errorType = (string) ($searchResponse->errorType ?? 'unexpected_response');
             $status = $this->liveSearchStatusCode($errorType);
-            $errorMessage = $this->liveSearchErrorMessage($errorType);
+            $errorMessage = $searchResponse->userMessage ?? 'Søket kunne ikke fullføres. Prøv igjen om litt.';
             $logLevel = $status >= HttpResponse::HTTP_INTERNAL_SERVER_ERROR ? 'error' : 'warning';
 
             Log::$logLevel('[DOFFIN][controller] Live notice search returned a controlled error response.', [
                 'error_type' => $errorType,
                 'mapped_status' => $status,
-                'upstream_status' => $searchResponse['upstream_status'] ?? null,
-                'request_id' => $searchResponse['meta']['request_id'] ?? null,
+                'upstream_status' => $searchResponse->upstreamStatus,
                 'fallback_used' => $fallbackUsed,
                 'customer_id' => $customerId,
                 'page' => $page,
@@ -211,7 +239,7 @@ class NoticeController extends Controller
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'tab' => $noticeTab,
-                'source' => $this->discoverySource($mode),
+                'source' => $this->discoverySource($mode, $request),
                 'supportMode' => [
                     'active' => false,
                     'message' => null,
@@ -230,8 +258,8 @@ class NoticeController extends Controller
                         [
                             'fallback_used' => $fallbackUsed,
                             'error_type' => $errorType,
-                            'error_message' => $searchResponse['error_message'] ?? $errorMessage,
-                            'upstream_status' => $searchResponse['upstream_status'] ?? null,
+                            'error_message' => $searchResponse->errorMessage ?? $errorMessage,
+                            'upstream_status' => $searchResponse->upstreamStatus,
                         ],
                     ),
                 ],
@@ -242,25 +270,48 @@ class NoticeController extends Controller
             ], $status);
         }
 
-        $hits = collect($this->liveSearchItems($searchResponse))
-            ->filter(fn (mixed $hit): bool => is_array($hit))
-            ->values();
-        $accessibleTotal = (int) ($searchResponse['numHitsAccessible'] ?? $searchResponse['numHitsTotal'] ?? $hits->count());
-        $total = (int) ($searchResponse['numHitsTotal'] ?? $accessibleTotal);
-        $hitExternalIds = $hits->pluck('id')->filter()->map(fn (mixed $id): string => (string) $id)->all();
-        $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user)
-            ->whereIn('external_id', $hitExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $id): string => (string) $id)
-            ->all();
-        $archivedExternalIds = $this->archivedSavedNoticeVisibleQuery($user)
-            ->whereIn('external_id', $hitExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $id): string => (string) $id)
-            ->all();
+        $notices = collect($searchResponse->notices);
+        $accessibleTotal = $searchResponse->numHitsAccessible;
+        $total = $searchResponse->numHitsTotal;
+        $hitExternalIds = $notices->pluck('externalId')->filter()->map(fn (mixed $id): string => (string) $id)->all();
+        // Matched within the source these hits came from. An external id on its own cannot tell
+        // Doffin's notice 123 from another register's notice 123, and answering "already saved"
+        // on the strength of a shared number would be wrong in exactly the case that matters.
+        $sourceKey = $this->discoverySourceKey($request);
+        $savedExternalIds = $this->savedExternalIdsForSource(
+            $this->activeSavedNoticeVisibleQuery($user),
+            $sourceKey,
+            $hitExternalIds,
+        );
+        $archivedExternalIds = $this->savedExternalIdsForSource(
+            $this->archivedSavedNoticeVisibleQuery($user),
+            $sourceKey,
+            $hitExternalIds,
+        );
 
-        $items = $hits
-            ->map(fn (array $hit): array => $this->liveNoticeListItem($hit, $savedExternalIds, $archivedExternalIds))
+        // And the same question asked of the procurement rather than the record.
+        //
+        // A case opened from Doffin is the same case when TED publishes the tender, so a hit whose
+        // procurement this customer already works on is already saved — offering it again would
+        // hand them a second case for one tender, which is the thing this whole model exists to
+        // prevent. Matched only on the identifiers the registers publish themselves; a hit nobody
+        // can identify is simply not matched, and falls back on the source-aware answer above.
+        $opportunityLinks = $this->opportunityLinks->linkHits(
+            $sourceKey,
+            $notices->all(),
+            $this->caseOpportunityIds($user),
+        );
+        $savedExternalIds = array_values(array_unique(array_merge(
+            $savedExternalIds,
+            $this->opportunityLinks->coveredExternalIds($opportunityLinks, $this->activeSavedNoticeVisibleQuery($user)),
+        )));
+        $archivedExternalIds = array_values(array_unique(array_merge(
+            $archivedExternalIds,
+            $this->opportunityLinks->coveredExternalIds($opportunityLinks, $this->archivedSavedNoticeVisibleQuery($user)),
+        )));
+
+        $items = $notices
+            ->map(fn ($notice): array => $notice->toDiscoveryPayload($savedExternalIds, $archivedExternalIds))
             ->all();
 
         Log::debug('[DOFFIN][ui-contract] Outgoing notice payload ready for frontend.', [
@@ -273,7 +324,7 @@ class NoticeController extends Controller
         return $this->renderNoticeIndexPage($request, [
             'mode' => $mode,
             'tab' => $noticeTab,
-            'source' => $this->discoverySource($mode),
+            'source' => $this->discoverySource($mode, $request),
             'supportMode' => [
                 'active' => false,
                 'message' => null,
@@ -335,6 +386,54 @@ class NoticeController extends Controller
             ->with('success', 'Varsel slettet.');
     }
 
+    /**
+     * The register that was the only one, for rows written before Procynia recorded which.
+     *
+     * Not the same question as "which register is this request searching": a case saved in 2025
+     * came from Doffin whatever a 2026 request happens to ask for, and `notices.notice_id` holds
+     * Doffin's ids however many registers are wired up now.
+     */
+    private const LEGACY_SOURCE_KEY = DoffinSourceAdapter::SOURCE_KEY;
+
+    /**
+     * The register this request is searching.
+     *
+     * A choice now that there are two. The UI does not offer it yet, so a request that says
+     * nothing gets Doffin — every existing link, saved search and bookmark keeps meaning what it
+     * meant. A request that does say something gets what it asked for, or nothing: an unknown key
+     * is refused by the registry rather than quietly answered by whichever adapter is at hand,
+     * which is the whole reason the registry refuses instead of defaulting.
+     */
+    private function discoverySourceKey(?Request $request = null): string
+    {
+        $requested = trim((string) ($request?->string('source') ?? ''));
+
+        return $requested === '' ? DoffinSourceAdapter::SOURCE_KEY : $requested;
+    }
+
+    /** The adapter for the register being searched. Throws if that register is not registered. */
+    private function discoveryAdapter(?Request $request = null): OpportunitySourceAdapter
+    {
+        return $this->sources->get($this->discoverySourceKey($request));
+    }
+
+    /**
+     * The adapter for a source that was recorded on a row, or null.
+     *
+     * Null rather than a default: a row from a register this installation has no adapter for must
+     * fall back on what it already stored, not on somebody else's URL builder. A null source is a
+     * public row written before the column existed, when the discovery register was the only one
+     * there was — those are read under that name, which is what keeps them working.
+     */
+    private function storedSourceAdapter(?string $source, bool $isPublicNotice): ?OpportunitySourceAdapter
+    {
+        if (! $isPublicNotice) {
+            return null;
+        }
+
+        return $this->sources->find($source ?? self::LEGACY_SOURCE_KEY);
+    }
+
     public function storeSavedNotice(Request $request): RedirectResponse
     {
         /** @var User $user */
@@ -351,6 +450,10 @@ class NoticeController extends Controller
         $sourceType = in_array($sourceType, SavedNotice::SOURCE_TYPES, true)
             ? $sourceType
             : SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE;
+
+        // True unless a second register's record led us to a case that already exists. A private
+        // request has no register at all, so it is always its own record.
+        $isOwnRecord = true;
 
         if ($sourceType === SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST) {
             $validated = $request->validate([
@@ -395,10 +498,61 @@ class NoticeController extends Controller
                 'notes' => ['nullable', 'string'],
             ]);
 
-            $record = SavedNotice::query()->firstOrNew([
-                'customer_id' => $customerId,
-                'external_id' => $validated['notice_id'],
-            ]);
+            // The identity of a public case is the register plus what that register calls the
+            // notice. The source comes from the adapter, so there is one spelling of it, and the
+            // controller never has to know which register it is talking to.
+            $sourceKey = $this->discoverySourceKey($request);
+
+            // Which procurement this record is, if a register has told Procynia. This is the one
+            // place that is allowed to pay for the answer — for Doffin it costs a single detail
+            // request, once per record ever, and it buys the rule that one procurement is one
+            // case however many registers publish it. A null is ordinary: without an identifier
+            // nothing below changes, and the case is found the way it always was.
+            $opportunity = $this->opportunities->resolveWithLookup($sourceKey, (string) $validated['notice_id']);
+
+            // A public case whose source is still null is a row from before the register was
+            // recorded. It is matched too — otherwise saving the same notice again would create a
+            // second case beside it and step straight past the archived-case guard below — and
+            // named on the way past, so it only ever happens once per row.
+            $record = ($opportunity !== null ? $this->opportunities->caseFor($customerId, $opportunity) : null)
+                ?? SavedNotice::query()
+                    ->where('customer_id', $customerId)
+                    ->where('external_id', $validated['notice_id'])
+                    ->where(fn (Builder $query) => $query
+                        ->where('source', $sourceKey)
+                        ->orWhere(fn (Builder $legacy) => $legacy
+                            ->whereNull('source')
+                            ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+                    ->first()
+                ?? new SavedNotice([
+                    'customer_id' => $customerId,
+                    'external_id' => $validated['notice_id'],
+                ]);
+
+            // Whether this save is about the register record the case was built from, or about a
+            // second register's record of the same procurement. The second kind is why the case
+            // was found at all, and it must not rewrite the case: TED's title for a Norwegian
+            // tender is its own translation, and the bid manager saved the one they saved.
+            $isOwnRecord = ! $record->exists
+                || ((string) $record->external_id === (string) $validated['notice_id']
+                    && ($record->source === null || $record->source === $sourceKey));
+
+            if ($isOwnRecord) {
+                $record->source = $sourceKey;
+            }
+
+            if ($opportunity !== null && $record->opportunity_id === null) {
+                $record->opportunity_id = $opportunity->id;
+            }
+
+            // Link the imported notice when Procynia actually has one. Most public cases are saved
+            // straight from a live search or a watch alert and never pass through the import
+            // pipeline, so a null here is an ordinary answer — and no Notice is created to avoid it.
+            if ($record->notice_id === null) {
+                $record->notice_id = Notice::query()
+                    ->where('notice_id', (string) $validated['notice_id'])
+                    ->value('id');
+            }
         }
 
         // Moving a case to history is final: an archived case is never brought back by saving the
@@ -413,7 +567,13 @@ class NoticeController extends Controller
         $isNewRecord = ! $record->exists;
         $hadCaseAccess = ! $record->exists || $this->savedNoticeAccess->canView($user, $record);
 
-        $record->fill([
+        // Saving the other register's record of a procurement the customer is already working on
+        // reaches the case that exists and leaves its contents alone. Overwriting them would swap
+        // the title, the summary and the link for another register's version of the same tender —
+        // TED's title for a Norwegian notice is its own translation — which nobody asked for and
+        // which would read as data loss. Everything after this still runs: the person pressed save
+        // and gets the same access to the case they would have got by saving it first.
+        $record->fill($isOwnRecord ? [
             'source_type' => $sourceType,
             'title' => $validated['title'],
             'buyer_name' => $validated['buyer_name'] ?? null,
@@ -428,7 +588,7 @@ class NoticeController extends Controller
             'contact_person_email' => $validated['contact_person_email'] ?? null,
             'notes' => $validated['notes'] ?? null,
             'rfi_submission_deadline_at' => $validated['rfi_submission_deadline_at'] ?? null,
-        ]);
+        ] : []);
 
         if ($isNewRecord) {
             $record->saved_by_user_id = $user->id;
@@ -683,6 +843,9 @@ class NoticeController extends Controller
         $record = $this->customerSavedNoticeVisibleQuery($user)
             ->whereKey($savedNotice->id)
             ->with([
+                // Which registers publish this procurement. Null for a case with no identity,
+                // which is every case saved before the identifiers were recorded.
+                'opportunity.sourceRecords',
                 'opportunityOwner:id,name,bid_role',
                 'bidManager:id,name,bid_role',
                 'businessReviews:id,saved_notice_id,business_review_at',
@@ -1372,6 +1535,97 @@ class NoticeController extends Controller
             ->whereIn('history_type', SavedNotice::HISTORY_TYPES);
     }
 
+    /**
+     * The external ids, within one source, that the given query already holds.
+     *
+     * Returned as a flat list because every hit in a live search comes from the same source, so
+     * the source is a filter rather than part of the answer.
+     *
+     * @param  array<int, string>  $externalIds
+     * @return array<int, string>
+     */
+    private function savedExternalIdsForSource(Builder $query, string $source, array $externalIds): array
+    {
+        if ($externalIds === []) {
+            return [];
+        }
+
+        return $query
+            // A legacy public case that predates the source column belongs to the register that
+            // was the only one when it was written.
+            ->where(fn (Builder $scope) => $scope
+                ->where('source', $source)
+                ->orWhere(fn (Builder $legacy) => $legacy
+                    ->whereNull('source')
+                    ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+            ->whereIn('external_id', $externalIds)
+            ->pluck('external_id')
+            ->map(fn (mixed $value): string => (string) $value)
+            ->all();
+    }
+
+    /**
+     * The same question across several sources at once, for a list that may mix them.
+     *
+     * Keyed "source\nexternal_id" rather than returned as a flat list: a watch list can hold the
+     * same number from two registers, and a flat list would say both were saved as soon as one of
+     * them was.
+     *
+     * @param  array<int, string>  $sources
+     * @param  array<int, string>  $externalIds
+     * @return array<int, string>
+     */
+    private function savedIdentitiesForSources(Builder $query, array $sources, array $externalIds): array
+    {
+        if ($sources === [] || $externalIds === []) {
+            return [];
+        }
+
+        // A legacy public case that predates the source column came from the only register there
+        // was, which is the one the adapter speaks for. Read under that name so it keeps matching;
+        // a row from any other register always names itself and is never folded in here.
+        $legacySource = self::LEGACY_SOURCE_KEY;
+
+        return $query
+            ->where(fn (Builder $scope) => $scope
+                ->whereIn('source', $sources)
+                ->orWhere(fn (Builder $legacy) => $legacy
+                    ->whereNull('source')
+                    ->where('source_type', SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE)))
+            ->whereIn('external_id', $externalIds)
+            ->get(['source', 'external_id'])
+            ->map(fn ($row): string => self::sourceIdentityKey(
+                $row->source !== null ? (string) $row->source : $legacySource,
+                (string) $row->external_id,
+            ))
+            ->all();
+    }
+
+    /** One string for one external identity, so two registers can never be mistaken for each other. */
+    private static function sourceIdentityKey(string $source, string $externalId): string
+    {
+        return $source."\n".$externalId;
+    }
+
+    /**
+     * The procurements this user can see a case for, open or archived.
+     *
+     * Read through the ordinary visibility query, so a case somebody else in the customer keeps
+     * private stays private here too — a hit must not read as "already saved" on the strength of
+     * a case the person looking is not allowed to know about.
+     *
+     * @return array<int, int>
+     */
+    private function caseOpportunityIds(User $user): array
+    {
+        return $this->customerSavedNoticeVisibleQuery($user)
+            ->whereNotNull('opportunity_id')
+            ->distinct()
+            ->pluck('opportunity_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+    }
+
     private function customerSavedNoticeManageableQuery(User $user): Builder
     {
         return $this->savedNoticeAccess->manageableQueryFor($user);
@@ -1417,17 +1671,20 @@ class NoticeController extends Controller
             return $this->emptyWatchAlertsPayload();
         }
 
-        $alertExternalIds = $records->pluck('doffin_notice_id')->filter()->map(fn (mixed $value): string => (string) $value)->all();
-        $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user, $customerId)
-            ->whereIn('external_id', $alertExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $value): string => (string) $value)
-            ->all();
-        $archivedExternalIds = $this->archivedSavedNoticeVisibleQuery($user, $customerId)
-            ->whereIn('external_id', $alertExternalIds)
-            ->pluck('external_id')
-            ->map(fn (mixed $value): string => (string) $value)
-            ->all();
+        $alertExternalIds = $records->pluck('external_id')->filter()->map(fn (mixed $value): string => (string) $value)->all();
+        // Keyed by source, because two registers may name a notice the same thing. Each record is
+        // then asked about its own source rather than about a flat list of ids.
+        $alertSources = $records->pluck('source')->filter()->map(fn (mixed $value): string => (string) $value)->unique()->all();
+        $savedExternalIds = $this->savedIdentitiesForSources(
+            $this->activeSavedNoticeVisibleQuery($user, $customerId),
+            $alertSources,
+            $alertExternalIds,
+        );
+        $archivedExternalIds = $this->savedIdentitiesForSources(
+            $this->archivedSavedNoticeVisibleQuery($user, $customerId),
+            $alertSources,
+            $alertExternalIds,
+        );
 
         return [
             'data' => $records
@@ -1447,21 +1704,41 @@ class NoticeController extends Controller
             ->map(fn (string $cpv): string => trim($cpv))
             ->values();
         $summary = trim((string) data_get($rawPayload, 'description', ''));
-        $status = strtoupper(trim((string) data_get($rawPayload, 'status', '')));
         $cpvCode = trim((string) data_get($rawPayload, 'mainCpvCode', ''));
 
         if ($cpvCode === '') {
             $cpvCode = (string) $cpvCodes->first();
         }
 
-        if ($status === 'ACTIVE') {
-            $status = '';
+        // Identity comes from the source, not from a Doffin id. For a Doffin record the two are
+        // the same string, so the payload the frontend already reads is unchanged.
+        $externalId = (string) $record->external_id;
+        // The adapter for the register this record actually came from. A record from a register
+        // Procynia has no adapter for keeps whatever URL was stored with it and is offered
+        // nothing else — it is not handed another register's link because the ids look alike.
+        $recordAdapter = $this->sources->find((string) $record->source);
+
+        // An open notice shows no status badge — the card says how long is left instead, and
+        // stamping "still open" on something that is obviously open is noise. Which stored word
+        // means open is the register's business, so the record's own adapter reads it; a record
+        // from a register Procynia cannot speak to keeps whatever word was stored with it.
+        $normalized = $recordAdapter?->normalizeLiveSearchHit($rawPayload);
+        $status = trim((string) data_get($rawPayload, 'status', ''));
+
+        if ($normalized !== null) {
+            $status = $normalized->status === OpportunityStatus::Open
+                ? ''
+                : (string) $normalized->providerStatusLabel();
         }
 
         return [
             'id' => $record->id,
-            'notice_id' => $record->doffin_notice_id,
-            'title' => trim((string) $record->title) !== '' ? trim((string) $record->title) : $record->doffin_notice_id,
+            'notice_id' => $externalId,
+            // Additive: what the frontend reads is above, but a consumer that wants to know where
+            // a hit came from no longer has to infer it from a column name.
+            'source' => (string) $record->source,
+            'external_id' => $externalId,
+            'title' => trim((string) $record->title) !== '' ? trim((string) $record->title) : $externalId,
             'buyer_name' => $record->buyer_name,
             'summary' => $summary !== '' ? Str::squish($summary) : null,
             'publication_date' => optional($record->publication_date)?->toIso8601String(),
@@ -1473,9 +1750,14 @@ class NoticeController extends Controller
             'saved_search_name' => null,
             'cpv_code' => $cpvCode !== '' ? $cpvCode : null,
             'is_new' => false,
-            'external_url' => $record->external_url ?: $this->publicNoticeUrl($record->doffin_notice_id),
-            'is_saved' => in_array($record->doffin_notice_id, $savedExternalIds, true),
-            'is_in_history' => in_array($record->doffin_notice_id, $archivedExternalIds, true),
+            // The stored URL is what the source actually gave us; its own adapter is the fallback.
+            'external_url' => $record->external_url ?: $recordAdapter?->sourceUrl($externalId),
+            // SavedNotice is still identified by a bare external id, so these compare like for like
+            // only while Doffin is the only source. Making that comparison source-aware is Phase 3B.
+            // Asked as an identity, not as a number: a record from another register that happens
+            // to share this id is a different opportunity and must not read as already saved.
+            'is_saved' => in_array(self::sourceIdentityKey((string) $record->source, $externalId), $savedExternalIds, true),
+            'is_in_history' => in_array(self::sourceIdentityKey((string) $record->source, $externalId), $archivedExternalIds, true),
             'watch_profile_name' => $record->watchProfile?->name,
             'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
             'delete_url' => route('app.notices.watch-alerts.destroy', ['watchProfileInboxRecord' => $record->id]),
@@ -1538,6 +1820,11 @@ class NoticeController extends Controller
             'id' => $notice->id,
             'saved_notice_id' => $notice->id,
             'notice_id' => $notice->external_id,
+            // Additive: the payload key above is the external id the frontend already reads, and
+            // keeps its name. These two say which register it belongs to and whether Procynia
+            // holds the imported notice behind it.
+            'source' => $notice->source,
+            'source_notice_id' => $notice->notice_id,
             'source_type' => $notice->source_type,
             'source_type_label' => $notice->source_type_label,
             'title' => $notice->title,
@@ -1602,6 +1889,83 @@ class NoticeController extends Controller
         ];
     }
 
+    /**
+     * The registers a case's procurement is published in.
+     *
+     * Provenance, shown rather than folded away. Doffin and TED both publishing one tender is the
+     * ordinary situation for anything over the EEA threshold, and a bid manager who saved it from
+     * one of them should be able to see that the other has it too — not least because the two
+     * records carry different reference numbers, and somebody will eventually be given the one
+     * that is not in the case.
+     *
+     * Deduplicated by register, because a register can hold several records of one procurement:
+     * TED republishes, and a procurement's change notice and award notice are separate rows. Two
+     * "TED" entries would say nothing the first one does not.
+     *
+     * A case with no identity gets the one register it was saved from, which is the whole truth
+     * about it. A private request gets nothing — it has no register.
+     *
+     * @return array<int, array{key: string, label: string, external_id: string, url: ?string, is_case_origin: bool}>
+     */
+    private function caseSourcesPayload(SavedNotice $notice): array
+    {
+        if ($notice->source_type !== SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE) {
+            return [];
+        }
+
+        $ownSource = $notice->source ?? self::LEGACY_SOURCE_KEY;
+        $ownEntry = [
+            'key' => $ownSource,
+            'label' => $this->registerName($ownSource),
+            'external_id' => (string) $notice->external_id,
+            'url' => $this->savedNoticeExternalUrl($notice),
+            'is_case_origin' => true,
+        ];
+
+        $sources = collect($notice->opportunity?->sourceRecords ?? [])
+            ->filter(fn (OpportunitySourceRecord $record): bool => trim((string) $record->source) !== '')
+            ->sortBy(fn (OpportunitySourceRecord $record): string => (string) $record->source)
+            ->unique(fn (OpportunitySourceRecord $record): string => (string) $record->source)
+            ->map(fn (OpportunitySourceRecord $record): array => [
+                'key' => (string) $record->source,
+                'label' => $this->registerName((string) $record->source),
+                'external_id' => (string) $record->external_id,
+                'url' => $this->sourceRecordUrl($record),
+                'is_case_origin' => (string) $record->source === $ownSource,
+            ])
+            ->values()
+            ->all();
+
+        if ($sources === []) {
+            return [$ownEntry];
+        }
+
+        // The case's own register goes first and is never missing from the list: it is where the
+        // title, the deadline and the documents in front of the reader actually came from.
+        $own = array_values(array_filter($sources, fn (array $source): bool => $source['is_case_origin']));
+        $others = array_values(array_filter($sources, fn (array $source): bool => ! $source['is_case_origin']));
+
+        return [...($own === [] ? [$ownEntry] : $own), ...$others];
+    }
+
+    /** The register's own short name, or its key when this installation has no adapter for it. */
+    private function registerName(string $sourceKey): string
+    {
+        return $this->sources->find($sourceKey)?->registerName() ?? Str::upper($sourceKey);
+    }
+
+    /** What the register stored, or what its adapter would build now. */
+    private function sourceRecordUrl(OpportunitySourceRecord $record): ?string
+    {
+        $stored = trim((string) $record->source_url);
+
+        if ($stored !== '') {
+            return $stored;
+        }
+
+        return $this->sources->find((string) $record->source)?->sourceUrl((string) $record->external_id);
+    }
+
     private function savedNoticeCasePayload(
         SavedNotice $notice,
         bool $canManageCase,
@@ -1619,8 +1983,15 @@ class NoticeController extends Controller
         return [
             'id' => $notice->id,
             'notice_id' => $notice->external_id,
+            // Additive: the payload key above is the external id the frontend already reads, and
+            // keeps its name. These two say which register it belongs to and whether Procynia
+            // holds the imported notice behind it.
+            'source' => $notice->source,
+            'source_notice_id' => $notice->notice_id,
             'source_type' => $notice->source_type,
             'source_type_label' => $notice->source_type_label,
+            // The registers this procurement is published in, the case's own first.
+            'sources' => $this->caseSourcesPayload($notice),
             'title' => $notice->title,
             'organization_name' => $notice->buyer_name,
             'external_url' => $this->savedNoticeExternalUrl($notice),
@@ -1891,10 +2262,21 @@ class NoticeController extends Controller
      */
     private function savedNoticeDocumentsPayload(SavedNotice $notice): array
     {
-        $sourceNotice = Notice::query()
-            ->where('notice_id', (string) $notice->external_id)
-            ->with('documents')
-            ->first();
+        // The link, when the case has one. Falling back to matching the external id by hand is
+        // what this has always done, and it stays — but only for a case from the register whose
+        // ids `notices.notice_id` actually holds. Another register's id must not reach in here and
+        // collect a Doffin notice's documents because the two happen to share a number.
+        // The bare-id fallback only holds for the register whose ids `notices.notice_id` carries,
+        // which is the discovery register. Any other register's case reaches the imported notice
+        // through the link or not at all.
+        $matchesImportedIds = $this->storedSourceAdapter($notice->source, $notice->isPublicNotice())
+            ?->sourceKey() === self::LEGACY_SOURCE_KEY;
+
+        $sourceNotice = $notice->notice_id !== null
+            ? Notice::query()->whereKey($notice->notice_id)->with('documents')->first()
+            : ($matchesImportedIds
+                ? Notice::query()->where('notice_id', (string) $notice->external_id)->with('documents')->first()
+                : null);
 
         if ($sourceNotice === null) {
             return [
@@ -2164,71 +2546,36 @@ class NoticeController extends Controller
         ];
     }
 
-    private function liveNoticeListItem(array $hit, array $savedExternalIds = [], array $archivedExternalIds = []): array
+    /** A search of a register this installation has no adapter for. */
+    private function unknownSourceResult(string $sourceKey, int $page, int $perPage): OpportunitySourceSearchResult
     {
-        $buyers = collect($hit['buyer'] ?? [])
-            ->filter(fn (mixed $buyer): bool => is_array($buyer))
-            ->map(fn (array $buyer): string => trim((string) ($buyer['name'] ?? '')))
-            ->filter()
-            ->unique()
-            ->values();
-        $description = trim((string) ($hit['description'] ?? ''));
-        $cpvCodes = collect($hit['cpvCodes'] ?? [])
-            ->filter(fn (mixed $cpv): bool => is_string($cpv) && trim($cpv) !== '')
-            ->values();
-        $noticeId = (string) ($hit['id'] ?? '');
-        $publicationDate = $hit['publicationDate'] ?? $hit['issueDate'] ?? null;
-
-        return [
-            'id' => $noticeId,
-            'notice_id' => $noticeId,
-            'title' => trim((string) ($hit['heading'] ?? '')),
-            'buyer_name' => $buyers->implode(', '),
-            'summary' => $description !== '' ? Str::squish($description) : null,
-            'publication_date' => $publicationDate,
-            'deadline' => $hit['deadline'] ?? null,
-            'status' => $hit['status'] ?? null,
-            'relevance_level' => null,
-            'score' => null,
-            'department' => null,
-            'saved_search_name' => null,
-            'cpv_code' => $cpvCodes->first(),
-            'is_new' => false,
-            'external_url' => $this->publicNoticeUrl($noticeId),
-            'is_saved' => in_array($noticeId, $savedExternalIds, true),
-            'is_in_history' => in_array($noticeId, $archivedExternalIds, true),
-        ];
-    }
-
-    private function liveSearchItems(array $searchResponse): array
-    {
-        return collect($searchResponse['items'] ?? $searchResponse['hits'] ?? [])
-            ->filter(fn (mixed $item): bool => is_array($item))
-            ->values()
-            ->all();
+        return new OpportunitySourceSearchResult(
+            ok: false,
+            notices: [],
+            page: $page,
+            perPage: $perPage,
+            numHitsTotal: 0,
+            numHitsAccessible: 0,
+            fallbackUsed: false,
+            errorType: 'unknown_source',
+            // For the log. The user message says nothing about the key they typed.
+            errorMessage: sprintf('No adapter claims the source key "%s".', $sourceKey),
+            userMessage: __('procynia.notices.live_unknown_source'),
+        );
     }
 
     private function liveSearchStatusCode(string $errorType): int
     {
         return match ($errorType) {
+            // Not the register's fault and not a register that exists: the request named one that
+            // is not there, which is the only one of these that is about the URL.
+            'unknown_source' => HttpResponse::HTTP_NOT_FOUND,
             'invalid_request' => HttpResponse::HTTP_UNPROCESSABLE_ENTITY,
             'upstream_unavailable' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
             'timeout' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
             'connection_error' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
             'unexpected_response' => HttpResponse::HTTP_BAD_GATEWAY,
             default => HttpResponse::HTTP_BAD_GATEWAY,
-        };
-    }
-
-    private function liveSearchErrorMessage(string $errorType): string
-    {
-        return match ($errorType) {
-            'invalid_request' => 'Søket mot Doffin ble avvist. Kontroller filtrene og prøv igjen.',
-            'upstream_unavailable' => 'Doffin er midlertidig utilgjengelig. Prøv igjen om litt.',
-            'timeout' => 'Doffin svarte ikke i tide. Prøv igjen om litt.',
-            'connection_error' => 'Klarte ikke å koble til Doffin. Prøv igjen om litt.',
-            'unexpected_response' => 'Doffin returnerte et uventet svar. Prøv igjen om litt.',
-            default => 'Doffin-søket kunne ikke fullføres. Prøv igjen om litt.',
         };
     }
 
@@ -2268,22 +2615,17 @@ class NoticeController extends Controller
         return max(1, (int) ceil($accessibleTotal / $perPage));
     }
 
-    private function publicNoticeUrl(string $noticeId): ?string
-    {
-        if ($noticeId === '') {
-            return null;
-        }
-
-        return sprintf((string) config('doffin.public_notice_url'), rawurlencode($noticeId));
-    }
-
     private function savedNoticeExternalUrl(SavedNotice $notice): ?string
     {
         if ($notice->isPrivateRequest()) {
             return $notice->external_url;
         }
 
-        return $notice->external_url ?: $this->publicNoticeUrl($notice->external_id);
+        // The stored URL first, because it is what the register actually gave us. Its own adapter
+        // is the only fallback — a case from a register Procynia cannot speak to gets null rather
+        // than a link built by whichever adapter happened to be at hand.
+        return $notice->external_url
+            ?: $this->storedSourceAdapter($notice->source, true)?->sourceUrl($notice->external_id);
     }
 
     private function emptySearchResult(): array
@@ -2320,7 +2662,7 @@ class NoticeController extends Controller
         ];
     }
 
-    private function discoverySource(string $mode = 'live'): array
+    private function discoverySource(string $mode = 'live', ?Request $request = null): array
     {
         return match ($mode) {
             'saved' => [
@@ -2331,11 +2673,42 @@ class NoticeController extends Controller
                 'type' => 'saved_notice_history',
                 'label' => 'Historikk',
             ],
-            default => [
-                'type' => 'doffin_live_search',
-                'label' => 'Live søk i Doffin',
-            ],
+            default => $this->liveDiscoverySource($request),
         };
+    }
+
+    /**
+     * Which register this search is in, and which ones it could be in.
+     *
+     * The options are read from the registry rather than listed here, so a register Procynia can
+     * speak to is a register the selector offers — there is no second list to forget to update.
+     *
+     * Label and name are null for a key no adapter claims. That is a page the user can reach by
+     * editing the URL, and it renders with the selector intact so there is a way back; naming it
+     * after whichever register happened to be first would be the silent default the registry
+     * exists to refuse.
+     *
+     * @return array<string, mixed>
+     */
+    private function liveDiscoverySource(?Request $request): array
+    {
+        $sourceKey = $this->discoverySourceKey($request);
+        $adapter = $this->sources->find($sourceKey);
+
+        return [
+            'type' => $sourceKey.'_live_search',
+            'key' => $sourceKey,
+            'name' => $adapter?->registerName(),
+            'label' => $adapter?->label(),
+            'options' => collect($this->sources->all())
+                ->map(fn (OpportunitySourceAdapter $option): array => [
+                    'key' => $option->sourceKey(),
+                    'name' => $option->registerName(),
+                    'label' => $option->label(),
+                ])
+                ->values()
+                ->all(),
+        ];
     }
 
     private function cpvSelectorPayload(string $cpvFilter): array
