@@ -195,6 +195,16 @@ Route::prefix('app')
             Route::delete('/wiki-links/{link}', [QualityController::class, 'destroyWikiLink'])
                 ->name('wiki-links.destroy');
 
+            // The seam to the document store — a separate thing from the Wiki seam above. These
+            // reach files the document consists of, uses or leaves behind; the store itself is the
+            // existing enterprise_wiki_documents one, and removing a link never removes a file.
+            Route::post('/items/{item}/documents', [QualityController::class, 'storeDocument'])
+                ->name('items.documents.store');
+            Route::post('/items/{item}/document-links', [QualityController::class, 'storeDocumentLink'])
+                ->name('items.document-links.store');
+            Route::delete('/document-links/{link}', [QualityController::class, 'destroyDocumentLink'])
+                ->name('document-links.destroy');
+
             Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
             Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
         });

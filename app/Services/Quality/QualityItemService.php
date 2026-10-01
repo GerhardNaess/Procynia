@@ -3,10 +3,12 @@
 namespace App\Services\Quality;
 
 use App\Jobs\Quality\ProjectQualityItemToGraph;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\QualityChecklistItem;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
+use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessIo;
@@ -143,7 +145,8 @@ class QualityItemService
             ->map(fn ($id): int => (int) $id)
             ->all();
 
-        // Structure rows, relations and wiki links all cascade in the database.
+        // Structure rows, relations, wiki links and document links all cascade in the database.
+        // The documents themselves are untouched — a file is the virksomhet's, not the item's.
         DB::transaction(static fn () => $item->delete());
 
         $this->deprojectItem($customerId, $itemId);
@@ -418,6 +421,80 @@ class QualityItemService
         $link->delete();
 
         $this->reproject([$itemId]);
+    }
+
+    // -----------------------------------------------------------------
+    // Documents
+    // -----------------------------------------------------------------
+
+    /**
+     * Attach a file from the virksomhet's document store to a quality item.
+     *
+     * Nothing is written to the document, and nothing is copied: the file stays exactly where the
+     * upload put it, and every other item that uses it keeps using the same bytes. Detaching later
+     * removes this row alone — see unlinkDocument().
+     *
+     * No graph reprojection, unlike linkWikiPage(). Documents are not nodes in the Neo4j projection
+     * — GraphProjectionService knows wiki pages and quality items and nothing else — so there is no
+     * edge for this to keep in step, and dispatching a projection job would only burn a worker slot
+     * rebuilding a node this write did not change.
+     */
+    public function linkDocument(
+        int $customerId,
+        QualityItem $item,
+        EnterpriseWikiDocument $document,
+        string $relationType = QualityItemDocument::RELATION_TYPE_SOURCE,
+        ?string $note = null,
+        ?User $actor = null,
+    ): QualityItemDocument {
+        $this->assertOwned($customerId, $item);
+
+        if ((int) $document->customer_id !== $customerId) {
+            // Deliberately the message a missing document would give, for the same reason
+            // linkWikiPage() does it: another customer's file must not be distinguishable from one
+            // that does not exist.
+            throw ValidationException::withMessages([
+                'enterprise_wiki_document_id' => __('procynia.quality.errors.document_not_found'),
+            ]);
+        }
+
+        if (! in_array($relationType, QualityItemDocument::RELATION_TYPES, true)) {
+            throw ValidationException::withMessages([
+                'relation_type' => __('procynia.quality.errors.unknown_document_relation_type'),
+            ]);
+        }
+
+        return QualityItemDocument::query()->firstOrCreate(
+            [
+                'quality_item_id' => $item->id,
+                'enterprise_wiki_document_id' => $document->id,
+                'relation_type' => $relationType,
+            ],
+            [
+                'customer_id' => $customerId,
+                'note' => $this->nullableText($note),
+                'source' => QualityItemDocument::SOURCE_MANUAL,
+                'created_by_user_id' => $actor?->id,
+            ],
+        );
+    }
+
+    /**
+     * Detach a file from a quality item.
+     *
+     * The link row goes; the document, its bytes and its other attachments stay. Deleting the file
+     * itself is a different act with a different authority — it lives in Wiki → Kildedokumenter,
+     * where EnterpriseWikiDocumentDeletionService knows what else is built on it.
+     */
+    public function unlinkDocument(int $customerId, QualityItemDocument $link): void
+    {
+        if ((int) $link->customer_id !== $customerId) {
+            throw ValidationException::withMessages([
+                'link' => __('procynia.quality.errors.document_link_not_found'),
+            ]);
+        }
+
+        $link->delete();
     }
 
     // -----------------------------------------------------------------

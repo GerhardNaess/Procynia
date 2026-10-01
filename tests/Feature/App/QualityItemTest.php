@@ -5,12 +5,14 @@ namespace Tests\Feature\App;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityChecklistItem;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
+use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessIo;
@@ -18,8 +20,10 @@ use App\Models\QualityProcessStep;
 use App\Models\User;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
@@ -36,6 +40,8 @@ use Tests\TestCase;
  *  - A relation may only join a pair of types the matrix allows — including the case independent
  *    from/to lists got wrong, process -> work instruction.
  *  - Structure belongs to the type that has it.
+ *  - Documents belong to the virksomhet, not to one item: attaching one copies no bytes, the same
+ *    file serves several items, and detaching removes the connection alone.
  *  - Kvalitet is a paid module, and the gate is the backend's, not the rail's.
  *  - Nothing crosses a customer boundary.
  */
@@ -500,6 +506,393 @@ class QualityItemTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // The seam to the document store
+    // ---------------------------------------------------------------------
+
+    public function test_an_existing_document_is_attached_without_being_changed(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $document = $this->document($customer, 'innkjopspolicy.pdf');
+
+        $before = (array) DB::table('enterprise_wiki_documents')->where('id', $document->id)->sole();
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$policy->id}/document-links", [
+                'enterprise_wiki_document_id' => $document->id,
+                'relation_type' => QualityItemDocument::RELATION_TYPE_SOURCE,
+                'note' => 'Signert versjon',
+            ])
+            ->assertRedirect();
+
+        $link = QualityItemDocument::query()->where('quality_item_id', $policy->id)->sole();
+
+        $this->assertSame((int) $document->id, (int) $link->enterprise_wiki_document_id);
+        $this->assertSame(QualityItemDocument::RELATION_TYPE_SOURCE, $link->relation_type);
+        $this->assertSame('Signert versjon', $link->note);
+        $this->assertSame((int) $customer->id, (int) $link->customer_id);
+
+        // Attaching reaches the file; it never writes to it.
+        $this->assertSame($before, (array) DB::table('enterprise_wiki_documents')->where('id', $document->id)->sole());
+    }
+
+    public function test_one_document_may_belong_to_several_quality_items(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'kvalitetshandbok.pdf');
+
+        foreach ([$policy, $process] as $item) {
+            $this->actingAs($owner)
+                ->post("/app/quality/items/{$item->id}/document-links", [
+                    'enterprise_wiki_document_id' => $document->id,
+                ])
+                ->assertRedirect();
+        }
+
+        $this->assertSame(
+            2,
+            QualityItemDocument::query()->where('enterprise_wiki_document_id', $document->id)->count(),
+        );
+        // One row on disk, two connections to it.
+        $this->assertSame(1, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+    }
+
+    public function test_the_same_document_may_serve_one_item_in_two_capacities_but_not_twice_in_one(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'skjema.docx');
+
+        foreach ([
+            QualityItemDocument::RELATION_TYPE_TEMPLATE,
+            QualityItemDocument::RELATION_TYPE_EVIDENCE,
+            // The repeat is the point: firstOrCreate must not raise a unique violation.
+            QualityItemDocument::RELATION_TYPE_TEMPLATE,
+        ] as $relationType) {
+            $this->actingAs($owner)
+                ->post("/app/quality/items/{$process->id}/document-links", [
+                    'enterprise_wiki_document_id' => $document->id,
+                    'relation_type' => $relationType,
+                ])
+                ->assertRedirect();
+        }
+
+        $this->assertSame(2, QualityItemDocument::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_an_unknown_relation_type_is_refused(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'rutine.pdf');
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/document-links", [
+                'enterprise_wiki_document_id' => $document->id,
+                'relation_type' => 'something_else',
+            ])
+            ->assertSessionHasErrors('relation_type');
+
+        $this->assertSame(0, QualityItemDocument::query()->count());
+    }
+
+    public function test_a_document_from_another_customer_cannot_be_attached(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        ['customer' => $otherCustomer] = $this->context();
+
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $foreignDocument = $this->document($otherCustomer, 'fremmed.pdf');
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/document-links", [
+                'enterprise_wiki_document_id' => $foreignDocument->id,
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(0, QualityItemDocument::query()->count());
+    }
+
+    public function test_detaching_a_document_removes_the_connection_and_keeps_the_file(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'kvalitetshandbok.pdf');
+
+        foreach ([$policy, $process] as $item) {
+            $this->actingAs($owner)->post("/app/quality/items/{$item->id}/document-links", [
+                'enterprise_wiki_document_id' => $document->id,
+            ]);
+        }
+
+        $link = QualityItemDocument::query()->where('quality_item_id', $policy->id)->sole();
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/document-links/{$link->id}")
+            ->assertRedirect();
+
+        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $policy->id)->count());
+        // The file survives, and so does every other item's claim on it.
+        $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
+        $this->assertSame(1, QualityItemDocument::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_another_customers_document_link_cannot_be_removed(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        ['customer' => $otherCustomer, 'owner' => $otherOwner] = $this->context();
+
+        $foreignItem = $this->item($otherCustomer, QualityItem::TYPE_POLICY, 'Fremmed policy');
+        $foreignDocument = $this->document($otherCustomer, 'fremmed.pdf');
+
+        $this->actingAs($otherOwner)->post("/app/quality/items/{$foreignItem->id}/document-links", [
+            'enterprise_wiki_document_id' => $foreignDocument->id,
+        ]);
+
+        $link = QualityItemDocument::query()->where('quality_item_id', $foreignItem->id)->sole();
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/document-links/{$link->id}")
+            ->assertNotFound();
+
+        $this->assertNotNull(QualityItemDocument::query()->find($link->id));
+    }
+
+    public function test_deleting_an_item_leaves_the_document_standing(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'rutine.pdf');
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/document-links", [
+            'enterprise_wiki_document_id' => $document->id,
+        ]);
+
+        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}")->assertRedirect();
+
+        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $process->id)->count());
+        $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
+    }
+
+    public function test_deleting_the_file_in_wiki_takes_its_quality_links_with_it(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'rutine.pdf');
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/document-links", [
+            'enterprise_wiki_document_id' => $document->id,
+        ]);
+
+        // Not through the Wiki deletion flow — this asserts the FK itself, so a link row can never
+        // outlive the file it points at and show a quality item a document that is gone.
+        DB::table('enterprise_wiki_documents')->where('id', $document->id)->delete();
+
+        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $process->id)->count());
+        $this->assertNotNull(QualityItem::query()->find($process->id));
+    }
+
+    /**
+     * The create form carries the document itself.
+     *
+     * One flow, one submit: the styrende dokument and the file that is it come into being together,
+     * because that is how a user thinks of "opprett dokumentet". What is defended here is that the
+     * file goes into the existing shared store rather than anywhere new, that it arrives as the
+     * item's `source`, and that the item page can then hand it back — the whole point of attaching
+     * it being that somebody can open it later.
+     */
+    public function test_creating_an_item_with_a_file_attaches_it_in_the_same_flow(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+
+        $this->actingAs($owner)
+            ->post('/app/quality/items', [
+                'quality_type' => QualityItem::TYPE_PROCEDURE,
+                'title' => 'Avvikshandtering',
+                'code' => 'PRO-07',
+                'purpose' => 'Hvordan avvik meldes og lukkes.',
+                'owner_user_id' => $owner->id,
+                'status' => QualityItem::STATUS_ACTIVE,
+                'file' => UploadedFile::fake()->createWithContent('avvikshandtering.pdf', 'Prosedyre for avvikshandtering.'),
+            ])
+            ->assertRedirect();
+
+        $item = QualityItem::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame('Avvikshandtering', $item->title);
+
+        // The file went into the shared store on its own path, not a quality-specific one.
+        $document = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame('avvikshandtering.pdf', $document->original_filename);
+        $this->assertStringStartsWith("customers/{$customer->id}/wiki-documents/", $document->file_path);
+        Storage::disk('local')->assertExists($document->file_path);
+
+        // And it hangs on the item as its source, in the same flow that created the item.
+        $link = QualityItemDocument::query()->where('quality_item_id', $item->id)->sole();
+        $this->assertSame((int) $document->id, (int) $link->enterprise_wiki_document_id);
+        $this->assertSame(QualityItemDocument::RELATION_TYPE_SOURCE, $link->relation_type);
+
+        // The item page shows it, with a way to open it.
+        $this->actingAs($owner)
+            ->get("/app/quality/items/{$item->id}")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('documents.0.filename', 'avvikshandtering.pdf')
+                ->where('documents.0.download_url', route('app.wiki.sources.download', ['document' => $document->id]))
+            );
+    }
+
+    public function test_an_item_is_created_without_a_file(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+
+        // The file is optional on purpose: a styrende dokument is registered the moment the
+        // organisation decides it has one, routinely before anybody has written it.
+        $this->actingAs($owner)
+            ->post('/app/quality/items', [
+                'quality_type' => QualityItem::TYPE_POLICY,
+                'title' => 'Innkjopspolicy',
+            ])
+            ->assertRedirect();
+
+        $item = QualityItem::query()->where('customer_id', $customer->id)->sole();
+
+        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $item->id)->count());
+        $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+    }
+
+    public function test_uploading_a_file_stores_it_once_and_attaches_it(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/documents", [
+                'file' => UploadedFile::fake()->createWithContent('rutine.pdf', 'Rutinebeskrivelse for anskaffelser.'),
+                'relation_type' => QualityItemDocument::RELATION_TYPE_SOURCE,
+            ])
+            ->assertRedirect();
+
+        $document = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->sole();
+
+        $this->assertSame('rutine.pdf', $document->original_filename);
+        $this->assertSame((int) $owner->id, (int) $document->uploaded_by_user_id);
+        // The shared store's own path, not a quality-specific one.
+        $this->assertStringStartsWith("customers/{$customer->id}/wiki-documents/", $document->file_path);
+        Storage::disk('local')->assertExists($document->file_path);
+
+        $link = QualityItemDocument::query()->where('quality_item_id', $process->id)->sole();
+        $this->assertSame((int) $document->id, (int) $link->enterprise_wiki_document_id);
+    }
+
+    public function test_re_uploading_the_same_file_attaches_the_copy_the_customer_already_has(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        foreach ([$policy, $process] as $item) {
+            $this->actingAs($owner)
+                ->post("/app/quality/items/{$item->id}/documents", [
+                    // Same bytes, uploaded twice — which is what actually happens when two people
+                    // attach the quality manual to their own document.
+                    'file' => UploadedFile::fake()->createWithContent('handbok.pdf', 'Kvalitetshandbok, revisjon 4.'),
+                ])
+                ->assertRedirect();
+        }
+
+        // One file on disk, one row, two connections.
+        $this->assertSame(1, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(2, QualityItemDocument::query()->count());
+    }
+
+    public function test_attaching_a_document_is_gated_by_the_same_entitlement_as_the_page(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context(grantQuality: false);
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $document = $this->document($customer, 'rutine.pdf');
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/document-links", [
+                'enterprise_wiki_document_id' => $document->id,
+            ])
+            ->assertRedirect(route('app.dashboard'));
+
+        $this->assertSame(0, QualityItemDocument::query()->count());
+    }
+
+    public function test_the_detail_page_shows_documents_and_wiki_knowledge_as_two_separate_things(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $page = $this->page($customer, 'Anskaffelsesrutine');
+        $document = $this->document($customer, 'rutine.pdf');
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/wiki-links", [
+            'enterprise_wiki_page_id' => $page->id,
+        ]);
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/document-links", [
+            'enterprise_wiki_document_id' => $document->id,
+        ]);
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}")
+            ->assertOk()
+            ->viewData('page')['props'];
+
+        $this->assertCount(1, $props['documents']);
+        $this->assertSame('rutine.pdf', $props['documents'][0]['filename']);
+        $this->assertNotNull($props['documents'][0]['download_url']);
+
+        // Two seams, two props. A Wiki page never appears as a document, or the other way round.
+        $this->assertCount(1, $props['wiki_links']);
+        $this->assertSame((int) $page->id, $props['wiki_links'][0]['page_id']);
+        $this->assertSame(QualityItemDocument::RELATION_TYPES, $props['document_relation_types']);
+    }
+
+    public function test_the_document_picker_is_scoped_to_the_customer_and_searchable(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        ['customer' => $otherCustomer] = $this->context();
+
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $this->document($customer, 'anskaffelsesrutine.pdf');
+        $this->document($customer, 'personalhandbok.pdf');
+        $this->document($otherCustomer, 'anskaffelsesrutine-hos-andre.pdf');
+
+        $all = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}")
+            ->viewData('page')['props']['document_options'];
+
+        $this->assertSame(
+            ['anskaffelsesrutine.pdf', 'personalhandbok.pdf'],
+            collect($all)->pluck('filename')->sort()->values()->all(),
+        );
+
+        $found = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?document_search=PERSONAL")
+            ->viewData('page')['props']['document_options'];
+
+        $this->assertSame(['personalhandbok.pdf'], collect($found)->pluck('filename')->all());
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------------
 
@@ -572,6 +965,22 @@ class QualityItemTest extends TestCase
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    /**
+     * A file already in the virksomhet's store. Deliberately not written through the upload
+     * endpoint: most of these tests are about the link, not about getting bytes onto a disk.
+     */
+    private function document(Customer $customer, string $filename): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => $filename,
+            'file_path' => sprintf('customers/%d/wiki-documents/%s', $customer->id, Str::ulid()),
+            'file_hash_sha256' => hash('sha256', $filename.Str::random(8)),
+            'extracted_text' => 'Innhold i '.$filename,
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 }

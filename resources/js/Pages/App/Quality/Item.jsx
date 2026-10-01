@@ -6,10 +6,12 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 /**
  * One styrende dokument.
  *
- * Three things on one page, in the order a kvalitetsleder needs them: what the document is and who
- * answers for it, the structure its type carries, and the Wiki pages behind it. The structure is
- * saved as a whole list — see QualityItemService for why — so the editor builds one array and posts
- * it, rather than firing a request per row.
+ * Four things on one page, in the order a kvalitetsleder needs them: what the document is and who
+ * answers for it, the structure its type carries, the files that belong to it, and the knowledge in
+ * Wiki behind it. Files and Wiki pages are kept in separate sections because they answer different
+ * questions — one is what the document IS and leaves behind, the other is what the virksomhet knows
+ * about the subject. The structure is saved as a whole list — see QualityItemService for why — so
+ * the editor builds one array and posts it, rather than firing a request per row.
  */
 
 const TYPE_TONES = {
@@ -46,6 +48,10 @@ export default function QualityItem() {
         wiki_links: wikiLinks = [],
         wiki_page_options: wikiPageOptions = [],
         wiki_search: wikiSearch = '',
+        documents = [],
+        document_options: documentOptions = [],
+        document_relation_types: documentRelationTypes = [],
+        document_search: documentSearch = '',
         relations = [],
     } = usePage().props;
 
@@ -100,6 +106,18 @@ export default function QualityItem() {
 
                 <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
 
+                <DocumentsPanel
+                    tq={tq}
+                    item={item}
+                    canManage={canManage}
+                    documents={documents}
+                    documentOptions={documentOptions}
+                    documentSearch={documentSearch}
+                    wikiSearch={wikiSearch}
+                    relationTypes={documentRelationTypes}
+                    relationTypeLabels={tq.document_relation_types ?? {}}
+                />
+
                 <WikiPanel
                     tq={tq}
                     item={item}
@@ -107,6 +125,7 @@ export default function QualityItem() {
                     wikiLinks={wikiLinks}
                     wikiPageOptions={wikiPageOptions}
                     wikiSearch={wikiSearch}
+                    documentSearch={documentSearch}
                     linkTypes={linkTypes}
                     linkTypeLabels={tq.link_types ?? {}}
                 />
@@ -533,12 +552,239 @@ function RelationsPanel({ tq, relations, typeLabels }) {
 }
 
 /**
+ * The files that belong to one styrende dokument.
+ *
+ * A separate seam from the Wiki one below, and separate on purpose: this reaches files the document
+ * consists of, uses or leaves behind, where "Relatert kunnskap" reaches what the virksomhet has
+ * written down about the subject. Attaching a file copies nothing and changes nothing about it —
+ * the same file belongs to as many documents as it is attached to — and removing a row here removes
+ * the connection alone. Deleting the file itself stays in Wiki → Kildedokumenter, where the
+ * deletion flow knows what else is built on it.
+ */
+function DocumentsPanel({
+    tq,
+    item,
+    canManage,
+    documents,
+    documentOptions,
+    documentSearch,
+    wikiSearch,
+    relationTypes,
+    relationTypeLabels,
+}) {
+    const tdoc = tq.documents ?? {};
+    const statusLabels = tdoc.statuses ?? {};
+    const [search, setSearch] = useState(documentSearch ?? '');
+
+    const linkForm = useForm({
+        enterprise_wiki_document_id: '',
+        relation_type: relationTypes[0] ?? 'source',
+        note: '',
+    });
+
+    const uploadForm = useForm({
+        file: null,
+        relation_type: relationTypes[0] ?? 'source',
+        note: '',
+    });
+
+    function submitLink(event) {
+        event.preventDefault();
+        linkForm.post(`/app/quality/items/${item.id}/document-links`, {
+            preserveScroll: true,
+            onSuccess: () => linkForm.reset(),
+        });
+    }
+
+    function submitUpload(event) {
+        event.preventDefault();
+        uploadForm.post(`/app/quality/items/${item.id}/documents`, {
+            preserveScroll: true,
+            forceFormData: true,
+            onSuccess: () => uploadForm.reset(),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tdoc.heading ?? 'Dokumenter'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tdoc.help ?? ''}</p>
+
+            {documents.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {tdoc.empty ?? 'Ingen dokumenter er koblet til dette styrende dokumentet ennå.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {documents.map((link) => (
+                        <li key={link.id} className="flex flex-wrap items-center gap-3 py-3">
+                            <a
+                                href={link.download_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-semibold text-slate-950 hover:underline"
+                            >
+                                {link.filename}
+                            </a>
+                            <StatusBadge tone="slate">
+                                {relationTypeLabels?.[link.relation_type] ?? link.relation_type}
+                            </StatusBadge>
+                            {link.document_status === 'failed' && (
+                                <StatusBadge tone="amber">
+                                    {statusLabels?.failed ?? 'Tekstuttrekk feilet'}
+                                </StatusBadge>
+                            )}
+                            <span className="text-sm text-slate-500">
+                                {link.owner_name ?? (tdoc.no_owner ?? 'Ingen eier')}
+                                {link.uploaded_at ? ` · ${link.uploaded_at}` : ''}
+                            </span>
+                            {link.note && <span className="text-sm text-slate-600">{link.note}</span>}
+                            {canManage && (
+                                <button
+                                    type="button"
+                                    className="ml-auto text-sm font-semibold text-rose-600 hover:underline"
+                                    onClick={() => {
+                                        if (window.confirm(tdoc.unlink_confirm ?? 'Fjern koblingen?')) {
+                                            router.delete(`/app/quality/document-links/${link.id}`, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    {tdoc.unlink ?? 'Fjern kobling'}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canManage && (
+                <div className="mt-6 space-y-6">
+                    <div className="space-y-4">
+                        <h3 className="text-base font-semibold text-slate-900">
+                            {tdoc.link_existing_heading ?? 'Koble til eksisterende dokument'}
+                        </h3>
+
+                        <div className="flex flex-wrap gap-2">
+                            <input
+                                className={`${INPUT} max-w-sm`}
+                                placeholder={tdoc.search_placeholder ?? 'Søk etter filnavn …'}
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                            />
+                            <button
+                                type="button"
+                                className={QUIET_BUTTON}
+                                onClick={() => router.get(
+                                    `/app/quality/items/${item.id}`,
+                                    { document_search: search, wiki_search: wikiSearch },
+                                    { preserveScroll: true, preserveState: false },
+                                )}
+                            >
+                                {tdoc.search_submit ?? 'Søk'}
+                            </button>
+                        </div>
+
+                        {documentOptions.length === 0 ? (
+                            <p className="text-sm text-slate-500">
+                                {tdoc.no_candidates ?? 'Ingen dokumenter er lastet opp ennå, eller søket ga ingen treff.'}
+                            </p>
+                        ) : (
+                            <form onSubmit={submitLink} className="grid gap-4 md:grid-cols-4">
+                                <div className="md:col-span-2">
+                                    <Field
+                                        label={tdoc.document_label ?? 'Dokument'}
+                                        error={linkForm.errors.enterprise_wiki_document_id}
+                                    >
+                                        <select
+                                            className={INPUT}
+                                            value={linkForm.data.enterprise_wiki_document_id}
+                                            onChange={(e) => linkForm.setData('enterprise_wiki_document_id', e.target.value)}
+                                        >
+                                            <option value="">{tdoc.document_placeholder ?? 'Velg dokument …'}</option>
+                                            {documentOptions.map((option) => (
+                                                <option key={option.document_id} value={option.document_id}>
+                                                    {option.filename}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </Field>
+                                </div>
+
+                                <Field label={tdoc.relation_type ?? 'Dokumenttype'} error={linkForm.errors.relation_type}>
+                                    <select
+                                        className={INPUT}
+                                        value={linkForm.data.relation_type}
+                                        onChange={(e) => linkForm.setData('relation_type', e.target.value)}
+                                    >
+                                        {relationTypes.map((type) => (
+                                            <option key={type} value={type}>{relationTypeLabels?.[type] ?? type}</option>
+                                        ))}
+                                    </select>
+                                </Field>
+
+                                <div className="flex items-end">
+                                    <button type="submit" className={PRIMARY_BUTTON} disabled={linkForm.processing}>
+                                        {tdoc.link_submit ?? 'Koble til'}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+                    </div>
+
+                    <div className="space-y-4 border-t border-slate-100 pt-6">
+                        <h3 className="text-base font-semibold text-slate-900">
+                            {tdoc.upload_heading ?? 'Last opp nytt dokument'}
+                        </h3>
+                        <p className="max-w-3xl text-sm leading-6 text-slate-600">{tdoc.upload_help ?? ''}</p>
+
+                        <form onSubmit={submitUpload} className="grid gap-4 md:grid-cols-4">
+                            <div className="md:col-span-2">
+                                <Field label={tdoc.upload_field ?? 'Fil'} error={uploadForm.errors.file}>
+                                    <input
+                                        type="file"
+                                        accept=".pdf,.docx"
+                                        className={INPUT}
+                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                    />
+                                </Field>
+                            </div>
+
+                            <Field label={tdoc.relation_type ?? 'Dokumenttype'} error={uploadForm.errors.relation_type}>
+                                <select
+                                    className={INPUT}
+                                    value={uploadForm.data.relation_type}
+                                    onChange={(e) => uploadForm.setData('relation_type', e.target.value)}
+                                >
+                                    {relationTypes.map((type) => (
+                                        <option key={type} value={type}>{relationTypeLabels?.[type] ?? type}</option>
+                                    ))}
+                                </select>
+                            </Field>
+
+                            <div className="flex items-end">
+                                <button
+                                    type="submit"
+                                    className={PRIMARY_BUTTON}
+                                    disabled={uploadForm.processing || ! uploadForm.data.file}
+                                >
+                                    {tdoc.upload_submit ?? 'Last opp og koble til'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </section>
+    );
+}
+
+/**
  * The seam to Wiki, from the quality side.
  *
  * Attaching a page changes nothing about the page — no type, no label, no move out of the Wiki
  * catalogue. The same page may back several documents here, and most pages back none.
  */
-function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch, linkTypes, linkTypeLabels }) {
+function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch, documentSearch, linkTypes, linkTypeLabels }) {
     const tw = tq.wiki ?? {};
     const [search, setSearch] = useState(wikiSearch ?? '');
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -610,7 +856,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                             className={QUIET_BUTTON}
                             onClick={() => router.get(
                                 `/app/quality/items/${item.id}`,
-                                { wiki_search: search },
+                                { wiki_search: search, document_search: documentSearch },
                                 { preserveScroll: true, preserveState: false },
                             )}
                         >
@@ -625,7 +871,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                     ) : (
                         <form onSubmit={submit} className="grid gap-4 md:grid-cols-4">
                             <div className="md:col-span-2">
-                                <Field label={tw.heading ?? 'Wiki-side'} error={errors.enterprise_wiki_page_id}>
+                                <Field label={tw.page_label ?? 'Wiki-side'} error={errors.enterprise_wiki_page_id}>
                                     <select
                                         className={INPUT}
                                         value={data.enterprise_wiki_page_id}

@@ -3,17 +3,21 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
+use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Quality\QualityItemService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -50,6 +54,7 @@ class QualityController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly QualityItemService $items,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
+        private readonly EnterpriseWikiDocumentUploadService $documentUploads,
     ) {}
 
     public function index(Request $request): Response
@@ -99,6 +104,10 @@ class QualityController extends Controller
             'wiki_links' => $this->wikiLinkRows($item, $user),
             'wiki_page_options' => $this->wikiPageOptions($customerId, $user, $request),
             'wiki_search' => trim((string) $request->query('wiki_search', '')),
+            'document_relation_types' => QualityItemDocument::RELATION_TYPES,
+            'documents' => $this->documentRows($item),
+            'document_options' => $this->documentOptions($customerId, $request),
+            'document_search' => trim((string) $request->query('document_search', '')),
             'relations' => $this->relationsForItem($customerId, (int) $item->id),
         ]);
     }
@@ -119,13 +128,64 @@ class QualityController extends Controller
             'status' => ['nullable', 'string'],
             'review_interval_months' => ['nullable', 'integer', 'min:1', 'max:120'],
             'last_reviewed_at' => ['nullable', 'date'],
+            // The document itself, optional: a styrende dokument is registered the moment the
+            // organisation decides it has one, which is routinely before anybody has written the
+            // file. The same formats storeDocument() accepts, because this is the same store —
+            // widening it here would put files into it that the ingest pipeline cannot read.
+            'file' => ['nullable', 'file', 'mimes:pdf,docx', 'max:20480'],
         ]);
 
         $item = $this->items->createItem((int) $customerId, $validated, $user);
 
+        // Deliberately after the item exists. createItem() is what rejects an unknown type, status
+        // or owner, and uploading first would mean storing a file for a form that is about to come
+        // back with a validation error. The reverse failure — a stored item whose upload failed — is
+        // both rarer and visible: the user lands on the item page and sees no document there, with
+        // the per-item upload ready to retry.
+        if ($request->hasFile('file')) {
+            $this->attachUploadedDocument($request->file('file'), (int) $customerId, $item, $user);
+        }
+
         return redirect()
             ->route('app.quality.items.show', ['item' => $item->id])
             ->with('success', __('procynia.quality.flash.item_created'));
+    }
+
+    /**
+     * Put the file from the create form into the virksomhet's store and hang it on the new item.
+     *
+     * The upload is the existing one — EnterpriseWikiDocumentUploadService, the same service
+     * storeDocument() uses — so the file lands on the same private customer path under the same
+     * SHA-256 identity, extracted the same way, and a file the customer already has is attached
+     * rather than written twice.
+     *
+     * The relation is always `source`: the file arriving with the form is the document being
+     * registered, not a template it uses or a record it leaves behind. Attaching a file in any
+     * other capacity stays on the item page, where there is a field to say which.
+     */
+    private function attachUploadedDocument(
+        UploadedFile $file,
+        int $customerId,
+        QualityItem $item,
+        ?User $user,
+    ): bool {
+        // The uploader owns what they upload, when their role may own a document at all. No new
+        // permission is introduced: an ownerless document is a state the store already supports,
+        // and reassigning the owner stays where it is, in Wiki → Kildedokumenter.
+        $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
+
+        $result = $this->documentUploads->store($customerId, $file, $ownerUserId, $user?->id);
+
+        $this->items->linkDocument(
+            $customerId,
+            $item,
+            $result['document'],
+            QualityItemDocument::RELATION_TYPE_SOURCE,
+            null,
+            $user,
+        );
+
+        return (bool) $result['reused'];
     }
 
     public function updateItem(Request $request, QualityItem $item): RedirectResponse
@@ -308,6 +368,109 @@ class QualityController extends Controller
         return back()->with('success', __('procynia.quality.flash.wiki_unlinked'));
     }
 
+    /**
+     * Attach a file the virksomhet already has.
+     *
+     * Separate from storeWikiLink() and deliberately so: a Wiki link reaches the knowledge written
+     * down about a subject, this reaches a file the document consists of, uses or leaves behind.
+     */
+    public function storeDocumentLink(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'enterprise_wiki_document_id' => ['required', 'integer'],
+            'relation_type' => ['nullable', 'string'],
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->findOrFail($validated['enterprise_wiki_document_id']);
+
+        $this->items->linkDocument(
+            (int) $customerId,
+            $item,
+            $document,
+            $validated['relation_type'] ?? QualityItemDocument::RELATION_TYPE_SOURCE,
+            $validated['note'] ?? null,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.document_linked'));
+    }
+
+    /**
+     * Upload a file and attach it in one step.
+     *
+     * The upload itself is the existing one — EnterpriseWikiDocumentUploadService is literally what
+     * Wiki → Kildedokumenter runs, so the file lands in the same private, customer-scoped place,
+     * under the same SHA-256 identity, extracted the same way. Kvalitet only differs in what it
+     * does about a file the customer already has: Wiki refuses the upload, Kvalitet attaches the
+     * copy it already holds, because a second copy of the same bytes is never the right answer and
+     * the user's intent — "this file belongs to this document" — is satisfied either way.
+     *
+     * Validation accepts the same formats Wiki does. Widening it here would put files into the
+     * shared store that the Wiki ingest pipeline cannot read.
+     */
+    public function storeDocument(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'mimes:pdf,docx', 'max:20480'],
+            'relation_type' => ['nullable', 'string'],
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        // The uploader owns what they upload, when their role may own a document at all. No new
+        // permission is introduced: an ownerless document is a state the store already supports,
+        // and reassigning the owner stays where it is, in Wiki → Kildedokumenter.
+        $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
+
+        $result = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user?->id);
+
+        $this->items->linkDocument(
+            (int) $customerId,
+            $item,
+            $result['document'],
+            $validated['relation_type'] ?? QualityItemDocument::RELATION_TYPE_SOURCE,
+            $validated['note'] ?? null,
+            $user,
+        );
+
+        return back()->with('success', __($result['reused']
+            ? 'procynia.quality.flash.document_reused'
+            : 'procynia.quality.flash.document_uploaded'));
+    }
+
+    /**
+     * Remove the connection, not the file.
+     *
+     * Deleting the document itself is a different act with a different authority and lives in
+     * Wiki → Kildedokumenter, where the deletion service knows what else is built on it.
+     */
+    public function destroyDocumentLink(QualityItemDocument $link): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $link->customer_id, $customerId);
+
+        $this->items->unlinkDocument((int) $customerId, $link);
+
+        return back()->with('success', __('procynia.quality.flash.document_unlinked'));
+    }
+
     // -----------------------------------------------------------------
     // Payloads
     // -----------------------------------------------------------------
@@ -485,6 +648,74 @@ class QualityController extends Controller
                 'slug' => $page->slug,
                 'page_type' => $page->page_type,
                 'status' => $page->status,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The files attached to one quality item.
+     *
+     * No visibility filter, unlike wikiLinkRows(): a document is customer-scoped and has no
+     * per-reader status, so anyone who may open the quality item may see what is attached to it.
+     * Whether they may delete the file is a separate question, answered in Wiki.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function documentRows(QualityItem $item): array
+    {
+        return QualityItemDocument::query()
+            ->where('quality_item_id', $item->id)
+            ->with(['document:id,original_filename,document_status,owner_user_id,created_at', 'document.owner:id,name'])
+            ->orderBy('id')
+            ->get()
+            ->filter(static fn (QualityItemDocument $link): bool => $link->document !== null)
+            ->map(static fn (QualityItemDocument $link): array => [
+                'id' => (int) $link->id,
+                'relation_type' => $link->relation_type,
+                'note' => $link->note,
+                'document_id' => (int) $link->enterprise_wiki_document_id,
+                'filename' => $link->document?->original_filename,
+                'document_status' => $link->document?->document_status,
+                'owner_name' => $link->document?->owner?->name,
+                'uploaded_at' => $link->document?->created_at?->toDateString(),
+                'download_url' => $link->document !== null
+                    ? route('app.wiki.sources.download', ['document' => $link->document->id])
+                    : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Files that can be attached.
+     *
+     * Capped and searchable for the same reason the Wiki page picker is: this is a picker into a
+     * store that grows without bound, not a worklist. Already-attached files are not excluded — one
+     * file may legitimately be both the source and the template — and the unique index refuses a
+     * true duplicate.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function documentOptions(?int $customerId, Request $request): array
+    {
+        $search = trim((string) $request->query('document_search', ''));
+
+        $query = EnterpriseWikiDocument::query()->where('customer_id', $customerId);
+
+        if ($search !== '') {
+            $query->whereRaw('LOWER(original_filename) LIKE ?', ['%'.mb_strtolower($search).'%']);
+        }
+
+        return $query
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get(['id', 'original_filename', 'document_status', 'created_at'])
+            ->map(static fn (EnterpriseWikiDocument $document): array => [
+                'document_id' => (int) $document->id,
+                'filename' => $document->original_filename,
+                'document_status' => $document->document_status,
+                'uploaded_at' => $document->created_at?->toDateString(),
             ])
             ->values()
             ->all();

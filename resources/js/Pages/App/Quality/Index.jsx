@@ -225,11 +225,26 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
         status: 'draft',
         review_interval_months: '',
         last_reviewed_at: '',
+        file: null,
     });
+
+    // Held in state so the file input can be cleared on success — a file input's value cannot be
+    // set programmatically, so remounting it is the only way to stop a submitted file lingering in
+    // the form after the item has been created.
+    const [fileInputKey, setFileInputKey] = useState(0);
 
     function submit(event) {
         event.preventDefault();
-        post('/app/quality/items', { onSuccess: () => reset() });
+        // forceFormData, because a file cannot travel as JSON. Inertia would switch on its own once
+        // it sees a File, but saying so keeps the request shape from depending on whether the user
+        // happened to pick one.
+        post('/app/quality/items', {
+            forceFormData: true,
+            onSuccess: () => {
+                reset();
+                setFileInputKey((key) => key + 1);
+            },
+        });
     }
 
     return (
@@ -311,6 +326,21 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                         onChange={(event) => setData('last_reviewed_at', event.target.value)}
                     />
                 </Field>
+
+                <div className="md:col-span-2">
+                    <Field label={tq.field_file ?? 'Last opp dokument'} error={errors.file}>
+                        <input
+                            key={fileInputKey}
+                            type="file"
+                            accept=".pdf,.docx"
+                            className={INPUT}
+                            onChange={(event) => setData('file', event.target.files?.[0] ?? null)}
+                        />
+                        <span className="block text-sm text-slate-500">
+                            {tq.field_file_help ?? 'Valgfritt. PDF eller Word (DOCX), maks 20 MB.'}
+                        </span>
+                    </Field>
+                </div>
 
                 <div className="md:col-span-2">
                     <Field label={tq.field_purpose ?? 'Formål'} error={errors.purpose}>
