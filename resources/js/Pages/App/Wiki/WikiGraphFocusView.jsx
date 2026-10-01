@@ -4,7 +4,8 @@ import Sigma from 'sigma';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { truncateLabelToWidth } from './graphLabelLogic';
 import { articleHrefFromGraph } from './wikiGraphNavigation';
-import { buildFocusUrl, focusErrorFromStatus, focusRadialLayout } from './wikiGraphFocus';
+import { buildFocusUrl, focusErrorFromStatus, focusLayout } from './wikiGraphFocus';
+import { computeLabelAwareFit } from './wikiGraphFocusFit';
 
 /**
  * The focus neighbourhood of a single Wiki page, drawn from /app/wiki/graph-focus.
@@ -28,7 +29,31 @@ const PAGE_TYPE_COLORS = {
 const EDGE_COLOR = '#cbd5e1';
 const NODE_LABEL_SIZE = 16;
 const NODE_LABEL_COLOR = '#1e293b';
-const NODE_LABEL_MAX_WIDTH_PX = 180;
+const NODE_LABEL_FONT = 'Inter, system-ui, sans-serif';
+const NODE_LABEL_WEIGHT = '500';
+
+/** The gap between a node's disc and the first letter of its label, in pixels. */
+const NODE_LABEL_OFFSET_PX = 3;
+
+/**
+ * How much of the canvas one label may claim.
+ *
+ * A fixed 180px is right on a laptop and absurd on a phone, where it is nearly half the screen: two
+ * labels pointing at each other would leave no room for the graph between them. Tying it to the
+ * canvas keeps the proportion the same on every width, and the floor keeps a phone's labels long
+ * enough to tell two pages apart.
+ */
+const LABEL_WIDTH_FRACTION = 0.26;
+const LABEL_WIDTH_MIN_PX = 96;
+const LABEL_WIDTH_MAX_PX = 180;
+
+export function labelWidthForCanvas(canvasWidth) {
+    if (!Number.isFinite(canvasWidth) || canvasWidth <= 0) {
+        return LABEL_WIDTH_MAX_PX;
+    }
+
+    return Math.max(LABEL_WIDTH_MIN_PX, Math.min(LABEL_WIDTH_MAX_PX, canvasWidth * LABEL_WIDTH_FRACTION));
+}
 
 // Size carries the hop distance, so depth is readable without consulting a legend: the focus page is
 // unmistakably the subject, first-hop pages are full participants, second-hop pages are context.
@@ -38,23 +63,123 @@ function nodeSizeForDepth(depth) {
     return DEPTH_SIZES[depth] ?? 9;
 }
 
-function drawTruncatedNodeLabel(context, data, settings) {
-    if (!data.label) return;
+/**
+ * The label renderer, bound to the width one label may use on THIS canvas.
+ *
+ * Labels are written outward — a page on the left of the layout has its title to its left — so that
+ * titles lean into the empty margin instead of across the middle of the picture, and so that the fit
+ * only has to reserve a label's width on one side of each node. `labelSide` is decided by the layout
+ * rather than re-derived here, because the layout is the thing that knows which column a page is in.
+ */
+function makeNodeLabelRenderer(labelWidth) {
+    return function drawTruncatedNodeLabel(context, data, settings) {
+        if (!data.label) return;
 
-    const size = settings.labelSize;
-    const font = settings.labelFont;
-    const weight = settings.labelWeight;
+        const size = settings.labelSize;
 
-    context.fillStyle = settings.labelColor.color;
-    context.font = `${weight} ${size}px ${font}`;
+        context.fillStyle = settings.labelColor.color;
+        context.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
 
-    const label = truncateLabelToWidth(
-        (text) => context.measureText(text).width,
-        data.label,
-        NODE_LABEL_MAX_WIDTH_PX,
+        // Read through the holder rather than captured: a resize changes how wide a label may be,
+        // and a renderer still truncating to the old width would be clipped by the new fit.
+        const label = truncateLabelToWidth(
+            (text) => context.measureText(text).width,
+            data.label,
+            labelWidth.px,
+        );
+
+        const baseline = data.y + size / 3;
+
+        if (data.labelSide === 'left') {
+            const width = context.measureText(label).width;
+
+            context.fillText(label, data.x - data.size - NODE_LABEL_OFFSET_PX - width, baseline);
+
+            return;
+        }
+
+        context.fillText(label, data.x + data.size + NODE_LABEL_OFFSET_PX, baseline);
+    };
+}
+
+/**
+ * A detached 2D context, used only to measure text for the camera fit.
+ *
+ * Measuring against Sigma's own label canvas would mean reading a context whose font is whatever the
+ * last frame happened to set, and writing to it would fight the renderer for the same surface.
+ */
+let measurementContext = null;
+
+function measureLabelWidth(label, maxWidthPx) {
+    if (!label) {
+        return 0;
+    }
+
+    if (measurementContext === null) {
+        measurementContext = document.createElement('canvas').getContext('2d');
+    }
+
+    measurementContext.font = `${NODE_LABEL_WEIGHT} ${NODE_LABEL_SIZE}px ${NODE_LABEL_FONT}`;
+
+    const truncated = truncateLabelToWidth(
+        (text) => measurementContext.measureText(text).width,
+        label,
+        maxWidthPx,
     );
 
-    context.fillText(label, data.x + data.size + 3, data.y + size / 3);
+    return measurementContext.measureText(truncated).width;
+}
+
+/**
+ * Frame the neighbourhood so that no label is cut off at any edge.
+ *
+ * Sigma's auto-rescale frames node POSITIONS, and a label sits beside its node at a fixed pixel size
+ * — so the outermost title on each side is exactly what gets clipped. Every node's real extent (its
+ * disc, plus its label on whichever side the layout put it) is measured here in pixels and handed to
+ * computeLabelAwareFit, which answers with the largest camera that still contains all of them.
+ */
+function fitCameraToLabels(renderer, maxLabelWidthPx) {
+    const graph = renderer.getGraph();
+    const { width, height } = renderer.getDimensions();
+    const items = [];
+
+    graph.forEachNode((id, attributes) => {
+        const display = renderer.getNodeDisplayData(id);
+
+        if (!display) return;
+
+        const point = renderer.framedGraphToViewport({ x: display.x, y: display.y });
+        const radius = (display.size ?? attributes.size ?? 10) + NODE_LABEL_OFFSET_PX;
+        // The focus page's label is drawn boxed by Sigma's own highlight renderer, which is a little
+        // wider than the plain text — allow for the box rather than let it be the one thing clipped.
+        const boxed = attributes.highlighted ? 16 : 0;
+        const labelWidth = measureLabelWidth(attributes.label, maxLabelWidthPx) + boxed;
+
+        items.push({
+            x: point.x,
+            y: point.y,
+            left: radius + (attributes.labelSide === 'left' ? labelWidth : 0),
+            right: radius + (attributes.labelSide === 'left' ? 0 : labelWidth),
+            top: radius + NODE_LABEL_SIZE,
+            bottom: radius + NODE_LABEL_SIZE,
+        });
+    });
+
+    const camera = renderer.getCamera();
+    const fit = computeLabelAwareFit({
+        items,
+        width,
+        height,
+        ratio: camera.getState().ratio,
+    });
+
+    if (fit === null) {
+        return;
+    }
+
+    const target = renderer.viewportToFramedGraph(fit.center);
+
+    camera.setState({ x: target.x, y: target.y, ratio: fit.ratio, angle: 0 });
 }
 
 function Message({ tone = 'slate', title, hint, children }) {
@@ -212,16 +337,17 @@ export default function WikiGraphFocusView({
             return undefined;
         }
 
-        const positions = focusRadialLayout(data.nodes, data.edges ?? []);
+        const positions = focusLayout(data.nodes, data.edges ?? []);
         const graph = new Graph();
 
         data.nodes.forEach((node) => {
-            const position = positions[node.id] ?? { x: 0, y: 0 };
+            const position = positions[node.id] ?? { x: 0, y: 0, labelSide: 'right' };
 
             graph.addNode(node.id, {
                 label: node.title,
                 x: position.x,
                 y: position.y,
+                labelSide: position.labelSide ?? 'right',
                 size: nodeSizeForDepth(Number(node.depth)),
                 color: PAGE_TYPE_COLORS[node.page_type] ?? '#6b7280',
                 // Sigma's own "this one matters" treatment: the focus page keeps its label boxed and
@@ -246,14 +372,16 @@ export default function WikiGraphFocusView({
             }
         });
 
+        const labelWidth = { px: labelWidthForCanvas(containerRef.current.clientWidth) };
+
         const renderer = new Sigma(graph, containerRef.current, {
             renderEdgeLabels: false,
             defaultEdgeColor: EDGE_COLOR,
-            labelFont: 'Inter, system-ui, sans-serif',
+            labelFont: NODE_LABEL_FONT,
             labelSize: NODE_LABEL_SIZE,
-            labelWeight: '500',
+            labelWeight: NODE_LABEL_WEIGHT,
             labelColor: { color: NODE_LABEL_COLOR },
-            defaultDrawNodeLabel: drawTruncatedNodeLabel,
+            defaultDrawNodeLabel: makeNodeLabelRenderer(labelWidth),
             labelGridCellSize: 150,
             // Every page in a focus view is meant to be read — this is a small graph, so nothing is
             // decluttered away.
@@ -268,7 +396,35 @@ export default function WikiGraphFocusView({
 
         sigmaRef.current = renderer;
 
+        // One frame late, deliberately: the camera fit is measured in viewport pixels, and the
+        // container has no pixels to measure until Sigma has drawn into it once.
+        let frame = requestAnimationFrame(() => {
+            frame = null;
+            fitCameraToLabels(renderer, labelWidth.px);
+        });
+
+        // A rotated phone, an opened sidebar or a resized window changes how much room the labels
+        // have, and a fit computed for the old width leaves them over the edge of the new one.
+        const observer = new ResizeObserver(() => {
+            if (frame !== null) return;
+
+            frame = requestAnimationFrame(() => {
+                frame = null;
+                labelWidth.px = labelWidthForCanvas(renderer.getDimensions().width);
+                renderer.refresh();
+                fitCameraToLabels(renderer, labelWidth.px);
+            });
+        });
+
+        observer.observe(containerRef.current);
+
         return () => {
+            observer.disconnect();
+
+            if (frame !== null) {
+                cancelAnimationFrame(frame);
+            }
+
             renderer.kill();
             sigmaRef.current = null;
         };

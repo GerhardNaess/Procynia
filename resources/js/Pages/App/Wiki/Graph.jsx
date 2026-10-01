@@ -1265,9 +1265,12 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                 </div>
 
                 {/* Main content */}
-                <div className="flex min-h-0 flex-1 gap-4">
+                {/* The sidebar is a fixed 224px column, which on a phone leaves the canvas barely a
+                    hundred pixels wide — too narrow for a single page title, in either mode. Below
+                    lg it stacks above the canvas instead, so the graph gets the whole width. */}
+                <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
                     {/* Left sidebar */}
-                    <div className="flex w-56 shrink-0 flex-col gap-3 overflow-y-auto">
+                    <div className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto lg:w-56">
                         {mode === 'focus' && (
                             <FocusPanel
                                 pageOptions={pageOptions}
@@ -1316,7 +1319,10 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                     </div>
 
                     {/* Graph canvas area */}
-                    <div className="relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+                    {/* min-h-80 is for the stacked phone layout only: once the sidebar is a row of
+                        its own, flex-1 alone would let a tall filter panel squeeze the canvas to
+                        nothing. */}
+                    <div className="relative min-h-80 min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
                         {/* Loading */}
                         {mode === 'full' && loading && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-50">

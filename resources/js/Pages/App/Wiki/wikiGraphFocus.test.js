@@ -4,14 +4,19 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
+    COLUMN_ROW_PITCH,
     DEFAULT_FOCUS_DEPTH,
     DEFAULT_FOCUS_DIRECTION,
     FOCUS_DEPTHS,
     FOCUS_DIRECTIONS,
+    OUTER_RING_MAX_SPOKES,
+    RING_MAX_SPOKES,
     buildFocusUrl,
     focusErrorFromStatus,
+    focusLayout,
+    focusLayoutStrategy,
     focusPageOptions,
-    focusRadialLayout,
+    labelSideForX,
 } from './wikiGraphFocus.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -126,36 +131,80 @@ describe('focusPageOptions — the page picker', () => {
     });
 });
 
+const focusNode = { id: 'page-82', depth: 0, is_focus: true };
+
+const neighbourhood = (count, depth = 1) =>
+    Array.from({ length: count }, (_, i) => ({ id: `page-${depth}-${i}`, depth }));
+
+/** A hub: one focus page, `count` first-hop pages, and the edges that attach them. */
+const hub = (count) => ({
+    nodes: [focusNode, ...neighbourhood(count)],
+    edges: neighbourhood(count).map((node) => ({ source: 'page-82', target: node.id })),
+});
+
+/**
+ * Ring while a ring reads, columns once it does not.
+ *
+ * A label is horizontal and fixed in pixels, and a ring gives two neighbouring pages almost no
+ * HORIZONTAL separation at the top and bottom of the circle. Making the ring bigger cannot help: the
+ * camera fits it to the viewport, so a bigger ring is drawn smaller. Past a count, the arrangement
+ * itself has to change.
+ */
+describe('focusLayoutStrategy — which arrangement this neighbourhood gets', () => {
+    test('a handful of neighbours keeps the ring', () => {
+        assert.equal(focusLayoutStrategy(0, 0), 'ring');
+        assert.equal(focusLayoutStrategy(RING_MAX_SPOKES, 0), 'ring');
+    });
+
+    test('a crowded first hop switches to columns', () => {
+        assert.equal(focusLayoutStrategy(RING_MAX_SPOKES + 1, 0), 'columns');
+        assert.equal(focusLayoutStrategy(24, 0), 'columns');
+    });
+
+    test('a crowded SECOND hop switches too, even behind a small first hop', () => {
+        // Six neighbours with forty children between them is a hairball on a ring, and the first-hop
+        // count alone would never notice.
+        assert.equal(focusLayoutStrategy(6, OUTER_RING_MAX_SPOKES), 'ring');
+        assert.equal(focusLayoutStrategy(6, OUTER_RING_MAX_SPOKES + 1), 'columns');
+    });
+});
+
+describe('labelSideForX — which way a title is written', () => {
+    test('a page left of the centre writes its title leftward, away from the picture', () => {
+        assert.equal(labelSideForX(-1), 'left');
+        assert.equal(labelSideForX(-0.0001), 'left');
+    });
+
+    test('the centre and everything right of it writes rightward', () => {
+        assert.equal(labelSideForX(0), 'right');
+        assert.equal(labelSideForX(140), 'right');
+    });
+});
+
 /**
  * The layout IS the readability of this view. A force simulation would place the focus page wherever
  * the physics settled and would move every page each time the depth changed; these assertions pin
- * the three properties that make the picture answerable at a glance.
+ * the properties that make the picture answerable at a glance.
  */
-describe('focusRadialLayout — where each page goes', () => {
-    const focusNode = { id: 'page-82', depth: 0, is_focus: true };
-
-    const neighbourhood = (count, depth = 1) =>
-        Array.from({ length: count }, (_, i) => ({ id: `page-${depth}${i}`, depth }));
-
+describe('focusLayout — the ring, for a neighbourhood that fits on one', () => {
     test('the focus page sits at the centre, which is what makes it the focus', () => {
-        const positions = focusRadialLayout([focusNode, ...neighbourhood(3)], []);
+        const positions = focusLayout([focusNode, ...neighbourhood(3)], []);
 
-        assert.deepEqual(positions['page-82'], { x: 0, y: 0 });
+        assert.deepEqual(positions['page-82'], { x: 0, y: 0, labelSide: 'right' });
     });
 
     test('the ring starts directly above the focus page, where a reader looks first', () => {
         // Sigma renders positive y upward. Getting this sign wrong is invisible in every assertion
         // about distances and relative angles, and puts the first page at the bottom on screen.
-        const positions = focusRadialLayout([focusNode, ...neighbourhood(4)], [], { ringRadius: 100 });
-        const first = positions['page-10'];
+        const positions = focusLayout([focusNode, ...neighbourhood(4)], [], { ringRadius: 100 });
+        const first = positions['page-1-0'];
 
         assert.ok(Math.abs(first.x) < 1e-9, 'the first ring page must sit on the vertical axis');
         assert.ok(first.y > 0, 'the first ring page must sit ABOVE the focus page, not below it');
     });
 
     test('first-hop pages share one radius — the ring IS the hop distance', () => {
-        const nodes = [focusNode, ...neighbourhood(5)];
-        const positions = focusRadialLayout(nodes, [], { ringRadius: 100 });
+        const positions = focusLayout([focusNode, ...neighbourhood(5)], [], { ringRadius: 100 });
 
         for (const node of neighbourhood(5)) {
             const { x, y } = positions[node.id];
@@ -170,7 +219,7 @@ describe('focusRadialLayout — where each page goes', () => {
             { source: 'page-1', target: 'page-2' },
         ];
 
-        const positions = focusRadialLayout(nodes, edges, { ringRadius: 100 });
+        const positions = focusLayout(nodes, edges, { ringRadius: 100 });
 
         assert.ok(Math.abs(Math.hypot(positions['page-1'].x, positions['page-1'].y) - 100) < 1e-6);
         assert.ok(Math.abs(Math.hypot(positions['page-2'].x, positions['page-2'].y) - 200) < 1e-6);
@@ -193,7 +242,7 @@ describe('focusRadialLayout — where each page goes', () => {
             { source: 'b', target: 'b-child' },
         ];
 
-        const positions = focusRadialLayout(nodes, edges, { ringRadius: 100 });
+        const positions = focusLayout(nodes, edges, { ringRadius: 100 });
         const angle = (id) => Math.atan2(positions[id].y, positions[id].x);
         const gap = (one, two) => Math.abs(Math.atan2(Math.sin(angle(one) - angle(two)), Math.cos(angle(one) - angle(two))));
 
@@ -210,33 +259,190 @@ describe('focusRadialLayout — where each page goes', () => {
             { source: 'a-child', target: 'a' },
         ];
 
-        const positions = focusRadialLayout(nodes, edges, { ringRadius: 100 });
+        const positions = focusLayout(nodes, edges, { ringRadius: 100 });
         const angle = (id) => Math.atan2(positions[id].y, positions[id].x);
 
         assert.ok(Math.abs(angle('a-child') - angle('a')) < 1e-6, 'a single child sits on its parent\'s own bearing');
     });
 
+    test('a ring page left of the centre writes its title outward', () => {
+        const positions = focusLayout([focusNode, ...neighbourhood(4)], [], { ringRadius: 100 });
+
+        for (const [id, position] of Object.entries(positions)) {
+            assert.equal(position.labelSide, position.x < 0 ? 'left' : 'right', `${id} writes its title inward`);
+        }
+    });
+
     test('the same neighbourhood always draws the same way', () => {
         const nodes = [focusNode, ...neighbourhood(4), ...neighbourhood(3, 2)];
-        const edges = [{ source: 'page-10', target: 'page-20' }];
+        const edges = [{ source: 'page-1-0', target: 'page-2-0' }];
 
-        assert.deepEqual(focusRadialLayout(nodes, edges), focusRadialLayout(nodes, edges));
+        assert.deepEqual(focusLayout(nodes, edges), focusLayout(nodes, edges));
     });
 
     test('a page with no path back to the first hop is still given a position', () => {
         // The server should never send one; if it ever does, the view must not stack it on the
         // focus page and claim they are the same point.
-        const positions = focusRadialLayout([focusNode, { id: 'stray', depth: 2 }], []);
+        const positions = focusLayout([focusNode, { id: 'stray', depth: 2 }], []);
 
-        assert.notDeepEqual(positions.stray, { x: 0, y: 0 });
+        assert.notEqual(positions.stray.x === 0 && positions.stray.y === 0, true);
         assert.ok(Number.isFinite(positions.stray.x) && Number.isFinite(positions.stray.y));
     });
 
     test('a lone focus page lays out without dividing by zero', () => {
-        const positions = focusRadialLayout([focusNode], []);
+        assert.deepEqual(focusLayout([focusNode], []), { 'page-82': { x: 0, y: 0, labelSide: 'right' } });
+        assert.deepEqual(focusLayout([], []), {});
+    });
+});
 
-        assert.deepEqual(positions, { 'page-82': { x: 0, y: 0 } });
-        assert.deepEqual(focusRadialLayout([], []), {});
+/**
+ * The arrangement that has to survive a hub.
+ *
+ * Twenty-four neighbours on a ring is unreadable whatever the radius; in two columns it is twelve
+ * rows a side, which is ordinary. These assertions pin the properties that make that true — every
+ * page on its own row, both columns the same height, children in line with their own parent, and
+ * titles written away from the middle.
+ */
+describe('focusLayout — columns, for a neighbourhood a ring cannot hold', () => {
+    const rowsOf = (positions, ids) => ids.map((id) => positions[id].y);
+
+    test('the focus page keeps the centre', () => {
+        const { nodes, edges } = hub(24);
+        const positions = focusLayout(nodes, edges);
+
+        assert.deepEqual(positions['page-82'], { x: 0, y: 0, labelSide: 'right' });
+    });
+
+    test('neighbours land in exactly two columns, one either side of the focus page', () => {
+        const { nodes, edges } = hub(24);
+        const positions = focusLayout(nodes, edges);
+        const xs = new Set(neighbourhood(24).map((node) => positions[node.id].x));
+
+        assert.equal(xs.size, 2, 'a first hop must occupy one column per side and no more');
+        assert.deepEqual([...xs].map(Math.sign).sort(), [-1, 1]);
+    });
+
+    test('the two columns stay within one page of each other, however lopsided the links', () => {
+        // A side chosen by edge direction would put all 24 of an outgoing-only hub in one column,
+        // twice as tall as the viewport and half of it empty.
+        for (const count of [3, 11, 24, 25]) {
+            const { nodes, edges } = hub(count);
+            const positions = focusLayout(nodes, edges, { strategy: 'columns' });
+            const left = neighbourhood(count).filter((n) => positions[n.id].x < 0).length;
+            const right = count - left;
+
+            assert.ok(Math.abs(left - right) <= 1, `${count} neighbours split ${left}/${right}`);
+        }
+    });
+
+    test('no two pages in a column share a row — this is what a ring could not promise', () => {
+        const { nodes, edges } = hub(24);
+        const positions = focusLayout(nodes, edges);
+
+        for (const side of [-1, 1]) {
+            const ys = neighbourhood(24)
+                .filter((node) => Math.sign(positions[node.id].x) === side)
+                .map((node) => positions[node.id].y);
+
+            assert.equal(new Set(ys).size, ys.length, 'two pages were put on the same row');
+            assert.ok(
+                Math.min(...ys.slice(1).map((y, i) => Math.abs(y - ys[i]))) >= COLUMN_ROW_PITCH - 1e-9,
+                'rows are closer together than the pitch allows',
+            );
+        }
+    });
+
+    test('a column is centred on the focus page rather than hanging off one side of it', () => {
+        const { nodes, edges } = hub(24);
+        const positions = focusLayout(nodes, edges);
+        const ys = neighbourhood(24).map((node) => positions[node.id].y);
+
+        assert.ok(Math.abs(Math.min(...ys) + Math.max(...ys)) < 1e-9, 'the columns are not centred vertically');
+    });
+
+    test('a second-hop page sits further out than its parent, on the same side', () => {
+        const nodes = [focusNode, ...neighbourhood(12), ...neighbourhood(20, 2)];
+        const edges = [
+            ...neighbourhood(12).map((node) => ({ source: 'page-82', target: node.id })),
+            ...neighbourhood(20, 2).map((node, i) => ({ source: `page-1-${i % 12}`, target: node.id })),
+        ];
+
+        const positions = focusLayout(nodes, edges);
+
+        for (const [i, child] of neighbourhood(20, 2).entries()) {
+            const parent = positions[`page-1-${i % 12}`];
+            const own = positions[child.id];
+
+            assert.equal(Math.sign(own.x), Math.sign(parent.x), `${child.id} changed sides`);
+            assert.ok(Math.abs(own.x) > Math.abs(parent.x), `${child.id} is not beyond its parent`);
+        }
+    });
+
+    test('a page with one child is level with it, so the edge between them is a short line', () => {
+        const nodes = [focusNode, ...neighbourhood(12), { id: 'only-child', depth: 2 }];
+        const edges = [
+            ...neighbourhood(12).map((node) => ({ source: 'page-82', target: node.id })),
+            { source: 'page-1-0', target: 'only-child' },
+        ];
+
+        const positions = focusLayout(nodes, edges);
+
+        assert.ok(Math.abs(positions['only-child'].y - positions['page-1-0'].y) < 1e-9);
+    });
+
+    test('a page with several children sits at the middle of them', () => {
+        const children = neighbourhood(3, 2);
+        const nodes = [focusNode, ...neighbourhood(12), ...children];
+        const edges = [
+            ...neighbourhood(12).map((node) => ({ source: 'page-82', target: node.id })),
+            ...children.map((child) => ({ source: 'page-1-0', target: child.id })),
+        ];
+
+        const positions = focusLayout(nodes, edges);
+        const ys = rowsOf(positions, children.map((child) => child.id));
+
+        assert.ok(Math.abs(positions['page-1-0'].y - (Math.min(...ys) + Math.max(...ys)) / 2) < 1e-9);
+    });
+
+    test('titles are written outward, so a column never writes across the middle', () => {
+        const { nodes, edges } = hub(24);
+        const positions = focusLayout(nodes, edges);
+
+        for (const node of neighbourhood(24)) {
+            const position = positions[node.id];
+            assert.equal(position.labelSide, position.x < 0 ? 'left' : 'right');
+        }
+    });
+
+    test('the columns stand further apart as they grow taller, so the gap on screen does not close', () => {
+        // The camera fits the layout's HEIGHT into the viewport, so a taller layout is drawn at a
+        // smaller scale. A gap fixed in layout units would therefore shrink on screen exactly when
+        // there are the most titles to keep apart; it has to grow with the height instead.
+        const gapFor = (count) => {
+            const { nodes, edges } = hub(count);
+
+            return Math.abs(focusLayout(nodes, edges, { strategy: 'columns' })[`page-1-0`].x);
+        };
+
+        const tallHeight = 24 * COLUMN_ROW_PITCH;
+        assert.ok(gapFor(48) > gapFor(12), 'a taller layout must spread its columns wider');
+        assert.ok(gapFor(48) / gapFor(12) > 1.5, `a ${tallHeight}-unit column barely widened its gap`);
+    });
+
+    test('an unattached second-hop page goes below the shorter column, never onto the focus page', () => {
+        const nodes = [focusNode, ...neighbourhood(12), { id: 'stray', depth: 2 }];
+        const edges = neighbourhood(12).map((node) => ({ source: 'page-82', target: node.id }));
+
+        const positions = focusLayout(nodes, edges);
+
+        assert.ok(Number.isFinite(positions.stray.x) && Number.isFinite(positions.stray.y));
+        assert.notEqual(positions.stray.x, 0);
+    });
+
+    test('the same hub always draws the same way', () => {
+        const { nodes, edges } = hub(24);
+
+        assert.deepEqual(focusLayout(nodes, edges), focusLayout(nodes, edges));
     });
 });
 
@@ -299,6 +505,28 @@ describe('the wiring in Graph.jsx and WikiGraphFocusView.jsx', () => {
 
     test('a slower earlier answer cannot overwrite the view the user is now on', () => {
         assert.match(focus, /cancelled = true/);
+    });
+
+    test('the camera is fitted around the labels, not around the dots', () => {
+        // Sigma's own auto-rescale frames node positions; a label is drawn beside its node at a
+        // fixed pixel size, so without this the outermost title on each side is clipped.
+        assert.match(focus, /computeLabelAwareFit/);
+        assert.match(focus, /fitCameraToLabels\(renderer/);
+    });
+
+    test('a resize re-fits rather than leaving the old framing in place', () => {
+        // A rotated phone or an opened sidebar changes how much room the labels have.
+        assert.match(focus, /new ResizeObserver\(/);
+        assert.match(focus, /observer\.disconnect\(\)/);
+    });
+
+    test('the label a page may draw is tied to the canvas it is drawn on', () => {
+        assert.match(focus, /labelWidthForCanvas/);
+    });
+
+    test('the full graph keeps its own fit, untouched by any of this', () => {
+        assert.match(graph, /computeFitToViewport/);
+        assert.equal(/wikiGraphFocusFit/.test(graph), false);
     });
 
     test('focus labels are translatable and fall back to Norwegian in both files', () => {
