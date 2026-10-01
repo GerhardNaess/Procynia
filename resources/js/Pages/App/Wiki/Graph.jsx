@@ -9,6 +9,14 @@ import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilter
 import { truncateLabelToWidth } from './graphLabelLogic';
 import { articleHrefFromGraph } from './wikiGraphNavigation';
 import { computeFitToViewport } from './wikiGraphFitView';
+import WikiGraphFocusView from './WikiGraphFocusView';
+import {
+    DEFAULT_FOCUS_DEPTH,
+    DEFAULT_FOCUS_DIRECTION,
+    FOCUS_DEPTHS,
+    FOCUS_DIRECTIONS,
+    focusPageOptions,
+} from './wikiGraphFocus';
 import {
     buildRelationIndex,
     buildRelationPanel,
@@ -344,7 +352,7 @@ function FilterPanel({
     );
 }
 
-function NodePanel({ node, tw, onClose, graphScope }) {
+function NodePanel({ node, tw, onClose, graphScope, onFocus }) {
     if (!node) return null;
     const statusColor = STATUS_RING[node.nodeStatus] ?? STATUS_RING.ok;
     const typeLabel = {
@@ -402,6 +410,19 @@ function NodePanel({ node, tw, onClose, graphScope }) {
                     </div>
                 ))}
             </dl>
+
+            {/* The second question a user has about a node they just clicked, after "what is it":
+                "what is it connected to". Focus mode answers that one, so the panel offers it here
+                rather than making the user find the page again in the focus picker. */}
+            {onFocus && (
+                <button
+                    type="button"
+                    onClick={() => onFocus(node.pageId)}
+                    className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                >
+                    {tw.graph_focus_set_focus ?? 'Fokuser på denne siden'}
+                </button>
+            )}
 
             {/* The article is opened WITH its origin: ?back_url= lets Show.jsx render
                 "Tilbake til Grafvisning" on every render of that URL, reload and new tab
@@ -540,6 +561,114 @@ function RelationPanel({ panel, tw, onClose, graphScope }) {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
+/**
+ * The two questions this view can answer, and the switch between them.
+ *
+ * Full graph: "what does this wiki look like" — every visible page, SQL-backed, unchanged.
+ * Focus: "what is connected to THIS page" — one page and its neighbourhood, Neo4j-backed.
+ *
+ * They are modes rather than two pages because the user is looking at the same wiki either way;
+ * what changes is the question, not the dataset they are exploring.
+ */
+function GraphModeSwitch({ mode, setMode, tw }) {
+    const modes = [
+        { key: 'full', label: tw.graph_mode_full ?? 'Fullgraf' },
+        { key: 'focus', label: tw.graph_mode_focus ?? 'Fokus' },
+    ];
+
+    return (
+        <div className="inline-flex items-center rounded-full border border-slate-200 bg-white p-0.5" role="group">
+            {modes.map(({ key, label }) => (
+                <button
+                    key={key}
+                    type="button"
+                    onClick={() => setMode(key)}
+                    aria-pressed={mode === key}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                        mode === key
+                            ? 'bg-slate-900 text-white'
+                            : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                >
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * Focus mode's only controls: which page, how far out, and which way the links point. Three
+ * controls, because those are exactly the three parameters /app/wiki/graph-focus accepts — the
+ * panel is the query, not a dashboard around it.
+ */
+function FocusPanel({ pageOptions, focusPageId, setFocusPageId, depth, setDepth, direction, setDirection, tw }) {
+    const directionLabels = {
+        both: tw.graph_focus_direction_both ?? 'Begge veier',
+        outgoing: tw.graph_focus_direction_outgoing ?? 'Lenker ut',
+        incoming: tw.graph_focus_direction_incoming ?? 'Lenker inn',
+    };
+
+    return (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                {tw.graph_focus_title ?? 'Fokusvisning'}
+            </h3>
+
+            <label className="mb-1.5 block text-xs font-medium text-slate-600" htmlFor="graph-focus-page">
+                {tw.graph_focus_page ?? 'Fokusside'}
+            </label>
+            <select
+                id="graph-focus-page"
+                value={focusPageId ?? ''}
+                onChange={(event) => setFocusPageId(event.target.value === '' ? null : Number(event.target.value))}
+                className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-violet-400 focus:outline-none"
+            >
+                <option value="">{tw.graph_focus_page_placeholder ?? 'Velg side …'}</option>
+                {pageOptions.map((option) => (
+                    <option key={option.pageId} value={option.pageId}>{option.title}</option>
+                ))}
+            </select>
+
+            <p className="mb-1.5 text-xs font-medium text-slate-600">{tw.graph_focus_depth ?? 'Dybde'}</p>
+            <div className="mb-4 inline-flex w-full rounded-xl border border-slate-200 p-0.5">
+                {FOCUS_DEPTHS.map((option) => (
+                    <button
+                        key={option}
+                        type="button"
+                        onClick={() => setDepth(option)}
+                        aria-pressed={depth === option}
+                        className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+                            depth === option ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                    >
+                        {(tw.graph_focus_depth_option ?? ':count hopp').replace(':count', option)}
+                    </button>
+                ))}
+            </div>
+
+            <p className="mb-1.5 text-xs font-medium text-slate-600">{tw.graph_focus_direction ?? 'Retning'}</p>
+            <div className="flex flex-col gap-1">
+                {FOCUS_DIRECTIONS.map((option) => (
+                    <button
+                        key={option}
+                        type="button"
+                        onClick={() => setDirection(option)}
+                        aria-pressed={direction === option}
+                        className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition ${
+                            direction === option
+                                ? 'bg-violet-50 font-semibold text-violet-800'
+                                : 'text-slate-600 hover:bg-slate-50'
+                        }`}
+                    >
+                        {directionLabels[option]}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 export default function WikiGraph({ initialRunId = null, initialPageId = null }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -578,6 +707,23 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     });
     const [showOrphans, setShowOrphans] = useState(true);
     const [openFilterDropdown, setOpenFilterDropdown] = useState(null); // 'documents' | 'owners' | null
+
+    // ── focus mode ────────────────────────────────────────────────────────────
+    // None of this reaches the full graph: focus is an alternative canvas with its own endpoint and
+    // its own renderer, not a filter applied to the payload already loaded above.
+    const [mode, setMode] = useState('full');
+    const [focusPageId, setFocusPageId] = useState(initialPageId ?? null);
+    const [focusDepth, setFocusDepth] = useState(DEFAULT_FOCUS_DEPTH);
+    const [focusDirection, setFocusDirection] = useState(DEFAULT_FOCUS_DIRECTION);
+
+    // The picker's options come from the full graph payload: it is already loaded, and it already
+    // contains exactly the pages this viewer is allowed to see. No second request, no second rule.
+    const pageOptions = useMemo(() => focusPageOptions(graphData?.nodes ?? []), [graphData]);
+
+    const focusOnPage = (pageId) => {
+        setFocusPageId(Number(pageId));
+        setMode('focus');
+    };
 
     // The part of this view's state that IS representable in a URL, and therefore the part a
     // return link can restore. Deliberately the same two props WikiGraphController reads.
@@ -1079,8 +1225,10 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         <CustomerAppLayout title={tw.graph_view_title ?? 'Enterprise Wiki Graf'} showPageTitle={false}>
             <div className="flex h-[calc(100vh-80px)] min-h-[600px] flex-col gap-0">
                 {/* Header bar */}
-                <div className="flex shrink-0 items-center justify-between gap-4 pb-3">
-                    <div className="flex items-center gap-3">
+                {/* Wraps rather than overflowing: the header now carries a mode switch as well as
+                    the title, scope and camera button, which together are wider than a phone. */}
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                         <Link
                             href="/app/wiki"
                             className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"
@@ -1098,6 +1246,9 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             {scopeLabel}
                         </span>
                     </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                    <GraphModeSwitch mode={mode} setMode={setMode} tw={tw} />
+                    {mode === 'full' && (
                     <button
                         type="button"
                         onClick={fitView}
@@ -1109,12 +1260,27 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         </svg>
                         {tw.graph_fit_view ?? 'Tilpass visning'}
                     </button>
+                    )}
+                    </div>
                 </div>
 
                 {/* Main content */}
                 <div className="flex min-h-0 flex-1 gap-4">
                     {/* Left sidebar */}
                     <div className="flex w-56 shrink-0 flex-col gap-3 overflow-y-auto">
+                        {mode === 'focus' && (
+                            <FocusPanel
+                                pageOptions={pageOptions}
+                                focusPageId={focusPageId}
+                                setFocusPageId={setFocusPageId}
+                                depth={focusDepth}
+                                setDepth={setFocusDepth}
+                                direction={focusDirection}
+                                setDirection={setFocusDirection}
+                                tw={tw}
+                            />
+                        )}
+                        {mode === 'full' && (
                         <FilterPanel
                             searchQuery={searchQuery}
                             setSearchQuery={setSearchQuery}
@@ -1138,7 +1304,8 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             openFilterDropdown={openFilterDropdown}
                             setOpenFilterDropdown={setOpenFilterDropdown}
                         />
-                        {graphData && (
+                        )}
+                        {mode === 'full' && graphData && (
                             <SummaryPanel
                                 summary={filteredSummary}
                                 totalNodeCount={graphData.nodes.length}
@@ -1151,7 +1318,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                     {/* Graph canvas area */}
                     <div className="relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
                         {/* Loading */}
-                        {loading && (
+                        {mode === 'full' && loading && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
                                 <div className="flex flex-col items-center gap-3">
                                     <svg
@@ -1171,7 +1338,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         )}
 
                         {/* Error */}
-                        {!loading && error && (
+                        {mode === 'full' && !loading && error && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-50 p-8">
                                 <div className="max-w-sm rounded-2xl border border-rose-100 bg-rose-50 p-6 text-center">
                                     <p className="text-sm font-semibold text-rose-700">
@@ -1184,7 +1351,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         )}
 
                         {/* Empty — no wiki pages at all in this scope */}
-                        {!loading && !error && graphData && graphData.nodes.length === 0 && (
+                        {mode === 'full' && !loading && !error && graphData && graphData.nodes.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-50 p-8">
                                 <div className="max-w-sm text-center">
                                     <p className="text-sm font-semibold text-slate-600">
@@ -1198,7 +1365,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         )}
 
                         {/* No matches — pages exist, but the active filters exclude all of them */}
-                        {!loading && !error && graphData && graphData.nodes.length > 0 && displayed.nodes.length === 0 && (
+                        {mode === 'full' && !loading && !error && graphData && graphData.nodes.length > 0 && displayed.nodes.length === 0 && (
                             <div
                                 role="status"
                                 aria-live="polite"
@@ -1225,16 +1392,31 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         {/* Sigma container — always mounted so ref is stable */}
                         <div
                             ref={containerRef}
+                            data-graph-view="full"
                             className="absolute inset-0"
-                            style={{ visibility: (!loading && !error && graphData && graphData.nodes.length > 0) ? 'visible' : 'hidden' }}
+                            style={{ visibility: (mode === 'full' && !loading && !error && graphData && graphData.nodes.length > 0) ? 'visible' : 'hidden' }}
                         />
 
                         {/* Relation tooltip — positioned inside the canvas wrapper, which is the
                             coordinate space sigma reports pointer positions in. */}
-                        <EdgeTooltip hover={hoveredEdge} position={pointer} />
+                        {mode === 'full' && <EdgeTooltip hover={hoveredEdge} position={pointer} />}
+
+                        {/* Focus canvas. Mounted only in focus mode, so there is exactly one live
+                            renderer at a time; the full graph's Sigma stays alive but hidden, which
+                            keeps its layout and camera where the user left them. */}
+                        {mode === 'focus' && (
+                            <WikiGraphFocusView
+                                pageId={focusPageId}
+                                depth={focusDepth}
+                                direction={focusDirection}
+                                tw={tw}
+                                graphScope={graphScope}
+                                onMakeFocus={focusOnPage}
+                            />
+                        )}
 
                         {/* Scope badge overlay */}
-                        {!loading && !error && graphData && graphData.nodes.length > 0 && (
+                        {mode === 'full' && !loading && !error && graphData && graphData.nodes.length > 0 && (
                             <div className="pointer-events-none absolute bottom-3 right-3">
                                 <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200 backdrop-blur-sm">
                                     {scopeLabel}
@@ -1245,9 +1427,17 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
 
                     {/* Right sidebar — one slot, one answer: the node that was clicked, or the
                         relation that was clicked. Never both, because a click can only be one. */}
+                    {mode === 'full' && (
+                        <>
                     {selectedNode && (
                         <div className="w-56 shrink-0">
-                            <NodePanel node={selectedNode} tw={tw} onClose={() => setSelectedNode(null)} graphScope={graphScope} />
+                            <NodePanel
+                                node={selectedNode}
+                                tw={tw}
+                                onClose={() => setSelectedNode(null)}
+                                graphScope={graphScope}
+                                onFocus={focusOnPage}
+                            />
                         </div>
                     )}
                     {! selectedNode && relationPanel && (
@@ -1259,6 +1449,8 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                                 graphScope={graphScope}
                             />
                         </div>
+                    )}
+                        </>
                     )}
                 </div>
             </div>
