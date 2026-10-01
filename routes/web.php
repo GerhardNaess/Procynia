@@ -11,6 +11,7 @@ use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
+use App\Http\Controllers\App\QualityController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -159,6 +160,10 @@ Route::prefix('app')
     ->group(function (): void {
         Route::redirect('/', '/app/notices?mode=saved');
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+
+        // The Kvalitet module's landing page. Navigation only for now; the quality work it will
+        // gather still lives in Wiki review and claim approval.
+        Route::get('/quality', QualityController::class)->name('quality.index');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import ActionDialog from '../Components/App/ActionDialog';
 import ControlHint from '../Components/App/ControlHint';
 import NotificationBell from '../Components/App/NotificationBell';
+import ModuleSidebar from '../Components/App/ModuleSidebar';
+import { activeModuleKey } from '../Support/appModules';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 
 function classNames(...values) {
@@ -68,6 +70,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
     const navigation = translations?.navigation ?? {};
+    const modules = navigation.modules ?? {};
     const tw = translations?.wiki ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -172,6 +175,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'wiki';
         }
 
+        if (pathname.startsWith('/app/quality')) {
+            return 'quality';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }
@@ -185,25 +192,24 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : '';
 
     /**
-     * The main menu is the bid workflow, in the order the work happens: see where the portfolio
-     * stands, find a notice, take it into the worklist, look things up, check the competition,
-     * write the response.
+     * The module rail's second level: the work areas inside Anbud.
      *
-     * Three things that used to sit here no longer do, because none of them is a step in that
-     * work. Watch lists is how Kunngjøringer is set up, so it belongs in that area's own tabs.
-     * Kundemiljø and Abonnement are administration, and live in the user menu. Infosenter is
-     * follow-up that cuts across every case, so it sits apart from the workflow rather than
-     * inside it — see followUpNavigation below. All four keep their routes and permissions
-     * exactly as they were; only where they are named has changed.
+     * These four were the main menu until the rail took over module navigation. They are not
+     * modules — they are the stages one bid passes through, plus the competitor view that informs
+     * them — so they belong under Anbud rather than beside Wiki and Kvalitet. Routes, labels and
+     * permissions are exactly what they were; only the place they are named has moved. Tabs inside
+     * each stage stay in the header's second row, where they always were.
      */
-    const mainNavigation = [
-        { key: 'overview', label: navigation.bid_status, href: '/app/dashboard' },
-        { key: 'procurements', label: navigation.notices, href: '/app/notices' },
-        { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
-        { key: 'wiki', label: translations.wiki?.nav ?? 'Wiki', href: '/app/wiki' },
-        { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
-        { key: 'ai', label: navigation.ai, href: '/app/ai' },
-    ];
+    const activeModule = activeModuleKey(activeMainArea);
+
+    const moduleSections = activeModule === 'tenders'
+        ? [
+            { key: 'procurements', label: navigation.notices, href: '/app/notices' },
+            { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
+            { key: 'ai', label: navigation.ai, href: '/app/ai' },
+            { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
+        ]
+        : [];
 
     /**
      * Ask Wiki, between the workflow and the follow-up group. The magnifying glass is the whole
@@ -555,27 +561,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     />
                                 </Link>
 
-                                <nav className="flex flex-wrap items-center gap-1.5" aria-label={navigation.workflow_aria ?? 'Arbeidsflyt'}>
-                                    {mainNavigation.map((item) => {
-                                        const isActive = activeMainArea === item.key;
-
-                                        return (
-                                            <Link
-                                                key={item.key}
-                                                href={item.href}
-                                                aria-current={isActive ? 'page' : undefined}
-                                                className={classNames(
-                                                    'rounded-xl px-3 py-2 text-base font-medium transition',
-                                                    isActive
-                                                        ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                                )}
-                                            >
-                                                {item.label}
-                                            </Link>
-                                        );
-                                    })}
-                                </nav>
                             </div>
 
                             {/* Search, follow-up, the bell and the user, in that order. Allowed to wrap on a
@@ -819,7 +804,23 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     </div>
                 </header>
 
-                <main className="mx-auto max-w-[1600px] px-4 py-7 sm:px-6 lg:px-8">
+                {/* The rail and the page are one row from lg up, stacked below it. The rail is
+                    sticky under the header on wide screens so the module structure stays visible
+                    while a long page scrolls; on a phone it simply sits above the page, because
+                    the modules are the only navigation left and must not become unreachable. */}
+                <div className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-7 sm:px-6 lg:flex-row lg:px-8">
+                    <aside className="w-full shrink-0 lg:w-64">
+                        <div className="lg:sticky lg:top-24">
+                            <ModuleSidebar
+                                modules={modules}
+                                activeKey={activeModule}
+                                sections={moduleSections}
+                                activeSectionKey={activeMainArea}
+                            />
+                        </div>
+                    </aside>
+
+                    <main className="min-w-0 flex-1">
                     {flash?.success && showSuccess ? (
                         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-base text-emerald-800 shadow-lg">
                             {flash.success}
@@ -847,7 +848,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     ) : null}
 
                     {children}
-                </main>
+                    </main>
+                </div>
 
                 <footer className="bg-transparent">
                     <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-sm text-slate-500 sm:px-6 lg:px-8">

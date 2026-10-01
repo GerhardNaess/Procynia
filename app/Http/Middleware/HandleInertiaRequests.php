@@ -81,6 +81,9 @@ class HandleInertiaRequests extends Middleware
             ],
             'translations' => [
                 'navigation' => [
+                    // The left module rail. Shared as a block because the rail renders the whole
+                    // planned product structure, available modules and not-yet-built ones alike.
+                    'modules' => __('procynia.navigation.modules'),
                     'bid_status' => __('procynia.navigation.bid_status'),
                     'notices' => __('procynia.navigation.notices'),
                     'ai' => __('procynia.navigation.ai'),
