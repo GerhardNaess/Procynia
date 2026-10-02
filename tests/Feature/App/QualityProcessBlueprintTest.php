@@ -5,9 +5,9 @@ namespace Tests\Feature\App;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\EnterpriseWikiPage;
-use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
@@ -1011,264 +1011,258 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
-    // Kunnskap bak en aktivitet
+    // En aktivitet som kilde til kunnskapsartikler
     // ---------------------------------------------------------------------
 
     /**
      * What these tests defend.
      *
-     * An activity on a flow can be connected to the Wiki pages it is carried out against. The node
-     * holds nothing but those pages' ids, so the knowledge stays in Wiki — which owns it — and an
-     * edited page changes what the activity rests on without the flow being touched. The two rules
-     * a JSON payload cannot enforce hold: nothing crosses a customer boundary, and a page that has
-     * been deleted leaves the activity standing rather than breaking the flow.
+     * A prosessaktivitet is a SOURCE of knowledge articles, not a place to hang existing ones. The
+     * user asks for one from a step, corrects the draft, and what is created is an ordinary
+     * Enterprise Wiki page in draft that then follows Wiki's own review and approval. Wiki owns the
+     * article from that moment: the flow holds none of its content, and the only thing Kvalitet
+     * keeps is the record of which activity it came out of.
+     *
+     * The invariant that cost this feature its first design: that record survives the flow being
+     * rewritten. A blueprint payload is replaced wholesale on every save and on every adopted
+     * proposal, so provenance kept inside it would be destroyed by an ordinary edit.
      */
-    public function test_an_activity_can_be_connected_to_one_wiki_article(): void
+    public function test_an_activity_creates_an_ordinary_wiki_page_in_draft(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
-        $page = $this->wikiPage($customer, 'Anskaffelsesrutine');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithKnowledge([$page->id]))
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'vurder',
+                'title' => 'Sikkerhetskrav ved vurdering av leverandører',
+                'markdown' => "Artikkelen dekker hva som skal kontrolleres.\n\n## Hva du ser etter\n\nDokumentasjon på styringssystem.",
+            ])
             ->assertSessionHasNoErrors();
 
-        $stored = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
+        $page = EnterpriseWikiPage::query()->where('customer_id', $customer->id)->sole();
 
+        $this->assertSame('Sikkerhetskrav ved vurdering av leverandører', $page->title);
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status);
+        $this->assertSame(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $page->page_type);
+        // Manual, and owned by whoever asked for it — Wiki's submit-for-review gate is
+        // owner-or-System-Owner, so an unowned article would be one nobody could hand on.
+        $this->assertSame(EnterpriseWikiPage::GENERATED_BY_MANUAL, $page->generated_by);
+        $this->assertSame((int) $owner->id, (int) $page->owner_user_id);
+        $this->assertNull($page->published_version_id);
+
+        $version = $page->currentVersion()->first();
+
+        $this->assertNotNull($version);
+        $this->assertSame(1, (int) $version->version_number);
+        $this->assertStringContainsString('## Hva du ser etter', (string) $version->content_markdown);
+
+        // Human-authored throughout, with no document provenance at all. Claiming a source would be
+        // claiming a document backs text that no document backs.
         $this->assertSame(
-            [[], [$page->id], []],
-            array_column($stored->nodes(), 'knowledge_page_ids'),
+            ['human_authored', 'human_authored', 'human_authored'],
+            array_column((array) $version->content_blocks_json, 'content_origin'),
         );
+
+        foreach ((array) $version->content_blocks_json as $block) {
+            $this->assertNull($block['source_id']);
+            $this->assertSame([], $block['source_elements']);
+        }
     }
 
-    public function test_an_activity_can_be_connected_to_several_wiki_articles(): void
+    /** The user is taken to the article, because everything after this happens in Wiki. */
+    public function test_creating_an_article_lands_the_user_in_wiki(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
-        $rutine = $this->wikiPage($customer, 'Anskaffelsesrutine');
-        $terskler = $this->wikiPage($customer, 'Terskelverdier');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithKnowledge([$rutine->id, $terskler->id]))
-            ->assertSessionHasNoErrors();
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'vurder',
+                'title' => 'Terskelverdier',
+                'markdown' => 'Hva som gjelder.',
+            ])
+            ->assertRedirect('/app/wiki/terskelverdier')
+            ->assertSessionHas('success');
+    }
 
-        $node = $this->knowledgeNode($owner, $process);
+    public function test_the_activity_shows_the_articles_it_produced_as_wiki_has_them_now(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
 
-        $this->assertSame([$rutine->id, $terskler->id], $node['knowledge_page_ids']);
+        $process = $this->process($customer, 'Innkjøp');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
+
+        $page = $this->createArticle($owner, $process, 'Sikkerhetskrav');
+
+        $node = $this->activityNode($owner, $process);
+
+        $this->assertSame(['Sikkerhetskrav'], array_column($node['articles'], 'title'));
+        $this->assertStringEndsWith("/app/wiki/{$page->slug}", $node['articles'][0]['url']);
+        $this->assertNotNull($node['articles'][0]['publication']);
+
+        // Renamed in Wiki, which owns it. Nothing in Kvalitet is touched, and the activity shows
+        // the new name — the whole reason nothing of the article is stored on the flow.
+        $page->update(['title' => 'Sikkerhetskrav ved leverandørvurdering']);
+
         $this->assertSame(
-            ['Anskaffelsesrutine', 'Terskelverdier'],
-            array_column($node['knowledge'], 'title'),
+            ['Sikkerhetskrav ved leverandørvurdering'],
+            array_column($this->activityNode($owner, $process)['articles'], 'title'),
         );
     }
 
     /**
-     * The connection is read when the page is opened, never cached on the flow. That is the whole
-     * reason it is a reference: a renamed or re-approved Wiki page shows as it is now, and nothing
-     * about the blueprint had to change for it to.
+     * The invariant the provenance table exists for.
+     *
+     * The payload is rewritten wholesale on every save. An article's origin stored inside it would
+     * be gone the first time somebody fixed a typo in a step's label.
      */
-    public function test_the_activity_reports_the_wiki_article_as_it_is_now(): void
+    public function test_rewriting_the_flow_does_not_lose_what_an_activity_produced(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
-        $page = $this->wikiPage($customer, 'Anskaffelsesrutine');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $this->blueprintFor($customer, $process, $this->flowWithKnowledge([$page->id]));
+        $this->createArticle($owner, $process, 'Sikkerhetskrav');
 
-        $before = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->updated_at;
-
-        $page->forceFill(['title' => 'Rutine for anskaffelser'])->save();
-
-        $node = $this->knowledgeNode($owner, $process);
-
-        $this->assertSame('Rutine for anskaffelser', $node['knowledge'][0]['title']);
-        $this->assertStringEndsWith("/app/wiki/{$page->slug}", $node['knowledge'][0]['url']);
-
-        // Nothing on the flow was rewritten to say so.
-        $this->assertEquals(
-            $before,
-            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->updated_at,
-        );
-    }
-
-    public function test_a_connection_can_be_removed(): void
-    {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
-
-        $process = $this->process($customer, 'Innkjøp');
-        $page = $this->wikiPage($customer, 'Anskaffelsesrutine');
-
-        $this->blueprintFor($customer, $process, $this->flowWithKnowledge([$page->id]));
+        $edited = $this->simpleFlow();
+        $edited['nodes'][1]['label'] = 'Vurder anskaffelsen grundig';
 
         $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithKnowledge([]))
+            ->put("/app/quality/items/{$process->id}/blueprint", $edited)
             ->assertSessionHasNoErrors();
 
-        $this->assertSame([[], [], []], array_column(
-            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->nodes(),
-            'knowledge_page_ids',
-        ));
+        $node = $this->activityNode($owner, $process);
 
-        // Removing the connection leaves the Wiki page entirely alone — it learns nothing from
-        // being pointed at, and nothing from being let go.
-        $this->assertTrue($page->fresh()->exists);
+        $this->assertSame('Vurder anskaffelsen grundig', $node['label']);
+        $this->assertSame(['Sikkerhetskrav'], array_column($node['articles'], 'title'));
     }
 
-    public function test_another_customers_wiki_article_cannot_be_connected(): void
-    {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
-        ['customer' => $other] = $this->context();
-
-        $process = $this->process($customer, 'Innkjøp');
-        $foreign = $this->wikiPage($other, 'Andres rutine');
-
-        $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithKnowledge([$foreign->id]))
-            ->assertSessionHasNoErrors();
-
-        // Dropped, not refused — the same answer the service gives every unresolvable row. What
-        // matters is that it never reaches the payload.
-        $this->assertSame([[], [], []], array_column(
-            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->nodes(),
-            'knowledge_page_ids',
-        ));
-    }
-
-    public function test_a_deleted_wiki_article_leaves_the_activity_standing(): void
+    /**
+     * Wiki is the source of truth, including about whether the article still exists. Deleting the
+     * page leaves the activity standing with one article fewer rather than a broken reference.
+     */
+    public function test_deleting_the_wiki_page_leaves_the_activity_standing(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
-        $kept = $this->wikiPage($customer, 'Anskaffelsesrutine');
-        $removed = $this->wikiPage($customer, 'Terskelverdier');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $this->blueprintFor($customer, $process, $this->flowWithKnowledge([$kept->id, $removed->id]));
+        $kept = $this->createArticle($owner, $process, 'Anskaffelsesrutine');
+        $removed = $this->createArticle($owner, $process, 'Terskelverdier');
 
+        $removed->versions()->delete();
         $removed->delete();
 
-        $node = $this->knowledgeNode($owner, $process);
+        $node = $this->activityNode($owner, $process);
 
-        // The activity is still there, with one knowledge source fewer rather than a broken one.
-        $this->assertSame('Vurder anskaffelsen', $node['label']);
-        $this->assertSame(['Anskaffelsesrutine'], array_column($node['knowledge'], 'title'));
+        $this->assertSame('Vurder saken', $node['label']);
+        $this->assertSame(['Anskaffelsesrutine'], array_column($node['articles'], 'title'));
+        $this->assertSame((int) $kept->id, (int) $node['articles'][0]['page_id']);
 
-        // And the next save drops the reference that can no longer resolve.
-        $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithKnowledge([$kept->id, $removed->id]))
-            ->assertSessionHasNoErrors();
-
-        $this->assertSame([$kept->id], QualityProcessBlueprint::query()
-            ->where('quality_item_id', $process->id)
-            ->sole()
-            ->nodes()[1]['knowledge_page_ids']);
+        // And the provenance row went with the page rather than being left pointing at nothing.
+        $this->assertSame(1, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
     }
 
-    public function test_the_same_article_twice_on_one_activity_becomes_one_connection(): void
+    public function test_an_activity_that_has_produced_nothing_carries_an_empty_list(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
-        $page = $this->wikiPage($customer, 'Anskaffelsesrutine');
-
-        $this->actingAs($owner)
-            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithKnowledge([$page->id, $page->id]))
-            ->assertSessionHasNoErrors();
-
-        $this->assertSame([$page->id], QualityProcessBlueprint::query()
-            ->where('quality_item_id', $process->id)
-            ->sole()
-            ->nodes()[1]['knowledge_page_ids']);
-    }
-
-    public function test_an_activity_without_knowledge_is_unchanged(): void
-    {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
-
-        $process = $this->process($customer, 'Innkjøp');
-
         $this->blueprintFor($customer, $process, $this->simpleFlow());
 
         $props = $this->actingAs($owner)
             ->get("/app/quality/items/{$process->id}?tab=flow")
             ->viewData('page')['props'];
 
-        $this->assertSame(
-            ['Start', 'Vurder saken', 'Ferdig'],
-            array_column($props['blueprint']['nodes'], 'label'),
-        );
-
         foreach ($props['blueprint']['nodes'] as $node) {
-            $this->assertSame([], $node['knowledge_page_ids']);
-            $this->assertSame([], $node['knowledge']);
+            $this->assertSame([], $node['articles']);
+            // The retired direction: the flow holds no page references at all any more.
+            $this->assertArrayNotHasKey('knowledge_page_ids', $node);
         }
     }
 
-    /**
-     * A reader gets the knowledge each activity already rests on — that is the point of the
-     * indicator — but not the picker. The picker is one control in an editor they do not have.
-     */
-    public function test_the_wiki_picker_is_only_sent_to_someone_who_can_edit_the_flow(): void
+    /** A step that is not on the flow is not an activity, and nothing may be created from it. */
+    public function test_an_unknown_activity_cannot_produce_an_article(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
-        $page = $this->wikiPage($customer, 'Anskaffelsesrutine');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $this->blueprintFor($customer, $process, $this->flowWithKnowledge([$page->id]));
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'finnes-ikke',
+                'title' => 'Noe',
+                'markdown' => 'Tekst.',
+            ])
+            ->assertNotFound();
 
-        $this->assertSame(
-            ['Anskaffelsesrutine'],
-            array_column($this->knowledgePageOptions($owner, $process), 'title'),
-        );
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+    }
+
+    public function test_a_reader_cannot_create_an_article_from_an_activity(): void
+    {
+        ['customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Innkjøp');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
 
         $reader = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
 
-        $props = $this->actingAs($reader)
-            ->get("/app/quality/items/{$process->id}?tab=flow")
-            ->viewData('page')['props'];
+        $this->actingAs($reader)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'vurder',
+                'title' => 'Noe',
+                'markdown' => 'Tekst.',
+            ])
+            ->assertForbidden();
 
-        $this->assertFalse($props['can_manage']);
-        $this->assertSame([], $props['knowledge_page_options']);
-
-        // Reading what the activity rests on is not an edit.
-        $this->assertSame(
-            ['Anskaffelsesrutine'],
-            array_column($props['blueprint']['nodes'][1]['knowledge'], 'title'),
-        );
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
     }
 
-    public function test_the_picker_offers_only_this_customers_wiki_pages(): void
+    public function test_an_article_cannot_be_created_on_another_customers_process(): void
     {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        ['owner' => $owner] = $this->context();
         ['customer' => $other] = $this->context();
 
-        $process = $this->process($customer, 'Innkjøp');
-        $this->wikiPage($customer, 'Anskaffelsesrutine');
-        $this->wikiPage($other, 'Andres rutine');
+        $process = $this->process($other, 'Andres innkjøp');
+        $this->blueprintFor($other, $process, $this->simpleFlow());
 
-        $this->assertSame(
-            ['Anskaffelsesrutine'],
-            array_column($this->knowledgePageOptions($owner, $process), 'title'),
-        );
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'vurder',
+                'title' => 'Noe',
+                'markdown' => 'Tekst.',
+            ])
+            ->assertNotFound();
 
-        // And it is searchable, because a mature Wiki has thousands of pages.
-        $this->assertSame([], $this->knowledgePageOptions($owner, $process, 'terskel'));
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $other->id)->count());
     }
 
     /**
-     * A model reading a plain-language description never proposes a Wiki page, and must not be able
-     * to smuggle an id in: the interpreter normalises without a customer, which is the one state in
-     * which a reference cannot be checked, so it is dropped there by construction.
+     * Two activities may legitimately want the same name. The second one gets a slug of its own
+     * rather than losing the article it has just been written.
      */
-    public function test_a_knowledge_reference_is_dropped_when_there_is_no_customer_to_check_it_against(): void
+    public function test_two_articles_with_the_same_name_both_survive(): void
     {
-        $normalised = app(QualityProcessBlueprintService::class)->normalise($this->flowWithKnowledge([1, 2]));
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
 
-        foreach ($normalised['nodes'] as $node) {
-            $this->assertSame([], $node['knowledge_page_ids']);
-        }
+        $process = $this->process($customer, 'Innkjøp');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
+
+        $first = $this->createArticle($owner, $process, 'Sikkerhetskrav');
+        $second = $this->createArticle($owner, $process, 'Sikkerhetskrav');
+
+        $this->assertNotSame($first->slug, $second->slug);
+        $this->assertSame('sikkerhetskrav', $first->slug);
+        $this->assertSame('sikkerhetskrav-2', $second->slug);
     }
 
     // ---------------------------------------------------------------------
@@ -1299,59 +1293,11 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     /**
-     * The same three steps, with the middle one carried out against the given Wiki pages.
-     *
-     * @param  list<int>  $pageIds
-     * @return array<string, mixed>
-     */
-    private function flowWithKnowledge(array $pageIds): array
-    {
-        $flow = $this->simpleFlow();
-
-        $flow['nodes'][1] = [
-            'key' => 'vurder',
-            'lane' => 'saksbehandler',
-            'type' => 'step',
-            'label' => 'Vurder anskaffelsen',
-            'knowledge_page_ids' => $pageIds,
-        ];
-
-        return $flow;
-    }
-
-    /**
-     * A Wiki page of this customer. Draft and unpublished, which is the honest state of a page
-     * nobody has taken through approval — and no obstacle to pointing an activity at it, because
-     * read access to a Wiki page is not gated on its status.
-     */
-    private function wikiPage(Customer $customer, string $title): EnterpriseWikiPage
-    {
-        $page = EnterpriseWikiPage::query()->create([
-            'customer_id' => $customer->id,
-            'slug' => Str::slug($title).'-'.Str::lower(Str::random(8)),
-            'title' => $title,
-            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-            'status' => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
-            'last_source_hash' => str_pad('hash', 64, '0'),
-        ]);
-
-        EnterpriseWikiPageVersion::query()->create([
-            'enterprise_wiki_page_id' => $page->id,
-            'version_number' => 1,
-            'is_current' => true,
-            'content_markdown' => 'Text.',
-        ]);
-
-        return $page->refresh();
-    }
-
-    /**
-     * The activity that carries the knowledge, as the page serves it.
+     * The activity the articles hang off, as the page serves it.
      *
      * @return array<string, mixed>
      */
-    private function knowledgeNode(User $actor, QualityItem $process): array
+    private function activityNode(User $actor, QualityItem $process): array
     {
         return $this->actingAs($actor)
             ->get("/app/quality/items/{$process->id}?tab=flow")
@@ -1359,15 +1305,26 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * One article created from the middle activity, the way a user creates one.
+     *
+     * Through the endpoint rather than the service, so every test that needs an article also
+     * exercises the authorisation and the Wiki write that produce it.
      */
-    private function knowledgePageOptions(User $actor, QualityItem $process, string $search = ''): array
+    private function createArticle(User $actor, QualityItem $process, string $title): EnterpriseWikiPage
     {
-        $query = $search === '' ? '' : '&knowledge_search='.urlencode($search);
+        $this->actingAs($actor)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'vurder',
+                'title' => $title,
+                'markdown' => "Innledning.\n\n## Avsnitt\n\nInnhold.",
+            ])
+            ->assertSessionHasNoErrors();
 
-        return $this->actingAs($actor)
-            ->get("/app/quality/items/{$process->id}?tab=flow{$query}")
-            ->viewData('page')['props']['knowledge_page_options'];
+        return EnterpriseWikiPage::query()
+            ->where('customer_id', $process->customer_id)
+            ->where('title', $title)
+            ->orderByDesc('id')
+            ->firstOrFail();
     }
 
     /**

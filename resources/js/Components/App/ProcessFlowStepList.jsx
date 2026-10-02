@@ -71,26 +71,25 @@ export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = 
                             )
                         )}
 
-                        {(step.knowledge ?? []).length > 0 && (
-                            /* The same count the diagram puts on the node, in the view that can be
-                               read aloud and by a screen reader. It is the way into the activity's
-                               knowledge whether or not the step also stands for a process — on the
+                        {onOpenActivity ? (
+                            /* Every activity gets this, not only the ones that have produced
+                               something: an activity is a SOURCE of knowledge articles, so the step
+                               with none is exactly the one the user most needs a way into. It is
+                               the way in whether or not the step also stands for a process — on the
                                diagram the box can only do one thing, and drilling in wins there. */
-                            onOpenActivity ? (
-                                <button
-                                    type="button"
-                                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-sm font-semibold text-sky-800 transition hover:border-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
-                                    onClick={() => onOpenActivity(step)}
-                                    aria-label={(tb.knowledge_open ?? 'Vis kunnskapskildene for :label')
-                                        .replace(':label', step.label ?? '')}
-                                >
-                                    {knowledgeLabel(tb, step.knowledge)}
-                                </button>
-                            ) : (
-                                <p className="mt-1 text-sm font-medium text-sky-800">
-                                    {knowledgeLabel(tb, step.knowledge)}
-                                </p>
-                            )
+                            <button
+                                type="button"
+                                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-sm font-semibold text-sky-800 transition hover:border-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                                onClick={() => onOpenActivity(step)}
+                                aria-label={(tb.articles_open ?? 'Åpne kunnskapen bak :label')
+                                    .replace(':label', step.label ?? '')}
+                            >
+                                {articleLabel(tb, step.articles ?? [])}
+                            </button>
+                        ) : (step.articles ?? []).length > 0 && (
+                            <p className="mt-1 text-sm font-medium text-sky-800">
+                                {articleLabel(tb, step.articles)}
+                            </p>
                         )}
 
                         {step.outcomes.length > 0 && (
@@ -105,13 +104,17 @@ export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = 
     );
 }
 
-/** "2 kunnskapskilder" — a count, never the titles: see the diagram's KnowledgeMarker. */
-function knowledgeLabel(tb, knowledge) {
-    const template = knowledge.length === 1
-        ? (tb.knowledge_count_one ?? ':count kunnskapskilde')
-        : (tb.knowledge_count ?? ':count kunnskapskilder');
+/** "2 kunnskapsartikler" — a count, never the titles: see the diagram's ArticleMarker. */
+function articleLabel(tb, articles) {
+    if (articles.length === 0) {
+        return tb.articles_none ?? 'Ingen kunnskapsartikkel';
+    }
 
-    return template.replace(':count', String(knowledge.length));
+    const template = articles.length === 1
+        ? (tb.articles_count_one ?? ':count kunnskapsartikkel')
+        : (tb.articles_count ?? ':count kunnskapsartikler');
+
+    return template.replace(':count', String(articles.length));
 }
 
 /** "Underprosess: Leverandørkontroll (6 steg)" — the name first, because that is what is clicked. */

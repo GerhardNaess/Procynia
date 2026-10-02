@@ -480,12 +480,12 @@ describe('a step that stands for another process', () => {
 });
 
 /**
- * An activity may rest on knowledge written down in Wiki. Exactly as with a subprocess, the layout
- * only has to hand the reference over untouched and move nothing: what the indicator says is the
- * diagram's business, and what the page says is Wiki's.
+ * An activity is a SOURCE of knowledge articles. The layout carries what it has produced so the
+ * node and the step list can show a count — where the layout puts the node is the diagram's
+ * business, and what the articles say is Wiki's.
  */
-describe('an activity that rests on knowledge in Wiki', () => {
-    const withKnowledge = {
+describe('an activity that has produced knowledge articles', () => {
+    const withArticles = {
         lanes: [{ key: 'l', label: 'Innkjøper' }],
         nodes: [
             { key: 'start', lane: 'l', type: 'start', label: 'Behov meldes' },
@@ -494,8 +494,7 @@ describe('an activity that rests on knowledge in Wiki', () => {
                 lane: 'l',
                 type: 'step',
                 label: 'Vurder leverandøren',
-                knowledge_page_ids: [7, 9],
-                knowledge: [
+                articles: [
                     { page_id: 7, title: 'Anskaffelsesrutine', url: '/app/wiki/anskaffelsesrutine' },
                     { page_id: 9, title: 'Terskelverdier', url: '/app/wiki/terskelverdier' },
                 ],
@@ -508,32 +507,32 @@ describe('an activity that rests on knowledge in Wiki', () => {
         ],
     };
 
-    test('the connections reach the drawing unchanged', () => {
-        const node = layoutBlueprint(withKnowledge).nodes.find((row) => row.key === 'vurder');
+    test('the articles reach the drawing unchanged', () => {
+        const node = layoutBlueprint(withArticles).nodes.find((row) => row.key === 'vurder');
 
-        assert.deepEqual(node.knowledge.map((page) => page.title), ['Anskaffelsesrutine', 'Terskelverdier']);
+        assert.deepEqual(node.articles.map((page) => page.title), ['Anskaffelsesrutine', 'Terskelverdier']);
     });
 
-    test('an activity that rests on nothing written down carries an empty list, never undefined', () => {
-        const node = layoutBlueprint(withKnowledge).nodes.find((row) => row.key === 'start');
+    test('an activity that has produced nothing carries an empty list, never undefined', () => {
+        const node = layoutBlueprint(withArticles).nodes.find((row) => row.key === 'start');
 
-        assert.deepEqual(node.knowledge, []);
+        assert.deepEqual(node.articles, []);
     });
 
     /** The indicator is drawn from the node, so the step list's rows need it too. */
     test('the reading order carries them too', () => {
-        const steps = flowReadingOrder(withKnowledge);
+        const steps = flowReadingOrder(withArticles);
 
-        assert.equal(steps.find((row) => row.key === 'vurder').knowledge.length, 2);
-        assert.deepEqual(steps.find((row) => row.key === 'slutt').knowledge, []);
+        assert.equal(steps.find((row) => row.key === 'vurder').articles.length, 2);
+        assert.deepEqual(steps.find((row) => row.key === 'slutt').articles, []);
     });
 
-    test('connecting knowledge moves nothing', () => {
+    test('producing an article moves nothing', () => {
         const plain = layoutBlueprint({
-            ...withKnowledge,
-            nodes: withKnowledge.nodes.map(({ knowledge, knowledge_page_ids: _ids, ...node }) => node),
+            ...withArticles,
+            nodes: withArticles.nodes.map(({ articles: _articles, ...node }) => node),
         });
-        const linked = layoutBlueprint(withKnowledge);
+        const linked = layoutBlueprint(withArticles);
 
         assert.equal(linked.width, plain.width);
         assert.equal(linked.height, plain.height);

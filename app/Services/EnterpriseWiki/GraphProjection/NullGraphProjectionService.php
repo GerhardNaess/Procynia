@@ -48,7 +48,7 @@ class NullGraphProjectionService implements GraphProjectionService
         int $customerId,
         int $qualityItemId,
         array $activities,
-        array $knowledgeLinks,
+        array $articleLinks,
     ): void {
         //
     }
@@ -61,7 +61,7 @@ class NullGraphProjectionService implements GraphProjectionService
         array $qualityItemRelations = [],
         array $qualityWikiLinks = [],
         array $processActivities = [],
-        array $activityKnowledgeLinks = [],
+        array $activityArticleLinks = [],
     ): void {
         //
     }

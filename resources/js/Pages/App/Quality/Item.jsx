@@ -81,8 +81,8 @@ export default function QualityItem() {
         flow_ai_available: flowAiAvailable = false,
         subprocess_view: subprocessView = null,
         subprocess_options: subprocessOptions = [],
-        knowledge_page_options: knowledgePageOptions = [],
-        knowledge_search: knowledgeSearch = '',
+        activity_article_draft: articleDraft = null,
+        activity_article_error: articleError = null,
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -130,8 +130,8 @@ export default function QualityItem() {
                         flowAiAvailable={flowAiAvailable}
                         subprocessView={subprocessView}
                         subprocessOptions={subprocessOptions}
-                        knowledgePageOptions={knowledgePageOptions}
-                        knowledgeSearch={knowledgeSearch}
+                        articleDraft={articleDraft}
+                        articleError={articleError}
                     />
                 ) : (
                     <>

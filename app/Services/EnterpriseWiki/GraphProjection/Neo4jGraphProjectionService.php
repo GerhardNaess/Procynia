@@ -55,19 +55,20 @@ class Neo4jGraphProjectionService implements GraphProjectionService
      *
      * An activity is a node on the process's flow. It is a graph node of its own rather than a
      * property on the process, because the question the knowledge layer exists to answer is about
-     * one step and not about the whole process: two activities of one process routinely rest on the
-     * same Wiki page for different reasons, and an edge from the process could not tell them apart.
+     * one step and not about the whole process: two activities of one process routinely produce
+     * different articles, and an edge from the process could not tell them apart.
      */
     private const HAS_ACTIVITY = 'HAS_ACTIVITY';
 
     /**
-     * The edge from an activity to the Wiki page it is carried out against.
+     * The edge from an activity to a Wiki page the activity was the SOURCE of.
      *
-     * Carries no content whatsoever — no excerpt, no title, no version. Wiki/SQL owns what the page
-     * says; the graph records only that the activity depends on it, so editing the page changes the
-     * knowledge without the relation moving at all.
+     * The direction matters. An activity is where the virksomhet knows something nobody has written
+     * down, and Procynia's answer is to write it down: the article exists because of the activity.
+     * This records that origin and nothing else — no excerpt, no title, no version. Wiki/SQL owns
+     * what the page says, so editing the page never moves the relation.
      */
-    private const REQUIRES_KNOWLEDGE = 'REQUIRES_KNOWLEDGE';
+    private const SOURCE_OF_ARTICLE = 'SOURCE_OF_ARTICLE';
 
     private readonly Neo4jConnection $connection;
 
@@ -300,26 +301,25 @@ class Neo4jGraphProjectionService implements GraphProjectionService
      *
      * Four statements in one write transaction, in this order because each depends on the one
      * before it: activities that are no longer on the flow go first (with their edges), the ones
-     * that are left are upserted and hung off the process, every knowledge edge they still hold is
+     * that are left are upserted and hung off the process, every article edge they still hold is
      * cleared, and the current set is written. A failure halfway through must not leave the process
      * with half its activities or a mix of two flows.
      *
-     * The knowledge edges are cleared wholesale rather than diffed for the same reason the Wiki
-     * links are: a reference removed from the payload leaves nothing behind to carry its own
-     * removal.
+     * The article edges are cleared wholesale rather than diffed for the same reason the Wiki links
+     * are: a provenance row that has gone leaves nothing behind to carry its own removal.
      */
     public function replaceProcessActivities(
         int $customerId,
         int $qualityItemId,
         array $activities,
-        array $knowledgeLinks,
+        array $articleLinks,
     ): void {
         foreach ($activities as $activity) {
             $this->assertProjectableProperties($activity, 'QualityActivity');
         }
 
-        foreach ($knowledgeLinks as $link) {
-            $this->assertProjectableProperties($link, 'REQUIRES_KNOWLEDGE');
+        foreach ($articleLinks as $link) {
+            $this->assertProjectableProperties($link, 'SOURCE_OF_ARTICLE');
         }
 
         $keys = array_values(array_map(
@@ -328,7 +328,7 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         ));
 
         $this->client()->writeTransaction(
-            function (TransactionInterface $tsx) use ($customerId, $qualityItemId, $activities, $knowledgeLinks, $keys): void {
+            function (TransactionInterface $tsx) use ($customerId, $qualityItemId, $activities, $articleLinks, $keys): void {
                 $tsx->run(
                     <<<'CYPHER'
                     MATCH (a:QualityActivity {customer_id: $customer_id, quality_item_id: $quality_item_id})
@@ -347,7 +347,7 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                 $tsx->run(
                     <<<CYPHER
                     MATCH (a:QualityActivity {customer_id: \$customer_id, quality_item_id: \$quality_item_id})
-                          -[old:{$this->requiresKnowledge()}]->(:EnterpriseWikiPage {customer_id: \$customer_id})
+                          -[old:{$this->sourceOfArticle()}]->(:EnterpriseWikiPage {customer_id: \$customer_id})
                     DELETE old
                     CYPHER,
                     [
@@ -356,7 +356,7 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                     ],
                 );
 
-                $tsx->run($this->knowledgeMergeQuery(), ['links' => array_values($knowledgeLinks)]);
+                $tsx->run($this->articleMergeQuery(), ['links' => array_values($articleLinks)]);
             },
         );
     }
@@ -369,7 +369,7 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         array $qualityItemRelations = [],
         array $qualityWikiLinks = [],
         array $processActivities = [],
-        array $activityKnowledgeLinks = [],
+        array $activityArticleLinks = [],
     ): void {
         foreach ($pages as $page) {
             $this->assertProjectableProperties($page, 'EnterpriseWikiPage');
@@ -387,8 +387,8 @@ class Neo4jGraphProjectionService implements GraphProjectionService
             $this->assertProjectableProperties($activity, 'QualityActivity');
         }
 
-        foreach ($activityKnowledgeLinks as $link) {
-            $this->assertProjectableProperties($link, 'REQUIRES_KNOWLEDGE');
+        foreach ($activityArticleLinks as $link) {
+            $this->assertProjectableProperties($link, 'SOURCE_OF_ARTICLE');
         }
 
         $encodedLinks = $this->encodeLinkMetadata($links);
@@ -418,7 +418,7 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                 $groupedRelations,
                 $qualityWikiLinks,
                 $processActivities,
-                $activityKnowledgeLinks,
+                $activityArticleLinks,
             ): void {
                 $tsx->run(
                     <<<'CYPHER'
@@ -522,10 +522,10 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                 );
 
                 // After the items, because an activity hangs off the process it belongs to, and
-                // after the pages, because the knowledge merge matches the page rather than
+                // after the pages, because the article merge matches the page rather than
                 // creating it.
                 $tsx->run($this->activityMergeQuery(), ['activities' => array_values($processActivities)]);
-                $tsx->run($this->knowledgeMergeQuery(), ['links' => array_values($activityKnowledgeLinks)]);
+                $tsx->run($this->articleMergeQuery(), ['links' => array_values($activityArticleLinks)]);
             },
         );
     }
@@ -540,9 +540,9 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         return self::HAS_ACTIVITY;
     }
 
-    private function requiresKnowledge(): string
+    private function sourceOfArticle(): string
     {
-        return self::REQUIRES_KNOWLEDGE;
+        return self::SOURCE_OF_ARTICLE;
     }
 
     /**
@@ -573,13 +573,13 @@ class Neo4jGraphProjectionService implements GraphProjectionService
     }
 
     /**
-     * One activity's dependency on one Wiki page.
+     * One article one activity was the source of.
      *
      * Both ends are matched, never created: an activity or a page that is not in the graph leaves
      * the edge out rather than inventing a node for it. The edge carries the identity of the two
      * ends and nothing about what the page says.
      */
-    private function knowledgeMergeQuery(): string
+    private function articleMergeQuery(): string
     {
         return <<<CYPHER
         UNWIND \$links AS link
@@ -589,7 +589,7 @@ class Neo4jGraphProjectionService implements GraphProjectionService
             activity_key: link.activity_key
         })
         MATCH (p:EnterpriseWikiPage {customer_id: link.customer_id, page_id: link.page_id})
-        MERGE (a)-[rel:{$this->requiresKnowledge()}]->(p)
+        MERGE (a)-[rel:{$this->sourceOfArticle()}]->(p)
         SET rel.customer_id = link.customer_id,
             rel.quality_item_id = link.quality_item_id,
             rel.activity_key = link.activity_key,

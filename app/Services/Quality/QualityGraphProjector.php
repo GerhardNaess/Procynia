@@ -4,6 +4,7 @@ namespace App\Services\Quality;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
@@ -11,8 +12,8 @@ use App\Models\QualityProcessBlueprint;
 use App\Services\EnterpriseWiki\GraphProjection\GraphProjectionService;
 
 /**
- * Projects one quality item onto the graph: the node, the edges that leave it, and the Wiki pages
- * it draws on.
+ * Projects one quality item onto the graph: the node, the edges that leave it, the Wiki pages it
+ * draws on, and the articles its activities have produced.
  *
  * Its own class rather than more methods on EnterpriseWikiGraphProjector because the two are
  * triggered by different things — the Wiki pipeline moves pages and wikilinks, Kvalitet moves items,
@@ -130,12 +131,15 @@ class QualityGraphProjector
     }
 
     /**
-     * The process's activities, and the Wiki pages each of them is carried out against.
+     * The process's activities, and the Wiki articles each of them was the source of.
      *
-     * The blueprint payload is the source of truth for both: an activity is a node on the flow, and
-     * the knowledge behind it is the list of page ids that node holds. Nothing about the page is
-     * read into the graph beyond its identity — editing a Wiki page changes the knowledge without
-     * the relation moving.
+     * Two sources of truth, each for its own half. The blueprint payload says what the activities
+     * are — they are nodes on the flow and nowhere else. The provenance rows say which article came
+     * out of which activity, because that is a fact about something that happened, and the flow is
+     * rewritten wholesale on every save.
+     *
+     * Nothing about the page is read into the graph beyond its identity: editing a Wiki page never
+     * moves the relation, because the relation is about where the page came from.
      */
     private function projectActivities(int $customerId, int $itemId): void
     {
@@ -154,7 +158,7 @@ class QualityGraphProjector
         $updatedAt = $blueprint?->updated_at?->toIso8601String();
 
         $activities = [];
-        $askedPageIds = [];
+        $activityKeys = [];
 
         foreach (array_values($nodes) as $position => $node) {
             $key = (string) ($node['key'] ?? '');
@@ -162,6 +166,8 @@ class QualityGraphProjector
             if ($key === '') {
                 continue;
             }
+
+            $activityKeys[$key] = true;
 
             $activities[] = [
                 'customer_id' => $customerId,
@@ -175,45 +181,56 @@ class QualityGraphProjector
                 'position' => $position,
                 'updated_at' => $updatedAt,
             ];
-
-            foreach ($node['knowledge_page_ids'] ?? [] as $pageId) {
-                $pageId = (int) $pageId;
-
-                if ($pageId > 0) {
-                    $askedPageIds[$pageId][] = $key;
-                }
-            }
         }
+
+        // An article whose activity is no longer on the flow is dropped from the graph rather than
+        // from the database: the page is untouched and the provenance row stands, but there is no
+        // activity node for the edge to leave, and inventing one would put a step on the diagram
+        // that the process does not have.
+        $links = QualityActivityWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('quality_item_id', $itemId)
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (QualityActivityWikiPage $row): bool => isset($activityKeys[(string) $row->activity_key]))
+            ->map(fn (QualityActivityWikiPage $row): array => [
+                'customer_id' => $customerId,
+                'quality_item_id' => $itemId,
+                'activity_key' => (string) $row->activity_key,
+                'page_id' => (int) $row->enterprise_wiki_page_id,
+                'updated_at' => $row->updated_at?->toIso8601String(),
+            ])
+            ->values()
+            ->all();
 
         // Same reason as the item-level Wiki links: the page at the other end has to be a node
         // already, and it may legitimately not be projected yet because the Wiki projection runs on
-        // its own schedule. Only pages of this same customer qualify, so a reference that somehow
-        // named another tenant's page stays out of the graph rather than becoming a placeholder.
+        // its own schedule. Only pages of this same customer qualify, so a row that somehow named
+        // another tenant's page stays out of the graph rather than becoming a placeholder.
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->whereIn('id', array_keys($askedPageIds))
+            ->whereIn('id', array_values(array_unique(array_map(
+                static fn (array $link): int => (int) $link['page_id'],
+                $links,
+            ))))
             ->orderBy('id')
             ->get();
 
-        $knowledgeLinks = [];
+        $projectable = [];
 
         foreach ($pages as $page) {
+            $projectable[(int) $page->id] = true;
             $this->projection->upsertWikiPage($this->pagePayload($page));
-
-            foreach ($askedPageIds[(int) $page->id] as $activityKey) {
-                $knowledgeLinks[] = [
-                    'customer_id' => $customerId,
-                    'quality_item_id' => $itemId,
-                    'activity_key' => $activityKey,
-                    'page_id' => (int) $page->id,
-                    'updated_at' => $updatedAt,
-                ];
-            }
         }
 
-        // Always called, including with empty lists: this is what removes activities and knowledge
+        $articleLinks = array_values(array_filter(
+            $links,
+            static fn (array $link): bool => isset($projectable[(int) $link['page_id']]),
+        ));
+
+        // Always called, including with empty lists: this is what removes activities and article
         // edges the flow no longer holds.
-        $this->projection->replaceProcessActivities($customerId, $itemId, $activities, $knowledgeLinks);
+        $this->projection->replaceProcessActivities($customerId, $itemId, $activities, $articleLinks);
     }
 
     /**

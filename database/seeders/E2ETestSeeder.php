@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
@@ -71,10 +72,10 @@ class E2ETestSeeder extends Seeder
     private const PARENT_FLOW_CODE = 'E2E-FLOW-P';
 
     /**
-     * A process one of whose activities is carried out against knowledge written down in Wiki.
+     * A process one of whose activities has already been the source of knowledge articles in Wiki.
      *
-     * Two pages rather than one, deliberately: the indicator is a count, and a count is only
-     * checkable when it is not 1. See tests/e2e/quality-flow-activity-knowledge.spec.js.
+     * Two articles rather than one, deliberately: the indicator is a count, and a count is only
+     * checkable when it is not 1. See tests/e2e/quality-flow-activity-articles.spec.js.
      */
     private const KNOWLEDGE_FLOW_CODE = 'E2E-FLOW-K';
 
@@ -217,11 +218,11 @@ class E2ETestSeeder extends Seeder
     }
 
     /**
-     * The knowledge case: one activity carried out against two Wiki pages.
+     * The knowledge case: one activity that has produced two Wiki articles.
      *
-     * The flow holds nothing but the pages' ids — Wiki owns what they say — so the pages have to
-     * exist before the blueprint can name them. Both are drafts, which is the honest state of a
-     * page nobody has taken through approval and no obstacle to pointing an activity at one.
+     * The flow holds nothing about them — Wiki owns what they say, and a provenance row is what
+     * records that the activity is why they exist. Both pages are drafts, which is the honest state
+     * of an article nobody has taken through approval yet.
      */
     private function seedKnowledgeProcess(Customer $customer, User $owner): void
     {
@@ -265,9 +266,9 @@ class E2ETestSeeder extends Seeder
                 'payload' => [
                     'lanes' => [['key' => 'innkjoper', 'label' => 'Innkjøper']],
                     'nodes' => [
-                        ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldes', 'description' => null, 'subprocess_quality_item_id' => null, 'knowledge_page_ids' => []],
-                        ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder anskaffelsen', 'description' => null, 'subprocess_quality_item_id' => null, 'knowledge_page_ids' => $pageIds],
-                        ['key' => 'slutt', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Anskaffelsen er besluttet', 'description' => null, 'subprocess_quality_item_id' => null, 'knowledge_page_ids' => []],
+                        ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldes', 'description' => null, 'subprocess_quality_item_id' => null],
+                        ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder anskaffelsen', 'description' => null, 'subprocess_quality_item_id' => null],
+                        ['key' => 'slutt', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Anskaffelsen er besluttet', 'description' => null, 'subprocess_quality_item_id' => null],
                     ],
                     'edges' => [
                         ['from' => 'start', 'to' => 'vurder', 'label' => null],
@@ -280,6 +281,21 @@ class E2ETestSeeder extends Seeder
                 'generated_by_user_id' => $owner->id,
             ],
         );
+
+        // The provenance: the "Vurder anskaffelsen" activity is why both articles exist.
+        foreach ($pageIds as $pageId) {
+            QualityActivityWikiPage::query()->updateOrCreate(
+                [
+                    'quality_item_id' => $item->id,
+                    'activity_key' => 'vurder',
+                    'enterprise_wiki_page_id' => $pageId,
+                ],
+                [
+                    'customer_id' => $customer->id,
+                    'created_by_user_id' => $owner->id,
+                ],
+            );
+        }
     }
 
     /**

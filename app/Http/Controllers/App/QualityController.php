@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Exceptions\Ai\AiCostControlException;
 use App\Http\Controllers\Controller;
+use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\QualityControlDetail;
@@ -13,16 +14,17 @@ use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
+use App\Services\Quality\QualityActivityArticleService;
 use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowInterpreter;
-use App\Services\Quality\QualityProcessKnowledgeService;
 use App\Services\Quality\QualityProcessSubprocessService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
@@ -85,7 +87,7 @@ class QualityController extends Controller
         private readonly QualityFlowClarificationService $flowClarifications,
         private readonly QualityProcessDescriptionClarifier $flowClarifier,
         private readonly QualityProcessSubprocessService $subprocesses,
-        private readonly QualityProcessKnowledgeService $knowledge,
+        private readonly QualityActivityArticleService $activityArticles,
     ) {}
 
     public function index(Request $request): Response
@@ -126,6 +128,7 @@ class QualityController extends Controller
         $item->loadMissing(['owner', 'processSteps', 'processIo', 'checklistItems', 'controlDetail']);
 
         $tab = $this->detailTab($request, $item);
+        $subprocessView = $this->subprocessView($customerId, $item, $request);
 
         return Inertia::render('App/Quality/Item', [
             'item' => $this->itemDetail($item),
@@ -137,13 +140,12 @@ class QualityController extends Controller
             // Drill-down. The trail is in the URL, so the diagram area is server-driven exactly as
             // the tab is: a subprocess view survives a reload, a back button and a shared link, and
             // it is read from the subprocess's own blueprint every time it is opened.
-            'subprocess_view' => $this->subprocessView($customerId, $item, $request),
+            'subprocess_view' => $subprocessView,
             'subprocess_options' => $this->subprocessOptions($customerId, $item, $user),
-            // The Wiki picker for the flow's activities. Its own prop and its own search parameter,
-            // separate from the item-level `wiki_page_options`, so searching for a page to hang on
-            // one activity cannot reset the picker on the Dokument tab — or the other way round.
-            'knowledge_page_options' => $this->knowledgePageOptions($customerId, $item, $user, $request),
-            'knowledge_search' => trim((string) $request->query('knowledge_search', '')),
+            // A draft article, flashed by the redirect that produced it. Nothing is stored until
+            // the user has read it and pressed create — see QualityActivityArticleService.
+            'activity_article_draft' => $this->flashedActivityArticleState($item, $subprocessView, 'activity_article_draft'),
+            'activity_article_error' => $this->flashedActivityArticleState($item, $subprocessView, 'activity_article_error'),
             // A proposal is not stored, so it travels in the session across the one redirect
             // between interpreting a description and seeing the result. Reloading the page drops
             // it, which is the honest behaviour: nothing was adopted.
@@ -659,11 +661,6 @@ class QualityController extends Controller
             // The process this step opens into. Whether it may point there at all — same customer,
             // actually a process, no cycle — is QualityProcessSubprocessService's call, not a rule's.
             'nodes.*.subprocess_quality_item_id' => ['nullable', 'integer'],
-            // The Wiki pages this activity is carried out against. Whether a page may be pointed at
-            // at all — same customer, still exists — is QualityProcessKnowledgeService's call, not
-            // a rule's, exactly as with the subprocess reference above.
-            'nodes.*.knowledge_page_ids' => ['nullable', 'array', 'max:'.QualityProcessKnowledgeService::MAX_PER_ACTIVITY],
-            'nodes.*.knowledge_page_ids.*' => ['integer'],
             'edges' => ['present', 'array', 'max:200'],
             'edges.*.from' => ['nullable', 'string', 'max:80'],
             'edges.*.to' => ['nullable', 'string', 'max:80'],
@@ -688,6 +685,132 @@ class QualityController extends Controller
         $this->blueprints->approve((int) $customerId, $item, $user);
 
         return back()->with('success', __('procynia.quality.flash.blueprint_approved'));
+    }
+
+    /**
+     * "Opprett kunnskapsartikkel" — step one of two.
+     *
+     * An activity is a place where the virksomhet knows something that is not written down. This
+     * drafts the article from the process, the activity and the role, and hands it back for the
+     * user to read and correct. NOTHING IS STORED: the draft travels in a flash across the one
+     * redirect, exactly as a flow proposal does, and reloading the page drops it — which is the
+     * honest behaviour, because nothing was created.
+     */
+    public function draftActivityArticle(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        if (! ProcessActivityArticleAiClient::isAvailable()) {
+            throw ValidationException::withMessages([
+                'activity_key' => __('procynia.quality.errors.flow_ai_disabled'),
+            ]);
+        }
+
+        $validated = $request->validate([
+            'activity_key' => ['required', 'string', 'max:80'],
+        ]);
+
+        $blueprint = $this->blueprints->forItem((int) $customerId, $item)
+            ?? abort(404);
+
+        $activityKey = (string) $validated['activity_key'];
+
+        if ($this->activityArticles->activity($blueprint, $activityKey) === null) {
+            abort(404);
+        }
+
+        try {
+            $drafted = $this->activityArticles->draft(
+                $item,
+                $blueprint,
+                $activityKey,
+                $this->customerContext->resolveLanguageCode($user),
+            );
+        } catch (ProcessFlowInterpretationException|AiCostControlException $exception) {
+            return back()->with('activity_article_error', [
+                'quality_item_id' => (int) $item->id,
+                'activity_key' => $activityKey,
+                'message' => $exception instanceof AiCostControlException
+                    ? app(AiCostControlPresenter::class)->message($exception, $user?->customer)
+                    : $exception->getMessage(),
+            ]);
+        }
+
+        return back()->with('activity_article_draft', [
+            'quality_item_id' => (int) $item->id,
+            'activity_key' => $activityKey,
+            'title' => $drafted['title'],
+            'markdown' => $drafted['markdown'],
+        ]);
+    }
+
+    /**
+     * Step two: the article the user settled on, as an Enterprise Wiki page in draft.
+     *
+     * What is created is an ordinary Wiki page — no special type, no Kvalitet-owned copy — and the
+     * user is taken to it, because everything that happens next (editing, review, approval,
+     * publication) happens in Wiki. Kvalitet keeps one row saying which activity it came out of.
+     *
+     * The text sent is the user's, not the model's: they may have rewritten every word of the
+     * draft, or written it from nothing. That is why this endpoint takes a title and a body and
+     * does not consult the draft at all.
+     */
+    public function storeActivityArticle(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        $validated = $request->validate([
+            'activity_key' => ['required', 'string', 'max:80'],
+            'title' => ['required', 'string', 'max:'.ProcessActivityArticleAiClient::MAX_TITLE_LENGTH],
+            'markdown' => ['required', 'string', 'max:'.ProcessActivityArticleAiClient::MAX_MARKDOWN_LENGTH],
+        ], [
+            'title.required' => __('procynia.quality.errors.article_title_required'),
+            'markdown.required' => __('procynia.quality.errors.article_markdown_required'),
+        ]);
+
+        $blueprint = $this->blueprints->forItem((int) $customerId, $item)
+            ?? abort(404);
+
+        $activityKey = (string) $validated['activity_key'];
+
+        if ($this->activityArticles->activity($blueprint, $activityKey) === null) {
+            abort(404);
+        }
+
+        if ($this->activityArticles->countForActivity((int) $customerId, (int) $item->id, $activityKey)
+            >= QualityActivityArticleService::MAX_PER_ACTIVITY) {
+            throw ValidationException::withMessages([
+                'activity_key' => __('procynia.quality.errors.article_limit_reached'),
+            ]);
+        }
+
+        $created = $this->activityArticles->create(
+            $item,
+            $blueprint,
+            $activityKey,
+            (string) $validated['title'],
+            (string) $validated['markdown'],
+            $user,
+        );
+
+        // The flow's activities and what they have produced are a relation the graph answers
+        // questions about, so a created article has to reach it. afterCommit for the same reason
+        // saving a flow does: the job reads SQL.
+        ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
+
+        return redirect()
+            ->route('app.wiki.show', ['slug' => $created['page']->slug])
+            ->with('success', __('procynia.quality.flash.article_created'));
     }
 
     public function storeRelation(Request $request): RedirectResponse
@@ -991,12 +1114,12 @@ class QualityController extends Controller
     {
         $nodes = $blueprint->nodes();
 
-        // Every page the whole flow points at, read once. `knowledge_page_ids` is the stored truth
-        // and the only thing written back; `knowledge` is what those ids resolve to now — title,
-        // slug and how far the page has got through publication — so an activity shows the Wiki
-        // page as it currently is. A page that has been deleted simply does not resolve, and the
-        // activity is shown with one knowledge source fewer rather than a broken one.
-        $described = $this->knowledge->describeAll($customerId, $nodes);
+        // The articles this flow's activities have produced, read once for the whole flow. Nothing
+        // about them is stored on the node: the provenance rows say which activity produced which
+        // page, and the page's title and publication state are read fresh here, so an article shows
+        // as it currently is in Wiki. A page that has been deleted took its provenance row with it
+        // and is simply not here.
+        $articles = $this->activityArticles->describeForItem($customerId, (int) $blueprint->quality_item_id);
 
         return array_map(
             fn (array $node): array => $node + [
@@ -1004,34 +1127,10 @@ class QualityController extends Controller
                     $customerId,
                     $node['subprocess_quality_item_id'] ?? null,
                 ),
-                'knowledge' => array_values(array_filter(array_map(
-                    static fn (mixed $pageId): ?array => $described[(int) $pageId] ?? null,
-                    $node['knowledge_page_ids'] ?? [],
-                ))),
+                'articles' => $articles[(string) ($node['key'] ?? '')] ?? [],
             ],
             $nodes,
         );
-    }
-
-    /**
-     * The Wiki pages an activity on this flow may be pointed at.
-     *
-     * Only sent to someone who can edit the flow, for the same reason the subprocess options are:
-     * it is the content of one picker in the manual structure editor, and a reader has no use for a
-     * list of pages they cannot attach. What a reader does get is `knowledge` on each node — the
-     * pages the flow already points at.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function knowledgePageOptions(?int $customerId, QualityItem $item, ?User $user, Request $request): array
-    {
-        if ($customerId === null
-            || $item->quality_type !== QualityItem::TYPE_PROCESS
-            || ! ($user?->canApproveWikiClaims() ?? false)) {
-            return [];
-        }
-
-        return $this->knowledge->options($customerId, (string) $request->query('knowledge_search', ''));
     }
 
     /**
@@ -1492,6 +1591,32 @@ class QualityController extends Controller
         }
 
         return $state;
+    }
+
+    /**
+     * A draft article, or the reason there is none, belonging to the flow on screen.
+     *
+     * Not flashedFlowState(): an activity on a subprocess belongs to the subprocess's own item, and
+     * the page being rendered is the parent's. Both are legitimate owners of what was flashed, and
+     * matching only the parent would silently drop every draft produced while drilled in.
+     *
+     * @param  array{trail: list<array{id: int, title: string}>, blueprint: array<string, mixed>|null}|null  $subprocessView
+     * @return array<string, mixed>|null
+     */
+    private function flashedActivityArticleState(QualityItem $item, ?array $subprocessView, string $key): ?array
+    {
+        $state = session($key);
+
+        if (! is_array($state)) {
+            return null;
+        }
+
+        $trail = $subprocessView['trail'] ?? [];
+        $shownItemId = $trail === []
+            ? (int) $item->id
+            : (int) ($trail[array_key_last($trail)]['id'] ?? $item->id);
+
+        return ($state['quality_item_id'] ?? null) === $shownItemId ? $state : null;
     }
 
     private function assertOwnedByCustomer(int $rowCustomerId, ?int $customerId): void

@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki\GraphProjection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
@@ -122,10 +123,10 @@ class EnterpriseWikiGraphProjector
             ->values()
             ->all();
 
-        // The flow's activities and the knowledge behind them, for the same reason the rest of
+        // The flow's activities and the articles they produced, for the same reason the rest of
         // Kvalitet travels here: the rebuild deletes the customer's QualityActivity nodes first, so
         // activities left out would be dropped by a routine Wiki rebuild and never come back.
-        [$activities, $knowledgeLinks] = $this->processActivityPayloads($customerId, $itemIds, $pageIds);
+        [$activities, $articleLinks] = $this->processActivityPayloads($customerId, $itemIds, $pageIds);
 
         $this->projection->replaceCustomerWikiGraph(
             $customerId,
@@ -135,17 +136,20 @@ class EnterpriseWikiGraphProjector
             $qualityRelations,
             $qualityWikiLinks,
             $activities,
-            $knowledgeLinks,
+            $articleLinks,
         );
     }
 
     /**
-     * Every activity of every process this customer has, and every knowledge edge leaving one.
+     * Every activity of every process this customer has, and every article edge leaving one.
      *
-     * The blueprint payload is the source of truth: an activity is a node on a flow, and the
-     * knowledge behind it is the page ids that node holds. Both ends of a knowledge edge must be
-     * part of this rebuild or the MERGE would silently match nothing, so a page the Wiki query
-     * skipped drops the edge rather than the activity.
+     * Two sources, each for its own half. The blueprint payload says what the activities are — an
+     * activity is a node on a flow and nowhere else. The provenance rows say which article came out
+     * of which activity.
+     *
+     * Both ends of an article edge must be part of this rebuild or the MERGE would silently match
+     * nothing, so a page the Wiki query skipped drops the edge rather than the activity, and an
+     * article whose activity is no longer on the flow drops out the same way.
      *
      * @param  list<int>  $itemIds
      * @param  list<int>  $pageIds
@@ -156,7 +160,8 @@ class EnterpriseWikiGraphProjector
         $projectablePages = array_fill_keys(array_map('intval', $pageIds), true);
 
         $activities = [];
-        $knowledgeLinks = [];
+        $activityKeys = [];
+        $updatedAtByItem = [];
 
         QualityProcessBlueprint::query()
             ->where('customer_id', $customerId)
@@ -165,12 +170,13 @@ class EnterpriseWikiGraphProjector
             ->get()
             ->each(function (QualityProcessBlueprint $blueprint) use (
                 $customerId,
-                $projectablePages,
                 &$activities,
-                &$knowledgeLinks,
+                &$activityKeys,
+                &$updatedAtByItem,
             ): void {
                 $itemId = (int) $blueprint->quality_item_id;
                 $updatedAt = $blueprint->updated_at?->toIso8601String();
+                $updatedAtByItem[$itemId] = $updatedAt;
 
                 $laneLabels = [];
 
@@ -185,6 +191,8 @@ class EnterpriseWikiGraphProjector
                         continue;
                     }
 
+                    $activityKeys[$itemId.'#'.$key] = true;
+
                     $activities[] = [
                         'customer_id' => $customerId,
                         'quality_item_id' => $itemId,
@@ -195,26 +203,43 @@ class EnterpriseWikiGraphProjector
                         'position' => $position,
                         'updated_at' => $updatedAt,
                     ];
-
-                    foreach ($node['knowledge_page_ids'] ?? [] as $pageId) {
-                        $pageId = (int) $pageId;
-
-                        if ($pageId <= 0 || ! isset($projectablePages[$pageId])) {
-                            continue;
-                        }
-
-                        $knowledgeLinks[] = [
-                            'customer_id' => $customerId,
-                            'quality_item_id' => $itemId,
-                            'activity_key' => $key,
-                            'page_id' => $pageId,
-                            'updated_at' => $updatedAt,
-                        ];
-                    }
                 }
             });
 
-        return [$activities, $knowledgeLinks];
+        $articleLinks = [];
+
+        if ($itemIds !== []) {
+            QualityActivityWikiPage::query()
+                ->where('customer_id', $customerId)
+                ->whereIn('quality_item_id', $itemIds)
+                ->orderBy('id')
+                ->get()
+                ->each(function (QualityActivityWikiPage $row) use (
+                    $customerId,
+                    $projectablePages,
+                    $activityKeys,
+                    $updatedAtByItem,
+                    &$articleLinks,
+                ): void {
+                    $itemId = (int) $row->quality_item_id;
+                    $key = (string) $row->activity_key;
+                    $pageId = (int) $row->enterprise_wiki_page_id;
+
+                    if (! isset($activityKeys[$itemId.'#'.$key]) || ! isset($projectablePages[$pageId])) {
+                        return;
+                    }
+
+                    $articleLinks[] = [
+                        'customer_id' => $customerId,
+                        'quality_item_id' => $itemId,
+                        'activity_key' => $key,
+                        'page_id' => $pageId,
+                        'updated_at' => $updatedAtByItem[$itemId] ?? null,
+                    ];
+                });
+        }
+
+        return [$activities, $articleLinks];
     }
 
     private function pagePayload(EnterpriseWikiPage $page): array

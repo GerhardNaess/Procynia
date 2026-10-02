@@ -276,10 +276,10 @@ export function layoutBlueprint(blueprint) {
             // The process this step opens into, as the server resolved it. Carried through
             // untouched: the layout decides where the node sits, never what it is.
             subprocess: node.subprocess ?? null,
-            // The Wiki pages the activity is carried out against, as the server resolved them.
+            // The Wiki articles this activity has been the source of, as the server resolved them.
             // Carried through for the same reason, and never counted or summarised here — the
-            // layout is geometry, and what the knowledge says is Wiki's business.
-            knowledge: Array.isArray(node.knowledge) ? node.knowledge : [],
+            // layout is geometry, and what the articles say is Wiki's business.
+            articles: Array.isArray(node.articles) ? node.articles : [],
             lane: node.lane,
             rank,
             x: METRICS.laneLabelWidth + METRICS.paddingX + (rank * columnPitch),
@@ -504,7 +504,7 @@ export function flowReadingOrder(blueprint) {
             label: node.label,
             description: node.description,
             subprocess: node.subprocess ?? null,
-            knowledge: node.knowledge ?? [],
+            articles: node.articles ?? [],
             role: laneLabel.get(node.lane) ?? '',
             outcomes: edges
                 .filter((edge) => edge.from === node.key && (edge.label ?? '') !== '')

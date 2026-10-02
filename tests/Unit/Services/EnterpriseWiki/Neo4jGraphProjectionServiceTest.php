@@ -189,14 +189,15 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $client = new RecordingNeo4jClient;
         $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
 
-        $service->replaceProcessActivities(10, 20, [$this->activity()], [$this->knowledgeLink()]);
+        $service->replaceProcessActivities(10, 20, [$this->activity()], [$this->articleLink()]);
 
         $statements = implode("\n", array_column($client->runs, 'statement'));
 
         // The requested model, as the graph expresses it: prosess -> aktivitet -> Wiki-artikkel.
-        // An edge straight from the process could not say which of its steps needs the page.
+        // An edge straight from the process could not say which of its steps the article came out
+        // of.
         $this->assertStringContainsString('MERGE (q)-[:HAS_ACTIVITY]->(a)', $statements);
-        $this->assertStringContainsString('MERGE (a)-[rel:REQUIRES_KNOWLEDGE]->(p)', $statements);
+        $this->assertStringContainsString('MERGE (a)-[rel:SOURCE_OF_ARTICLE]->(p)', $statements);
         $this->assertStringContainsString('MATCH (p:EnterpriseWikiPage {customer_id: link.customer_id, page_id: link.page_id})', $statements);
 
         // Matched, never merged: an activity whose process is not in the graph must be skipped
@@ -209,17 +210,17 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $this->assertSame(1, $client->writeTransactions);
     }
 
-    public function test_the_knowledge_edge_carries_no_wiki_content(): void
+    public function test_the_article_edge_carries_no_wiki_content(): void
     {
         $client = new RecordingNeo4jClient;
         $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
 
-        $service->replaceProcessActivities(10, 20, [$this->activity()], [$this->knowledgeLink()]);
+        $service->replaceProcessActivities(10, 20, [$this->activity()], [$this->articleLink()]);
 
-        $merge = $this->statementContaining($client, 'MERGE (a)-[rel:REQUIRES_KNOWLEDGE]->(p)');
+        $merge = $this->statementContaining($client, 'MERGE (a)-[rel:SOURCE_OF_ARTICLE]->(p)');
 
-        // Wiki/SQL owns what the page says. The relation records the dependency and nothing else,
-        // so editing the page changes the knowledge without the relation moving at all.
+        // Wiki/SQL owns what the page says. The relation records where the article came from and
+        // nothing else, so editing the page never moves the relation.
         foreach (['title', 'markdown', 'content', 'excerpt', 'version_number'] as $content) {
             $this->assertStringNotContainsString($content, $merge);
         }
@@ -240,9 +241,9 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $this->assertStringContainsString('DETACH DELETE a', $statements[0]);
         $this->assertSame(['kontroller'], $client->runs[0]['parameters']['keys']);
 
-        // And the knowledge edges of the activities that did survive are cleared before the new set
+        // And the article edges of the activities that did survive are cleared before the new set
         // is written, for the same reason the Wiki links are.
-        $this->assertStringContainsString('[old:REQUIRES_KNOWLEDGE]', implode("\n", $statements));
+        $this->assertStringContainsString('[old:SOURCE_OF_ARTICLE]', implode("\n", $statements));
     }
 
     public function test_clearing_a_flow_removes_every_activity_it_had(): void
@@ -317,7 +318,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $this->assertStringContainsString('MERGE (q)-[rel:SUPPORTED_BY]->(p)', $statements);
     }
 
-    public function test_a_customer_rebuild_carries_the_activities_and_the_knowledge_behind_them(): void
+    public function test_a_customer_rebuild_carries_the_activities_and_the_articles_they_produced(): void
     {
         $client = new RecordingNeo4jClient;
         $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
@@ -330,7 +331,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
             [],
             [],
             [$this->activity()],
-            [$this->knowledgeLink()],
+            [$this->articleLink()],
         );
 
         $statements = implode("\n", array_column($client->runs, 'statement'));
@@ -339,7 +340,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         // edge, not the activity, so one left out here would survive every rebuild as an orphan.
         $this->assertStringContainsString('MATCH (a:QualityActivity {customer_id: $customer_id})', $statements);
         $this->assertStringContainsString('MERGE (q)-[:HAS_ACTIVITY]->(a)', $statements);
-        $this->assertStringContainsString('MERGE (a)-[rel:REQUIRES_KNOWLEDGE]->(p)', $statements);
+        $this->assertStringContainsString('MERGE (a)-[rel:SOURCE_OF_ARTICLE]->(p)', $statements);
     }
 
     /**
@@ -383,7 +384,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
      */
-    private function knowledgeLink(array $overrides = []): array
+    private function articleLink(array $overrides = []): array
     {
         return array_merge([
             'customer_id' => 10,
@@ -620,7 +621,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $service->replaceCustomerWikiGraph(10, [], []);
 
         // Nine statements: delete pages, quality items and activities, then merge pages, wikilinks,
-        // quality items, the SUPPORTED_BY edges, the activities and their REQUIRES_KNOWLEDGE edges.
+        // quality items, the SUPPORTED_BY edges, the activities and their SOURCE_OF_ARTICLE edges.
         // All three deletes are customer-scoped — a rebuild for one customer must never touch
         // another's nodes.
         $this->assertCount(9, $client->runs);

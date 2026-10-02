@@ -225,6 +225,15 @@ Route::prefix('app')
             Route::post('/items/{item}/blueprint/approve', [QualityController::class, 'approveBlueprint'])
                 ->name('items.blueprint.approve');
 
+            // An activity as a SOURCE of knowledge. Two routes for the same reason interpreting and
+            // adopting a flow are two: drafting writes nothing, and creating is the user saying the
+            // article — as they corrected it — is what should go into Wiki. Only the second touches
+            // the database, and what it creates is an ordinary Enterprise Wiki page in draft.
+            Route::post('/items/{item}/activities/article-draft', [QualityController::class, 'draftActivityArticle'])
+                ->name('items.activities.article-draft');
+            Route::post('/items/{item}/activities/articles', [QualityController::class, 'storeActivityArticle'])
+                ->name('items.activities.articles.store');
+
             // The seam to Wiki. Attaching a page changes nothing about the page.
             Route::post('/items/{item}/wiki-links', [QualityController::class, 'storeWikiLink'])
                 ->name('items.wiki-links.store');

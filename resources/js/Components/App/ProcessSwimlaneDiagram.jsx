@@ -452,8 +452,8 @@ function Edge({ edge }) {
 }
 
 /**
- * One node, and — when it stands for another process, or rests on knowledge in Wiki — the way into
- * it.
+ * One node, and — when it stands for another process, or has produced knowledge in Wiki — the way
+ * into it.
  *
  * A subprocess node is still a node: same box, same lane colour, same shape, because it is still a
  * step in this flow and redrawing it as something else would make the diagram harder to read for
@@ -462,18 +462,18 @@ function Edge({ edge }) {
  * deciding whether to open it: BPMN's ⊞ with the number spelled out, because a kvalitetshåndbok is
  * read by people who do not know BPMN.
  *
- * An activity that draws on Wiki pages is marked the same way and just as quietly, by a count on
- * its top edge. The count is the whole statement — what the pages say is Wiki's business, and the
- * diagram would be unreadable if it tried to say any of it.
+ * An activity that has produced Wiki articles is marked the same way and just as quietly, by a
+ * count on its top edge. The count is the whole statement — what the articles say is Wiki's
+ * business, and the diagram would be unreadable if it tried to say any of it.
  *
  * The whole node becomes the control, not the pill. The pill is 16 pixels tall on a diagram that is
  * routinely viewed at 60 %, and a target that small is a target nobody hits — so the box is the
  * button, the pill is the sign that says so.
  *
- * ONE NODE, ONE ACTION. A node that both stands for a process and carries knowledge opens the
- * process: drilling in is the bigger move, and the reader who went in can still see the knowledge
- * on the step list either side of the trail. Two controls on one 64-pixel box would be two targets
- * nobody can tell apart at the zoom these diagrams are actually read at.
+ * ONE NODE, ONE ACTION. A node that both stands for a process and has produced articles opens the
+ * process: drilling in is the bigger move, and the reader who went in can still reach the articles
+ * from the step list either side of the trail. Two controls on one 64-pixel box would be two
+ * targets nobody can tell apart at the zoom these diagrams are actually read at.
  */
 function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null }) {
     const shape = nodeShape(node);
@@ -481,10 +481,10 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
     const firstLineY = node.y + (node.height / 2) - (((node.lines.length - 1) * 15) / 2) + 4;
 
     const subprocess = node.subprocess ?? null;
-    const knowledge = node.knowledge ?? [];
+    const articles = node.articles ?? [];
 
     const opensSubprocess = subprocess !== null && typeof onOpenSubprocess === 'function';
-    const opensActivity = ! opensSubprocess && knowledge.length > 0 && typeof onOpenActivity === 'function';
+    const opensActivity = ! opensSubprocess && articles.length > 0 && typeof onOpenActivity === 'function';
     const openable = opensSubprocess || opensActivity;
 
     const open = openable
@@ -533,7 +533,7 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
 
             {subprocess && <SubprocessMarker node={node} subprocess={subprocess} tb={tb} />}
 
-            {knowledge.length > 0 && <KnowledgeMarker node={node} count={knowledge.length} tb={tb} />}
+            {articles.length > 0 && <ArticleMarker node={node} count={articles.length} tb={tb} />}
         </>
     );
 
@@ -543,7 +543,7 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
 
     const name = opensSubprocess
         ? (tb.subprocess_open ?? 'Åpne underprosessen :title').replace(':title', subprocess.title ?? '')
-        : (tb.knowledge_open ?? 'Vis kunnskapskildene for :label').replace(':label', node.label ?? '');
+        : (tb.articles_open ?? 'Åpne kunnskapen bak :label').replace(':label', node.label ?? '');
 
     return (
         <g
@@ -609,7 +609,7 @@ function SubprocessMarker({ node, subprocess, tb }) {
 }
 
 /**
- * The pill that says this activity rests on knowledge in Wiki.
+ * The pill that says this activity has produced knowledge in Wiki.
  *
  * A count and nothing else. The Wiki pages have titles that are routinely longer than the node, and
  * a diagram that tried to name them would stop being a diagram — so this says how many there are,
@@ -617,18 +617,18 @@ function SubprocessMarker({ node, subprocess, tb }) {
  * are in the panel that opens, where they are links.
  *
  * On the top edge, right-aligned, because the bottom centre belongs to the subprocess pill: a step
- * that is both a process and knowledge-backed has to be able to say both at once. The 9 pixels it
+ * that is both a process and a source of articles has to be able to say both at once. The 9 pixels it
  * hangs above the box come out of the 20-pixel row gap, so it can never reach the node above it.
  *
  * Width is counted from the text rather than measured, for the same reason wrapLabel() counts
  * characters: measuring needs a DOM, and this has to draw identically everywhere.
  */
-function KnowledgeMarker({ node, count, tb }) {
-    // One source is a case a reader meets routinely, and ":count kunnskapskilder" reads as a bug
+function ArticleMarker({ node, count, tb }) {
+    // One article is a case a reader meets routinely, and ":count kunnskapsartikler" reads as a bug
     // when the count is 1. The grammatical number is part of the string, so it is a key of its own.
     const template = count === 1
-        ? (tb.knowledge_count_one ?? ':count kunnskapskilde')
-        : (tb.knowledge_count ?? ':count kunnskapskilder');
+        ? (tb.articles_count_one ?? ':count kunnskapsartikkel')
+        : (tb.articles_count ?? ':count kunnskapsartikler');
     const text = template.replace(':count', String(count));
 
     // 16 for the glyph, 6.4 per character, 10 of padding.

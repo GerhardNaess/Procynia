@@ -4,13 +4,16 @@ namespace Tests\Feature\App;
 
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
+use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityFlowClarificationResolution;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
+use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessFlowValidator;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -213,15 +216,14 @@ class QualityProcessFlowInterpretationTest extends TestCase
             // asserting the order would be asserting a fact about Postgres rather than about what
             // a node is allowed to carry — which is the point here. No geometry, ever.
             $this->assertSame(
-                ['description', 'key', 'knowledge_page_ids', 'label', 'lane', 'subprocess_quality_item_id', 'type'],
+                ['description', 'key', 'label', 'lane', 'subprocess_quality_item_id', 'type'],
                 collect(array_keys($node))->sort()->values()->all(),
             );
 
-            // A model reading a description never names another process or a Wiki page, and cannot:
-            // the interpreter normalises without a customer, which is the one state in which a
+            // A model reading a description never names another process, and cannot: the
+            // interpreter normalises without a customer, which is the one state in which a
             // reference cannot be checked against a tenant or a cycle.
             $this->assertNull($node['subprocess_quality_item_id']);
-            $this->assertSame([], $node['knowledge_page_ids']);
         }
     }
 
@@ -298,13 +300,13 @@ class QualityProcessFlowInterpretationTest extends TestCase
         // an object, and the flow is the same flow either way.
         //
         // The served node carries two fields the stored one does not: what its subprocess reference
-        // and its knowledge references resolve to today. Both are read fresh on every page load
-        // rather than stored, so they are checked separately rather than smuggled into the
-        // comparison with what was adopted.
+        // resolves to today, and the articles its activity has produced. Both are read fresh on
+        // every page load rather than stored, so they are checked separately rather than smuggled
+        // into the comparison with what was adopted.
         $this->assertEquals(
             $proposal['nodes'],
             array_map(
-                static fn (array $node): array => collect($node)->except(['subprocess', 'knowledge'])->all(),
+                static fn (array $node): array => collect($node)->except(['subprocess', 'articles'])->all(),
                 $props['blueprint']['nodes'],
             ),
         );
@@ -312,7 +314,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
         foreach ($props['blueprint']['nodes'] as $node) {
             $this->assertNull($node['subprocess_quality_item_id']);
             $this->assertNull($node['subprocess']);
-            $this->assertSame([], $node['knowledge']);
+            $this->assertSame([], $node['articles']);
         }
 
         $this->assertEquals($proposal['edges'], $props['blueprint']['edges']);
@@ -1474,6 +1476,148 @@ class QualityProcessFlowInterpretationTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // En aktivitet som kilde til en kunnskapsartikkel
+    // ---------------------------------------------------------------------
+
+    /**
+     * What these tests defend.
+     *
+     * A prosessaktivitet is where the virksomhet knows something nobody has written down, and
+     * Procynia's answer is to help write it. The draft is a starting point for a person: it is shown
+     * before anything is created, it writes nothing, and what is eventually created is the text the
+     * person settled on.
+     *
+     * The same rule as every other reading of a description holds — the model is given the process,
+     * the activity and the role, and nothing else of the customer's data.
+     */
+    public function test_drafting_an_article_from_an_activity_writes_nothing(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse([
+            'title' => 'Sikkerhetskrav ved vurdering av leverandører',
+            'markdown' => "Artikkelen dekker hva som skal kontrolleres.\n\n## Hva du ser etter\n\nDokumentasjon på styringssystem.",
+        ]);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", [
+                'activity_key' => 'kontroller',
+            ])
+            ->assertRedirect();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $draft = $props['activity_article_draft'];
+
+        $this->assertSame('kontroller', $draft['activity_key']);
+        $this->assertSame('Sikkerhetskrav ved vurdering av leverandører', $draft['title']);
+        $this->assertStringContainsString('## Hva du ser etter', $draft['markdown']);
+        $this->assertNull($props['activity_article_error']);
+
+        // Nothing was created. The user has read nothing yet, and a page they have not agreed to
+        // would be a page in Wiki's review queue that nobody asked for.
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(0, QualityActivityWikiPage::query()->count());
+    }
+
+    public function test_the_draft_is_given_the_process_the_activity_and_the_role_and_nothing_else(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse(['title' => 'Sikkerhetskrav', 'markdown' => 'Tekst.']);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", [
+                'activity_key' => 'kontroller',
+            ]);
+
+        Http::assertSent(function (Request $request): bool {
+            $sent = $this->sentText($request);
+
+            foreach ([
+                'Leverandørkontroll',
+                'Kontroller leverandørens informasjonssikkerhet',
+                'Sikkerhetsansvarlig',
+                'Slik gjennomføres leverandørkontrollen hos oss.',
+            ] as $expected) {
+                if (! str_contains($sent, $expected)) {
+                    return false;
+                }
+            }
+
+            // The rule the article is written by, because an invented threshold in a
+            // kvalitetssystem is read as a requirement.
+            return str_contains($sent, 'Invent nothing.');
+        });
+    }
+
+    /** A provider that cannot answer leaves the activity exactly as it was. */
+    public function test_a_failed_draft_creates_nothing_and_says_so(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        Http::fake(['*' => Http::response(['error' => ['message' => 'upstream']], 503)]);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", [
+                'activity_key' => 'kontroller',
+            ])
+            ->assertRedirect();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['activity_article_draft']);
+        $this->assertSame('kontroller', $props['activity_article_error']['activity_key']);
+        $this->assertNotSame('', $props['activity_article_error']['message']);
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+    }
+
+    public function test_drafting_is_gated_the_same_way_every_other_flow_write_is(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        ['customer' => $otherCustomer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $foreign = $this->process($otherCustomer, 'Andres prosess');
+        $this->flowWithActivity($otherCustomer, $foreign);
+
+        $contributor = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
+
+        Http::fake([]);
+        Http::preventStrayRequests();
+
+        $this->actingAs($contributor)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller'])
+            ->assertForbidden();
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$foreign->id}/activities/article-draft", ['activity_key' => 'kontroller'])
+            ->assertNotFound();
+
+        // A step that is not on the flow is not an activity, and never reaches a provider.
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'finnes-ikke'])
+            ->assertNotFound();
+
+        Http::assertNothingSent();
+    }
+
+    // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 
@@ -1755,5 +1899,36 @@ class QualityProcessFlowInterpretationTest extends TestCase
     private function process(Customer $customer, string $title): QualityItem
     {
         return $this->item($customer, QualityItem::TYPE_PROCESS, $title);
+    }
+
+    /**
+     * A stored flow with the one activity the article tests draft from, and the description the
+     * draft is written against.
+     */
+    private function flowWithActivity(Customer $customer, QualityItem $process): QualityProcessBlueprint
+    {
+        return app(QualityProcessBlueprintService::class)->store(
+            (int) $customer->id,
+            $process,
+            [
+                'lanes' => [['key' => 'sikkerhet', 'label' => 'Sikkerhetsansvarlig']],
+                'nodes' => [
+                    ['key' => 'start', 'lane' => 'sikkerhet', 'type' => 'start', 'label' => 'Ny leverandør'],
+                    [
+                        'key' => 'kontroller',
+                        'lane' => 'sikkerhet',
+                        'type' => 'step',
+                        'label' => 'Kontroller leverandørens informasjonssikkerhet',
+                    ],
+                    ['key' => 'ferdig', 'lane' => 'sikkerhet', 'type' => 'end', 'label' => 'Kontrollert'],
+                ],
+                'edges' => [
+                    ['from' => 'start', 'to' => 'kontroller'],
+                    ['from' => 'kontroller', 'to' => 'ferdig'],
+                ],
+            ],
+            QualityProcessBlueprint::SOURCE_MANUAL,
+            description: 'Slik gjennomføres leverandørkontrollen hos oss.',
+        );
     }
 }
