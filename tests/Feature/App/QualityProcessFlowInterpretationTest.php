@@ -9,6 +9,7 @@ use App\Models\Nationality;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\Quality\QualityProcessFlowValidator;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -352,7 +353,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
     /**
      * "Hvis bestillingen er stor må den godkjennes." — what counts as stor, and who approves, are
      * not in the text. The product rule is that Procynia says so rather than inventing an answer,
-     * and the ambiguities reach the user intact.
+     * and the questions reach the user intact — blocking and optional kept apart.
      */
     public function test_an_under_specified_description_surfaces_questions_instead_of_invented_facts(): void
     {
@@ -369,7 +370,12 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $this->assertSame(
             ['Hva regnes som en stor bestilling?', 'Hvem skal godkjenne en stor bestilling?'],
-            $props['flow_proposal']['ambiguities'],
+            $props['flow_proposal']['blocking_questions'],
+        );
+
+        $this->assertSame(
+            ['Skal bestillingen registreres et sted før den sendes?'],
+            $props['flow_proposal']['optional_clarifications'],
         );
 
         // The role nobody named stays unnamed: a lane, not a guess at who it is.
@@ -420,11 +426,171 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $proposal = $props['flow_proposal'];
 
-        $this->assertSame([], $proposal['ambiguities']);
+        $this->assertSame([], $proposal['blocking_questions']);
+        $this->assertSame([], $proposal['optional_clarifications']);
         $this->assertSame(['Kunde', 'Saksbehandler'], array_column($proposal['lanes'], 'label'));
         $this->assertCount(5, $proposal['nodes']);
         $this->assertCount(4, $proposal['edges']);
         $this->assertSame([null, null, null, null], array_column($proposal['edges'], 'label'));
+    }
+
+    // ---------------------------------------------------------------------
+    // The simplest flow that is still faithful
+    // ---------------------------------------------------------------------
+
+    /**
+     * The worked example, and the whole point of the simplicity rule.
+     *
+     * "Dersom leverandøren er kritisk, skal sikkerhetsansvarlig kontrollere leverandøren. Deretter
+     * godkjenner økonomi leverandøren." is a complete description. A critical supplier is checked
+     * and then approved; one that is not goes straight to approval. There is nothing missing from
+     * it — so nothing is asked about it, and nothing is added to it.
+     *
+     * The two things that go wrong when a model is left to be thorough are both asserted here: the
+     * check becoming a second decision with an invented rejection path, and a question about who
+     * approves the suppliers the text already says økonomi approves.
+     */
+    public function test_a_conditional_step_rejoins_the_main_flow_without_inventing_a_second_decision(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponse($this->supplierProposal());
+
+        $proposal = $this->interpret($owner, $process)['flow_proposal'];
+
+        // One decision. The check is work being done, not a second branch.
+        $types = array_column($proposal['nodes'], 'type', 'key');
+        $this->assertSame(
+            ['kritisk-leverandor'],
+            array_keys(array_filter($types, static fn (string $type): bool => $type === QualityProcessBlueprint::NODE_DECISION)),
+        );
+        $this->assertSame(QualityProcessBlueprint::NODE_STEP, $types['kontroller-leverandor']);
+
+        // Kritisk -> kontroll -> økonomi. Ikke kritisk -> økonomi. Both paths end at the same step.
+        $this->assertSame(
+            ['kontroller-leverandor', 'godkjenn-leverandor'],
+            $this->targetsFrom($proposal['edges'], 'kritisk-leverandor'),
+        );
+        $this->assertSame(['godkjenn-leverandor'], $this->targetsFrom($proposal['edges'], 'kontroller-leverandor'));
+        $this->assertSame(['end'], $this->targetsFrom($proposal['edges'], 'godkjenn-leverandor'));
+
+        // Nothing to ask: the description answers everything the flow needed.
+        $this->assertSame([], $proposal['blocking_questions']);
+        $this->assertSame([], $proposal['optional_clarifications']);
+    }
+
+    /**
+     * The rules that keep the proposal simple live in the prompt, so the prompt is what has to be
+     * defended. Not its wording — its load-bearing instructions, each of which exists because a
+     * model without it produces the flow the user did not describe.
+     */
+    public function test_the_prompt_asks_for_the_simplest_faithful_flow(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponse($this->supplierProposal());
+        $this->interpret($owner, $process);
+
+        Http::assertSent(function ($request): bool {
+            $sent = (string) json_encode($request->data(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            foreach ([
+                // The governing rule.
+                'simplest valid flow that faithfully reproduces',
+                'without answering anything',
+                // No invented structure.
+                'Never add a decision, branch, rejection, failure path',
+                'Never add the opposite case',
+                // Checks are work, not branches.
+                'approve, sign off, validate and inspect name work being performed',
+                'If the text does not branch, neither do you',
+                // The sentence after the condition applies to both paths.
+                'both paths lead to that next step',
+                // Asking is the exception, and empty lists are the expected result.
+                'At most two',
+                'at most three',
+                'both lists are empty',
+            ] as $rule) {
+                if (! str_contains($sent, $rule)) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
+    /**
+     * The caps are a product rule, not a parsing detail. The schema states them and the provider
+     * enforces them, but a proposal that puts six questions in front of the user is the endless
+     * fine-tuning this feature exists to avoid — so the cap holds on the way out as well.
+     */
+    public function test_more_questions_than_the_caps_allow_are_cut_to_the_caps(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $proposal = $this->supplierProposal();
+        $proposal['blocking_questions'] = [
+            ['question' => 'Hvem godkjenner?'],
+            ['question' => 'Hva er terskelen?'],
+            ['question' => 'Hva skjer ved avslag?'],
+            ['question' => 'Hvem eskalerer?'],
+        ];
+        $proposal['optional_clarifications'] = [
+            ['question' => 'Bør registreringen deles i to steg?'],
+            ['question' => 'Skal kontrollen dokumenteres?'],
+            ['question' => 'Er det en frist?'],
+            ['question' => 'Skal leverandøren varsles?'],
+            ['question' => 'Hvem arkiverer avtalen?'],
+        ];
+
+        $this->fakeResponse($proposal);
+
+        $proposed = $this->interpret($owner, $process)['flow_proposal'];
+
+        $this->assertSame(['Hvem godkjenner?', 'Hva er terskelen?'], $proposed['blocking_questions']);
+        $this->assertSame(
+            ['Bør registreringen deles i to steg?', 'Skal kontrollen dokumenteres?', 'Er det en frist?'],
+            $proposed['optional_clarifications'],
+        );
+    }
+
+    /**
+     * A question that blocks is not also a suggestion. Shown in both panels it would read as two
+     * outstanding things, and the optional list would look longer than the work actually is.
+     */
+    public function test_a_question_asked_in_both_lists_is_shown_only_as_blocking(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $proposal = $this->supplierProposal();
+        $proposal['blocking_questions'] = [['question' => 'Hvem godkjenner kritiske leverandører?']];
+        $proposal['optional_clarifications'] = [
+            ['question' => 'Hvem godkjenner kritiske leverandører?'],
+            ['question' => 'Skal kontrollen dokumenteres?'],
+        ];
+
+        $this->fakeResponse($proposal);
+
+        $proposed = $this->interpret($owner, $process)['flow_proposal'];
+
+        $this->assertSame(['Hvem godkjenner kritiske leverandører?'], $proposed['blocking_questions']);
+        $this->assertSame(['Skal kontrollen dokumenteres?'], $proposed['optional_clarifications']);
+    }
+
+    /** The caps as the provider sees them, since `strict` means it is the provider that enforces them. */
+    public function test_the_response_contract_caps_both_question_lists(): void
+    {
+        $schema = ProcessFlowInterpretationAiClient::schema();
+
+        $this->assertSame(2, $schema['properties']['blocking_questions']['maxItems']);
+        $this->assertSame(3, $schema['properties']['optional_clarifications']['maxItems']);
+        $this->assertContains('blocking_questions', $schema['required']);
+        $this->assertContains('optional_clarifications', $schema['required']);
     }
 
     // ---------------------------------------------------------------------
@@ -678,6 +844,20 @@ class QualityProcessFlowInterpretationTest extends TestCase
     // Helpers
     // ---------------------------------------------------------------------
 
+    /**
+     * The steps one node leads to, in edge order.
+     *
+     * @param  list<array<string, mixed>>  $edges
+     * @return list<string>
+     */
+    private function targetsFrom(array $edges, string $key): array
+    {
+        return array_values(array_map(
+            static fn (array $edge): string => (string) $edge['to'],
+            array_filter($edges, static fn (array $edge): bool => (string) $edge['from'] === $key),
+        ));
+    }
+
     /** @return array<string, mixed> */
     private function interpret(User $owner, QualityItem $item, ?string $description = null): array
     {
@@ -741,7 +921,8 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 ['from' => 'kontroller_leverandor', 'to' => 'godkjenn_leverandor', 'condition' => null],
                 ['from' => 'godkjenn_leverandor', 'to' => 'end', 'condition' => null],
             ],
-            'ambiguities' => [],
+            'blocking_questions' => [],
+            'optional_clarifications' => [],
         ];
     }
 
@@ -775,9 +956,12 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 ['from' => 'godkjenn', 'to' => 'send', 'condition' => null],
                 ['from' => 'send', 'to' => 'end', 'condition' => null],
             ],
-            'ambiguities' => [
+            'blocking_questions' => [
                 ['question' => 'Hva regnes som en stor bestilling?'],
                 ['question' => 'Hvem skal godkjenne en stor bestilling?'],
+            ],
+            'optional_clarifications' => [
+                ['question' => 'Skal bestillingen registreres et sted før den sendes?'],
             ],
         ];
     }
@@ -798,7 +982,8 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 ['from' => 'vurder_soknad', 'to' => 'godkjenn_soknad', 'condition' => null],
                 ['from' => 'godkjenn_soknad', 'to' => 'end', 'condition' => null],
             ],
-            'ambiguities' => [],
+            'blocking_questions' => [],
+            'optional_clarifications' => [],
         ];
     }
 

@@ -53,7 +53,7 @@ class QualityProcessFlowInterpreter
     /**
      * Interpret a description into a flow the user can look at, correct and adopt.
      *
-     * @return array{payload: array{lanes: list<array<string, string>>, nodes: list<array<string, mixed>>, edges: list<array<string, mixed>>}, ambiguities: list<string>, description: string, model: string, repaired: bool}
+     * @return array{payload: array{lanes: list<array<string, string>>, nodes: list<array<string, mixed>>, edges: list<array<string, mixed>>}, blocking_questions: list<string>, optional_clarifications: list<string>, description: string, model: string, repaired: bool}
      *
      * @throws ProcessFlowInterpretationException
      */
@@ -74,7 +74,7 @@ class QualityProcessFlowInterpreter
     }
 
     /**
-     * @return array{payload: array<string, mixed>, ambiguities: list<string>, description: string, model: string, repaired: bool}
+     * @return array{payload: array<string, mixed>, blocking_questions: list<string>, optional_clarifications: list<string>, description: string, model: string, repaired: bool}
      */
     private function run(QualityItem $item, string $description, string $languageCode): array
     {
@@ -307,13 +307,14 @@ class QualityProcessFlowInterpreter
     /**
      * @param  array<string, mixed>  $payload
      * @param  array<string, mixed>  $proposal
-     * @return array{payload: array<string, mixed>, ambiguities: list<string>, description: string, model: string, repaired: bool}
+     * @return array{payload: array<string, mixed>, blocking_questions: list<string>, optional_clarifications: list<string>, description: string, model: string, repaired: bool}
      */
     private function result(array $payload, array $proposal, string $description, bool $repaired): array
     {
         return [
             'payload' => $payload,
-            'ambiguities' => $proposal['ambiguities'],
+            'blocking_questions' => $proposal['blocking_questions'],
+            'optional_clarifications' => $proposal['optional_clarifications'],
             'description' => $description,
             'model' => $proposal['model'],
             'repaired' => $repaired,

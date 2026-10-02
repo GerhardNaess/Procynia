@@ -202,7 +202,14 @@ export default function ProcessFlowPanel({
                 </div>
 
                 {reviewing
-                    ? <ProposalNotice tb={tb} replaces={blueprint !== null} ambiguities={proposal.ambiguities ?? []} />
+                    ? (
+                        <ProposalNotice
+                            tb={tb}
+                            replaces={blueprint !== null}
+                            blocking={proposal.blocking_questions ?? []}
+                            optional={proposal.optional_clarifications ?? []}
+                        />
+                    )
                     : blueprint && <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} />}
 
                 {! hasFlow && (
@@ -438,11 +445,22 @@ function FlowErrorCard({ tb, flowError }) {
  * Stated at the top of the flow rather than beside the button, because the user is about to spend a
  * minute reading a diagram and has to know what they are reading before they start.
  *
- * The ambiguities sit here too. They are the one thing the model was explicitly allowed not to
- * answer, and burying them under the structure would make a guess the user never agreed to look
- * like part of the proposal.
+ * THE TWO QUESTION LISTS.
+ *
+ * Blocking questions are things the description does not say and the flow cannot be believed
+ * without — shown in amber, above the structure, because a guess the user never agreed to must not
+ * be able to hide inside the proposal.
+ *
+ * Optional clarifications are the opposite: things that would sharpen the flow and change nothing
+ * if ignored. They are deliberately quiet — a plain panel below the blocking one — because the
+ * failure mode this feature has to avoid is the user reading a list of suggestions as a list of
+ * chores and tuning their description forever instead of using the flow.
+ *
+ * Neither list disables anything. "Bruk denne prosessflyten" is available with questions on screen,
+ * and the copy in both panels says so, because a user who believes they have to answer first will
+ * answer first.
  */
-function ProposalNotice({ tb, replaces, ambiguities }) {
+function ProposalNotice({ tb, replaces, blocking, optional }) {
     return (
         <div className="mt-4 space-y-4">
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5">
@@ -459,16 +477,30 @@ function ProposalNotice({ tb, replaces, ambiguities }) {
                 )}
             </div>
 
-            {ambiguities.length > 0 && (
+            {blocking.length > 0 && (
                 <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
                     <p className="text-base font-semibold text-amber-950">
-                        {tb.ambiguities_heading ?? 'Dette kommer ikke fram av beskrivelsen'}
+                        {tb.blocking_questions_heading ?? 'Dette kommer ikke fram av beskrivelsen'}
                     </p>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-base leading-6 text-amber-900">
-                        {ambiguities.map((question) => <li key={question}>{question}</li>)}
+                        {blocking.map((question) => <li key={question}>{question}</li>)}
                     </ul>
                     <p className="mt-2 text-sm text-amber-800">
-                        {tb.ambiguities_help ?? 'Procynia har ikke gjettet på svarene.'}
+                        {tb.blocking_questions_help ?? 'Procynia har ikke gjettet på svarene.'}
+                    </p>
+                </div>
+            )}
+
+            {optional.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <p className="text-base font-semibold text-slate-900">
+                        {tb.optional_clarifications_heading ?? 'Mulige forbedringer'}
+                    </p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-base leading-6 text-slate-700">
+                        {optional.map((question) => <li key={question}>{question}</li>)}
+                    </ul>
+                    <p className="mt-2 text-sm text-slate-600">
+                        {tb.optional_clarifications_help ?? 'Du kan ta flyten i bruk uten å svare på dette.'}
                     </p>
                 </div>
             )}

@@ -449,7 +449,10 @@ class QualityController extends Controller
             'lanes' => $proposal['payload']['lanes'],
             'nodes' => $proposal['payload']['nodes'],
             'edges' => $proposal['payload']['edges'],
-            'ambiguities' => $proposal['ambiguities'],
+            // Two lists, not one. What blocks adoption and what would merely sharpen the flow are
+            // different news to the user, and neither of them stops them adopting it.
+            'blocking_questions' => $proposal['blocking_questions'],
+            'optional_clarifications' => $proposal['optional_clarifications'],
             'description' => $proposal['description'],
         ]);
     }
