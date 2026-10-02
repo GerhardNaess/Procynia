@@ -17,6 +17,7 @@ use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
+use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintGenerator;
 use App\Services\Quality\QualityProcessBlueprintService;
@@ -80,6 +81,7 @@ class QualityController extends Controller
         private readonly QualityProcessBlueprintService $blueprints,
         private readonly QualityProcessBlueprintGenerator $blueprintGenerator,
         private readonly QualityProcessFlowInterpreter $flowInterpreter,
+        private readonly QualityFlowClarificationService $flowClarifications,
     ) {}
 
     public function index(Request $request): Response
@@ -455,6 +457,45 @@ class QualityController extends Controller
             'optional_clarifications' => $proposal['optional_clarifications'],
             'description' => $proposal['description'],
         ]);
+    }
+
+    /**
+     * "Avvis" on one of the suggestions beside a proposal.
+     *
+     * The suggestion is gone from the screen before this request is made — the browser removes it
+     * on the click, because a user dismissing a note should not watch it sit there while a round
+     * trip happens. What this endpoint does is make it stay gone: the next time the process is
+     * interpreted, QualityFlowClarificationService drops the question again, for as long as the
+     * description it was dismissed against is still the description being read.
+     *
+     * It writes nothing about the flow. A dismissal is an answer about what Procynia should say,
+     * not about how the process runs, so it cannot touch the blueprint and no proposal is created,
+     * changed or adopted by it. Blocking questions have no equivalent on purpose.
+     */
+    public function dismissFlowClarification(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        $validated = $request->validate([
+            'question' => ['required', 'string', 'max:500'],
+            // What it was dismissed against. Optional because the dismissal is still meaningful
+            // without it — it simply never lapses. See QualityFlowClarificationService.
+            'description' => ['nullable', 'string', 'max:8000'],
+        ]);
+
+        $this->flowClarifications->dismiss(
+            $item,
+            $validated['question'],
+            $validated['description'] ?? null,
+            $user,
+        );
+
+        return back();
     }
 
     /**

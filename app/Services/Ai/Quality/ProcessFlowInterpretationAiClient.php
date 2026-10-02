@@ -64,8 +64,9 @@ class ProcessFlowInterpretationAiClient
      * question says the flow cannot be believed until it is answered, and a proposal that raises
      * three of those is not reporting gaps, it is refusing to commit — so there are at most two,
      * and the model has to pick the two that actually matter. Optional clarifications never hold
-     * anything up, which is exactly why they need a ceiling: an unbounded list of things that could
-     * be sharper is the endless-tuning loop this feature is meant not to have.
+     * anything up, which is exactly why they need a ceiling: the prompt asks for the terms a
+     * decision turns on and nothing else, and a ceiling is what stops that becoming a list of
+     * everything that could be sharper — the endless-tuning loop this feature is meant not to have.
      */
     public const MAX_BLOCKING_QUESTIONS = 2;
 
@@ -257,6 +258,18 @@ class ProcessFlowInterpretationAiClient
      * The ones about language are not style preferences either. "Innkjøper registrerer
      * leverandøren" names who is accountable; "registrering av leverandøropplysninger utføres" does
      * not, and a flow whose boxes do not say who acts cannot be drawn in lanes at all.
+     *
+     * WHY SIMPLICITY IS NOT SILENCE.
+     *
+     * A model held this tightly stops saying anything at all, and that costs the user something
+     * real. "Dersom leverandøren er kritisk" decides where the process goes on a word the
+     * description never defines — the flow is right, and two people following it still disagree
+     * about which suppliers it applies to. That is worth one sentence, so the prompt asks for
+     * exactly that class of observation: a term, threshold or criterion an explicit decision turns
+     * on and the text leaves open. It stays separate from inventing, because it adds nothing to the
+     * flow — the proposal is built as though the term were defined and can be adopted unanswered.
+     * What the prompt still refuses is the hypothetical: a rejection, a failure path or an
+     * exception nobody described does not become reportable by being phrased as a question.
      */
     private function instructions(string $languageCode): string
     {
@@ -286,10 +299,14 @@ class ProcessFlowInterpretationAiClient
             'Sequence words — deretter, så, til slutt, etterpå, finally — apply to the whole process, not only to the branch nearest them, unless the text says otherwise.',
             '',
             'ASKING',
-            'Ask a blocking question only when the missing information genuinely prevents a credible flow — there is no way to tell what happens next, or a stated branch has no stated outcome to follow. At most two, and they go in `blocking_questions`.',
-            'Everything else that merely could be sharper — a role the text leaves implicit, a step that could be split, detail that would be useful — goes in `optional_clarifications`, at most three. These never hold anything up.',
-            'If the description is clear enough to work from, both lists are empty. That is the normal, expected result, not a sign that you missed something.',
-            'Never ask about something the text already answers, and never ask for the sake of thoroughness. Each question must change the flow if answered.',
+            'Ask a blocking question only when the missing information genuinely prevents a credible flow — there is no way to tell what happens next, or a stated branch has no stated outcome to follow. At most two, and they go in `blocking_questions`. This list is normally empty, and an empty one is the expected result rather than a sign that you missed something.',
+            '',
+            'OPTIONAL CLARIFICATIONS',
+            'These are a different job, and not a softer version of the first. Raise one where the description decides something on a term, threshold or criterion it never defines — the word is doing real work in the process, and two people carrying the process out as written would not apply it the same way. At most three, in `optional_clarifications`.',
+            '"Dersom leverandøren er kritisk, kontrollerer sikkerhetsansvarlig den" branches the process on "kritisk" and never says what makes a supplier critical. Report it: "Hva gjør at en leverandør regnes som kritisk?". The same goes for an amount the text calls only "stort", a risk it calls only "høy", a deadline it calls only "snarest", and a check it calls only "tilstrekkelig".',
+            'Noticing this never holds anything up and never changes what you propose. Build the flow exactly as if the term were defined, keep the user\'s own word for it in the labels and conditions, and leave them able to adopt the proposal unanswered.',
+            'Never report a hypothetical in either list: a rejection the text does not mention, a path for what happens when an ordinary activity fails, an exception nobody described, a step that could in principle be split. Those are the invented process this prompt forbids, and phrasing one as a question does not turn it into an observation.',
+            'Never ask about something the text already answers. A blocking question must change the flow if it is answered; an optional clarification must make the process possible to carry out the same way twice.',
             '',
             'ACTIVITIES',
             'Write each `label` as role + action + object, in the active voice, as one short imperative or present-tense statement: "Registrer leverandøren", not "Registrering av leverandøropplysninger gjennomføres".',

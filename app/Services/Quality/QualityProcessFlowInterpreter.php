@@ -47,6 +47,7 @@ class QualityProcessFlowInterpreter
         private readonly ProcessFlowInterpretationAiClient $client,
         private readonly QualityProcessBlueprintService $blueprints,
         private readonly QualityProcessFlowValidator $validator,
+        private readonly QualityFlowClarificationService $clarifications,
         private readonly AiCallContextScope $contextScope,
     ) {}
 
@@ -84,7 +85,7 @@ class QualityProcessFlowInterpreter
         $checked = $this->check($proposal);
 
         if ($checked['problems'] === []) {
-            return $this->result($checked['payload'], $proposal, $description, repaired: false);
+            return $this->result($item, $checked['payload'], $proposal, $description, repaired: false);
         }
 
         // One repair, with the problems stated. See ProcessFlowInterpretationAiClient::repair() for
@@ -105,7 +106,7 @@ class QualityProcessFlowInterpreter
             );
         }
 
-        return $this->result($recheck['payload'], $repaired, $description, repaired: true);
+        return $this->result($item, $recheck['payload'], $repaired, $description, repaired: true);
     }
 
     /**
@@ -305,16 +306,27 @@ class QualityProcessFlowInterpreter
     }
 
     /**
+     * The proposal as the user will see it.
+     *
+     * Optional clarifications pass through what the user has already turned down for this process:
+     * a suggestion they dismissed is not raised again while the description it was dismissed
+     * against still stands. Blocking questions deliberately do not — those say the flow cannot be
+     * believed, and nobody gets to switch that off, least of all by clicking past it once.
+     *
      * @param  array<string, mixed>  $payload
      * @param  array<string, mixed>  $proposal
      * @return array{payload: array<string, mixed>, blocking_questions: list<string>, optional_clarifications: list<string>, description: string, model: string, repaired: bool}
      */
-    private function result(array $payload, array $proposal, string $description, bool $repaired): array
+    private function result(QualityItem $item, array $payload, array $proposal, string $description, bool $repaired): array
     {
         return [
             'payload' => $payload,
             'blocking_questions' => $proposal['blocking_questions'],
-            'optional_clarifications' => $proposal['optional_clarifications'],
+            'optional_clarifications' => $this->clarifications->remaining(
+                $item,
+                $description,
+                $proposal['optional_clarifications'],
+            ),
             'description' => $description,
             'model' => $proposal['model'],
             'repaired' => $repaired,

@@ -72,6 +72,10 @@ export default function ProcessFlowPanel({
     // rewriting rather than adopting, so the editor goes back to the stored flow.
     const [dismissed, setDismissed] = useState(false);
     const [descriptionError, setDescriptionError] = useState(null);
+    // Suggestions turned down with "Avvis". Held here as well as persisted, because the suggestion
+    // has to be gone on the click — the server is being told so it stays gone next time, which is a
+    // different question from what the user is looking at now.
+    const [declined, setDeclined] = useState([]);
 
     const reviewing = proposal !== null && ! dismissed;
 
@@ -87,6 +91,7 @@ export default function ProcessFlowPanel({
         setEdges(source?.edges ?? []);
         setIsDirty(false);
         setDismissed(false);
+        setDeclined([]);
 
         if (proposal?.description) {
             setDescription(proposal.description);
@@ -144,14 +149,38 @@ export default function ProcessFlowPanel({
         });
     }
 
-    function interpret() {
+    function interpret(text = description) {
         setSaving(true);
         setDescriptionError(null);
-        router.post(`/app/quality/items/${item.id}/blueprint/interpret`, { description }, {
+        router.post(`/app/quality/items/${item.id}/blueprint/interpret`, { description: text }, {
             preserveScroll: true,
             onError: (errors) => setDescriptionError(errors.description ?? null),
             onFinish: () => setSaving(false),
         });
+    }
+
+    // "Avvis". Gone from the screen on the click; the request only makes it stay gone next time.
+    // `only` keeps this a partial reload, so the proposal on screen — which lives in the flash of
+    // the visit that produced it and cannot be flashed again — survives the round trip.
+    function declineClarification(question) {
+        setDeclined((current) => [...current, question]);
+
+        router.post(`/app/quality/items/${item.id}/blueprint/clarifications/dismiss`, { question, description }, {
+            preserveScroll: true,
+            preserveState: true,
+            only: ['flash'],
+        });
+    }
+
+    // "Avklar". The answer goes into the description and the description is read again — so there
+    // is one place the process is written down, the user can see and edit what their answer became,
+    // and adopting the result stores a text that actually says what the flow shows. Anything else
+    // here would be a second source of truth, or a chat.
+    function clarify(question, answer) {
+        const next = `${description.trim()}\n\n${question} ${answer.trim()}`;
+
+        setDescription(next);
+        interpret(next);
     }
 
     // The payload travels as it stands in the editor, corrections included — the user is adopting
@@ -207,7 +236,12 @@ export default function ProcessFlowPanel({
                             tb={tb}
                             replaces={blueprint !== null}
                             blocking={proposal.blocking_questions ?? []}
-                            optional={proposal.optional_clarifications ?? []}
+                            optional={(proposal.optional_clarifications ?? [])
+                                .filter((question) => ! declined.includes(question))}
+                            onClarify={clarify}
+                            onDecline={declineClarification}
+                            busy={saving}
+                            canManage={canManage}
                         />
                     )
                     : blueprint && <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} />}
@@ -452,16 +486,21 @@ function FlowErrorCard({ tb, flowError }) {
  * without — shown in amber, above the structure, because a guess the user never agreed to must not
  * be able to hide inside the proposal.
  *
- * Optional clarifications are the opposite: things that would sharpen the flow and change nothing
- * if ignored. They are deliberately quiet — a plain panel below the blocking one — because the
- * failure mode this feature has to avoid is the user reading a list of suggestions as a list of
- * chores and tuning their description forever instead of using the flow.
+ * Optional clarifications are the opposite: a term the process decides on and the description never
+ * defines. They change nothing about the flow and are deliberately quiet — a plain panel below the
+ * blocking one — because the failure mode this feature has to avoid is the user reading a list of
+ * suggestions as a list of chores and tuning their description forever instead of using the flow.
+ *
+ * Each one carries its own two answers rather than sitting in a bullet list, because a suggestion
+ * the user cannot do anything about is a suggestion they learn to read past. "Avvis" is what makes
+ * the quiet panel safe to keep showing: a note that can be turned off for good is a note nobody has
+ * to tune their description to silence.
  *
  * Neither list disables anything. "Bruk denne prosessflyten" is available with questions on screen,
  * and the copy in both panels says so, because a user who believes they have to answer first will
  * answer first.
  */
-function ProposalNotice({ tb, replaces, blocking, optional }) {
+function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline, busy, canManage }) {
     return (
         <div className="mt-4 space-y-4">
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5">
@@ -493,18 +532,111 @@ function ProposalNotice({ tb, replaces, blocking, optional }) {
             )}
 
             {optional.length > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <p className="text-base font-semibold text-slate-900">
-                        {tb.optional_clarifications_heading ?? 'Mulige forbedringer'}
-                    </p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-base leading-6 text-slate-700">
-                        {optional.map((question) => <li key={question}>{question}</li>)}
-                    </ul>
-                    <p className="mt-2 text-sm text-slate-600">
-                        {tb.optional_clarifications_help ?? 'Du kan ta flyten i bruk uten å svare på dette.'}
-                    </p>
-                </div>
+                <ClarificationSuggestions
+                    tb={tb}
+                    questions={optional}
+                    onClarify={onClarify}
+                    onDecline={onDecline}
+                    busy={busy}
+                    canManage={canManage}
+                />
             )}
+        </div>
+    );
+}
+
+/**
+ * One suggestion, two answers: say what the term means, or say it does not need one.
+ *
+ * "Avvis" removes it here and now. It is also sent to the server, which is what stops the same note
+ * coming back on the next generation — but the screen does not wait for that, because a user who
+ * dismisses something and watches it sit there will click it again.
+ *
+ * "Avklar" opens one field. The answer is appended to the process description and the description
+ * is read again, so the clarification ends up in the one text the process is written down in rather
+ * than in a conversation beside it. That is also why this is not a wizard: there is no sequence to
+ * work through, no state between the suggestions, and no step that has to be completed. Answer one,
+ * answer none, dismiss the rest — the flow is adoptable either way.
+ */
+function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, canManage }) {
+    const [answering, setAnswering] = useState(null);
+    const [answer, setAnswer] = useState('');
+
+    function open(question) {
+        setAnswering(question);
+        setAnswer('');
+    }
+
+    function close() {
+        setAnswering(null);
+        setAnswer('');
+    }
+
+    return (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <p className="text-base font-semibold text-slate-900">
+                {tb.optional_clarifications_heading ?? 'Verdt å presisere'}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+                {tb.optional_clarifications_help ?? 'Du kan ta flyten i bruk uten å svare på dette.'}
+            </p>
+
+            <ul className="mt-3 space-y-3">
+                {questions.map((question) => (
+                    <li key={question} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <p className="text-base leading-6 text-slate-800">{question}</p>
+
+                        {answering === question ? (
+                            <div className="mt-3 space-y-2">
+                                <label className="block text-sm font-semibold text-slate-700" htmlFor="clarification-answer">
+                                    {tb.clarification_answer_label ?? 'Svar'}
+                                </label>
+                                <textarea
+                                    id="clarification-answer"
+                                    className={TEXTAREA}
+                                    rows={2}
+                                    value={answer}
+                                    onChange={(event) => setAnswer(event.target.value)}
+                                    placeholder={tb.clarification_answer_placeholder ?? ''}
+                                />
+                                <p className="text-sm text-slate-500">
+                                    {tb.clarification_answer_help ?? 'Svaret legges til i beskrivelsen, og flyten tolkes på nytt.'}
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        className={ROW_ADD}
+                                        disabled={busy || answer.trim() === ''}
+                                        onClick={() => {
+                                            onClarify(question, answer);
+                                            close();
+                                        }}
+                                    >
+                                        {tb.clarification_submit ?? 'Bruk svaret'}
+                                    </button>
+                                    <button type="button" className={ROW_ADD} onClick={close} disabled={busy}>
+                                        {tb.clarification_cancel ?? 'Avbryt'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : canManage && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                <button type="button" className={ROW_ADD} onClick={() => open(question)} disabled={busy}>
+                                    {tb.clarification_clarify ?? 'Avklar'}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={ROW_ADD}
+                                    onClick={() => onDecline(question)}
+                                    disabled={busy}
+                                >
+                                    {tb.clarification_dismiss ?? 'Avvis'}
+                                </button>
+                            </div>
+                        )}
+                    </li>
+                ))}
+            </ul>
         </div>
     );
 }

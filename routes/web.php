@@ -203,6 +203,12 @@ Route::prefix('app')
                 ->name('items.blueprint.interpret');
             Route::post('/items/{item}/blueprint/adopt', [QualityController::class, 'adoptFlowProposal'])
                 ->name('items.blueprint.adopt');
+
+            // Turning down one of the suggestions beside a proposal. A third decision, and the only
+            // one that is remembered: it writes no flow, and it exists so the same note is not put
+            // in front of the user every time they regenerate.
+            Route::post('/items/{item}/blueprint/clarifications/dismiss', [QualityController::class, 'dismissFlowClarification'])
+                ->name('items.blueprint.clarifications.dismiss');
             Route::put('/items/{item}/blueprint', [QualityController::class, 'updateBlueprint'])
                 ->name('items.blueprint.update');
             Route::post('/items/{item}/blueprint/approve', [QualityController::class, 'approveBlueprint'])

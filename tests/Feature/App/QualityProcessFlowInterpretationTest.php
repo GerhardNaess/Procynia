@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityFlowClarificationDismissal;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
@@ -44,6 +45,15 @@ class QualityProcessFlowInterpretationTest extends TestCase
     use UsesProjectPostgresConnection;
 
     private const DESCRIPTION = 'Når en ny leverandør skal opprettes registrerer innkjøper leverandøren i systemet. Dersom leverandøren er kritisk skal sikkerhetsansvarlig kontrollere leverandøren. Deretter godkjenner økonomi leverandøren.';
+
+    /**
+     * The term the description branches on and never defines.
+     *
+     * The flow is complete without it — both paths are stated, nothing is guessed — so it is a
+     * suggestion and not a gap. It is the worked example for the whole optional-clarification
+     * rule: noticed, reported, and never in the way.
+     */
+    private const CRITICAL_SUPPLIER_QUESTION = 'Hva gjør at en leverandør regnes som kritisk?';
 
     protected function setUp(): void
     {
@@ -475,9 +485,10 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $this->assertSame(['godkjenn-leverandor'], $this->targetsFrom($proposal['edges'], 'kontroller-leverandor'));
         $this->assertSame(['end'], $this->targetsFrom($proposal['edges'], 'godkjenn-leverandor'));
 
-        // Nothing to ask: the description answers everything the flow needed.
+        // Nothing the flow needed is missing, so nothing blocks. The undefined term it branches
+        // on is reported beside the flow instead — see
+        // test_an_undefined_term_a_decision_turns_on_is_reported_without_blocking_the_flow.
         $this->assertSame([], $proposal['blocking_questions']);
-        $this->assertSame([], $proposal['optional_clarifications']);
     }
 
     /**
@@ -508,10 +519,16 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 'If the text does not branch, neither do you',
                 // The sentence after the condition applies to both paths.
                 'both paths lead to that next step',
-                // Asking is the exception, and empty lists are the expected result.
+                // Blocking is the exception, and an empty blocking list is the expected result.
                 'At most two',
-                'at most three',
-                'both lists are empty',
+                'This list is normally empty',
+                // Optional clarifications are one specific thing: the terms a decision turns on.
+                'term, threshold or criterion it never defines',
+                'At most three',
+                'never holds anything up and never changes what you propose',
+                // And still not a way back in for the invented process.
+                'Never report a hypothetical in either list',
+                'does not turn it into an observation',
             ] as $rule) {
                 if (! str_contains($sent, $rule)) {
                     return false;
@@ -591,6 +608,181 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $this->assertSame(3, $schema['properties']['optional_clarifications']['maxItems']);
         $this->assertContains('blocking_questions', $schema['required']);
         $this->assertContains('optional_clarifications', $schema['required']);
+    }
+
+    // ---------------------------------------------------------------------
+    // Optional clarifications: noticed, never in the way, and dismissible for good
+    // ---------------------------------------------------------------------
+
+    /**
+     * The example the whole rule is built on.
+     *
+     * "Dersom leverandøren er kritisk" sends the process one way or the other on a word the
+     * description never defines. The flow is complete — both paths are stated — so there is nothing
+     * to block on, and Procynia proposing a definition would be the invented process. Saying that
+     * the word is undefined is neither: it is an observation about the text, and it belongs beside
+     * the flow rather than in it.
+     */
+    public function test_an_undefined_term_a_decision_turns_on_is_reported_without_blocking_the_flow(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponse($this->supplierProposal());
+
+        $proposal = $this->interpret($owner, $process)['flow_proposal'];
+
+        $this->assertSame([self::CRITICAL_SUPPLIER_QUESTION], $proposal['optional_clarifications']);
+        $this->assertSame([], $proposal['blocking_questions'], 'An undefined term must never block.');
+
+        // And it changed nothing about the flow: the decision is still there, still branching on
+        // the user's own word, with no guessed threshold attached to it.
+        $decision = collect($proposal['nodes'])->firstWhere('key', 'kritisk-leverandor');
+        $this->assertSame('Er leverandøren kritisk?', $decision['label']);
+        $this->assertSame(
+            ['kontroller-leverandor', 'godkjenn-leverandor'],
+            $this->targetsFrom($proposal['edges'], 'kritisk-leverandor'),
+        );
+    }
+
+    /**
+     * A suggestion is a suggestion. Leaving it unanswered costs the user nothing — the flow is
+     * adopted, stored and attributed exactly as it would be with no questions on screen.
+     */
+    public function test_a_flow_with_an_unanswered_clarification_can_still_be_adopted(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponse($this->supplierProposal());
+        $proposal = $this->interpret($owner, $process)['flow_proposal'];
+
+        $this->assertNotEmpty($proposal['optional_clarifications']);
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/adopt", [
+            'lanes' => $proposal['lanes'],
+            'nodes' => $proposal['nodes'],
+            'edges' => $proposal['edges'],
+            'description' => self::DESCRIPTION,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $blueprint = QualityProcessBlueprint::query()->firstOrFail();
+
+        $this->assertSame(QualityProcessBlueprint::SOURCE_AI, $blueprint->source);
+        $this->assertCount(6, $blueprint->nodes());
+    }
+
+    /**
+     * "Avvis" is an answer too: this organisation has decided the word is left to judgement.
+     *
+     * What the endpoint owes the user is that the decision survives the click. The removal itself
+     * happens in the browser — see ProcessFlowPanel — so what is asserted here is the half that
+     * cannot be done there: it is recorded against the process, and the next reading of the same
+     * description does not raise it again.
+     */
+    public function test_dismissing_a_suggestion_records_it_and_takes_it_off_the_next_proposal(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        // Both readings queued up front: Http::fake() adds stubs rather than replacing them, so a
+        // second call would leave the first, now exhausted, sequence matching first.
+        $this->fakeResponses([$this->supplierProposal(), $this->supplierProposal()]);
+
+        $this->assertSame(
+            [self::CRITICAL_SUPPLIER_QUESTION],
+            $this->interpret($owner, $process)['flow_proposal']['optional_clarifications'],
+        );
+
+        $this->dismiss($owner, $process, self::CRITICAL_SUPPLIER_QUESTION, self::DESCRIPTION);
+
+        $this->assertSame(1, QualityFlowClarificationDismissal::query()
+            ->where('quality_item_id', $process->id)
+            ->count());
+
+        // Nothing about the flow was written by saying no.
+        $this->assertSame(0, QualityProcessBlueprint::query()->count());
+
+        $proposal = $this->interpret($owner, $process)['flow_proposal'];
+
+        $this->assertSame([], $proposal['optional_clarifications']);
+        $this->assertNotEmpty($proposal['nodes'], 'Dismissing a suggestion must not affect the flow.');
+    }
+
+    /**
+     * How long a dismissal holds.
+     *
+     * Through ordinary regeneration, including the refinements that make up most of the work on a
+     * description — otherwise "Avvis" means "not this time", and the user learns to ignore the
+     * panel rather than use it. It also matches on the question rather than on its exact spelling,
+     * because a model asked the same thing twice does not spell it the same way twice.
+     *
+     * Not through describing the process again from scratch. That text is not the one the user
+     * answered about, and carrying old answers into it would silently suppress a question about
+     * work nobody has looked at yet.
+     */
+    public function test_a_dismissed_suggestion_survives_regeneration_but_not_a_new_description(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->dismiss($owner, $process, self::CRITICAL_SUPPLIER_QUESTION, self::DESCRIPTION);
+
+        // The same question asked in different words on the second reading: a dismissal that only
+        // survives an exact string match is a dismissal the user watches fail.
+        $reworded = $this->supplierProposal();
+        $reworded['optional_clarifications'] = [['question' => 'Hva gjør at en leverandør regnes som KRITISK']];
+
+        $this->fakeResponses([$this->supplierProposal(), $reworded, $this->supplierProposal()]);
+
+        // Same description, generated again.
+        $this->assertSame([], $this->interpret($owner, $process)['flow_proposal']['optional_clarifications']);
+
+        // The same description with a sentence added — the shape most editing takes.
+        $extended = self::DESCRIPTION.' Innkjøper arkiverer avtalen til slutt.';
+
+        $this->assertSame([], $this->interpret($owner, $process, $extended)['flow_proposal']['optional_clarifications']);
+
+        // A different process, described from scratch. The old answer was not about this text, so
+        // the suggestion is worth making again — and the dismissal it lapsed from is cleared out
+        // rather than left to suppress a future question. (The faked flow is unchanged; what is
+        // under test is which questions reach the user, not what the model proposed.)
+        $rewritten = 'Når et avvik meldes inn registrerer kvalitetsleder saken i avvikssystemet. Dersom saken gjelder HMS varsles verneombudet umiddelbart. Til slutt lukkes saken av kvalitetsleder.';
+
+        $this->assertSame(
+            [self::CRITICAL_SUPPLIER_QUESTION],
+            $this->interpret($owner, $process, $rewritten)['flow_proposal']['optional_clarifications'],
+        );
+        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+    }
+
+    /** Saying no on someone else's process, or without the right to manage this one. */
+    public function test_dismissing_a_suggestion_passes_the_same_gates_as_every_other_flow_write(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        ['customer' => $other] = $this->context();
+
+        $process = $this->process($customer, 'Leverandøropprettelse');
+        $foreign = $this->process($other, 'Andres prosess');
+        $contributor = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
+
+        Http::fake([]);
+        Http::preventStrayRequests();
+
+        $this->actingAs($contributor)
+            ->post("/app/quality/items/{$process->id}/blueprint/clarifications/dismiss", [
+                'question' => self::CRITICAL_SUPPLIER_QUESTION,
+            ])
+            ->assertForbidden();
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$foreign->id}/blueprint/clarifications/dismiss", [
+                'question' => self::CRITICAL_SUPPLIER_QUESTION,
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+        Http::assertNothingSent();
     }
 
     // ---------------------------------------------------------------------
@@ -858,6 +1050,18 @@ class QualityProcessFlowInterpretationTest extends TestCase
         ));
     }
 
+    /** "Avvis" on one suggestion, as the panel sends it. */
+    private function dismiss(User $owner, QualityItem $item, string $question, ?string $description): void
+    {
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$item->id}/blueprint/clarifications/dismiss", [
+                'question' => $question,
+                'description' => $description,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+    }
+
     /** @return array<string, mixed> */
     private function interpret(User $owner, QualityItem $item, ?string $description = null): array
     {
@@ -922,7 +1126,10 @@ class QualityProcessFlowInterpretationTest extends TestCase
                 ['from' => 'godkjenn_leverandor', 'to' => 'end', 'condition' => null],
             ],
             'blocking_questions' => [],
-            'optional_clarifications' => [],
+            // "Kritisk" decides where the process goes and the description never says what it
+            // means. Nothing is missing from the flow, so it is not blocking — but it is the one
+            // class of observation the prompt does ask for. See CRITICAL_SUPPLIER_QUESTION.
+            'optional_clarifications' => [['question' => self::CRITICAL_SUPPLIER_QUESTION]],
         ];
     }
 
