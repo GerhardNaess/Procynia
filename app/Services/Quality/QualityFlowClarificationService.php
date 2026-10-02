@@ -148,6 +148,40 @@ class QualityFlowClarificationService
     }
 
     /**
+     * What the user has already settled about this process, and still stands.
+     *
+     * The same comparison `remaining()` makes, asked the other way round and with nothing deleted:
+     * this is a read, and a read must not retire a resolution as a side effect of somebody drafting
+     * an article. A lapsed row is simply not returned; `remaining()` is still the one that clears it.
+     *
+     * Why an article draft is given these at all: they are the two things the user has said about
+     * their own process that the description cannot say on its own. "Avklar" means the answer is
+     * woven into the description, so the draft must not ask the question again; "Avvis" means the
+     * term is deliberately left to judgement, so the draft must not invent a definition for it.
+     *
+     * @return list<array{question: string, outcome: string}>
+     */
+    public function settled(QualityItem $item, ?string $description): array
+    {
+        $now = $this->text($description) ?? '';
+
+        return QualityFlowClarificationResolution::query()
+            ->where('quality_item_id', (int) $item->id)
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (QualityFlowClarificationResolution $resolution): bool => $this->stillCovers(
+                (string) $resolution->description,
+                $now,
+            ))
+            ->map(static fn (QualityFlowClarificationResolution $resolution): array => [
+                'question' => (string) $resolution->question,
+                'outcome' => (string) $resolution->outcome,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * The form a question is matched on: casing, punctuation and spacing removed.
      *
      * A model asked the same thing twice will not spell it identically, and a resolution that only

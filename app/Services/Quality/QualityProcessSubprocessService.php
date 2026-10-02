@@ -203,6 +203,46 @@ class QualityProcessSubprocessService
         return $trail;
     }
 
+    /**
+     * The processes whose own flow has a step standing for this one.
+     *
+     * The reference is written on the parent, so this is the only way up: a subprocess holds nothing
+     * saying what it is part of, and nothing should — it is a process in its own right, and the day
+     * two flows both point at it is the day a stored parent would be a lie.
+     *
+     * Several answers are legitimate. Ordered by title so the answer is stable, and bounded, because
+     * it is read to give context and not to be complete.
+     *
+     * @return list<array{id: int, title: string}>
+     */
+    public function parentsOf(int $customerId, int $itemId, int $limit = 3): array
+    {
+        $map = $this->referenceMap($customerId);
+        $parentIds = [];
+
+        foreach ($map as $parentId => $children) {
+            if (in_array($itemId, $children, true)) {
+                $parentIds[] = (int) $parentId;
+            }
+        }
+
+        if ($parentIds === []) {
+            return [];
+        }
+
+        return QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('id', $parentIds)
+            ->orderBy('title')
+            ->limit(max(1, $limit))
+            ->get(['id', 'title'])
+            ->map(static fn (QualityItem $item): array => [
+                'id' => (int) $item->id,
+                'title' => (string) $item->title,
+            ])
+            ->all();
+    }
+
     /** How many nodes the referenced process's own flow holds. Zero when it has no flow yet. */
     public function stepCount(int $customerId, int $itemId): int
     {

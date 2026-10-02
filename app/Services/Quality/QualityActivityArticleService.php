@@ -31,9 +31,12 @@ use Throwable;
  * Not the other way round. A prosessaktivitet is where the virksomhet knows something that is not
  * written down anywhere, and Kvalitet's job at that point is to get it into Enterprise Wiki — not to
  * hunt through Wiki for a page that might already cover it. Procynia drafts the article from the
- * process, the activity and the role; the user corrects it; what is created is an ordinary Wiki page
- * in draft, which then goes through Wiki's own review, approval and publication exactly like a page
- * that arrived from a document ingest.
+ * activity's place in the process — the step before it, the branch condition that sends the work
+ * there, what judges the result afterwards, and what the user has already settled about the process
+ * (see QualityActivityArticleContextBuilder) — in the one fixed structure every activity article
+ * has. The user corrects it; what is created is an ordinary Wiki page in draft, which then goes
+ * through Wiki's own review, approval and publication exactly like a page that arrived from a
+ * document ingest.
  *
  * WIKI OWNS THE ARTICLE. Nothing of the page's content is stored anywhere in Kvalitet — not the
  * title, not the text, not the status. The flow holds no article content at all, and this service
@@ -59,6 +62,7 @@ class QualityActivityArticleService
 
     public function __construct(
         private readonly ProcessActivityArticleAiClient $client,
+        private readonly QualityActivityArticleContextBuilder $contextBuilder,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly AiCallContextScope $contextScope,
@@ -80,7 +84,13 @@ class QualityActivityArticleService
         string $activityKey,
         string $languageCode,
     ): array {
-        $activity = $this->activityOrFail($blueprint, $activityKey);
+        $this->activityOrFail($blueprint, $activityKey);
+
+        // Built before the call rather than inside it: it is a read of the flow and of what the user
+        // has already settled about this process, and a context that cannot be assembled is not an
+        // AI failure.
+        $context = $this->contextBuilder->build($item, $blueprint, $activityKey)
+            ?? throw new RuntimeException("QualityActivityArticleService: no activity [{$activityKey}] on this flow.");
 
         return $this->contextScope->within(
             new AiCallContext(
@@ -90,16 +100,9 @@ class QualityActivityArticleService
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),
-            function () use ($item, $blueprint, $activity, $languageCode): array {
+            function () use ($context, $languageCode): array {
                 try {
-                    $drafted = $this->client->draft(
-                        (string) $item->title,
-                        trim((string) ($blueprint->description ?? '')),
-                        (string) $activity['label'],
-                        (string) $activity['description'],
-                        (string) $activity['role'],
-                        $languageCode,
-                    );
+                    $drafted = $this->client->draft($context, $languageCode);
                 } catch (AiCostControlException $exception) {
                     throw $exception;
                 } catch (Throwable $exception) {

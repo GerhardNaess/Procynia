@@ -1326,16 +1326,56 @@ function NodeSelect({ nodes, value, onChange, disabled }) {
 }
 
 /**
+ * The fixed structure of an article drafted from an activity.
+ *
+ * The same seven sections, in the same order, as the backend assembles a drafted article from — see
+ * ProcessActivityArticleAiClient::SECTIONS. Here they do one job: an article written by hand starts
+ * as the same skeleton an AI draft arrives in, so the two are the same kind of document and a reader
+ * opening either one in Wiki finds what they are looking for in the same place.
+ *
+ * Headings come from the customer's own translations, so the skeleton is in the language the article
+ * will be written in.
+ */
+const ARTICLE_SECTIONS = [
+    'purpose',
+    'timing',
+    'responsibility',
+    'procedure',
+    'criteria',
+    'documentation',
+    'process_context',
+];
+
+const ARTICLE_SECTION_FALLBACKS = {
+    purpose: 'Formål',
+    timing: 'Når aktiviteten utføres',
+    responsibility: 'Ansvar',
+    procedure: 'Fremgangsmåte',
+    criteria: 'Viktige vurderinger og kriterier',
+    documentation: 'Dokumentasjon og resultat',
+    process_context: 'Relatert prosesskontekst',
+};
+
+function articleSkeleton(tb) {
+    const headings = tb.article_sections ?? {};
+
+    return ARTICLE_SECTIONS
+        .map((section) => `## ${headings[section] ?? ARTICLE_SECTION_FALLBACKS[section]}\n\n`)
+        .join('\n');
+}
+
+/**
  * One activity, and the knowledge it is the source of.
  *
  * THE DIRECTION THIS PANEL RUNS IN.
  *
  * An activity on a prosessflyt is where the virksomhet knows something that nobody has written
  * down. So the panel is not a place to attach an article that already exists — it is the place the
- * next one is written from. "Opprett kunnskapsartikkel" drafts it from the process, the activity
- * and the role; the user reads and corrects the draft; what is created is an ordinary Enterprise
- * Wiki page in draft, and the user is taken to it, because everything after that — editing, review,
- * approval, publication — happens in Wiki.
+ * next one is written from. "Opprett kunnskapsartikkel" drafts it from where the activity sits in
+ * the process — the role, the step before, the condition that sends the work there, what judges the
+ * result — in the fixed structure every activity article has; the user reads and corrects the
+ * draft; what is created is an ordinary Enterprise Wiki page in draft, and the user is taken to it,
+ * because everything after that — editing, review, approval, publication — happens in Wiki.
  *
  * NOTHING OF THE ARTICLE LIVES HERE. The list above the button is read fresh from Wiki on every
  * page load: a title and how far the page has got through publication, nothing of what it says. The
@@ -1412,10 +1452,12 @@ function ActivityArticlePanel({
     }
 
     // Writing it by hand is a first-class way to do this, not a fallback: the point is to get the
-    // knowledge into Wiki, and a user who knows what it says does not need a draft first.
+    // knowledge into Wiki, and a user who knows what it says does not need a draft first. They start
+    // from the same structure a draft arrives in — an empty box and a drafted article should not
+    // produce two different kinds of page — and every word of it is theirs to change or delete.
     function writeByHand() {
         setTitle('');
-        setMarkdown('');
+        setMarkdown(articleSkeleton(tb));
         setWriting(true);
     }
 
@@ -1495,6 +1537,11 @@ function ActivityArticlePanel({
                                     ?? 'Skriv ned kunnskapen bak dette steget. Procynia lager et utkast du kan rette, og artikkelen opprettes som utkast i Enterprise Wiki — der den følger vanlig gjennomgang og godkjenning.'}
                             </p>
 
+                            <p className="mt-2 text-sm leading-5 text-slate-500">
+                                {tb.articles_structure_help
+                                    ?? 'Artikkelen følger en fast struktur: Formål, Når aktiviteten utføres, Ansvar, Fremgangsmåte, Viktige vurderinger og kriterier, Dokumentasjon og resultat, Relatert prosesskontekst.'}
+                            </p>
+
                             <div className="mt-4 flex flex-wrap gap-3">
                                 {aiAvailable && (
                                     <button type="button" className={PRIMARY_ACTION} onClick={requestDraft} disabled={busy}>
@@ -1516,6 +1563,11 @@ function ActivityArticlePanel({
                             <p className="text-sm leading-5 text-slate-600">
                                 {tb.articles_review_help
                                     ?? 'Les gjennom og rett teksten før du oppretter den. Det som opprettes, er det som står her — artikkelen legges i Wiki som utkast og sendes til gjennomgang derfra.'}
+                            </p>
+
+                            <p className="mt-2 text-sm leading-5 text-slate-500">
+                                {tb.articles_fill_in_help
+                                    ?? 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.'}
                             </p>
 
                             <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-title">

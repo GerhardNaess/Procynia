@@ -12,6 +12,7 @@ use App\Models\QualityFlowClarificationResolution;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessFlowValidator;
@@ -1497,10 +1498,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $process = $this->process($customer, 'Leverandørkontroll');
         $this->flowWithActivity($customer, $process);
 
-        $this->fakeResponse([
-            'title' => 'Sikkerhetskrav ved vurdering av leverandører',
-            'markdown' => "Artikkelen dekker hva som skal kontrolleres.\n\n## Hva du ser etter\n\nDokumentasjon på styringssystem.",
-        ]);
+        $this->fakeResponse($this->sectionedDraft());
 
         $this->actingAs($owner)
             ->post("/app/quality/items/{$process->id}/activities/article-draft", [
@@ -1516,7 +1514,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $this->assertSame('kontroller', $draft['activity_key']);
         $this->assertSame('Sikkerhetskrav ved vurdering av leverandører', $draft['title']);
-        $this->assertStringContainsString('## Hva du ser etter', $draft['markdown']);
+        $this->assertStringContainsString('Kontrollen skal avdekke', $draft['markdown']);
         $this->assertNull($props['activity_article_error']);
 
         // Nothing was created. The user has read nothing yet, and a page they have not agreed to
@@ -1525,14 +1523,76 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $this->assertSame(0, QualityActivityWikiPage::query()->count());
     }
 
-    public function test_the_draft_is_given_the_process_the_activity_and_the_role_and_nothing_else(): void
+    /**
+     * The article arrives in the one structure every activity article has.
+     *
+     * Assembled by the backend from one field per section, so the model cannot drop a section,
+     * rename one or reorder them — the headings are what a reader navigates by and what Wiki
+     * patches and reviews by, and an article whose structure is whatever the model felt like that
+     * day is an article a kvalitetssystem cannot maintain.
+     */
+    public function test_the_article_follows_the_fixed_structure(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Leverandørkontroll');
         $this->flowWithActivity($customer, $process);
 
-        $this->fakeResponse(['title' => 'Sikkerhetskrav', 'markdown' => 'Tekst.']);
+        $this->fakeResponse($this->sectionedDraft());
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        $markdown = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['activity_article_draft']['markdown'];
+
+        $headings = $this->sectionHeadings();
+
+        $this->assertSame(
+            ['Formål', 'Når aktiviteten utføres', 'Ansvar', 'Fremgangsmåte', 'Viktige vurderinger og kriterier', 'Dokumentasjon og resultat', 'Relatert prosesskontekst'],
+            $headings,
+        );
+
+        // Every section, in order, with its body under it — and a blank line between every part,
+        // because that is what Wiki splits content blocks on.
+        $position = -1;
+
+        foreach ($headings as $heading) {
+            $found = mb_strpos($markdown, "## {$heading}\n\n");
+
+            $this->assertNotFalse($found, "Section [{$heading}] is missing from the article.");
+            $this->assertGreaterThan($position, $found, "Section [{$heading}] is out of order.");
+
+            $position = $found;
+        }
+
+        // The model's own headings are not the article's: it returns section bodies, and nothing
+        // else it writes becomes an H2.
+        $this->assertSame(count($headings), substr_count($markdown, "\n## ") + 1);
+    }
+
+    /**
+     * The context is the activity's place in the process, not the process.
+     *
+     * The step before it and the branch condition that leads there are what answer "when is this
+     * done"; the decision after it is what answers "what is this judged on". Without them the draft
+     * is a general article about information security, which is true of every company and useful to
+     * none.
+     */
+    public function test_the_draft_is_given_the_activity_s_place_in_the_process(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        // Another process of the same customer, with its own flow. None of it is this activity's
+        // context, and none of it may be sent: the whole kvalitetssystem is noise, not context.
+        $unrelated = $this->process($customer, 'Reiseregninger');
+        $this->flowWithActivity($customer, $unrelated);
+
+        $this->fakeResponse($this->sectionedDraft());
 
         $this->actingAs($owner)
             ->post("/app/quality/items/{$process->id}/activities/article-draft", [
@@ -1543,20 +1603,210 @@ class QualityProcessFlowInterpretationTest extends TestCase
             $sent = $this->sentText($request);
 
             foreach ([
+                // The process, the activity, the role and the description — as before.
                 'Leverandørkontroll',
                 'Kontroller leverandørens informasjonssikkerhet',
                 'Sikkerhetsansvarlig',
                 'Slik gjennomføres leverandørkontrollen hos oss.',
+                // The step before, and the condition that sends the work here.
+                'Er leverandøren kritisk?',
+                'on the condition: Ja',
+                // What the other branch does instead, so the condition means something.
+                'Leverandøren er godkjent',
+                // The decision the result is judged by, and both its outcomes.
+                'Er sikkerheten god nok?',
+                'Avvis leverandøren',
+                // The rule the article is written by, because an invented threshold in a
+                // kvalitetssystem is read as a requirement.
+                'Invent nothing.',
             ] as $expected) {
                 if (! str_contains($sent, $expected)) {
                     return false;
                 }
             }
 
-            // The rule the article is written by, because an invented threshold in a
-            // kvalitetssystem is read as a requirement.
-            return str_contains($sent, 'Invent nothing.');
+            // One hop, both ways. "Registrer leverandøren" is two steps away and is not sent, and
+            // neither is anything at all from the customer's other processes.
+            return ! str_contains($sent, 'Registrer leverandøren')
+                && ! str_contains($sent, 'Reiseregninger');
         });
+    }
+
+    /**
+     * What the user has already settled about their own process travels with it.
+     *
+     * "Avklar" means the answer is woven into the description, so the draft must not ask again.
+     * "Avvis" means the term is deliberately left to judgement — and that is exactly the term a
+     * model would otherwise define on the company's behalf, in a document read as policy.
+     */
+    public function test_the_draft_is_given_what_the_user_has_already_settled(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $blueprint = $this->flowWithActivity($customer, $process);
+
+        QualityFlowClarificationResolution::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'question' => self::CRITICAL_SUPPLIER_QUESTION,
+            'question_key' => hash('sha256', 'kritisk'),
+            'outcome' => QualityFlowClarificationResolution::OUTCOME_DISMISSED,
+            'description' => $blueprint->description,
+        ]);
+
+        // Settled against a description nobody is using any more. It is about work this process no
+        // longer describes, so it is not context — and it is not deleted either, because drafting
+        // an article is a read.
+        QualityFlowClarificationResolution::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'question' => 'Hvem eier leverandørregisteret?',
+            'question_key' => hash('sha256', 'register'),
+            'outcome' => QualityFlowClarificationResolution::OUTCOME_ANSWERED,
+            'description' => 'En helt annen beskrivelse av noe helt annet arbeid.',
+        ]);
+
+        $this->fakeResponse($this->sectionedDraft());
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        Http::assertSent(function (Request $request): bool {
+            $sent = $this->sentText($request);
+
+            return str_contains($sent, self::CRITICAL_SUPPLIER_QUESTION)
+                && str_contains($sent, 'left to professional judgement')
+                && ! str_contains($sent, 'Hvem eier leverandørregisteret?');
+        });
+
+        $this->assertSame(2, QualityFlowClarificationResolution::query()->count());
+    }
+
+    /** An activity that stands for a whole process is written about with that process in view. */
+    public function test_the_draft_is_given_the_subprocess_the_activity_stands_for(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $subprocess = $this->process($customer, 'Sikkerhetsgjennomgang av leverandør');
+        app(QualityProcessBlueprintService::class)->store(
+            (int) $customer->id,
+            $subprocess,
+            [
+                'lanes' => [['key' => 'sikkerhet', 'label' => 'Sikkerhetsansvarlig']],
+                'nodes' => [['key' => 'gjennomgang', 'lane' => 'sikkerhet', 'type' => 'step', 'label' => 'Gå gjennom dokumentasjonen']],
+                'edges' => [],
+            ],
+            QualityProcessBlueprint::SOURCE_MANUAL,
+            description: 'Gjennomgangen følger vårt eget kontrollskjema.',
+        );
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process, ['subprocess_quality_item_id' => $subprocess->id]);
+
+        $this->fakeResponse($this->sectionedDraft());
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        Http::assertSent(function (Request $request): bool {
+            $sent = $this->sentText($request);
+
+            return str_contains($sent, 'Sikkerhetsgjennomgang av leverandør')
+                && str_contains($sent, 'Gjennomgangen følger vårt eget kontrollskjema.')
+                // The subprocess's own flow is the other process's article to write, not this one's.
+                && ! str_contains($sent, 'Gå gjennom dokumentasjonen');
+        });
+    }
+
+    /**
+     * Missing knowledge is left visibly missing.
+     *
+     * A section the model had nothing for does not disappear — the heading stands with a line the
+     * author can see and search for. An article whose "Ansvar" is visibly unanswered is honest and
+     * fixable; one where the heading is simply absent reads as an article that had nothing to say
+     * about responsibility, and a plausible-sounding guess in its place would be read as policy.
+     */
+    public function test_a_section_the_model_cannot_answer_is_left_to_be_filled_in(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse($this->sectionedDraft([
+            'criteria' => '',
+            'documentation' => '**Må fylles inn:** Hvor resultatet av kontrollen føres.',
+        ]));
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        $markdown = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['activity_article_draft']['markdown'];
+
+        $this->assertStringContainsString(
+            "## Viktige vurderinger og kriterier\n\n**Må fylles inn:**",
+            $markdown,
+        );
+
+        // And the model's own marker is left exactly as it wrote it.
+        $this->assertStringContainsString('**Må fylles inn:** Hvor resultatet av kontrollen føres.', $markdown);
+
+        // The instruction that produces it, because the alternative to a marker is an invented
+        // threshold, approver or deadline standing in a quality document as a requirement.
+        Http::assertSent(function (Request $request): bool {
+            $sent = $this->sentText($request);
+
+            return str_contains($sent, 'Invent nothing.')
+                && str_contains($sent, 'Må fylles inn');
+        });
+    }
+
+    /**
+     * What is created is the user's text, not the model's.
+     *
+     * The draft is a starting point. They may rewrite every word of it, and the two endpoints exist
+     * precisely so that the one that writes to Wiki never consults what was drafted.
+     */
+    public function test_the_user_s_corrections_are_what_reaches_wiki(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse($this->sectionedDraft());
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        $drafted = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['activity_article_draft'];
+
+        $corrected = str_replace(
+            'Kontrollen skal avdekke',
+            'Kontrollen skal dokumentere',
+            $drafted['markdown'],
+        )."\n\n## Egen seksjon\n\nNoe vi legger til selv.";
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'kontroller',
+                'title' => 'Vår egen tittel',
+                'markdown' => $corrected,
+            ])
+            ->assertSessionHasNoErrors();
+
+        $page = EnterpriseWikiPage::query()->where('customer_id', $customer->id)->sole();
+        $markdown = (string) $page->currentVersion()->first()?->content_markdown;
+
+        $this->assertSame('Vår egen tittel', $page->title);
+        $this->assertStringContainsString('Kontrollen skal dokumentere', $markdown);
+        $this->assertStringContainsString('## Egen seksjon', $markdown);
+        $this->assertStringNotContainsString('Kontrollen skal avdekke', $markdown);
     }
 
     /** A provider that cannot answer leaves the activity exactly as it was. */
@@ -1904,31 +2154,94 @@ class QualityProcessFlowInterpretationTest extends TestCase
     /**
      * A stored flow with the one activity the article tests draft from, and the description the
      * draft is written against.
+     *
+     * The activity does not stand alone: a decision above it says when it is carried out, a decision
+     * below it judges what it produced, and both branches of each are written down. That shape is
+     * the point of the whole context — it is what separates an article about this company's
+     * leverandørkontroll from an article about information security in general.
+     *
+     * @param  array<string, mixed>  $activityOverrides
      */
-    private function flowWithActivity(Customer $customer, QualityItem $process): QualityProcessBlueprint
-    {
+    private function flowWithActivity(
+        Customer $customer,
+        QualityItem $process,
+        array $activityOverrides = [],
+    ): QualityProcessBlueprint {
         return app(QualityProcessBlueprintService::class)->store(
             (int) $customer->id,
             $process,
             [
-                'lanes' => [['key' => 'sikkerhet', 'label' => 'Sikkerhetsansvarlig']],
+                'lanes' => [
+                    ['key' => 'innkjop', 'label' => 'Innkjøper'],
+                    ['key' => 'sikkerhet', 'label' => 'Sikkerhetsansvarlig'],
+                ],
                 'nodes' => [
-                    ['key' => 'start', 'lane' => 'sikkerhet', 'type' => 'start', 'label' => 'Ny leverandør'],
-                    [
+                    ['key' => 'start', 'lane' => 'innkjop', 'type' => 'start', 'label' => 'Ny leverandør'],
+                    ['key' => 'registrer', 'lane' => 'innkjop', 'type' => 'step', 'label' => 'Registrer leverandøren'],
+                    ['key' => 'kritisk', 'lane' => 'innkjop', 'type' => 'decision', 'label' => 'Er leverandøren kritisk?'],
+                    array_merge([
                         'key' => 'kontroller',
                         'lane' => 'sikkerhet',
                         'type' => 'step',
                         'label' => 'Kontroller leverandørens informasjonssikkerhet',
-                    ],
-                    ['key' => 'ferdig', 'lane' => 'sikkerhet', 'type' => 'end', 'label' => 'Kontrollert'],
+                    ], $activityOverrides),
+                    ['key' => 'godkjent', 'lane' => 'sikkerhet', 'type' => 'decision', 'label' => 'Er sikkerheten god nok?'],
+                    ['key' => 'avvis', 'lane' => 'innkjop', 'type' => 'step', 'label' => 'Avvis leverandøren'],
+                    ['key' => 'ferdig', 'lane' => 'innkjop', 'type' => 'end', 'label' => 'Leverandøren er godkjent'],
                 ],
                 'edges' => [
-                    ['from' => 'start', 'to' => 'kontroller'],
-                    ['from' => 'kontroller', 'to' => 'ferdig'],
+                    ['from' => 'start', 'to' => 'registrer'],
+                    ['from' => 'registrer', 'to' => 'kritisk'],
+                    ['from' => 'kritisk', 'to' => 'kontroller', 'label' => 'Ja'],
+                    ['from' => 'kritisk', 'to' => 'ferdig', 'label' => 'Nei'],
+                    ['from' => 'kontroller', 'to' => 'godkjent'],
+                    ['from' => 'godkjent', 'to' => 'ferdig', 'label' => 'Ja'],
+                    ['from' => 'godkjent', 'to' => 'avvis', 'label' => 'Nei'],
                 ],
             ],
             QualityProcessBlueprint::SOURCE_MANUAL,
             description: 'Slik gjennomføres leverandørkontrollen hos oss.',
+        );
+    }
+
+    /**
+     * A sectioned article, as the model returns one.
+     *
+     * One field per section, never a slab of Markdown: the headings are the backend's to write. See
+     * ProcessActivityArticleAiClient::SECTIONS.
+     *
+     * @param  array<string, string>  $overrides
+     * @return array<string, string>
+     */
+    private function sectionedDraft(array $overrides = []): array
+    {
+        return array_merge([
+            'title' => 'Sikkerhetskrav ved vurdering av leverandører',
+            'purpose' => 'Kontrollen skal avdekke om leverandøren kan håndtere opplysningene vi overlater dem.',
+            'timing' => 'Kontrollen gjennomføres når leverandøren er vurdert som kritisk.',
+            'responsibility' => 'Sikkerhetsansvarlig gjennomfører kontrollen.',
+            'procedure' => "1. Be om dokumentasjon på styringssystem.\n2. Gå gjennom avvikshåndteringen.",
+            'criteria' => 'Dokumentasjonen skal dekke tilgangsstyring og avvikshåndtering.',
+            'documentation' => 'Resultatet skrives inn i leverandørvurderingen.',
+            'process_context' => 'Kontrollen kommer etter at leverandøren er vurdert som kritisk.',
+        ], $overrides);
+    }
+
+    /**
+     * The headings the backend writes, in the order it writes them.
+     *
+     * Read through the client's own section list rather than through the lang file's key order, so
+     * the test is pinned to the structure contract and not to how a translator happened to sort it.
+     *
+     * @return list<string>
+     */
+    private function sectionHeadings(): array
+    {
+        return array_map(
+            static fn (string $section): string => (string) __(
+                'procynia.quality.blueprint.article_sections.'.$section, [], 'no',
+            ),
+            ProcessActivityArticleAiClient::SECTIONS,
         );
     }
 }

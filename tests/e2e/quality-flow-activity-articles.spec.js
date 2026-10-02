@@ -81,6 +81,10 @@ test.describe('an activity as a source of knowledge articles', () => {
 
         await panel.getByRole('button', { name: 'Skriv artikkelen selv' }).click();
 
+        // Written by hand or drafted, the article starts in the same structure — so the two are the
+        // same kind of document and a reader finds what they are looking for in the same place.
+        await expect(panel.getByLabel('Artikkel')).toHaveValue(/## Formål[\s\S]*## Relatert prosesskontekst/);
+
         const title = `E2E Sikkerhetskrav ${Date.now()}`;
 
         await panel.getByLabel('Tittel').fill(title);
