@@ -79,6 +79,8 @@ export default function QualityItem() {
         flow_proposal: flowProposal = null,
         flow_error: flowError = null,
         flow_ai_available: flowAiAvailable = false,
+        subprocess_view: subprocessView = null,
+        subprocess_options: subprocessOptions = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -124,6 +126,8 @@ export default function QualityItem() {
                         proposal={flowProposal}
                         flowError={flowError}
                         flowAiAvailable={flowAiAvailable}
+                        subprocessView={subprocessView}
+                        subprocessOptions={subprocessOptions}
                     />
                 ) : (
                     <>

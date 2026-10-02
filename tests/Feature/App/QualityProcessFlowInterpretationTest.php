@@ -209,7 +209,18 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $this->assertSame(['edges', 'lanes', 'nodes'], collect(array_keys($blueprint->payload))->sort()->values()->all());
 
         foreach ($blueprint->nodes() as $node) {
-            $this->assertSame(['key', 'lane', 'type', 'label', 'description'], array_keys($node));
+            // The key SET, not its order: jsonb stores an object's keys in its own order, so
+            // asserting the order would be asserting a fact about Postgres rather than about what
+            // a node is allowed to carry — which is the point here. No geometry, ever.
+            $this->assertSame(
+                ['description', 'key', 'label', 'lane', 'subprocess_quality_item_id', 'type'],
+                collect(array_keys($node))->sort()->values()->all(),
+            );
+
+            // A model reading a description never names another process, and cannot: the
+            // interpreter normalises without a customer, which is the one state in which a
+            // reference cannot be checked against a tenant or a cycle.
+            $this->assertNull($node['subprocess_quality_item_id']);
         }
     }
 
@@ -284,7 +295,23 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         // Compared by content, not by key order: a jsonb round trip is free to reorder the keys of
         // an object, and the flow is the same flow either way.
-        $this->assertEquals($proposal['nodes'], $props['blueprint']['nodes']);
+        //
+        // The served node carries one field the stored one does not: what its reference resolves to
+        // today. It is read fresh on every page load rather than stored, so it is checked separately
+        // rather than smuggled into the comparison with what was adopted.
+        $this->assertEquals(
+            $proposal['nodes'],
+            array_map(
+                static fn (array $node): array => collect($node)->except(['subprocess'])->all(),
+                $props['blueprint']['nodes'],
+            ),
+        );
+
+        foreach ($props['blueprint']['nodes'] as $node) {
+            $this->assertNull($node['subprocess_quality_item_id']);
+            $this->assertNull($node['subprocess']);
+        }
+
         $this->assertEquals($proposal['edges'], $props['blueprint']['edges']);
         $this->assertSame(self::DESCRIPTION, $props['blueprint']['description']);
 

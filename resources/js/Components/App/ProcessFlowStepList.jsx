@@ -12,7 +12,7 @@ import { flowReadingOrder } from '../../Support/processBlueprintLayout';
  * of sentences than across a swimlane, and the list is also what survives being read aloud in a
  * review meeting.
  */
-export default function ProcessFlowStepList({ tb, blueprint }) {
+export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = null }) {
     const steps = flowReadingOrder(blueprint);
 
     if (steps.length === 0) {
@@ -51,6 +51,26 @@ export default function ProcessFlowStepList({ tb, blueprint }) {
                             <p className="mt-1 text-sm leading-5 text-slate-600">{step.description}</p>
                         )}
 
+                        {step.subprocess && (
+                            /* The same statement the pill on the diagram makes, in the view that
+                               can actually be read aloud or by a screen reader. A step that is a
+                               process of its own is not a detail of the picture. */
+                            onOpenSubprocess ? (
+                                <button
+                                    type="button"
+                                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-semibold text-violet-700 transition hover:border-violet-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+                                    onClick={() => onOpenSubprocess(step.subprocess, step)}
+                                >
+                                    {subprocessLabel(tb, step.subprocess)}
+                                    <span aria-hidden="true">→</span>
+                                </button>
+                            ) : (
+                                <p className="mt-1 text-sm font-medium text-violet-700">
+                                    {subprocessLabel(tb, step.subprocess)}
+                                </p>
+                            )
+                        )}
+
                         {step.outcomes.length > 0 && (
                             <p className="mt-1 text-sm text-slate-500">
                                 {(tb.step_outcomes ?? 'Utfall: :outcomes').replace(':outcomes', step.outcomes.join(' / '))}
@@ -61,4 +81,16 @@ export default function ProcessFlowStepList({ tb, blueprint }) {
             ))}
         </ol>
     );
+}
+
+/** "Underprosess: Leverandørkontroll (6 steg)" — the name first, because that is what is clicked. */
+function subprocessLabel(tb, subprocess) {
+    const steps = Number(subprocess.step_count ?? 0);
+
+    const name = (tb.subprocess_step ?? 'Underprosess: :title')
+        .replace(':title', subprocess.title ?? '');
+
+    return steps > 0
+        ? `${name} (${(tb.subprocess_steps ?? ':count steg').replace(':count', String(steps))})`
+        : name;
 }

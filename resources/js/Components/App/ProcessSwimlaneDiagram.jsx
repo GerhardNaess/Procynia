@@ -45,7 +45,7 @@ const NODE_TONES = {
     step: { fill: '#ffffff', stroke: '#cbd5e1', text: '#0f172a' },
 };
 
-export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb = {} }) {
+export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb = {}, onOpenSubprocess = null }) {
     const layout = layoutBlueprint(blueprint);
 
     if (layout.isEmpty) {
@@ -56,7 +56,7 @@ export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb
         );
     }
 
-    return <ZoomableDiagram layout={layout} title={title} tb={tb} />;
+    return <ZoomableDiagram layout={layout} title={title} tb={tb} onOpenSubprocess={onOpenSubprocess} />;
 }
 
 /**
@@ -65,7 +65,7 @@ export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb
  * Split out from the exported component so the hooks below are never conditional on an empty
  * blueprint — an empty flow renders a sentence, not a zoomable surface.
  */
-function ZoomableDiagram({ layout, title, tb }) {
+function ZoomableDiagram({ layout, title, tb, onOpenSubprocess }) {
     const surfaceRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [scale, setScale] = useState(null);
@@ -254,7 +254,7 @@ function ZoomableDiagram({ layout, title, tb }) {
                         ))}
 
                         {layout.nodes.map((node) => (
-                            <Node key={node.key} node={node} />
+                            <Node key={node.key} node={node} tb={tb} onOpenSubprocess={onOpenSubprocess} />
                         ))}
                     </svg>
                 </div>
@@ -430,13 +430,37 @@ function Edge({ edge }) {
     );
 }
 
-function Node({ node }) {
+/**
+ * One node, and — when it stands for another process — the way into it.
+ *
+ * A subprocess node is still a node: same box, same lane colour, same shape, because it is still a
+ * step in this flow and redrawing it as something else would make the diagram harder to read for
+ * the sake of a detail most readers do not need. What marks it is a small pill on its bottom edge
+ * saying how many steps the other flow holds, which is the one thing a reader has to know before
+ * deciding whether to open it: BPMN's ⊞ with the number spelled out, because a kvalitetshåndbok is
+ * read by people who do not know BPMN.
+ *
+ * The whole node becomes the control, not the pill. The pill is 16 pixels tall on a diagram that is
+ * routinely viewed at 60 %, and a target that small is a target nobody hits — so the box is the
+ * button, the pill is the sign that says so.
+ */
+function Node({ node, tb = {}, onOpenSubprocess = null }) {
     const shape = nodeShape(node);
     const tone = NODE_TONES[node.type] ?? NODE_TONES.step;
     const firstLineY = node.y + (node.height / 2) - (((node.lines.length - 1) * 15) / 2) + 4;
 
-    return (
-        <g>
+    const subprocess = node.subprocess ?? null;
+    const openable = subprocess !== null && typeof onOpenSubprocess === 'function';
+
+    const open = openable
+        ? (event) => {
+            event.stopPropagation();
+            onOpenSubprocess(subprocess, node);
+        }
+        : undefined;
+
+    const body = (
+        <>
             {shape.kind === 'rect' ? (
                 <rect
                     x={shape.x}
@@ -446,14 +470,14 @@ function Node({ node }) {
                     rx={shape.rx}
                     fill={tone.fill}
                     stroke={tone.stroke}
-                    strokeWidth="1.5"
+                    strokeWidth={subprocess ? 2.5 : 1.5}
                 />
             ) : (
                 <polygon
                     points={shape.points.map((point) => `${point.x},${point.y}`).join(' ')}
                     fill={tone.fill}
                     stroke={tone.stroke}
-                    strokeWidth="1.5"
+                    strokeWidth={subprocess ? 2.5 : 1.5}
                 />
             )}
 
@@ -464,6 +488,77 @@ function Node({ node }) {
                     </tspan>
                 ))}
             </text>
+
+            {subprocess && <SubprocessMarker node={node} subprocess={subprocess} tb={tb} />}
+        </>
+    );
+
+    if (! openable) {
+        return <g>{body}</g>;
+    }
+
+    const name = (tb.subprocess_open ?? 'Åpne underprosessen :title')
+        .replace(':title', subprocess.title ?? '');
+
+    return (
+        <g
+            role="button"
+            tabIndex={0}
+            aria-label={name}
+            className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+            onClick={open}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    open(event);
+                }
+            }}
+        >
+            <title>{name}</title>
+            {body}
+        </g>
+    );
+}
+
+/**
+ * The pill that says this step is a process of its own.
+ *
+ * Centred on the bottom edge and hanging half outside the box: inside, it would take a third of a
+ * 64-pixel node that already carries up to three lines of label. The 8 pixels it uses below the box
+ * come out of the 20-pixel row gap, so it can never reach the node beneath it.
+ *
+ * Width is counted from the text rather than measured, for the same reason wrapLabel() counts
+ * characters: measuring needs a DOM, and this has to draw identically everywhere.
+ */
+function SubprocessMarker({ node, subprocess, tb }) {
+    const steps = Number(subprocess.step_count ?? 0);
+    const text = steps > 0
+        ? (tb.subprocess_steps ?? ':count steg').replace(':count', String(steps))
+        : (tb.subprocess_no_flow ?? 'Underprosess');
+
+    // 16 for the ⊞, 6.4 per character, 10 of padding, 12 for the chevron.
+    const width = 16 + (text.length * 6.4) + 22;
+    const x = node.x + (node.width / 2) - (width / 2);
+    const y = node.y + node.height - 8;
+
+    return (
+        <g aria-hidden="true">
+            <rect x={x} y={y} width={width} height="17" rx="8.5" fill="#ffffff" stroke="#c4b5fd" strokeWidth="1.2" />
+
+            {/* BPMN's collapsed-subprocess mark, small enough to read as a bullet. */}
+            <rect x={x + 7} y={y + 4.5} width="8" height="8" rx="1.5" fill="none" stroke="#7c3aed" strokeWidth="1.2" />
+            <path d={`M ${x + 11} ${y + 6.5} v 4 M ${x + 9} ${y + 8.5} h 4`} stroke="#7c3aed" strokeWidth="1.2" strokeLinecap="round" />
+
+            <text x={x + 20} y={y + 12} fontSize="10.5" fontWeight="600" fill="#5b21b6">{text}</text>
+
+            <path
+                d={`M ${x + width - 12} ${y + 5.5} l 3.5 3 l -3.5 3`}
+                fill="none"
+                stroke="#7c3aed"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
         </g>
     );
 }

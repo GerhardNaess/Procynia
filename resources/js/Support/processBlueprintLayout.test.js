@@ -406,3 +406,75 @@ describe('flowReadingOrder', () => {
         assert.deepEqual(steps.map((step) => step.key), ['start', 'utfor', 'kontroll', 'slutt']);
     });
 });
+
+/**
+ * A step may stand for another process. The layout's whole job is to decide where a node sits, and
+ * nothing about a subprocess changes that — so what is asserted here is that the reference survives
+ * the trip untouched and that it changes no geometry. The diagram draws the indicator from it; the
+ * layout only has to hand it over.
+ */
+describe('a step that stands for another process', () => {
+    const withSubprocess = {
+        lanes: [{ key: 'l', label: 'Innkjøper' }],
+        nodes: [
+            { key: 'start', lane: 'l', type: 'start', label: 'Behov meldes' },
+            {
+                key: 'vurder',
+                lane: 'l',
+                type: 'step',
+                label: 'Vurder leverandøren',
+                subprocess_quality_item_id: 42,
+                subprocess: { id: 42, title: 'Leverandørkontroll', code: 'P-04', step_count: 6 },
+            },
+            { key: 'slutt', lane: 'l', type: 'end', label: 'Bestilt' },
+        ],
+        edges: [
+            { from: 'start', to: 'vurder', label: null },
+            { from: 'vurder', to: 'slutt', label: null },
+        ],
+    };
+
+    test('the reference reaches the drawing unchanged', () => {
+        const node = layoutBlueprint(withSubprocess).nodes.find((row) => row.key === 'vurder');
+
+        assert.deepEqual(node.subprocess, {
+            id: 42,
+            title: 'Leverandørkontroll',
+            code: 'P-04',
+            step_count: 6,
+        });
+    });
+
+    test('a step that stands for nothing else says so rather than leaving it undefined', () => {
+        const node = layoutBlueprint(withSubprocess).nodes.find((row) => row.key === 'start');
+
+        assert.equal(node.subprocess, null);
+    });
+
+    /** The indicator is drawn from the node, so it has to be on the step list's rows as well. */
+    test('the reading order carries it too', () => {
+        const step = flowReadingOrder(withSubprocess).find((row) => row.key === 'vurder');
+
+        assert.equal(step.subprocess.title, 'Leverandørkontroll');
+        assert.equal(flowReadingOrder(withSubprocess).find((row) => row.key === 'slutt').subprocess, null);
+    });
+
+    /**
+     * The reference must not be able to move anything. A reader comparing a flow before and after a
+     * subprocess was attached should see the same picture with one more mark on it.
+     */
+    test('attaching one moves nothing', () => {
+        const plain = layoutBlueprint({
+            ...withSubprocess,
+            nodes: withSubprocess.nodes.map(({ subprocess, subprocess_quality_item_id: _id, ...node }) => node),
+        });
+        const linked = layoutBlueprint(withSubprocess);
+
+        assert.equal(linked.width, plain.width);
+        assert.equal(linked.height, plain.height);
+        assert.deepEqual(
+            linked.nodes.map((node) => [node.key, node.x, node.y]),
+            plain.nodes.map((node) => [node.key, node.x, node.y]),
+        );
+    });
+});

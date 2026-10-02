@@ -273,6 +273,9 @@ export function layoutBlueprint(blueprint) {
             lines: wrapLabel(node.label ?? ''),
             description: node.description ?? null,
             type: node.type ?? 'step',
+            // The process this step opens into, as the server resolved it. Carried through
+            // untouched: the layout decides where the node sits, never what it is.
+            subprocess: node.subprocess ?? null,
             lane: node.lane,
             rank,
             x: METRICS.laneLabelWidth + METRICS.paddingX + (rank * columnPitch),
@@ -496,6 +499,7 @@ export function flowReadingOrder(blueprint) {
             type: node.type,
             label: node.label,
             description: node.description,
+            subprocess: node.subprocess ?? null,
             role: laneLabel.get(node.lane) ?? '',
             outcomes: edges
                 .filter((edge) => edge.from === node.key && (edge.label ?? '') !== '')

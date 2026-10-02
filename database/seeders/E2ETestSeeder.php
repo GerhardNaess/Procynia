@@ -58,6 +58,15 @@ class E2ETestSeeder extends Seeder
      */
     private const NO_FLOW_CODE = 'E2E-FLOW-0';
 
+    /**
+     * A process whose middle step stands for another process — the small flow above.
+     *
+     * Drill-down cannot be tested on one process: it needs a real reference between two of them,
+     * because what is being checked is that the parent reads the child's own stored blueprint
+     * rather than a copy of it. See tests/e2e/quality-flow-subprocess.spec.js.
+     */
+    private const PARENT_FLOW_CODE = 'E2E-FLOW-P';
+
     public function run(): void
     {
         // Internal super admin — no customer, full Filament access
@@ -185,6 +194,57 @@ class E2ETestSeeder extends Seeder
                 ],
             );
         }
+
+        $this->seedParentProcess($customer, $owner);
+    }
+
+    /**
+     * The drill-down case: a process with a step that is itself a process.
+     *
+     * Written after the loop because the reference is the small process's id, which only exists
+     * once it has been created — which is the point of the whole feature: the parent holds an id,
+     * not a copy, so there is nothing here that has to be kept in step with the small flow.
+     */
+    private function seedParentProcess(Customer $customer, User $owner): void
+    {
+        $child = QualityItem::query()
+            ->where('customer_id', $customer->id)
+            ->where('code', self::SMALL_FLOW_CODE)
+            ->sole();
+
+        $parent = QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::PARENT_FLOW_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => 'E2E hovedprosess',
+                'purpose' => 'Fast testprosess for E2E, med et steg som peker på en annen prosess.',
+                'status' => QualityItem::STATUS_DRAFT,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
+
+        QualityProcessBlueprint::query()->updateOrCreate(
+            ['quality_item_id' => $parent->id],
+            [
+                'customer_id' => $customer->id,
+                'payload' => [
+                    'lanes' => [['key' => 'innkjoper', 'label' => 'Innkjøper']],
+                    'nodes' => [
+                        ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldes', 'description' => null, 'subprocess_quality_item_id' => null],
+                        ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder leverandøren', 'description' => null, 'subprocess_quality_item_id' => (int) $child->id],
+                        ['key' => 'slutt', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Bestillingen er sendt', 'description' => null, 'subprocess_quality_item_id' => null],
+                    ],
+                    'edges' => [
+                        ['from' => 'start', 'to' => 'vurder', 'label' => null],
+                        ['from' => 'vurder', 'to' => 'slutt', 'label' => null],
+                    ],
+                ],
+                'status' => QualityProcessBlueprint::STATUS_DRAFT,
+                'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                'generated_at' => now(),
+                'generated_by_user_id' => $owner->id,
+            ],
+        );
     }
 
     /** Two nodes in one lane: smaller than the diagram surface on any screen. */

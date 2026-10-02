@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { router } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
 import ProcessSwimlaneDiagram from './ProcessSwimlaneDiagram';
 import ProcessFlowStepList from './ProcessFlowStepList';
 import StatusBadge from './StatusBadge';
@@ -32,6 +32,20 @@ import {
  * the identical thing they would do to a stored flow. What changes is only what the buttons at the
  * bottom mean — adopt it, or go back and say it differently — and that nothing has been written
  * yet. The flow the process already had is untouched until the user adopts.
+ *
+ * DRILLING INTO A SUBPROCESS.
+ *
+ * A node may stand for another process. Opening it does not open that process's page — it shows
+ * that process's flow in this tab's diagram area, under a breadcrumb back to where the reader came
+ * from, because the question being asked is "what happens inside this step", not "take me somewhere
+ * else". The trail is in the URL rather than in state here, so the view survives a reload and the
+ * browser's back button is the back button; the editor's unsaved work survives it because the visit
+ * is a partial reload that asks only for the subprocess.
+ *
+ * What is shown there is read-only, and deliberately so. The subprocess is somebody's process with
+ * its own owner and its own approval, and editing it from inside a parent would be editing a
+ * document you did not open. There is one link out, to its own page, where it can be edited as what
+ * it is.
  */
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -55,6 +69,8 @@ export default function ProcessFlowPanel({
     proposal = null,
     flowError = null,
     flowAiAvailable = false,
+    subprocessView = null,
+    subprocessOptions = [],
 }) {
     const tb = tq.blueprint ?? {};
     const nodeTypeLabels = tb.node_types ?? {};
@@ -202,6 +218,29 @@ export default function ProcessFlowPanel({
         });
     }
 
+    const trail = subprocessView?.trail ?? [];
+
+    /**
+     * Move the diagram area to a trail of subprocesses — or back to the process itself, with none.
+     *
+     * A partial reload asking only for `subprocess_view`: everything else on the tab stays as it
+     * was, which is what keeps unsaved structure edits alive across a drill-down and keeps a
+     * proposal — which lives in a flash and cannot be flashed again — on screen behind it.
+     */
+    function navigateTrail(ids) {
+        router.get(`/app/quality/items/${item.id}`, {
+            tab: 'flow',
+            ...(ids.length > 0 ? { subprocess: ids.join(',') } : {}),
+        }, {
+            only: ['subprocess_view'],
+            preserveState: true,
+            preserveScroll: true,
+            replace: false,
+        });
+    }
+
+    const openSubprocess = (subprocess) => navigateTrail([...trail.map((step) => step.id), subprocess.id]);
+
     // The payload travels as it stands in the editor, corrections included — the user is adopting
     // what they are looking at, not what the model first returned.
     function adopt() {
@@ -210,6 +249,23 @@ export default function ProcessFlowPanel({
             preserveScroll: true,
             onFinish: () => setSaving(false),
         });
+    }
+
+    // Drilled into a subprocess. Everything that edits THIS process is gone from the tab, because
+    // none of it applies to what is on screen — a user looking at Leverandørkontroll must not have
+    // Innkjøp's description, structure editor and approval button under it.
+    if (trail.length > 0) {
+        return (
+            <div className="space-y-6">
+                <SubprocessTrail tb={tb} rootTitle={item.title} trail={trail} onNavigate={navigateTrail} />
+                <SubprocessFlow
+                    tb={tb}
+                    current={trail[trail.length - 1]}
+                    blueprint={subprocessView?.blueprint ?? null}
+                    onOpenSubprocess={openSubprocess}
+                />
+            </div>
+        );
     }
 
     return (
@@ -279,6 +335,11 @@ export default function ProcessFlowPanel({
                                 title={`${tb.heading ?? 'Prosessflyt'} — ${item.title}`}
                                 emptyText={tb.diagram_empty ?? 'Flyten har ingen steg å tegne.'}
                                 tb={tb}
+                                // Only a saved reference can be opened: the trail is resolved on the
+                                // server against what is stored, so a reference picked in the editor
+                                // and not yet saved has nothing to open into. It still shows its
+                                // pill, which is the honest state — chosen, not yet in force.
+                                onOpenSubprocess={isDirty ? null : openSubprocess}
                             />
                         </div>
                     </section>
@@ -286,7 +347,11 @@ export default function ProcessFlowPanel({
                     <section className={CARD}>
                         <h2 className="text-xl font-semibold text-slate-950">{tb.steps_heading ?? 'Steg'}</h2>
                         <div className="mt-4">
-                            <ProcessFlowStepList tb={tb} blueprint={draft} />
+                            <ProcessFlowStepList
+                                tb={tb}
+                                blueprint={draft}
+                                onOpenSubprocess={isDirty ? null : openSubprocess}
+                            />
                         </div>
                     </section>
 
@@ -332,6 +397,7 @@ export default function ProcessFlowPanel({
                                     edges={edges}
                                     setEdges={edit(setEdges)}
                                     canManage={canManage}
+                                    subprocessOptions={subprocessOptions}
                                 />
                                 <EdgeEditor
                                     tb={tb}
@@ -383,6 +449,113 @@ export default function ProcessFlowPanel({
                 </>
             )}
         </div>
+    );
+}
+
+/**
+ * Hovedprosess > Underprosess > …
+ *
+ * Every crumb but the last is a way back, and the last is where you are — the ordinary contract of
+ * a breadcrumb, which is why it is one rather than a "tilbake" button. A reader three levels down
+ * needs to reach the top in one click, not three.
+ *
+ * The first crumb is the process whose page this is, so the trail always says where it started even
+ * at depth one.
+ */
+function SubprocessTrail({ tb, rootTitle, trail, onNavigate }) {
+    const crumbs = [{ id: null, title: rootTitle }, ...trail];
+
+    return (
+        <nav className="flex flex-wrap items-center gap-1 text-base" aria-label={tb.trail_label ?? 'Hvor du er i prosessen'}>
+            {crumbs.map((crumb, index) => {
+                const last = index === crumbs.length - 1;
+
+                return (
+                    <span key={crumb.id ?? 'root'} className="flex items-center gap-1">
+                        {index > 0 && <span aria-hidden="true" className="text-slate-400">›</span>}
+
+                        {last ? (
+                            <span className="font-semibold text-slate-950" aria-current="page">{crumb.title}</span>
+                        ) : (
+                            <button
+                                type="button"
+                                className="rounded-lg px-1.5 py-0.5 font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                                onClick={() => onNavigate(trail.slice(0, index).map((step) => step.id))}
+                            >
+                                {crumb.title}
+                            </button>
+                        )}
+                    </span>
+                );
+            })}
+        </nav>
+    );
+}
+
+/**
+ * A subprocess, as it is stored on its own process.
+ *
+ * Read-only on purpose — see the panel's docblock. The one way to change it is the link at the
+ * bottom, which goes to the process's own page, where it is the document being edited rather than a
+ * step inside somebody else's.
+ *
+ * It can be drilled into further: a subprocess whose own steps are processes behaves exactly the
+ * same, because the trail is just one hop longer.
+ */
+function SubprocessFlow({ tb, current, blueprint, onOpenSubprocess }) {
+    if (blueprint === null) {
+        return (
+            <section className={CARD}>
+                <h2 className="text-xl font-semibold text-slate-950">{current.title}</h2>
+                <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-base text-slate-600">
+                    {tb.subprocess_without_flow ?? 'Denne underprosessen har ingen flyt ennå.'}
+                </p>
+                <SubprocessOwnPageLink tb={tb} current={current} />
+            </section>
+        );
+    }
+
+    return (
+        <>
+            <section className={CARD}>
+                <h2 className="text-xl font-semibold text-slate-950">{current.title}</h2>
+                <p className="mt-1 max-w-2xl text-base leading-6 text-slate-600">
+                    {tb.subprocess_intro ?? 'Dette er underprosessens egen flyt, slik den er lagret på den prosessen.'}
+                </p>
+
+                <div className="mt-4">
+                    <ProcessSwimlaneDiagram
+                        blueprint={blueprint}
+                        title={`${tb.heading ?? 'Prosessflyt'} — ${current.title}`}
+                        emptyText={tb.diagram_empty ?? 'Flyten har ingen steg å tegne.'}
+                        tb={tb}
+                        onOpenSubprocess={onOpenSubprocess}
+                    />
+                </div>
+
+                <SubprocessOwnPageLink tb={tb} current={current} />
+            </section>
+
+            <section className={CARD}>
+                <h2 className="text-xl font-semibold text-slate-950">{tb.steps_heading ?? 'Steg'}</h2>
+                <div className="mt-4">
+                    <ProcessFlowStepList tb={tb} blueprint={blueprint} onOpenSubprocess={onOpenSubprocess} />
+                </div>
+            </section>
+        </>
+    );
+}
+
+function SubprocessOwnPageLink({ tb, current }) {
+    return (
+        <p className="mt-4 border-t border-slate-100 pt-4">
+            <Link
+                href={`/app/quality/items/${current.id}?tab=flow`}
+                className="text-base font-semibold text-slate-700 hover:underline"
+            >
+                {(tb.subprocess_open_page ?? 'Åpne :title som egen prosess').replace(':title', current.title)} →
+            </Link>
+        </p>
     );
 }
 
@@ -801,9 +974,34 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canManage }) {
  * Removing a node removes the arrows that reached it, here rather than on the server, so the
  * diagram beside the editor is correct immediately instead of after a save.
  */
-function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdges, canManage }) {
+function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdges, canManage, subprocessOptions = [] }) {
     function update(index, field, value) {
         setNodes(nodes.map((node, i) => (i === index ? { ...node, [field]: value } : node)));
+    }
+
+    /**
+     * Point a step at another process, or at none.
+     *
+     * The id is what gets saved; the matching option is copied onto the node as well so the pill
+     * appears on the diagram on the change rather than after the save. The server rewrites it with
+     * what the reference actually resolves to on the way back, and that answer wins.
+     */
+    function setSubprocess(index, rawId) {
+        const id = rawId === '' ? null : Number(rawId);
+        const option = subprocessOptions.find((candidate) => candidate.id === id) ?? null;
+
+        setNodes(nodes.map((node, i) => (i === index
+            ? {
+                ...node,
+                subprocess_quality_item_id: id,
+                subprocess: option === null ? null : {
+                    id: option.id,
+                    title: option.title,
+                    code: option.code ?? null,
+                    step_count: option.step_count ?? 0,
+                },
+            }
+            : node)));
     }
 
     function remove(index) {
@@ -820,6 +1018,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
             type: 'step',
             label: '',
             description: null,
+            subprocess_quality_item_id: null,
         }]);
     }
 
@@ -831,12 +1030,18 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                 <p className="mt-2 text-sm text-slate-500">{tb.nodes_empty ?? 'Ingen noder er definert.'}</p>
             ) : (
                 <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-left text-sm">
+                    <table className={`w-full text-left text-sm ${subprocessOptions.length > 0 ? 'min-w-[820px]' : 'min-w-[640px]'}`}>
                         <thead className="text-xs uppercase tracking-wide text-slate-500">
                             <tr>
                                 <th className="pb-2 pr-3">{tb.node_label ?? 'Tekst'}</th>
                                 <th className="pb-2 pr-3">{tb.node_lane ?? 'Rolle'}</th>
                                 <th className="pb-2 pr-3">{tb.node_type ?? 'Type'}</th>
+                                {/* Only offered where there is something to offer: a customer with
+                                    one process has no other process to point at, and an empty
+                                    dropdown is a question with no answers. */}
+                                {subprocessOptions.length > 0 && (
+                                    <th className="pb-2 pr-3">{tb.node_subprocess ?? 'Underprosess'}</th>
+                                )}
                                 {canManage && <th className="pb-2" />}
                             </tr>
                         </thead>
@@ -877,6 +1082,22 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                             ))}
                                         </select>
                                     </td>
+                                    {subprocessOptions.length > 0 && (
+                                        <td className="py-2 pr-3">
+                                            <select
+                                                className={SMALL_INPUT}
+                                                value={node.subprocess_quality_item_id ?? ''}
+                                                aria-label={tb.node_subprocess ?? 'Underprosess'}
+                                                onChange={(event) => setSubprocess(index, event.target.value)}
+                                                disabled={! canManage}
+                                            >
+                                                <option value="">{tb.node_subprocess_none ?? '— ingen —'}</option>
+                                                {subprocessOptions.map((option) => (
+                                                    <option key={option.id} value={option.id}>{option.title}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                    )}
                                     {canManage && (
                                         <td className="py-2">
                                             <button

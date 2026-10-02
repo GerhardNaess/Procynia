@@ -590,6 +590,425 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // Underprosesser
+    // ---------------------------------------------------------------------
+
+    /**
+     * What these tests defend.
+     *
+     * A step can stand for another process. The node holds nothing but that process's id, so the
+     * parent shows the subprocess as it is now rather than a copy of how it was — and the two rules
+     * that cannot live in a JSON payload hold: nothing crosses a customer boundary, and A → B → A
+     * is refused rather than drawn into a loop nobody can get out of.
+     */
+    public function test_a_node_can_point_at_another_process(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $parent = $this->process($customer, 'Innkjøp');
+        $child = $this->process($customer, 'Leverandørkontroll');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$parent->id}/blueprint", $this->flowWithSubprocess($child->id))
+            ->assertSessionHasNoErrors();
+
+        $stored = QualityProcessBlueprint::query()->where('quality_item_id', $parent->id)->sole();
+
+        $this->assertSame(
+            [null, $child->id, null],
+            array_map(
+                static fn (array $node): ?int => $node['subprocess_quality_item_id'],
+                $stored->nodes(),
+            ),
+        );
+    }
+
+    /**
+     * The reference is read when the page is opened, never cached on the parent. That is the whole
+     * reason it is a reference: the parent's diagram has to say what the subprocess holds today.
+     */
+    public function test_the_parent_reports_the_subprocess_as_it_is_now(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $parent = $this->process($customer, 'Innkjøp');
+        $child = $this->process($customer, 'Leverandørkontroll');
+
+        $this->blueprintFor($customer, $parent, $this->flowWithSubprocess($child->id));
+
+        $node = $this->subprocessNode($owner, $parent);
+
+        $this->assertSame($child->id, $node['subprocess']['id']);
+        $this->assertSame('Leverandørkontroll', $node['subprocess']['title']);
+        $this->assertSame(0, $node['subprocess']['step_count'], 'the subprocess has no flow yet');
+
+        // The subprocess gets a flow of its own. Nothing on the parent was touched.
+        $this->blueprintFor($customer, $child, $this->simpleFlow());
+
+        $this->assertSame(3, $this->subprocessNode($owner, $parent)['subprocess']['step_count']);
+
+        // And is renamed. Same answer, for the same reason.
+        $child->forceFill(['title' => 'Kontroll av leverandør'])->save();
+
+        $this->assertSame(
+            'Kontroll av leverandør',
+            $this->subprocessNode($owner, $parent)['subprocess']['title'],
+        );
+    }
+
+    public function test_drilling_down_shows_the_subprocess_own_blueprint(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $parent = $this->process($customer, 'Innkjøp');
+        $child = $this->process($customer, 'Leverandørkontroll');
+
+        $this->blueprintFor($customer, $parent, $this->flowWithSubprocess($child->id));
+        $this->blueprintFor($customer, $child, $this->simpleFlow());
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$parent->id}?tab=flow&subprocess={$child->id}")
+            ->viewData('page')['props'];
+
+        $view = $props['subprocess_view'];
+
+        $this->assertSame([['id' => $child->id, 'title' => 'Leverandørkontroll']], $view['trail']);
+        $this->assertSame(
+            ['Start', 'Vurder saken', 'Ferdig'],
+            array_column($view['blueprint']['nodes'], 'label'),
+        );
+
+        // The parent's own flow still travels, so the breadcrumb back costs nothing.
+        $this->assertSame('Vurder leverandøren', $props['blueprint']['nodes'][1]['label']);
+    }
+
+    /** Point 6: the parent shows the subprocess's new version without being edited itself. */
+    public function test_an_edited_subprocess_is_shown_as_edited_when_the_parent_opens_it(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $parent = $this->process($customer, 'Innkjøp');
+        $child = $this->process($customer, 'Leverandørkontroll');
+
+        $this->blueprintFor($customer, $parent, $this->flowWithSubprocess($child->id));
+        $this->blueprintFor($customer, $child, $this->simpleFlow());
+
+        $parentUpdatedAt = QualityProcessBlueprint::query()
+            ->where('quality_item_id', $parent->id)->sole()->updated_at;
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$child->id}/blueprint", $this->incidentManagementFlow())
+            ->assertSessionHasNoErrors();
+
+        $view = $this->actingAs($owner)
+            ->get("/app/quality/items/{$parent->id}?tab=flow&subprocess={$child->id}")
+            ->viewData('page')['props']['subprocess_view'];
+
+        $this->assertSame(
+            ['Hendelse meldes inn', 'Registrer og kategoriser hendelsen', 'Hendelsen er lukket'],
+            array_column($view['blueprint']['nodes'], 'label'),
+        );
+
+        $this->assertEquals(
+            $parentUpdatedAt,
+            QualityProcessBlueprint::query()->where('quality_item_id', $parent->id)->sole()->updated_at,
+            'the parent is a reference, so nothing about it had to change',
+        );
+    }
+
+    /**
+     * A trail is a path the kvalitetssystem describes, not a list of ids anybody may ask for. Two
+     * processes of the same customer, with no reference between them, are not a drill-down.
+     */
+    public function test_the_trail_may_only_follow_a_reference_that_is_written_down(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $parent = $this->process($customer, 'Innkjøp');
+        $unrelated = $this->process($customer, 'Rekruttering');
+
+        $this->blueprintFor($customer, $parent, $this->simpleFlow());
+        $this->blueprintFor($customer, $unrelated, $this->incidentManagementFlow());
+
+        $this->assertNull(
+            $this->actingAs($owner)
+                ->get("/app/quality/items/{$parent->id}?tab=flow&subprocess={$unrelated->id}")
+                ->viewData('page')['props']['subprocess_view'],
+        );
+    }
+
+    /** Several levels down, each hop checked against the blueprint above it. */
+    public function test_a_subprocess_can_itself_be_drilled_into(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $top = $this->process($customer, 'Innkjøp');
+        $middle = $this->process($customer, 'Leverandørkontroll');
+        $bottom = $this->process($customer, 'Sikkerhetsvurdering');
+
+        $this->blueprintFor($customer, $top, $this->flowWithSubprocess($middle->id));
+        $this->blueprintFor($customer, $middle, $this->flowWithSubprocess($bottom->id));
+        $this->blueprintFor($customer, $bottom, $this->simpleFlow());
+
+        $view = $this->actingAs($owner)
+            ->get("/app/quality/items/{$top->id}?tab=flow&subprocess={$middle->id},{$bottom->id}")
+            ->viewData('page')['props']['subprocess_view'];
+
+        $this->assertSame(
+            [
+                ['id' => $middle->id, 'title' => 'Leverandørkontroll'],
+                ['id' => $bottom->id, 'title' => 'Sikkerhetsvurdering'],
+            ],
+            $view['trail'],
+        );
+
+        $this->assertSame(
+            ['Start', 'Vurder saken', 'Ferdig'],
+            array_column($view['blueprint']['nodes'], 'label'),
+        );
+
+        // Skipping the middle hop is not a shortcut — the top does not point at the bottom.
+        $this->assertNull(
+            $this->actingAs($owner)
+                ->get("/app/quality/items/{$top->id}?tab=flow&subprocess={$bottom->id}")
+                ->viewData('page')['props']['subprocess_view'],
+        );
+    }
+
+    /**
+     * Unlinking a subprocess must not turn a saved link into an error page. The reader lands on the
+     * deepest view that is still true, which at depth one is the process itself.
+     */
+    public function test_a_trail_through_a_reference_that_is_gone_truncates_rather_than_fails(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $top = $this->process($customer, 'Innkjøp');
+        $middle = $this->process($customer, 'Leverandørkontroll');
+        $bottom = $this->process($customer, 'Sikkerhetsvurdering');
+
+        $this->blueprintFor($customer, $top, $this->flowWithSubprocess($middle->id));
+        $this->blueprintFor($customer, $middle, $this->simpleFlow());
+
+        $view = $this->actingAs($owner)
+            ->get("/app/quality/items/{$top->id}?tab=flow&subprocess={$middle->id},{$bottom->id}")
+            ->viewData('page')['props']['subprocess_view'];
+
+        $this->assertSame([['id' => $middle->id, 'title' => 'Leverandørkontroll']], $view['trail']);
+
+        // The whole reference goes.
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$top->id}/blueprint", $this->simpleFlow())
+            ->assertSessionHasNoErrors();
+
+        $this->assertNull(
+            $this->actingAs($owner)
+                ->get("/app/quality/items/{$top->id}?tab=flow&subprocess={$middle->id}")
+                ->viewData('page')['props']['subprocess_view'],
+        );
+    }
+
+    public function test_a_process_cannot_be_its_own_subprocess(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Innkjøp');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithSubprocess($process->id))
+            ->assertSessionHasErrors('nodes');
+
+        $this->assertSame(0, QualityProcessBlueprint::query()->count());
+    }
+
+    /**
+     * A → B → A. The cycle is refused rather than dropped, because unlike a dangling edge it is a
+     * statement the user has just made and can fix by choosing a different process — and drilling
+     * into it would be a trail with no bottom.
+     */
+    public function test_a_subprocess_reference_that_closes_a_cycle_is_refused(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $a = $this->process($customer, 'Innkjøp');
+        $b = $this->process($customer, 'Leverandørkontroll');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$a->id}/blueprint", $this->flowWithSubprocess($b->id))
+            ->assertSessionHasNoErrors();
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$b->id}/blueprint", $this->flowWithSubprocess($a->id))
+            ->assertSessionHasErrors('nodes');
+
+        $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $b->id)->count());
+
+        // A longer way round is the same answer: A → B → C → A.
+        $c = $this->process($customer, 'Sikkerhetsvurdering');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$b->id}/blueprint", $this->flowWithSubprocess($c->id))
+            ->assertSessionHasNoErrors();
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$c->id}/blueprint", $this->flowWithSubprocess($a->id))
+            ->assertSessionHasErrors('nodes');
+    }
+
+    /** A process that would close a cycle is never offered, so the refusal above is a backstop. */
+    public function test_a_process_that_would_close_a_cycle_is_not_offered(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $a = $this->process($customer, 'Innkjøp');
+        $b = $this->process($customer, 'Leverandørkontroll');
+
+        $this->blueprintFor($customer, $a, $this->flowWithSubprocess($b->id));
+
+        $options = $this->actingAs($owner)
+            ->get("/app/quality/items/{$b->id}?tab=flow")
+            ->viewData('page')['props']['subprocess_options'];
+
+        $this->assertSame([], array_column($options, 'id'), 'A points at B, so B may not point at A');
+
+        $options = $this->actingAs($owner)
+            ->get("/app/quality/items/{$a->id}?tab=flow")
+            ->viewData('page')['props']['subprocess_options'];
+
+        $this->assertSame([$b->id], array_column($options, 'id'));
+    }
+
+    /**
+     * Tenancy. Another customer's process is not a thing to point at and not a thing to drill into,
+     * and the reference is dropped rather than stored and filtered later — nothing about somebody
+     * else's kvalitetssystem may sit in this customer's payload at all.
+     */
+    public function test_another_customers_process_cannot_be_referenced(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        ['customer' => $other] = $this->context();
+
+        $ours = $this->process($customer, 'Innkjøp');
+        $theirs = $this->process($other, 'Deres prosess');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$ours->id}/blueprint", $this->flowWithSubprocess($theirs->id))
+            ->assertSessionHasNoErrors();
+
+        $stored = QualityProcessBlueprint::query()->where('quality_item_id', $ours->id)->sole();
+
+        $this->assertSame(
+            [null, null, null],
+            array_map(
+                static fn (array $node): ?int => $node['subprocess_quality_item_id'],
+                $stored->nodes(),
+            ),
+        );
+
+        $this->assertNull($this->subprocessNode($owner, $ours)['subprocess']);
+
+        $this->assertNull(
+            $this->actingAs($owner)
+                ->get("/app/quality/items/{$ours->id}?tab=flow&subprocess={$theirs->id}")
+                ->viewData('page')['props']['subprocess_view'],
+        );
+
+        $this->assertSame(
+            [],
+            array_column(
+                $this->actingAs($owner)->get("/app/quality/items/{$ours->id}?tab=flow")
+                    ->viewData('page')['props']['subprocess_options'],
+                'id',
+            ),
+            'only this customer\'s processes are selectable',
+        );
+    }
+
+    /** Only a process is a process. A checklist is not something a step opens into. */
+    public function test_only_a_process_can_be_referenced(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Innkjøp');
+        $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste for leveranse');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->flowWithSubprocess($checklist->id))
+            ->assertSessionHasNoErrors();
+
+        $this->assertNull($this->subprocessNode($owner, $process)['subprocess']);
+    }
+
+    /**
+     * Point 7 of the brief, as a test: a flow with no references behaves exactly as it did before
+     * any of this existed. Every node reports no subprocess, and the tab is not drilled into.
+     */
+    public function test_a_flow_without_references_is_unchanged(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
+            ->assertSessionHasNoErrors();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['subprocess_view']);
+
+        foreach ($props['blueprint']['nodes'] as $node) {
+            $this->assertNull($node['subprocess_quality_item_id']);
+            $this->assertNull($node['subprocess']);
+        }
+    }
+
+    /**
+     * A reader who cannot edit the flow is not sent the picker's contents — it is one dropdown in
+     * the editor they do not have, and a list of other processes is not something the page owes them.
+     */
+    public function test_the_picker_is_only_sent_to_someone_who_can_edit_the_flow(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $parent = $this->process($customer, 'Innkjøp');
+        $child = $this->process($customer, 'Leverandørkontroll');
+
+        $this->blueprintFor($customer, $parent, $this->flowWithSubprocess($child->id));
+
+        $reader = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
+
+        $props = $this->actingAs($reader)
+            ->get("/app/quality/items/{$parent->id}?tab=flow&subprocess={$child->id}")
+            ->viewData('page')['props'];
+
+        $this->assertFalse($props['can_manage']);
+        $this->assertSame([], $props['subprocess_options']);
+
+        // Reading the subprocess is not an edit, so the drill-down itself still works.
+        $this->assertSame(
+            [['id' => $child->id, 'title' => 'Leverandørkontroll']],
+            $props['subprocess_view']['trail'],
+        );
+    }
+
+    /**
+     * A model reading a plain-language description never proposes a subprocess, and must not be
+     * able to smuggle an id in: the interpreter normalises without a customer, which is the one
+     * state in which a reference cannot be checked, so it is dropped there by construction.
+     */
+    public function test_a_reference_is_dropped_when_there_is_no_customer_to_check_it_against(): void
+    {
+        $normalised = app(QualityProcessBlueprintService::class)->normalise($this->flowWithSubprocess(1));
+
+        foreach ($normalised['nodes'] as $node) {
+            $this->assertNull($node['subprocess_quality_item_id']);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------------
 
@@ -614,6 +1033,49 @@ class QualityProcessBlueprintTest extends TestCase
                 ['from' => 'vurder', 'to' => 'ferdig', 'label' => null],
             ],
         ];
+    }
+
+    /**
+     * The same three steps, with the middle one standing for another process.
+     *
+     * @return array<string, mixed>
+     */
+    private function flowWithSubprocess(int $subprocessItemId): array
+    {
+        $flow = $this->simpleFlow();
+
+        $flow['nodes'][1] = [
+            'key' => 'vurder',
+            'lane' => 'saksbehandler',
+            'type' => 'step',
+            'label' => 'Vurder leverandøren',
+            'subprocess_quality_item_id' => $subprocessItemId,
+        ];
+
+        return $flow;
+    }
+
+    /** Store a flow the way a person would, through the one gate every write goes through. */
+    private function blueprintFor(Customer $customer, QualityItem $item, array $payload): QualityProcessBlueprint
+    {
+        return app(QualityProcessBlueprintService::class)->store(
+            (int) $customer->id,
+            $item,
+            $payload,
+            QualityProcessBlueprint::SOURCE_MANUAL,
+        );
+    }
+
+    /**
+     * The node that carries the reference, as the page serves it.
+     *
+     * @return array<string, mixed>
+     */
+    private function subprocessNode(User $actor, QualityItem $parent): array
+    {
+        return $this->actingAs($actor)
+            ->get("/app/quality/items/{$parent->id}?tab=flow")
+            ->viewData('page')['props']['blueprint']['nodes'][1];
     }
 
     /**

@@ -22,6 +22,7 @@ use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowInterpreter;
+use App\Services\Quality\QualityProcessSubprocessService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -82,6 +83,7 @@ class QualityController extends Controller
         private readonly QualityProcessFlowInterpreter $flowInterpreter,
         private readonly QualityFlowClarificationService $flowClarifications,
         private readonly QualityProcessDescriptionClarifier $flowClarifier,
+        private readonly QualityProcessSubprocessService $subprocesses,
     ) {}
 
     public function index(Request $request): Response
@@ -130,6 +132,11 @@ class QualityController extends Controller
             // strip exists at all — a policy's page is unchanged by any of this.
             'has_flow' => $item->quality_type === QualityItem::TYPE_PROCESS,
             'blueprint' => $this->blueprintPayload($customerId, $item),
+            // Drill-down. The trail is in the URL, so the diagram area is server-driven exactly as
+            // the tab is: a subprocess view survives a reload, a back button and a shared link, and
+            // it is read from the subprocess's own blueprint every time it is opened.
+            'subprocess_view' => $this->subprocessView($customerId, $item, $request),
+            'subprocess_options' => $this->subprocessOptions($customerId, $item, $user),
             // A proposal is not stored, so it travels in the session across the one redirect
             // between interpreting a description and seeing the result. Reloading the page drops
             // it, which is the honest behaviour: nothing was adopted.
@@ -642,6 +649,9 @@ class QualityController extends Controller
             'nodes.*.type' => ['nullable', 'string', 'max:20'],
             'nodes.*.label' => ['nullable', 'string', 'max:200'],
             'nodes.*.description' => ['nullable', 'string', 'max:2000'],
+            // The process this step opens into. Whether it may point there at all — same customer,
+            // actually a process, no cycle — is QualityProcessSubprocessService's call, not a rule's.
+            'nodes.*.subprocess_quality_item_id' => ['nullable', 'integer'],
             'edges' => ['present', 'array', 'max:200'],
             'edges.*.from' => ['nullable', 'string', 'max:80'],
             'edges.*.to' => ['nullable', 'string', 'max:80'],
@@ -945,7 +955,7 @@ class QualityController extends Controller
             'status' => $blueprint->status,
             'source' => $blueprint->source,
             'lanes' => $blueprint->lanes(),
-            'nodes' => $blueprint->nodes(),
+            'nodes' => $this->nodeRows($customerId, $blueprint),
             'edges' => $blueprint->edges(),
             'description' => $blueprint->description,
             'generated_at' => $blueprint->generated_at?->toDateTimeString(),
@@ -953,6 +963,91 @@ class QualityController extends Controller
             'approved_at' => $blueprint->approved_at?->toDateTimeString(),
             'approved_by_name' => $blueprint->approvedBy?->name,
         ];
+    }
+
+    /**
+     * The nodes as the page needs them: what is stored, plus what the reference resolves to now.
+     *
+     * `subprocess_quality_item_id` is the stored truth and the only thing written back. `subprocess`
+     * is read fresh here — title, code and how many steps the other flow holds today — so the
+     * parent's diagram shows the subprocess as it currently is. Nothing about it is cached on the
+     * parent, which is the whole reason the node holds a reference rather than a copy.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function nodeRows(int $customerId, QualityProcessBlueprint $blueprint): array
+    {
+        return array_map(
+            fn (array $node): array => $node + [
+                'subprocess' => $this->subprocesses->describe(
+                    $customerId,
+                    $node['subprocess_quality_item_id'] ?? null,
+                ),
+            ],
+            $blueprint->nodes(),
+        );
+    }
+
+    /**
+     * The subprocess the reader has drilled into, or null when they are looking at the process
+     * itself.
+     *
+     * `?subprocess=12,45` is the path taken, not a list of things to show — each hop is checked
+     * against the blueprint above it, so the only flows reachable here are the ones this process
+     * actually links to. A broken hop truncates rather than fails; see the service.
+     *
+     * @return array{trail: list<array{id: int, title: string}>, blueprint: array<string, mixed>|null}|null
+     */
+    private function subprocessView(?int $customerId, QualityItem $item, Request $request): ?array
+    {
+        if ($customerId === null || $item->quality_type !== QualityItem::TYPE_PROCESS) {
+            return null;
+        }
+
+        $requested = array_values(array_filter(array_map(
+            static fn (string $id): int => (int) trim($id),
+            explode(',', (string) $request->query('subprocess', '')),
+        )));
+
+        if ($requested === []) {
+            return null;
+        }
+
+        $trail = $this->subprocesses->trail($customerId, $item, array_slice($requested, 0, 10));
+
+        if ($trail === []) {
+            return null;
+        }
+
+        return [
+            'trail' => array_map(
+                static fn (QualityItem $step): array => [
+                    'id' => (int) $step->id,
+                    'title' => (string) $step->title,
+                ],
+                $trail,
+            ),
+            'blueprint' => $this->blueprintPayload($customerId, $trail[array_key_last($trail)]),
+        ];
+    }
+
+    /**
+     * The processes a node on this flow may be pointed at.
+     *
+     * Only sent to someone who can edit the flow — it is the content of one dropdown in the manual
+     * structure editor, and a reader has no use for a list of processes they cannot choose.
+     *
+     * @return list<array{id: int, title: string, code: ?string, step_count: int}>
+     */
+    private function subprocessOptions(?int $customerId, QualityItem $item, ?User $user): array
+    {
+        if ($customerId === null
+            || $item->quality_type !== QualityItem::TYPE_PROCESS
+            || ! ($user?->canApproveWikiClaims() ?? false)) {
+            return [];
+        }
+
+        return $this->subprocesses->options($customerId, $item);
     }
 
     /**

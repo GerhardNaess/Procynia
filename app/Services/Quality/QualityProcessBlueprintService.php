@@ -31,9 +31,16 @@ use Illuminate\Validation\ValidationException;
  *
  * Tenancy is a precondition, not a check: callers resolve the customer through CustomerContext and
  * pass it in, and the item is verified to belong to it before anything is written.
+ *
+ * The one exception to "forgiving" is a subprocess reference that would close a cycle — see
+ * QualityProcessSubprocessService for why that one is refused rather than dropped.
  */
 class QualityProcessBlueprintService
 {
+    public function __construct(
+        private readonly QualityProcessSubprocessService $subprocesses,
+    ) {}
+
     /**
      * Store a blueprint against a process, replacing whatever it had.
      *
@@ -76,7 +83,7 @@ class QualityProcessBlueprintService
 
         $attributes = [
             'customer_id' => $customerId,
-            'payload' => $this->normalise($payload),
+            'payload' => $this->normalise($payload, $customerId, (int) $item->id),
             'source' => $source,
             'status' => QualityProcessBlueprint::STATUS_DRAFT,
             'generated_at' => now(),
@@ -138,10 +145,10 @@ class QualityProcessBlueprintService
      * @param  array<string, mixed>  $payload
      * @return array{lanes: list<array<string, string>>, nodes: list<array<string, mixed>>, edges: list<array<string, mixed>>}
      */
-    public function normalise(array $payload): array
+    public function normalise(array $payload, ?int $customerId = null, ?int $itemId = null): array
     {
         $lanes = $this->normaliseLanes($payload['lanes'] ?? []);
-        $nodes = $this->normaliseNodes($payload['nodes'] ?? [], $lanes);
+        $nodes = $this->normaliseNodes($payload['nodes'] ?? [], $lanes, $customerId, $itemId);
 
         if ($nodes === []) {
             throw ValidationException::withMessages([
@@ -203,15 +210,29 @@ class QualityProcessBlueprintService
      * @param  list<array<string, string>>  $lanes
      * @return list<array<string, mixed>>
      */
-    private function normaliseNodes(mixed $rows, array $lanes): array
+    private function normaliseNodes(mixed $rows, array $lanes, ?int $customerId, ?int $itemId): array
     {
         $laneKeys = array_column($lanes, 'key');
         $fallbackLane = $laneKeys[0];
 
+        $rows = is_array($rows) ? $rows : [];
+
+        // Resolved for the whole flow in one go, before any node is built: every reference asks the
+        // same question of the same graph, and that graph is read once per save. Without a customer
+        // there is no tenant to check a target against and no graph to look for a cycle in, so
+        // nothing resolves — that is the interpreter's path, where a model reading a description
+        // has no business naming a process by id, and the user's path always has both.
+        $subprocesses = $customerId === null || $itemId === null
+            ? []
+            : $this->subprocesses->resolveAll($customerId, $itemId, array_map(
+                static fn (mixed $row): mixed => is_array($row) ? ($row['subprocess_quality_item_id'] ?? null) : null,
+                $rows,
+            ));
+
         $nodes = [];
         $seen = [];
 
-        foreach (is_array($rows) ? $rows : [] as $row) {
+        foreach ($rows as $row) {
             if (! is_array($row)) {
                 continue;
             }
@@ -226,6 +247,12 @@ class QualityProcessBlueprintService
 
             $nodes[] = [
                 'key' => $this->key((string) ($row['key'] ?? ''), $label, 'node', $seen),
+                // A step that is itself a process. Kept only when it can be checked, which needs
+                // to know whose process this is: without a customer there is no tenant to check
+                // the target against and no graph to look for a cycle in, so the reference is
+                // dropped rather than trusted. That is the interpreter's path — a model reading a
+                // description never proposes one — and the user's path always has both.
+                'subprocess_quality_item_id' => $subprocesses[(string) ($row['subprocess_quality_item_id'] ?? '')] ?? null,
                 // An unknown lane resolves to the first rather than failing: it is what a node
                 // whose lane was just renamed looks like, and losing the node would be worse.
                 'lane' => in_array($row['lane'] ?? null, $laneKeys, true) ? (string) $row['lane'] : $fallbackLane,
