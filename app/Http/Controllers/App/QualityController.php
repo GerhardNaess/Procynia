@@ -452,10 +452,19 @@ class QualityController extends Controller
      * description is revised first, and the flow is read from the revised text, so the proposal on
      * screen and the description in the box are the same statement about the process.
      *
-     * NOTHING IS WRITTEN HERE EITHER. The revised description travels back as part of the proposal
-     * and becomes the process's description if and when the user adopts the flow. A rewrite that
-     * cannot be used — or a reading that fails afterwards — leaves the description exactly as the
-     * user wrote it, which is what lets the browser put the suggestion back rather than lose it.
+     * NO FLOW IS WRITTEN HERE. The revised description travels back as part of the proposal and
+     * becomes the process's description if and when the user adopts the flow. A rewrite that cannot
+     * be used — or a reading that fails afterwards — leaves the description exactly as the user
+     * wrote it, which is what lets the browser put the suggestion back rather than lose it.
+     *
+     * WHAT IS WRITTEN IS THAT THE QUESTION WAS ANSWERED.
+     *
+     * Only once both calls have come back, so a failure still leaves nothing behind and the
+     * suggestion is there to try again. Relying on the rewrite alone to retire the question was the
+     * earlier behaviour and it did not hold: the revised description defines the term, the next
+     * reading does not always agree that it does, and the user watches Procynia ask the thing they
+     * just answered. See QualityFlowClarificationService for why the record is made against the
+     * revised text and when it lapses.
      */
     public function answerFlowClarification(Request $request, QualityItem $item): RedirectResponse
     {
@@ -498,6 +507,18 @@ class QualityController extends Controller
             // was changed, and the box has to go on saying so.
             return $this->flowFailed($item, $user, $exception, $validated['description']);
         }
+
+        $this->flowClarifications->resolve($item, $validated['question'], $description, $user);
+
+        // The reading happened before the answer was recorded, so this proposal can still be
+        // carrying the question that was just answered. Running the same filter over it again is
+        // not a special case for this endpoint — it is the filter every proposal passes, applied
+        // once the record it consults exists.
+        $proposal['optional_clarifications'] = $this->flowClarifications->remaining(
+            $item,
+            $description,
+            $proposal['optional_clarifications'],
+        );
 
         return $this->flowProposed($item, $proposal);
     }

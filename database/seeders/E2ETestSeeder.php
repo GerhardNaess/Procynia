@@ -82,6 +82,15 @@ class E2ETestSeeder extends Seeder
                 'language_id' => $language->id,
                 'nationality_id' => $nationality->id,
                 'is_active' => true,
+                // A plan with AI credits on it, because AiCostControlService refuses a customer
+                // whose quota policy resolves to NONE before any request is built — which it does
+                // for a customer with no plan at all. Without this, every spec that exercises a
+                // real AI feature gets "Abonnementet inkluderer ikke denne AI-funksjonen" instead
+                // of the feature, and the only ones that can run are the ones that stub the
+                // provider out. Nothing here charges anything: Stripe is not in this environment.
+                'subscription_plan' => Customer::PLAN_PRO,
+                'billing_interval' => Customer::BILLING_MONTHLY,
+                'included_ai_credits' => 20,
             ],
         );
 

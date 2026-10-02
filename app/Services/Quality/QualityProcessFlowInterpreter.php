@@ -308,10 +308,11 @@ class QualityProcessFlowInterpreter
     /**
      * The proposal as the user will see it.
      *
-     * Optional clarifications pass through what the user has already turned down for this process:
-     * a suggestion they dismissed is not raised again while the description it was dismissed
-     * against still stands. Blocking questions deliberately do not — those say the flow cannot be
-     * believed, and nobody gets to switch that off, least of all by clicking past it once.
+     * Optional clarifications pass through what the user has already settled for this process:
+     * a suggestion they dismissed or answered is not raised again while the description they
+     * settled it against still stands. Blocking questions deliberately do not — those say the flow
+     * cannot be believed, and nobody gets to switch that off, least of all by clicking past it
+     * once.
      *
      * @param  array<string, mixed>  $payload
      * @param  array<string, mixed>  $proposal

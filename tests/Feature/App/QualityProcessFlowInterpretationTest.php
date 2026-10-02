@@ -6,7 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Models\QualityFlowClarificationDismissal;
+use App\Models\QualityFlowClarificationResolution;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
@@ -710,8 +710,9 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $this->dismiss($owner, $process, self::CRITICAL_SUPPLIER_QUESTION, self::DESCRIPTION);
 
-        $this->assertSame(1, QualityFlowClarificationDismissal::query()
+        $this->assertSame(1, QualityFlowClarificationResolution::query()
             ->where('quality_item_id', $process->id)
+            ->where('outcome', QualityFlowClarificationResolution::OUTCOME_DISMISSED)
             ->count());
 
         // Nothing about the flow was written by saying no.
@@ -767,7 +768,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             [self::CRITICAL_SUPPLIER_QUESTION],
             $this->interpret($owner, $process, $rewritten)['flow_proposal']['optional_clarifications'],
         );
-        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+        $this->assertSame(0, QualityFlowClarificationResolution::query()->count());
     }
 
     /** Saying no on someone else's process, or without the right to manage this one. */
@@ -795,7 +796,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             ])
             ->assertNotFound();
 
-        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+        $this->assertSame(0, QualityFlowClarificationResolution::query()->count());
         Http::assertNothingSent();
     }
 
@@ -889,13 +890,15 @@ class QualityProcessFlowInterpretationTest extends TestCase
     }
 
     /**
-     * The suggestion is gone, and gone because it was answered rather than because it was silenced.
+     * The suggestion is gone, and recorded as answered rather than as dismissed.
      *
-     * No dismissal is recorded. That distinction is the whole behaviour: a dismissal suppresses a
-     * question about a description that still raises it, whereas an answer changes the description
-     * so there is nothing left to raise. Recording one here would hide the case below.
+     * That distinction is the whole point of keeping an outcome on the row. Both stop the question
+     * being asked again, but they are different statements about the process — "we leave this to
+     * judgement" and "here is what it means" — and a kvalitetsleder reading the table later is
+     * entitled to know which one happened. Writing an answer through the dismiss path would lose
+     * that, and it is the one thing this feature must not do.
      */
-    public function test_an_answered_clarification_is_gone_from_the_proposal_without_being_suppressed(): void
+    public function test_an_answered_clarification_is_recorded_as_answered_and_not_as_a_dismissal(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
         $process = $this->process($customer, 'Leverandøropprettelse');
@@ -914,7 +917,17 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $this->assertSame([], $proposal['optional_clarifications']);
         $this->assertSame([], $proposal['blocking_questions']);
-        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+
+        $resolution = QualityFlowClarificationResolution::query()->sole();
+
+        $this->assertSame(QualityFlowClarificationResolution::OUTCOME_ANSWERED, $resolution->outcome);
+        $this->assertSame(self::CRITICAL_SUPPLIER_QUESTION, $resolution->question);
+        $this->assertSame((int) $owner->id, (int) $resolution->resolved_by_user_id);
+
+        // Against the revised text, not the one the user started from. Everything the lapse rule
+        // decides afterwards is decided by comparison with this, so recording the pre-answer
+        // description would retire the answer the first time the user refined the revision.
+        $this->assertSame(self::CLARIFIED_DESCRIPTION, $resolution->description);
 
         // The flow is still the flow. Defining the term changed what the decision is called, not
         // that the process branches or who does what.
@@ -954,25 +967,81 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $this->assertSame([], $regenerated['optional_clarifications']);
         $this->assertSame($description, $regenerated['description']);
-        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+
+        // One row, and it says answered. The revised description is why the model stopped asking;
+        // the row is why it would not matter if it started again.
+        $this->assertSame(
+            QualityFlowClarificationResolution::OUTCOME_ANSWERED,
+            QualityFlowClarificationResolution::query()->sole()->outcome,
+        );
     }
 
     /**
-     * An answer that did not actually settle the question leaves the question standing.
+     * The bug this was written for: the model asks it again anyway, and the user must not see it.
      *
-     * The honest outcome, and the reason answering records nothing. "Avvis" is how a user says a
-     * term is left to judgement; "Avklar" is how they define it, and a definition that does not
-     * define it has not earned the silence.
+     * The rewrite is what makes the description true. It is not what makes the suggestion stay
+     * gone, and the earlier implementation asked it to be both — which held exactly as long as the
+     * next reading agreed that the revised wording defined the term. Here it does not: the same
+     * question comes back from the model, in different words, on the reading that immediately
+     * follows the answer and on the regeneration after it. Neither reaches the user.
      */
-    public function test_a_clarification_the_answer_did_not_cover_is_raised_again(): void
+    public function test_an_answered_clarification_is_filtered_even_when_the_model_asks_it_again(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
         $process = $this->process($customer, 'Leverandøropprettelse');
 
-        $vague = self::DESCRIPTION.' En kritisk leverandør vurderes særskilt.';
+        // A model that did not notice the definition it was handed. Reworded, so what is under test
+        // is the normalised match and not a string comparison.
+        $stillAsking = $this->definedSupplierProposal();
+        $stillAsking['optional_clarifications'] = [['question' => 'Hva gjør at en leverandør regnes som KRITISK']];
+
+        $this->fakeResponses([
+            ['description' => self::CLARIFIED_DESCRIPTION],
+            $stillAsking,
+            $stillAsking,
+        ]);
+
+        // The reading that comes back with the answer. The record is written after it, so this is
+        // the proposal the endpoint has to filter itself.
+        $proposal = $this->answerClarification(
+            $owner,
+            $process,
+            self::CRITICAL_SUPPLIER_QUESTION,
+            self::CRITICAL_SUPPLIER_ANSWER,
+        )['flow_proposal'];
+
+        $this->assertSame([], $proposal['optional_clarifications']);
+
+        // And the next one, which goes through the ordinary filter on the way out of the
+        // interpreter. This is the one a user hits by pressing "Generer prosessflyt" again, or by
+        // reloading and regenerating — the path where the question kept coming back.
+        $regenerated = $this->interpret($owner, $process, $proposal['description'])['flow_proposal'];
+
+        $this->assertSame([], $regenerated['optional_clarifications']);
+        $this->assertNotEmpty($regenerated['nodes'], 'Filtering a question must not affect the flow.');
+    }
+
+    /**
+     * A thin answer is still an answer, and how the user gets the question back.
+     *
+     * "Det vurderes i hvert enkelt tilfelle" does not define the term, and a model reading the
+     * revised description will go on noticing that. The user is not asked again, because they were
+     * asked once and they replied — asking a second time is Procynia disagreeing with an answer it
+     * solicited, and the user has no way to make it stop short of typing something they do not
+     * mean. If they want the suggestion back, the lapse rule is the route: describe the process
+     * again and every resolution about the old text goes with it.
+     */
+    public function test_a_thin_answer_still_settles_the_question_until_the_process_is_described_again(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $vague = self::DESCRIPTION.' En kritisk leverandør vurderes særskilt i hvert enkelt tilfelle.';
 
         $this->fakeResponses([
             ['description' => $vague],
+            $this->supplierProposal(),
+            $this->supplierProposal(),
             $this->supplierProposal(),
         ]);
 
@@ -983,7 +1052,24 @@ class QualityProcessFlowInterpretationTest extends TestCase
             'Det vurderes i hvert enkelt tilfelle.',
         )['flow_proposal'];
 
-        $this->assertSame([self::CRITICAL_SUPPLIER_QUESTION], $proposal['optional_clarifications']);
+        $this->assertSame([], $proposal['optional_clarifications']);
+
+        // Refining the revised text keeps the answer: this is the shape most editing takes, and a
+        // suggestion that returns on every tweak is one the user learns to read past.
+        $refined = $vague.' Innkjøper arkiverer avtalen til slutt.';
+
+        $this->assertSame([], $this->interpret($owner, $process, $refined)['flow_proposal']['optional_clarifications']);
+
+        // A different process, described from scratch. The answer was not about this text, so the
+        // suggestion is worth making again — and the row it lapsed from is cleared rather than left
+        // to suppress a question about work nobody has looked at yet.
+        $rewritten = 'Når et avvik meldes inn registrerer kvalitetsleder saken i avvikssystemet. Dersom saken gjelder HMS varsles verneombudet umiddelbart. Til slutt lukkes saken av kvalitetsleder.';
+
+        $this->assertSame(
+            [self::CRITICAL_SUPPLIER_QUESTION],
+            $this->interpret($owner, $process, $rewritten)['flow_proposal']['optional_clarifications'],
+        );
+        $this->assertSame(0, QualityFlowClarificationResolution::query()->count());
     }
 
     /**
