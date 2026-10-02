@@ -25,6 +25,12 @@ import {
  * question from the rest of the page — not what the document is, but how the work goes — and
  * because it is the one view that is not text. Every other type's page is unchanged: without a
  * flow there is no tab strip at all.
+ *
+ * Because of that tab, a process's Dokument tab carries neither "Struktur" nor "Relasjoner". Steg,
+ * input and output were a second, competing place to describe the same run the flow already holds,
+ * and leaving both open invited two answers to one question. For a process, the flow is the single
+ * place. Checklists and controls keep their Struktur panel — they have no flow to move it to — and
+ * the backend still serves and accepts process structure, so this is UI only.
  */
 
 const TYPE_TONES = {
@@ -79,6 +85,8 @@ export default function QualityItem() {
     const td = tq.detail ?? {};
     const typeLabels = tq.types ?? {};
     const statusLabels = tq.statuses ?? {};
+    /** A process answers "how does this run?" in the Flyt tab, so Dokument does not ask it twice. */
+    const isProcess = item.quality_type === 'process';
 
     return (
         <CustomerAppLayout title={item.title} showPageTitle={false}>
@@ -129,16 +137,20 @@ export default function QualityItem() {
                             ownerOptions={ownerOptions}
                         />
 
-                        <StructurePanel
-                            tq={tq}
-                            td={td}
-                            item={item}
-                            canManage={canManage}
-                            frequencies={frequencies}
-                            frequencyLabels={tq.frequencies ?? {}}
-                        />
+                        {! isProcess && (
+                            <StructurePanel
+                                tq={tq}
+                                td={td}
+                                item={item}
+                                canManage={canManage}
+                                frequencies={frequencies}
+                                frequencyLabels={tq.frequencies ?? {}}
+                            />
+                        )}
 
-                        <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
+                        {! isProcess && (
+                            <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
+                        )}
 
                         <DocumentsPanel
                             tq={tq}
@@ -327,18 +339,18 @@ function MetadataPanel({ tq, td, item, canManage, statuses, statusLabels, ownerO
  * The whole set travels on save, which is what the backend expects: positions are renumbered from
  * the array order, and a row whose required field is blank is simply dropped. That makes "remove"
  * a client-side splice rather than its own endpoint.
+ *
+ * A process is not one of the kinds: its steg, input and output live in the Flyt tab now. The
+ * endpoint still accepts them, so nothing here needs undoing if they come back.
  */
 function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels }) {
-    const [steps, setSteps] = useState(item.steps ?? []);
-    const [inputs, setInputs] = useState(item.inputs ?? []);
-    const [outputs, setOutputs] = useState(item.outputs ?? []);
     const [checklistItems, setChecklistItems] = useState(item.checklist_items ?? []);
     const [control, setControl] = useState(item.control ?? {
         criterion: '', responsibility: '', frequency: '', method: '',
     });
     const [saving, setSaving] = useState(false);
 
-    if (! ['process', 'checklist', 'control'].includes(item.quality_type)) {
+    if (! ['checklist', 'control'].includes(item.quality_type)) {
         return (
             <section className={CARD}>
                 <h2 className="text-xl font-semibold text-slate-950">{td.structure_heading ?? 'Struktur'}</h2>
@@ -351,12 +363,6 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
 
     function save() {
         const payload = {};
-
-        if (item.quality_type === 'process') {
-            payload.steps = steps;
-            payload.inputs = inputs;
-            payload.outputs = outputs;
-        }
 
         if (item.quality_type === 'checklist') {
             payload.checklist_items = checklistItems;
@@ -376,57 +382,6 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{td.structure_heading ?? 'Struktur'}</h2>
-
-            {item.quality_type === 'process' && (
-                <div className="mt-4 space-y-6">
-                    <RowEditor
-                        heading={td.steps_heading ?? 'Steg'}
-                        emptyText={td.steps_empty ?? 'Ingen steg er beskrevet ennå.'}
-                        addText={td.add_step ?? 'Legg til steg'}
-                        removeText={td.remove_row ?? 'Fjern'}
-                        canManage={canManage}
-                        rows={steps}
-                        setRows={setSteps}
-                        blank={{ title: '', description: '', responsibility: '' }}
-                        fields={[
-                            { key: 'title', label: td.step_title ?? 'Steg' },
-                            { key: 'responsibility', label: td.step_responsibility ?? 'Ansvar' },
-                            { key: 'description', label: td.step_description ?? 'Beskrivelse', textarea: true },
-                        ]}
-                        numbered
-                    />
-
-                    <RowEditor
-                        heading={td.inputs_heading ?? 'Input'}
-                        emptyText={td.io_empty ?? 'Ingen er beskrevet ennå.'}
-                        addText={td.add_input ?? 'Legg til input'}
-                        removeText={td.remove_row ?? 'Fjern'}
-                        canManage={canManage}
-                        rows={inputs}
-                        setRows={setInputs}
-                        blank={{ label: '', description: '' }}
-                        fields={[
-                            { key: 'label', label: td.io_label ?? 'Betegnelse' },
-                            { key: 'description', label: td.io_description ?? 'Beskrivelse' },
-                        ]}
-                    />
-
-                    <RowEditor
-                        heading={td.outputs_heading ?? 'Output'}
-                        emptyText={td.io_empty ?? 'Ingen er beskrevet ennå.'}
-                        addText={td.add_output ?? 'Legg til output'}
-                        removeText={td.remove_row ?? 'Fjern'}
-                        canManage={canManage}
-                        rows={outputs}
-                        setRows={setOutputs}
-                        blank={{ label: '', description: '' }}
-                        fields={[
-                            { key: 'label', label: td.io_label ?? 'Betegnelse' },
-                            { key: 'description', label: td.io_description ?? 'Beskrivelse' },
-                        ]}
-                    />
-                </div>
-            )}
 
             {item.quality_type === 'checklist' && (
                 <div className="mt-4">
