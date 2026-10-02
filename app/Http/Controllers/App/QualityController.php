@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Exceptions\Ai\AiCostControlException;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
@@ -10,14 +11,22 @@ use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
+use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
+use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityItemService;
+use App\Services\Quality\QualityProcessBlueprintGenerator;
+use App\Services\Quality\QualityProcessBlueprintService;
+use App\Services\Quality\QualityProcessFlowInterpreter;
+use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -38,6 +47,19 @@ class QualityController extends Controller
     private const TABS = ['overview', 'processes', 'controls', 'checklists'];
 
     /**
+     * The tabs on one document's page.
+     *
+     * `document` is everything the document IS — its governance, its structure, its files, the Wiki
+     * behind it. `flow` is the one view that is not text: how the process actually runs. Only a
+     * process has it, and a process that has it still has everything else, so the flow is a second
+     * tab rather than a replacement for the first.
+     *
+     * Server-driven, like the module's own tabs: the tab is in the URL, so a redirect after
+     * generating or approving comes back to the tab the user was standing on.
+     */
+    private const DETAIL_TABS = ['document', 'flow'];
+
+    /**
      * Which types each tab shows. Oversikt deliberately shows all of them: it is the whole document
      * hierarchy in one place, and the only tab policies, procedures and arbeidsinstrukser appear on.
      *
@@ -55,6 +77,9 @@ class QualityController extends Controller
         private readonly QualityItemService $items,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly EnterpriseWikiDocumentUploadService $documentUploads,
+        private readonly QualityProcessBlueprintService $blueprints,
+        private readonly QualityProcessBlueprintGenerator $blueprintGenerator,
+        private readonly QualityProcessFlowInterpreter $flowInterpreter,
     ) {}
 
     public function index(Request $request): Response
@@ -94,8 +119,22 @@ class QualityController extends Controller
 
         $item->loadMissing(['owner', 'processSteps', 'processIo', 'checklistItems', 'controlDetail']);
 
+        $tab = $this->detailTab($request, $item);
+
         return Inertia::render('App/Quality/Item', [
             'item' => $this->itemDetail($item),
+            'active_tab' => $tab,
+            // Only a process has a flow, and the React page uses this to decide whether the tab
+            // strip exists at all — a policy's page is unchanged by any of this.
+            'has_flow' => $item->quality_type === QualityItem::TYPE_PROCESS,
+            'blueprint' => $this->blueprintPayload($customerId, $item),
+            // A proposal is not stored, so it travels in the session across the one redirect
+            // between interpreting a description and seeing the result. Reloading the page drops
+            // it, which is the honest behaviour: nothing was adopted.
+            'flow_proposal' => $this->flashedFlowState($item, 'flow_proposal'),
+            'flow_error' => $this->flashedFlowState($item, 'flow_error'),
+            'flow_ai_available' => $item->quality_type === QualityItem::TYPE_PROCESS
+                && ProcessFlowInterpretationAiClient::isAvailable(),
             'can_manage' => $user?->canApproveWikiClaims() ?? false,
             'statuses' => QualityItem::STATUSES,
             'frequencies' => QualityControlDetail::FREQUENCIES,
@@ -281,6 +320,217 @@ class QualityController extends Controller
         }
 
         return back()->with('success', __('procynia.quality.flash.structure_updated'));
+    }
+
+    // -----------------------------------------------------------------
+    // Prosessflyt
+    // -----------------------------------------------------------------
+
+    /**
+     * Propose a flow for this process.
+     *
+     * Deterministic — see QualityProcessBlueprintGenerator. The proposal is stored as a draft
+     * rather than held in the browser, because the point of the button is to give the user
+     * something to edit, and an unsaved proposal would be lost by the first reload.
+     *
+     * It overwrites whatever draft was there, including an approved blueprint, which is why the
+     * UI asks first. Regenerating is the user saying the flow should be re-read from the steps.
+     */
+    public function generateBlueprint(QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $generated = $this->blueprintGenerator->generate($item);
+
+        $this->blueprints->store((int) $customerId, $item, $generated['payload'], $generated['source'], $user);
+
+        return back()->with('success', __($generated['source'] === QualityProcessBlueprint::SOURCE_EXAMPLE
+            ? 'procynia.quality.flash.blueprint_seeded'
+            : 'procynia.quality.flash.blueprint_generated'));
+    }
+
+    /**
+     * Save an edited flow.
+     *
+     * The whole blueprint travels, for the same reason the structure does: lanes, nodes and edges
+     * are edited together and a node moved between lanes takes its edges with it. Validation here
+     * is only about size and shape — what makes a payload drawable is
+     * QualityProcessBlueprintService::normalise(), and it is the only thing allowed to decide that.
+     */
+    public function updateBlueprint(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate($this->blueprintRules());
+
+        $this->blueprints->store(
+            (int) $customerId,
+            $item,
+            $validated,
+            QualityProcessBlueprint::SOURCE_MANUAL,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.blueprint_saved'));
+    }
+
+    /**
+     * Read a plain-language description of the process into a proposed flow.
+     *
+     * NOTHING IS WRITTEN HERE. The proposal comes back to the user as a proposal: a diagram, the
+     * steps behind it, and whatever the model could not work out from the text. They correct it,
+     * adopt it or throw it away, and until they adopt it the flow they already had is untouched.
+     * Overwriting first and apologising afterwards would mean the price of asking the question is
+     * losing the answer you already had.
+     *
+     * Reproducibility lives in that same decision: once a flow is adopted it is data, and showing
+     * it again redraws it from the stored payload. This endpoint is reached only when the user
+     * presses the button.
+     */
+    public function interpretFlow(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        if (! ProcessFlowInterpretationAiClient::isAvailable()) {
+            throw ValidationException::withMessages([
+                'description' => __('procynia.quality.errors.flow_ai_disabled'),
+            ]);
+        }
+
+        $validated = $request->validate([
+            // A floor as well as a ceiling: two words cannot describe a process, and letting them
+            // through only spends a provider call to tell the user something a rule can.
+            'description' => ['required', 'string', 'min:30', 'max:8000'],
+        ]);
+
+        try {
+            $proposal = $this->flowInterpreter->interpret(
+                $item,
+                $validated['description'],
+                $this->customerContext->resolveLanguageCode($user),
+            );
+        } catch (ProcessFlowInterpretationException $exception) {
+            // Flashed rather than thrown as a validation error: the description is well-formed, so
+            // marking the field invalid would be wrong, and the problem list needs more room than
+            // an error bag gives it.
+            return back()->with('flow_error', [
+                'quality_item_id' => (int) $item->id,
+                'message' => $exception->getMessage(),
+                'problems' => $exception->problems,
+                'description' => $validated['description'],
+            ]);
+        } catch (AiCostControlException $exception) {
+            // Quota, entitlement, suspension and the platform stop each need their own sentence —
+            // see AiCostControlPresenter. Shown in the same place as every other reason the flow
+            // could not be read, because to the user it is the same moment.
+            return back()->with('flow_error', [
+                'quality_item_id' => (int) $item->id,
+                'message' => app(AiCostControlPresenter::class)->message($exception, $user?->customer),
+                'problems' => [],
+                'description' => $validated['description'],
+            ]);
+        }
+
+        return back()->with('flow_proposal', [
+            'quality_item_id' => (int) $item->id,
+            'lanes' => $proposal['payload']['lanes'],
+            'nodes' => $proposal['payload']['nodes'],
+            'edges' => $proposal['payload']['edges'],
+            'ambiguities' => $proposal['ambiguities'],
+            'description' => $proposal['description'],
+        ]);
+    }
+
+    /**
+     * Adopt a proposal — as corrected — as the process's flow.
+     *
+     * The payload travels back from the browser rather than being held server-side, because the
+     * user may have edited it in between and the edited version is the one they are agreeing to.
+     * That makes it untrusted input, which is exactly what every other write to a blueprint already
+     * is: it goes through QualityProcessBlueprintService::normalise() on the same terms as a manual
+     * save. The endpoint's own contribution is the provenance — a flow stored here says `ai`,
+     * because that is where it came from, and nothing else in the system can claim that word.
+     */
+    public function adoptFlowProposal(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate($this->blueprintRules() + [
+            'description' => ['nullable', 'string', 'max:8000'],
+        ]);
+
+        $this->blueprints->store(
+            (int) $customerId,
+            $item,
+            $validated,
+            QualityProcessBlueprint::SOURCE_AI,
+            $user,
+            $validated['description'] ?? null,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.blueprint_adopted'));
+    }
+
+    /**
+     * Size and shape only. What makes a payload drawable is
+     * QualityProcessBlueprintService::normalise(), and what makes an interpreted one coherent is
+     * QualityProcessFlowValidator — neither belongs in a request rule.
+     *
+     * @return array<string, list<string>>
+     */
+    private function blueprintRules(): array
+    {
+        return [
+            'lanes' => ['present', 'array', 'max:12'],
+            'lanes.*.key' => ['nullable', 'string', 'max:80'],
+            'lanes.*.label' => ['nullable', 'string', 'max:120'],
+            'nodes' => ['present', 'array', 'max:80'],
+            'nodes.*.key' => ['nullable', 'string', 'max:80'],
+            'nodes.*.lane' => ['nullable', 'string', 'max:80'],
+            'nodes.*.type' => ['nullable', 'string', 'max:20'],
+            'nodes.*.label' => ['nullable', 'string', 'max:200'],
+            'nodes.*.description' => ['nullable', 'string', 'max:2000'],
+            'edges' => ['present', 'array', 'max:200'],
+            'edges.*.from' => ['nullable', 'string', 'max:80'],
+            'edges.*.to' => ['nullable', 'string', 'max:80'],
+            'edges.*.label' => ['nullable', 'string', 'max:60'],
+        ];
+    }
+
+    /**
+     * Vouch for the flow as it stands.
+     *
+     * Same authority as every other statement about the kvalitetssystem — no new permission. The
+     * approval covers the payload it was given, so any later edit clears it; see the service.
+     */
+    public function approveBlueprint(QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $this->blueprints->approve((int) $customerId, $item, $user);
+
+        return back()->with('success', __('procynia.quality.flash.blueprint_approved'));
     }
 
     public function storeRelation(Request $request): RedirectResponse
@@ -509,6 +759,65 @@ class QualityController extends Controller
             ))
             ->values()
             ->all();
+    }
+
+    /**
+     * Which tab the page opens on.
+     *
+     * A non-process can never be on `flow`, whatever the URL says — a stale link from a document
+     * that used to be a process must not land on an empty tab.
+     */
+    private function detailTab(Request $request, QualityItem $item): string
+    {
+        $requested = (string) $request->query('tab', 'document');
+
+        if (! in_array($requested, self::DETAIL_TABS, true)) {
+            return 'document';
+        }
+
+        if ($requested === 'flow' && $item->quality_type !== QualityItem::TYPE_PROCESS) {
+            return 'document';
+        }
+
+        return $requested;
+    }
+
+    /**
+     * The flow, or null when the process has none yet.
+     *
+     * The payload is shipped as stored — it was normalised on the way in, so what the editor loads
+     * is exactly what the diagram is drawn from, and there is no second normalisation to disagree
+     * with the first.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function blueprintPayload(?int $customerId, QualityItem $item): ?array
+    {
+        if ($customerId === null || $item->quality_type !== QualityItem::TYPE_PROCESS) {
+            return null;
+        }
+
+        $blueprint = $this->blueprints->forItem($customerId, $item);
+
+        if ($blueprint === null) {
+            return null;
+        }
+
+        $blueprint->loadMissing(['generatedBy:id,name', 'approvedBy:id,name']);
+
+        return [
+            'id' => (int) $blueprint->id,
+            'status' => $blueprint->status,
+            'source' => $blueprint->source,
+            'lanes' => $blueprint->lanes(),
+            'nodes' => $blueprint->nodes(),
+            'edges' => $blueprint->edges(),
+            'description' => $blueprint->description,
+            'generated_at' => $blueprint->generated_at?->toDateTimeString(),
+            'generated_by_name' => $blueprint->generatedBy?->name,
+            'approved_at' => $blueprint->approved_at?->toDateTimeString(),
+            'approved_by_name' => $blueprint->approvedBy?->name,
+        ];
     }
 
     /**
@@ -874,6 +1183,39 @@ class QualityController extends Controller
     private function authorizeManagement(?User $user): void
     {
         abort_unless($user?->canApproveWikiClaims() ?? false, 403);
+    }
+
+    /**
+     * A flow belongs to a process and to nothing else. The tab is already hidden for the other
+     * types, so reaching here means a hand-made request rather than a mistake in the UI.
+     */
+    private function assertProcess(QualityItem $item): void
+    {
+        if ($item->quality_type !== QualityItem::TYPE_PROCESS) {
+            throw ValidationException::withMessages([
+                'quality_type' => __('procynia.quality.errors.blueprint_requires_process'),
+            ]);
+        }
+    }
+
+    /**
+     * A proposal or an interpretation failure, flashed by the redirect that produced it.
+     *
+     * Checked against the item it was produced for: the flash survives one request, and that one
+     * request is not guaranteed to be the page it came from — a user who presses back and opens a
+     * different process would otherwise be shown a proposal about the one they left.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function flashedFlowState(QualityItem $item, string $key): ?array
+    {
+        $state = session($key);
+
+        if (! is_array($state) || ($state['quality_item_id'] ?? null) !== (int) $item->id) {
+            return null;
+        }
+
+        return $state;
     }
 
     private function assertOwnedByCustomer(int $rowCustomerId, ?int $customerId): void

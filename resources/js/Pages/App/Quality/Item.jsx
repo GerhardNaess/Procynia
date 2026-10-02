@@ -2,6 +2,13 @@ import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import FilePickerField from '../../../Components/App/FilePickerField';
+import ProcessFlowPanel from '../../../Components/App/ProcessFlowPanel';
+import {
+    DESTRUCTIVE_COLOURS,
+    PRIMARY_ACTION,
+    SECONDARY_ACTION,
+} from '../../../Support/actionStyles';
 
 /**
  * One styrende dokument.
@@ -12,6 +19,12 @@ import StatusBadge from '../../../Components/App/StatusBadge';
  * questions — one is what the document IS and leaves behind, the other is what the virksomhet knows
  * about the subject. The structure is saved as a whole list — see QualityItemService for why — so
  * the editor builds one array and posts it, rather than firing a request per row.
+ *
+ * A process carries a second tab, "Flyt": how the process actually runs, as lanes, branches and a
+ * diagram drawn from them. It is a tab rather than another panel because it answers a different
+ * question from the rest of the page — not what the document is, but how the work goes — and
+ * because it is the one view that is not text. Every other type's page is unchanged: without a
+ * flow there is no tab strip at all.
  */
 
 const TYPE_TONES = {
@@ -33,8 +46,9 @@ const STATUS_TONES = {
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-sm font-semibold text-slate-700';
-const PRIMARY_BUTTON = 'inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50';
-const QUIET_BUTTON = 'inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950';
+const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
+/** Matches the active tab on the Kvalitet index, so one tab strip does not read as two kinds. */
+const TAB_ACTIVE = 'inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700';
 
 export default function QualityItem() {
     const {
@@ -53,6 +67,12 @@ export default function QualityItem() {
         document_relation_types: documentRelationTypes = [],
         document_search: documentSearch = '',
         relations = [],
+        active_tab: activeTab = 'document',
+        has_flow: hasFlow = false,
+        blueprint = null,
+        flow_proposal: flowProposal = null,
+        flow_error: flowError = null,
+        flow_ai_available: flowAiAvailable = false,
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -85,52 +105,97 @@ export default function QualityItem() {
                     )}
                 </header>
 
-                <MetadataPanel
-                    tq={tq}
-                    td={td}
-                    item={item}
-                    canManage={canManage}
-                    statuses={statuses}
-                    statusLabels={statusLabels}
-                    ownerOptions={ownerOptions}
-                />
+                {hasFlow && <DetailTabs td={td} item={item} activeTab={activeTab} />}
 
-                <StructurePanel
-                    tq={tq}
-                    td={td}
-                    item={item}
-                    canManage={canManage}
-                    frequencies={frequencies}
-                    frequencyLabels={tq.frequencies ?? {}}
-                />
+                {hasFlow && activeTab === 'flow' ? (
+                    <ProcessFlowPanel
+                        tq={tq}
+                        item={item}
+                        blueprint={blueprint}
+                        canManage={canManage}
+                        proposal={flowProposal}
+                        flowError={flowError}
+                        flowAiAvailable={flowAiAvailable}
+                    />
+                ) : (
+                    <>
+                        <MetadataPanel
+                            tq={tq}
+                            td={td}
+                            item={item}
+                            canManage={canManage}
+                            statuses={statuses}
+                            statusLabels={statusLabels}
+                            ownerOptions={ownerOptions}
+                        />
 
-                <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
+                        <StructurePanel
+                            tq={tq}
+                            td={td}
+                            item={item}
+                            canManage={canManage}
+                            frequencies={frequencies}
+                            frequencyLabels={tq.frequencies ?? {}}
+                        />
 
-                <DocumentsPanel
-                    tq={tq}
-                    item={item}
-                    canManage={canManage}
-                    documents={documents}
-                    documentOptions={documentOptions}
-                    documentSearch={documentSearch}
-                    wikiSearch={wikiSearch}
-                    relationTypes={documentRelationTypes}
-                    relationTypeLabels={tq.document_relation_types ?? {}}
-                />
+                        <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
 
-                <WikiPanel
-                    tq={tq}
-                    item={item}
-                    canManage={canManage}
-                    wikiLinks={wikiLinks}
-                    wikiPageOptions={wikiPageOptions}
-                    wikiSearch={wikiSearch}
-                    documentSearch={documentSearch}
-                    linkTypes={linkTypes}
-                    linkTypeLabels={tq.link_types ?? {}}
-                />
+                        <DocumentsPanel
+                            tq={tq}
+                            item={item}
+                            canManage={canManage}
+                            documents={documents}
+                            documentOptions={documentOptions}
+                            documentSearch={documentSearch}
+                            wikiSearch={wikiSearch}
+                            relationTypes={documentRelationTypes}
+                            relationTypeLabels={tq.document_relation_types ?? {}}
+                        />
+
+                        <WikiPanel
+                            tq={tq}
+                            item={item}
+                            canManage={canManage}
+                            wikiLinks={wikiLinks}
+                            wikiPageOptions={wikiPageOptions}
+                            wikiSearch={wikiSearch}
+                            documentSearch={documentSearch}
+                            linkTypes={linkTypes}
+                            linkTypeLabels={tq.link_types ?? {}}
+                        />
+                    </>
+                )}
             </div>
         </CustomerAppLayout>
+    );
+}
+
+/**
+ * The tab strip, which only a process has.
+ *
+ * Links rather than local state: the tab is in the URL, so the redirect back from generating or
+ * approving a flow lands on the flow, and a link to a process's diagram is a link somebody can
+ * send. The cost is a round trip per tab switch, which is the trade the module's own tabs already
+ * make on the Kvalitet index.
+ */
+function DetailTabs({ td, item, activeTab }) {
+    const tabs = [
+        ['document', td.tab_document ?? 'Dokument'],
+        ['flow', td.tab_flow ?? 'Flyt'],
+    ];
+
+    return (
+        <nav className="flex flex-wrap gap-2">
+            {tabs.map(([key, label]) => (
+                <Link
+                    key={key}
+                    href={`/app/quality/items/${item.id}?tab=${key}`}
+                    className={key === activeTab ? TAB_ACTIVE : SECONDARY_ACTION}
+                >
+                    {label}
+                </Link>
+            ))}
+        </nav>
     );
 }
 
@@ -233,7 +298,7 @@ function MetadataPanel({ tq, td, item, canManage, statuses, statusLabels, ownerO
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 md:col-span-2">
-                    <button type="submit" className={PRIMARY_BUTTON} disabled={processing}>
+                    <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
                         {tq.save ?? 'Lagre'}
                     </button>
                     <span className="text-sm text-slate-500">
@@ -241,7 +306,7 @@ function MetadataPanel({ tq, td, item, canManage, statuses, statusLabels, ownerO
                     </span>
                     <button
                         type="button"
-                        className="ml-auto text-sm font-semibold text-rose-600 hover:underline"
+                        className={`ml-auto ${ROW_DESTRUCTIVE}`}
                         onClick={() => {
                             if (window.confirm(tq.delete_item_confirm ?? 'Slett dokumentet?')) {
                                 router.delete(`/app/quality/items/${item.id}`);
@@ -432,7 +497,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
 
             {canManage && (
                 <div className="mt-6">
-                    <button type="button" className={PRIMARY_BUTTON} onClick={save} disabled={saving}>
+                    <button type="button" className={PRIMARY_ACTION} onClick={save} disabled={saving}>
                         {tq.save ?? 'Lagre'}
                     </button>
                 </div>
@@ -494,7 +559,7 @@ function RowEditor({
                             {canManage && (
                                 <button
                                     type="button"
-                                    className="mt-2 text-sm font-semibold text-rose-600 hover:underline"
+                                    className={`mt-2 ${ROW_DESTRUCTIVE}`}
                                     onClick={() => setRows(rows.filter((_, i) => i !== index))}
                                 >
                                     {removeText}
@@ -508,7 +573,7 @@ function RowEditor({
             {canManage && (
                 <button
                     type="button"
-                    className={`${QUIET_BUTTON} mt-3`}
+                    className={`${SECONDARY_ACTION} mt-3`}
                     onClick={() => setRows([...rows, { ...blank }])}
                 >
                     {addText}
@@ -575,6 +640,9 @@ function DocumentsPanel({
     const tdoc = tq.documents ?? {};
     const statusLabels = tdoc.statuses ?? {};
     const [search, setSearch] = useState(documentSearch ?? '');
+    // The input is hidden behind a styled label, so it has to be remounted after an upload —
+    // otherwise it keeps the previous file while the label reads "Ingen fil valgt".
+    const [fileInputKey, setFileInputKey] = useState(0);
 
     const linkForm = useForm({
         enterprise_wiki_document_id: '',
@@ -601,7 +669,10 @@ function DocumentsPanel({
         uploadForm.post(`/app/quality/items/${item.id}/documents`, {
             preserveScroll: true,
             forceFormData: true,
-            onSuccess: () => uploadForm.reset(),
+            onSuccess: () => {
+                uploadForm.reset();
+                setFileInputKey((key) => key + 1);
+            },
         });
     }
 
@@ -642,7 +713,7 @@ function DocumentsPanel({
                             {canManage && (
                                 <button
                                     type="button"
-                                    className="ml-auto text-sm font-semibold text-rose-600 hover:underline"
+                                    className={`ml-auto ${ROW_DESTRUCTIVE}`}
                                     onClick={() => {
                                         if (window.confirm(tdoc.unlink_confirm ?? 'Fjern koblingen?')) {
                                             router.delete(`/app/quality/document-links/${link.id}`, { preserveScroll: true });
@@ -673,7 +744,7 @@ function DocumentsPanel({
                             />
                             <button
                                 type="button"
-                                className={QUIET_BUTTON}
+                                className={SECONDARY_ACTION}
                                 onClick={() => router.get(
                                     `/app/quality/items/${item.id}`,
                                     { document_search: search, wiki_search: wikiSearch },
@@ -723,7 +794,7 @@ function DocumentsPanel({
                                 </Field>
 
                                 <div className="flex items-end">
-                                    <button type="submit" className={PRIMARY_BUTTON} disabled={linkForm.processing}>
+                                    <button type="submit" className={PRIMARY_ACTION} disabled={linkForm.processing}>
                                         {tdoc.link_submit ?? 'Koble til'}
                                     </button>
                                 </div>
@@ -739,14 +810,18 @@ function DocumentsPanel({
 
                         <form onSubmit={submitUpload} className="grid gap-4 md:grid-cols-4">
                             <div className="md:col-span-2">
-                                <Field label={tdoc.upload_field ?? 'Fil'} error={uploadForm.errors.file}>
-                                    <input
-                                        type="file"
-                                        accept=".pdf,.docx"
-                                        className={INPUT}
-                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
-                                    />
-                                </Field>
+                                <FilePickerField
+                                    id={`quality-document-upload-${item.id}`}
+                                    inputKey={fileInputKey}
+                                    label={tdoc.upload_field ?? 'Fil'}
+                                    accept=".pdf,.docx"
+                                    file={uploadForm.data.file}
+                                    buttonLabel={tq.file_choose ?? 'Velg fil'}
+                                    emptyLabel={tq.file_none_selected ?? 'Ingen fil valgt'}
+                                    error={uploadForm.errors.file}
+                                    disabled={uploadForm.processing}
+                                    onChange={(file) => uploadForm.setData('file', file)}
+                                />
                             </div>
 
                             <Field label={tdoc.relation_type ?? 'Dokumenttype'} error={uploadForm.errors.relation_type}>
@@ -764,7 +839,7 @@ function DocumentsPanel({
                             <div className="flex items-end">
                                 <button
                                     type="submit"
-                                    className={PRIMARY_BUTTON}
+                                    className={PRIMARY_ACTION}
                                     disabled={uploadForm.processing || ! uploadForm.data.file}
                                 >
                                     {tdoc.upload_submit ?? 'Last opp og koble til'}
@@ -827,7 +902,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                             {canManage && (
                                 <button
                                     type="button"
-                                    className="ml-auto text-sm font-semibold text-rose-600 hover:underline"
+                                    className={`ml-auto ${ROW_DESTRUCTIVE}`}
                                     onClick={() => {
                                         if (window.confirm(tw.unlink_confirm ?? 'Fjern koblingen?')) {
                                             router.delete(`/app/quality/wiki-links/${link.id}`, { preserveScroll: true });
@@ -853,7 +928,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                         />
                         <button
                             type="button"
-                            className={QUIET_BUTTON}
+                            className={SECONDARY_ACTION}
                             onClick={() => router.get(
                                 `/app/quality/items/${item.id}`,
                                 { wiki_search: search, document_search: documentSearch },
@@ -898,7 +973,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                             </Field>
 
                             <div className="flex items-end">
-                                <button type="submit" className={PRIMARY_BUTTON} disabled={processing}>
+                                <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
                                     {tw.submit ?? 'Koble til'}
                                 </button>
                             </div>

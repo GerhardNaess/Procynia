@@ -2,7 +2,13 @@ import { useMemo, useState } from 'react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
+import FilePickerField from '../../../Components/App/FilePickerField';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import {
+    DESTRUCTIVE_COLOURS,
+    PRIMARY_ACTION,
+    SECONDARY_ACTION,
+} from '../../../Support/actionStyles';
 import {
     candidatesForRelationEnd,
     candidatesForRelationStart,
@@ -37,8 +43,8 @@ const STATUS_TONES = {
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-sm font-semibold text-slate-700';
-const PRIMARY_BUTTON = 'inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50';
-const QUIET_BUTTON = 'inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950';
+const ROW_DESTRUCTIVE = `ml-auto inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
+const TAB_ACTIVE = 'inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700';
 
 const TABS = ['overview', 'processes', 'controls', 'checklists'];
 
@@ -143,8 +149,8 @@ function Tabs({ activeTab, tq }) {
                     href={`/app/quality?tab=${tab}`}
                     className={
                         tab === activeTab
-                            ? 'rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white'
-                            : QUIET_BUTTON
+                            ? TAB_ACTIVE
+                            : SECONDARY_ACTION
                     }
                 >
                     {tq[`tab_${tab}`] ?? tab}
@@ -328,18 +334,18 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                 </Field>
 
                 <div className="md:col-span-2">
-                    <Field label={tq.field_file ?? 'Last opp dokument'} error={errors.file}>
-                        <input
-                            key={fileInputKey}
-                            type="file"
-                            accept=".pdf,.docx"
-                            className={INPUT}
-                            onChange={(event) => setData('file', event.target.files?.[0] ?? null)}
-                        />
-                        <span className="block text-sm text-slate-500">
-                            {tq.field_file_help ?? 'Valgfritt. PDF eller Word (DOCX), maks 20 MB.'}
-                        </span>
-                    </Field>
+                    <FilePickerField
+                        id="quality-create-file"
+                        inputKey={fileInputKey}
+                        label={tq.field_file ?? 'Last opp dokument'}
+                        accept=".pdf,.docx"
+                        file={data.file}
+                        buttonLabel={tq.file_choose ?? 'Velg fil'}
+                        emptyLabel={tq.file_none_selected ?? 'Ingen fil valgt'}
+                        help={tq.field_file_help ?? 'Valgfritt. PDF eller Word (DOCX), maks 20 MB.'}
+                        error={errors.file}
+                        onChange={(file) => setData('file', file)}
+                    />
                 </div>
 
                 <div className="md:col-span-2">
@@ -354,7 +360,7 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                 </div>
 
                 <div className="md:col-span-2">
-                    <button type="submit" className={PRIMARY_BUTTON} disabled={processing}>
+                    <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
                         {tq.create_submit ?? 'Opprett'}
                     </button>
                 </div>
@@ -413,7 +419,7 @@ function RelationPanel({ tq, canManage, relations, relationTypes, itemOptions, t
                             {canManage && (
                                 <button
                                     type="button"
-                                    className="ml-auto text-sm font-semibold text-rose-600 hover:underline"
+                                    className={ROW_DESTRUCTIVE}
                                     onClick={() => {
                                         if (window.confirm(tq.relation_delete_confirm ?? 'Fjern relasjonen?')) {
                                             destroy(`/app/quality/relations/${relation.id}`);
@@ -481,7 +487,7 @@ function RelationPanel({ tq, canManage, relations, relationTypes, itemOptions, t
                         </Field>
 
                         <div className="flex items-end">
-                            <button type="submit" className={PRIMARY_BUTTON} disabled={processing}>
+                            <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
                                 {tq.relation_submit ?? 'Legg til relasjon'}
                             </button>
                         </div>

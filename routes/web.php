@@ -189,6 +189,25 @@ Route::prefix('app')
             Route::put('/items/{item}/structure', [QualityController::class, 'updateStructure'])
                 ->name('items.structure.update');
 
+            // Prosessflyt. Only a process has one — the controller refuses the rest through
+            // QualityProcessBlueprintService — and the blueprint is the source of truth: the
+            // swimlane is drawn from it client-side and never stored.
+            Route::post('/items/{item}/blueprint/generate', [QualityController::class, 'generateBlueprint'])
+                ->name('items.blueprint.generate');
+
+            // Describing the process in plain language, and adopting what comes back. Two routes
+            // rather than one because they are two decisions: interpreting writes nothing, and
+            // adopting is the user saying the proposal — as they corrected it — is the flow. Only
+            // the second touches the database, and only it may record `source = ai`.
+            Route::post('/items/{item}/blueprint/interpret', [QualityController::class, 'interpretFlow'])
+                ->name('items.blueprint.interpret');
+            Route::post('/items/{item}/blueprint/adopt', [QualityController::class, 'adoptFlowProposal'])
+                ->name('items.blueprint.adopt');
+            Route::put('/items/{item}/blueprint', [QualityController::class, 'updateBlueprint'])
+                ->name('items.blueprint.update');
+            Route::post('/items/{item}/blueprint/approve', [QualityController::class, 'approveBlueprint'])
+                ->name('items.blueprint.approve');
+
             // The seam to Wiki. Attaching a page changes nothing about the page.
             Route::post('/items/{item}/wiki-links', [QualityController::class, 'storeWikiLink'])
                 ->name('items.wiki-links.store');

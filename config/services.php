@@ -89,6 +89,18 @@ return [
         'password' => env('NEO4J_PASSWORD'),
     ],
 
+    // Prosessflyt (Kvalitet). The one AI call the Quality module makes: it reads a plain-language
+    // process description and proposes a structure. It is user-initiated, synchronous and small, so
+    // the flag defaults on where a key is configured — the client refuses without one — and exists
+    // as a kill switch rather than as an opt-in.
+    'quality' => [
+        'flow_ai_enabled' => (bool) env('QUALITY_FLOW_AI_ENABLED', true),
+
+        // Reading a description into a structure is extraction, not authoring — the same work the
+        // requirement pipeline uses the small model for.
+        'flow_model' => env('QUALITY_FLOW_MODEL', env('OPENAI_MODEL', 'gpt-4.1-mini')),
+    ],
+
     'enterprise_wiki' => [
         'ai_enabled' => (bool) env('ENTERPRISE_WIKI_AI_ENABLED', false),
 
