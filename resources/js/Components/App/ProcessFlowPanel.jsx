@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, router } from '@inertiajs/react';
 import ProcessSwimlaneDiagram from './ProcessSwimlaneDiagram';
 import ProcessFlowStepList from './ProcessFlowStepList';
+import ActionDialog from './ActionDialog';
 import StatusBadge from './StatusBadge';
+import { flowReadingOrder } from '../../Support/processBlueprintLayout';
 import {
     DESTRUCTIVE_COLOURS,
     PRIMARY_ACTION,
@@ -71,6 +73,8 @@ export default function ProcessFlowPanel({
     flowAiAvailable = false,
     subprocessView = null,
     subprocessOptions = [],
+    knowledgePageOptions = [],
+    knowledgeSearch = '',
 }) {
     const tb = tq.blueprint ?? {};
     const nodeTypeLabels = tb.node_types ?? {};
@@ -85,6 +89,10 @@ export default function ProcessFlowPanel({
     // the loudest thing on the tab, so the diagram and the steps, which are what the user came to
     // read, start below three tables of keys and dropdowns.
     const [editingStructure, setEditingStructure] = useState(false);
+    // Which activity's knowledge panel is open, by node key rather than by the node itself: the
+    // panel has to show the activity as it is now, and holding the object would leave it showing a
+    // label the user has since corrected.
+    const [activityKey, setActivityKey] = useState(null);
 
     // The description the user typed. Seeded from whichever of the three sources knows it: the
     // proposal being reviewed, the attempt that failed, or the flow that was adopted from it.
@@ -121,6 +129,7 @@ export default function ProcessFlowPanel({
         setDeclined([]);
         // A new flow arrived from the server, so whatever the editor was open for is settled.
         setEditingStructure(false);
+        setActivityKey(null);
         // Cleared rather than carried, so the new reading has the last word. A suggestion answered
         // well is gone because the revised description defines the term and the model stops asking;
         // one the answer did not actually cover comes back, which is the truth about it.
@@ -228,6 +237,10 @@ export default function ProcessFlowPanel({
      * proposal — which lives in a flash and cannot be flashed again — on screen behind it.
      */
     function navigateTrail(ids) {
+        // A node key identifies an activity within one flow and nowhere else, so an open panel
+        // cannot survive a move to a different one.
+        setActivityKey(null);
+
         router.get(`/app/quality/items/${item.id}`, {
             tab: 'flow',
             ...(ids.length > 0 ? { subprocess: ids.join(',') } : {}),
@@ -240,6 +253,10 @@ export default function ProcessFlowPanel({
     }
 
     const openSubprocess = (subprocess) => navigateTrail([...trail.map((step) => step.id), subprocess.id]);
+
+    // "Vis kunnskapskildene". Opens the activity, not a page: what the reader asked is "what does
+    // this step rest on", and the answer is a list of Wiki pages they can then follow.
+    const openActivity = (activity) => setActivityKey(activity?.key ?? null);
 
     // The payload travels as it stands in the editor, corrections included — the user is adopting
     // what they are looking at, not what the model first returned.
@@ -255,15 +272,24 @@ export default function ProcessFlowPanel({
     // none of it applies to what is on screen — a user looking at Leverandørkontroll must not have
     // Innkjøp's description, structure editor and approval button under it.
     if (trail.length > 0) {
+        const shown = subprocessView?.blueprint ?? null;
+
         return (
             <div className="space-y-6">
                 <SubprocessFlow
                     tb={tb}
                     rootTitle={item.title}
                     trail={trail}
-                    blueprint={subprocessView?.blueprint ?? null}
+                    blueprint={shown}
                     onNavigate={navigateTrail}
                     onOpenSubprocess={openSubprocess}
+                    onOpenActivity={openActivity}
+                />
+
+                <ActivityKnowledgePanel
+                    tb={tb}
+                    activity={activityByKey(shown, activityKey)}
+                    onClose={() => setActivityKey(null)}
                 />
             </div>
         );
@@ -341,6 +367,10 @@ export default function ProcessFlowPanel({
                                 // and not yet saved has nothing to open into. It still shows its
                                 // pill, which is the honest state — chosen, not yet in force.
                                 onOpenSubprocess={isDirty ? null : openSubprocess}
+                                // Unlike a subprocess, knowledge needs nothing from the server to
+                                // show: the panel reads what the editor holds, so it opens on an
+                                // activity whose sources were picked a moment ago and not saved yet.
+                                onOpenActivity={openActivity}
                             />
                         </div>
                     </section>
@@ -352,6 +382,7 @@ export default function ProcessFlowPanel({
                                 tb={tb}
                                 blueprint={draft}
                                 onOpenSubprocess={isDirty ? null : openSubprocess}
+                                onOpenActivity={openActivity}
                             />
                         </div>
                     </section>
@@ -407,6 +438,16 @@ export default function ProcessFlowPanel({
                                     setEdges={edit(setEdges)}
                                     canManage={canManage}
                                 />
+                                <KnowledgeEditor
+                                    tb={tb}
+                                    itemId={item.id}
+                                    nodes={nodes}
+                                    lanes={lanes}
+                                    setNodes={edit(setNodes)}
+                                    canManage={canManage}
+                                    options={knowledgePageOptions}
+                                    search={knowledgeSearch}
+                                />
                             </div>
                         )}
 
@@ -449,8 +490,29 @@ export default function ProcessFlowPanel({
                     </section>
                 </>
             )}
+
+            <ActivityKnowledgePanel
+                tb={tb}
+                activity={activityByKey(draft, activityKey)}
+                onClose={() => setActivityKey(null)}
+            />
         </div>
     );
+}
+
+/**
+ * One activity of a flow, by the key an indicator was clicked on.
+ *
+ * Resolved through flowReadingOrder() rather than by searching the node list, so the activity the
+ * panel describes is the same activity the list and the diagram show — same role, same label, same
+ * knowledge — and a node that has since been deleted resolves to nothing and closes the panel.
+ */
+function activityByKey(blueprint, key) {
+    if (key === null || blueprint === null) {
+        return null;
+    }
+
+    return flowReadingOrder(blueprint).find((step) => step.key === key) ?? null;
 }
 
 /**
@@ -513,7 +575,7 @@ function SubprocessTrail({ tb, rootTitle, trail, onNavigate }) {
  * It can be drilled into further: a subprocess whose own steps are processes behaves exactly the
  * same, because the trail is just one hop longer.
  */
-function SubprocessFlow({ tb, rootTitle, trail, blueprint, onNavigate, onOpenSubprocess }) {
+function SubprocessFlow({ tb, rootTitle, trail, blueprint, onNavigate, onOpenSubprocess, onOpenActivity = null }) {
     const current = trail[trail.length - 1];
 
     if (blueprint === null) {
@@ -543,6 +605,7 @@ function SubprocessFlow({ tb, rootTitle, trail, blueprint, onNavigate, onOpenSub
                         emptyText={tb.diagram_empty ?? 'Flyten har ingen steg å tegne.'}
                         tb={tb}
                         onOpenSubprocess={onOpenSubprocess}
+                        onOpenActivity={onOpenActivity}
                     />
                 </div>
 
@@ -552,7 +615,12 @@ function SubprocessFlow({ tb, rootTitle, trail, blueprint, onNavigate, onOpenSub
             <section className={CARD}>
                 <h2 className="text-xl font-semibold text-slate-950">{tb.steps_heading ?? 'Steg'}</h2>
                 <div className="mt-4">
-                    <ProcessFlowStepList tb={tb} blueprint={blueprint} onOpenSubprocess={onOpenSubprocess} />
+                    <ProcessFlowStepList
+                        tb={tb}
+                        blueprint={blueprint}
+                        onOpenSubprocess={onOpenSubprocess}
+                        onOpenActivity={onOpenActivity}
+                    />
                 </div>
             </section>
         </>
@@ -1250,5 +1318,248 @@ function NodeSelect({ nodes, value, onChange, disabled }) {
                 <option key={node.key} value={node.key}>{node.label || node.key}</option>
             ))}
         </select>
+    );
+}
+
+/**
+ * What one activity is, who does it, and what it rests on.
+ *
+ * The smallest honest answer to "why is this step done this way": the activity, the role that
+ * carries it out, and the Wiki pages behind it as links out. Nothing of what those pages say is
+ * repeated here — Wiki owns the knowledge, this owns the connection — so the panel cannot drift
+ * out of date with the page it points at, and following the link is the way to read it.
+ *
+ * A dialog rather than a third column: it is opened deliberately, read, and closed, and the flow
+ * behind it is what the user is working on. The publication state travels with each page, from the
+ * same presenter Wiki itself uses, because an activity resting on a draft is a different statement
+ * from one resting on an approved page and the reader has to be able to tell.
+ */
+function ActivityKnowledgePanel({ tb, activity, onClose }) {
+    const knowledge = activity?.knowledge ?? [];
+    const titleId = 'process-activity-knowledge-title';
+
+    return (
+        <ActionDialog isOpen={activity !== null} onClose={onClose} titleId={titleId}>
+            {activity !== null && (
+                <div className="w-full max-w-xl rounded-[24px] bg-white p-6 shadow-xl">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {activity.role || (tb.default_lane ?? 'Uten angitt rolle')}
+                    </p>
+                    <h2 id={titleId} className="mt-1 text-xl font-semibold text-slate-950">{activity.label}</h2>
+
+                    {activity.description && (
+                        <p className="mt-2 text-base leading-6 text-slate-600">{activity.description}</p>
+                    )}
+
+                    <h3 className="mt-6 text-base font-semibold text-slate-900">
+                        {tb.knowledge_heading ?? 'Kunnskap bak aktiviteten'}
+                    </h3>
+
+                    {knowledge.length === 0 ? (
+                        <p className="mt-2 text-sm text-slate-500">
+                            {tb.knowledge_empty ?? 'Ingen kunnskapskilder er koblet til denne aktiviteten.'}
+                        </p>
+                    ) : (
+                        <ul className="mt-3 space-y-2">
+                            {knowledge.map((page) => (
+                                <li
+                                    key={page.page_id}
+                                    className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3"
+                                >
+                                    <div className="min-w-0">
+                                        <a
+                                            href={page.url}
+                                            className="text-base font-semibold text-slate-900 underline-offset-2 hover:underline"
+                                        >
+                                            {page.title}
+                                        </a>
+                                        {page.publication?.state_label && (
+                                            <p className="mt-0.5 text-xs text-slate-500">{page.publication.state_label}</p>
+                                        )}
+                                    </div>
+
+                                    <a href={page.url} className="text-sm font-semibold text-slate-600 hover:text-slate-950">
+                                        {tb.knowledge_open_page ?? 'Åpne i Wiki'} →
+                                    </a>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+
+                    <div className="mt-6 flex justify-end border-t border-slate-100 pt-5">
+                        <button type="button" className={SECONDARY_ACTION} onClick={onClose}>
+                            {tb.knowledge_close ?? 'Lukk'}
+                        </button>
+                    </div>
+                </div>
+            )}
+        </ActionDialog>
+    );
+}
+
+/**
+ * Which Wiki pages each activity is carried out against.
+ *
+ * Its own block rather than a column in the node table: the node table is already five columns
+ * wide, and a cell that holds an arbitrary number of chips plus a searchable picker is not a cell.
+ * One row per activity, in the order the editor shows them, so this reads against the table above
+ * it.
+ *
+ * Nothing of the page is stored on the node but its id — see QualityProcessKnowledgeService. The
+ * chip's title is carried locally so the indicator appears the moment a page is picked rather than
+ * after the save, and the server rewrites it with what the reference actually resolves to on the way
+ * back; that answer wins.
+ *
+ * The search goes to the server because the picker is capped: a mature Wiki has thousands of pages
+ * and the fifty that travelled with the page load are a starting point, not the list. It is a
+ * partial reload asking only for the options, so the unsaved flow in the editor survives it.
+ */
+function KnowledgeEditor({ tb, itemId, nodes, lanes, setNodes, canManage, options, search }) {
+    const [term, setTerm] = useState(search ?? '');
+    const laneLabels = new Map(lanes.map((lane) => [lane.key, lane.label]));
+
+    function attach(index, rawId) {
+        const id = Number(rawId);
+        const option = options.find((candidate) => candidate.page_id === id) ?? null;
+
+        if (option === null) {
+            return;
+        }
+
+        setNodes(nodes.map((node, i) => {
+            if (i !== index) {
+                return node;
+            }
+
+            const current = node.knowledge_page_ids ?? [];
+
+            // The same page twice behind one activity says nothing twice. The server collapses it
+            // too; refusing here is what keeps the chip list honest before the save.
+            if (current.includes(id)) {
+                return node;
+            }
+
+            return {
+                ...node,
+                knowledge_page_ids: [...current, id],
+                knowledge: [...(node.knowledge ?? []), {
+                    page_id: option.page_id,
+                    title: option.title,
+                    slug: option.slug,
+                    status: option.status,
+                    url: `/app/wiki/${option.slug}`,
+                    publication: null,
+                }],
+            };
+        }));
+    }
+
+    function detach(index, pageId) {
+        setNodes(nodes.map((node, i) => (i === index
+            ? {
+                ...node,
+                knowledge_page_ids: (node.knowledge_page_ids ?? []).filter((id) => id !== pageId),
+                knowledge: (node.knowledge ?? []).filter((page) => page.page_id !== pageId),
+            }
+            : node)));
+    }
+
+    function searchOptions(value) {
+        setTerm(value);
+
+        router.get(`/app/quality/items/${itemId}`, { tab: 'flow', knowledge_search: value }, {
+            only: ['knowledge_page_options', 'knowledge_search'],
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+        });
+    }
+
+    return (
+        <div>
+            <h3 className={SUBHEADING}>{tb.knowledge_heading ?? 'Kunnskap bak aktiviteten'}</h3>
+            <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-600">
+                {tb.knowledge_help
+                    ?? 'Koble aktiviteten til Wiki-sidene den utføres etter. Innholdet blir liggende i Wiki — her lagres bare koblingen, så siden kan endres uten at flyten må redigeres.'}
+            </p>
+
+            {nodes.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">{tb.nodes_empty ?? 'Ingen noder er definert.'}</p>
+            ) : (
+                <>
+                    {canManage && (
+                        <div className="mt-3 max-w-md">
+                            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="knowledge-search">
+                                {tb.knowledge_search ?? 'Søk etter Wiki-side'}
+                            </label>
+                            <input
+                                id="knowledge-search"
+                                type="search"
+                                className={`mt-1 ${SMALL_INPUT}`}
+                                value={term}
+                                placeholder={tb.knowledge_search_placeholder ?? 'Tittel eller slug'}
+                                onChange={(event) => searchOptions(event.target.value)}
+                            />
+                        </div>
+                    )}
+
+                    <ul className="mt-4 space-y-3">
+                        {nodes.map((node, index) => (
+                            <li key={node.key} className="rounded-2xl border border-slate-200 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    {laneLabels.get(node.lane) || (tb.default_lane ?? 'Uten angitt rolle')}
+                                </p>
+                                <p className="text-base font-semibold text-slate-900">
+                                    {node.label || (tb.node_label ?? 'Tekst')}
+                                </p>
+
+                                {(node.knowledge ?? []).length === 0 ? (
+                                    <p className="mt-2 text-sm text-slate-500">
+                                        {tb.knowledge_none ?? 'Ingen kunnskapskilder.'}
+                                    </p>
+                                ) : (
+                                    <ul className="mt-2 flex flex-wrap gap-2">
+                                        {(node.knowledge ?? []).map((page) => (
+                                            <li
+                                                key={page.page_id}
+                                                className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-sm font-medium text-sky-900"
+                                            >
+                                                <span>{page.title}</span>
+                                                {canManage && (
+                                                    <button
+                                                        type="button"
+                                                        className="text-sky-700 transition hover:text-sky-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                                                        onClick={() => detach(index, page.page_id)}
+                                                        aria-label={(tb.knowledge_remove ?? 'Fjern :title')
+                                                            .replace(':title', page.title ?? '')}
+                                                    >
+                                                        ×
+                                                    </button>
+                                                )}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+
+                                {canManage && (
+                                    <select
+                                        className={`mt-3 max-w-md ${SMALL_INPUT}`}
+                                        value=""
+                                        aria-label={(tb.knowledge_add ?? 'Legg til kunnskapskilde for :label')
+                                            .replace(':label', node.label ?? '')}
+                                        onChange={(event) => attach(index, event.target.value)}
+                                    >
+                                        <option value="">{tb.knowledge_add_none ?? '— legg til kunnskapskilde —'}</option>
+                                        {options.map((option) => (
+                                            <option key={option.page_id} value={option.page_id}>{option.title}</option>
+                                        ))}
+                                    </select>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </>
+            )}
+        </div>
     );
 }

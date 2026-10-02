@@ -2,6 +2,7 @@
 
 namespace App\Services\Quality;
 
+use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
@@ -34,11 +35,15 @@ use Illuminate\Validation\ValidationException;
  *
  * The one exception to "forgiving" is a subprocess reference that would close a cycle — see
  * QualityProcessSubprocessService for why that one is refused rather than dropped.
+ *
+ * A node may also point at the Wiki pages the activity is carried out against. Same shape, same
+ * reasons, and the same forgiving normalisation — see QualityProcessKnowledgeService.
  */
 class QualityProcessBlueprintService
 {
     public function __construct(
         private readonly QualityProcessSubprocessService $subprocesses,
+        private readonly QualityProcessKnowledgeService $knowledge,
     ) {}
 
     /**
@@ -96,10 +101,18 @@ class QualityProcessBlueprintService
             $attributes['description'] = $description;
         }
 
-        return QualityProcessBlueprint::query()->updateOrCreate(
+        $blueprint = QualityProcessBlueprint::query()->updateOrCreate(
             ['quality_item_id' => $item->id],
             $attributes,
         );
+
+        // The flow's activities and the knowledge behind them are a relation the graph answers
+        // questions about, so a saved flow has to reach it. After commit: the job reads SQL, and on
+        // the sync driver it would otherwise run against a transaction that has not landed yet. A
+        // failed projection is a stale graph, never lost data — `wiki:graph-project` repairs it.
+        ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
+
+        return $blueprint;
     }
 
     /**
@@ -229,6 +242,14 @@ class QualityProcessBlueprintService
                 $rows,
             ));
 
+        // The Wiki pages the flow's activities are carried out against, resolved for the whole flow
+        // in one read for the same reason. Without a customer there is no tenant to check a page
+        // against, so nothing resolves — that is the interpreter's path, where a model reading a
+        // description has no business naming a Wiki page by id.
+        $knowledge = $customerId === null
+            ? []
+            : $this->knowledge->resolveAll($customerId, $rows);
+
         $nodes = [];
         $seen = [];
 
@@ -253,6 +274,10 @@ class QualityProcessBlueprintService
                 // dropped rather than trusted. That is the interpreter's path — a model reading a
                 // description never proposes one — and the user's path always has both.
                 'subprocess_quality_item_id' => $subprocesses[(string) ($row['subprocess_quality_item_id'] ?? '')] ?? null,
+                // The Wiki pages this activity is carried out against. Ids only: the knowledge
+                // itself stays in Wiki, which is the source of truth for it, and a page that no
+                // longer exists or belongs to another customer is dropped rather than stored.
+                'knowledge_page_ids' => $this->knowledge->filter($row['knowledge_page_ids'] ?? null, $knowledge),
                 // An unknown lane resolves to the first rather than failing: it is what a node
                 // whose lane was just renamed looks like, and losing the node would be worse.
                 'lane' => in_array($row['lane'] ?? null, $laneKeys, true) ? (string) $row['lane'] : $fallbackLane,

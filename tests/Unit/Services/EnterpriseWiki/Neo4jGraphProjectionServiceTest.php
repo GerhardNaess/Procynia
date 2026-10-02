@@ -175,8 +175,101 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         // DETACH DELETE on the QualityItem drops its SUPPORTED_BY edges; the pages at the other
         // end are a different node kind and are not matched at all.
         $this->assertStringContainsString('MATCH (q:QualityItem {customer_id: $customer_id, quality_item_id: $quality_item_id})', $statement);
-        $this->assertStringContainsString('DETACH DELETE q', $statement);
         $this->assertStringNotContainsString('EnterpriseWikiPage', $statement);
+
+        // The item's activities do go with it. They hang off the item and mean nothing without it,
+        // and a DETACH DELETE removes the edge rather than the node at the other end of it — so
+        // deleting only the item would leave orphan activities behind for good.
+        $this->assertStringContainsString('(q)-[:HAS_ACTIVITY]->(a:QualityActivity)', $statement);
+        $this->assertStringContainsString('DETACH DELETE a, q', $statement);
+    }
+
+    public function test_an_activity_is_its_own_node_between_the_process_and_the_wiki_page(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceProcessActivities(10, 20, [$this->activity()], [$this->knowledgeLink()]);
+
+        $statements = implode("\n", array_column($client->runs, 'statement'));
+
+        // The requested model, as the graph expresses it: prosess -> aktivitet -> Wiki-artikkel.
+        // An edge straight from the process could not say which of its steps needs the page.
+        $this->assertStringContainsString('MERGE (q)-[:HAS_ACTIVITY]->(a)', $statements);
+        $this->assertStringContainsString('MERGE (a)-[rel:REQUIRES_KNOWLEDGE]->(p)', $statements);
+        $this->assertStringContainsString('MATCH (p:EnterpriseWikiPage {customer_id: link.customer_id, page_id: link.page_id})', $statements);
+
+        // Matched, never merged: an activity whose process is not in the graph must be skipped
+        // rather than create a placeholder item node.
+        $this->assertStringContainsString(
+            'MATCH (q:QualityItem {customer_id: activity.customer_id, quality_item_id: activity.quality_item_id})',
+            $statements,
+        );
+
+        $this->assertSame(1, $client->writeTransactions);
+    }
+
+    public function test_the_knowledge_edge_carries_no_wiki_content(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceProcessActivities(10, 20, [$this->activity()], [$this->knowledgeLink()]);
+
+        $merge = $this->statementContaining($client, 'MERGE (a)-[rel:REQUIRES_KNOWLEDGE]->(p)');
+
+        // Wiki/SQL owns what the page says. The relation records the dependency and nothing else,
+        // so editing the page changes the knowledge without the relation moving at all.
+        foreach (['title', 'markdown', 'content', 'excerpt', 'version_number'] as $content) {
+            $this->assertStringNotContainsString($content, $merge);
+        }
+    }
+
+    public function test_an_activity_that_left_the_flow_is_deleted_with_its_edges(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceProcessActivities(10, 20, [$this->activity(['activity_key' => 'kontroller'])], []);
+
+        $statements = array_column($client->runs, 'statement');
+
+        // A node removed from a flow leaves no payload behind to carry its own removal, so the
+        // complete set is what decides which activities survive.
+        $this->assertStringContainsString('WHERE NOT a.activity_key IN $keys', $statements[0]);
+        $this->assertStringContainsString('DETACH DELETE a', $statements[0]);
+        $this->assertSame(['kontroller'], $client->runs[0]['parameters']['keys']);
+
+        // And the knowledge edges of the activities that did survive are cleared before the new set
+        // is written, for the same reason the Wiki links are.
+        $this->assertStringContainsString('[old:REQUIRES_KNOWLEDGE]', implode("\n", $statements));
+    }
+
+    public function test_clearing_a_flow_removes_every_activity_it_had(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceProcessActivities(10, 20, [], []);
+
+        // `NOT x IN []` is true for every row, so an empty set deletes the lot — which is what a
+        // process whose flow was emptied has to look like.
+        $this->assertSame([], $client->runs[0]['parameters']['keys']);
+        $this->assertStringContainsString('DETACH DELETE a', $client->runs[0]['statement']);
+    }
+
+    public function test_the_activity_schema_is_keyed_on_the_process_as_well_as_the_node(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->ensureSchema();
+
+        $statements = implode("\n", array_column($client->runs, 'statement'));
+
+        // A node key is unique within one blueprint and nowhere else, so the process is part of the
+        // identity rather than a property hanging off it.
+        $this->assertStringContainsString('REQUIRE (a.customer_id, a.quality_item_id, a.activity_key) IS UNIQUE', $statements);
     }
 
     public function test_a_customer_rebuild_refuses_an_unknown_relation_type_before_emptying_the_graph(): void
@@ -224,6 +317,31 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $this->assertStringContainsString('MERGE (q)-[rel:SUPPORTED_BY]->(p)', $statements);
     }
 
+    public function test_a_customer_rebuild_carries_the_activities_and_the_knowledge_behind_them(): void
+    {
+        $client = new RecordingNeo4jClient;
+        $service = new Neo4jGraphProjectionService('bolt://example:7687', 'neo4j', 'neo4j', 'secret', $client);
+
+        $service->replaceCustomerWikiGraph(
+            10,
+            [$this->page()],
+            [],
+            [$this->qualityItem(['quality_type' => 'process'])],
+            [],
+            [],
+            [$this->activity()],
+            [$this->knowledgeLink()],
+        );
+
+        $statements = implode("\n", array_column($client->runs, 'statement'));
+
+        // Activities are deleted in a statement of their own: DETACH DELETE on the item removes the
+        // edge, not the activity, so one left out here would survive every rebuild as an orphan.
+        $this->assertStringContainsString('MATCH (a:QualityActivity {customer_id: $customer_id})', $statements);
+        $this->assertStringContainsString('MERGE (q)-[:HAS_ACTIVITY]->(a)', $statements);
+        $this->assertStringContainsString('MERGE (a)-[rel:REQUIRES_KNOWLEDGE]->(p)', $statements);
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
@@ -241,6 +359,51 @@ class Neo4jGraphProjectionServiceTest extends TestCase
             'next_review_at' => '2027-01-01',
             'updated_at' => '2026-10-01T10:00:00+00:00',
         ], $overrides);
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function activity(array $overrides = []): array
+    {
+        return array_merge([
+            'customer_id' => 10,
+            'quality_item_id' => 20,
+            'activity_key' => 'kontroller-leverandoren',
+            'label' => 'Kontroller leverandoren',
+            'activity_type' => 'step',
+            'role' => 'Innkjoper',
+            'position' => 1,
+            'updated_at' => '2026-10-01T10:00:00+00:00',
+        ], $overrides);
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function knowledgeLink(array $overrides = []): array
+    {
+        return array_merge([
+            'customer_id' => 10,
+            'quality_item_id' => 20,
+            'activity_key' => 'kontroller-leverandoren',
+            'page_id' => 20,
+            'updated_at' => '2026-10-01T10:00:00+00:00',
+        ], $overrides);
+    }
+
+    /** The one recorded statement that holds $needle. */
+    private function statementContaining(RecordingNeo4jClient $client, string $needle): string
+    {
+        foreach ($client->runs as $run) {
+            if (str_contains($run['statement'], $needle)) {
+                return $run['statement'];
+            }
+        }
+
+        $this->fail(sprintf('No statement contained [%s].', $needle));
     }
 
     /**
@@ -366,7 +529,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $service->ensureSchema();
 
         // One per node kind. Without them, MERGE on (customer_id, id) is both a full scan and racy.
-        $this->assertCount(2, $client->runs);
+        $this->assertCount(3, $client->runs);
 
         $this->assertStringContainsString('IF NOT EXISTS', $client->runs[0]['statement']);
         $this->assertStringContainsString('FOR (p:EnterpriseWikiPage)', $client->runs[0]['statement']);
@@ -375,6 +538,9 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $this->assertStringContainsString('IF NOT EXISTS', $client->runs[1]['statement']);
         $this->assertStringContainsString('FOR (q:QualityItem)', $client->runs[1]['statement']);
         $this->assertStringContainsString('REQUIRE (q.customer_id, q.quality_item_id) IS UNIQUE', $client->runs[1]['statement']);
+
+        $this->assertStringContainsString('IF NOT EXISTS', $client->runs[2]['statement']);
+        $this->assertStringContainsString('FOR (a:QualityActivity)', $client->runs[2]['statement']);
     }
 
     public function test_it_rejects_a_page_property_neo4j_cannot_store(): void
@@ -453,14 +619,17 @@ class Neo4jGraphProjectionServiceTest extends TestCase
 
         $service->replaceCustomerWikiGraph(10, [], []);
 
-        // Six statements: delete pages, delete quality items, then merge pages, wikilinks, quality
-        // items and the SUPPORTED_BY edges. Both deletes are customer-scoped — a rebuild for one
-        // customer must never touch another's nodes.
-        $this->assertCount(6, $client->runs);
+        // Nine statements: delete pages, quality items and activities, then merge pages, wikilinks,
+        // quality items, the SUPPORTED_BY edges, the activities and their REQUIRES_KNOWLEDGE edges.
+        // All three deletes are customer-scoped — a rebuild for one customer must never touch
+        // another's nodes.
+        $this->assertCount(9, $client->runs);
         $this->assertStringContainsString('MATCH (p:EnterpriseWikiPage {customer_id: $customer_id})', $client->runs[0]['statement']);
         $this->assertStringContainsString('MATCH (q:QualityItem {customer_id: $customer_id})', $client->runs[1]['statement']);
+        $this->assertStringContainsString('MATCH (a:QualityActivity {customer_id: $customer_id})', $client->runs[2]['statement']);
         $this->assertSame(10, $client->runs[0]['parameters']['customer_id']);
         $this->assertSame(10, $client->runs[1]['parameters']['customer_id']);
+        $this->assertSame(10, $client->runs[2]['parameters']['customer_id']);
     }
 
     public function test_customer_rebuild_runs_inside_a_single_write_transaction(): void
@@ -471,7 +640,7 @@ class Neo4jGraphProjectionServiceTest extends TestCase
         $service->replaceCustomerWikiGraph(10, [], []);
 
         $this->assertSame(1, $client->writeTransactions);
-        $this->assertSame(array_fill(0, 6, true), array_column($client->runs, 'in_transaction'));
+        $this->assertSame(array_fill(0, 9, true), array_column($client->runs, 'in_transaction'));
     }
 
     public function test_customer_rebuild_lets_a_failing_write_transaction_surface(): void
@@ -504,10 +673,10 @@ class Neo4jGraphProjectionServiceTest extends TestCase
             $this->link(['metadata' => ['section' => 'Drift', 'anchor_text' => 'SLA']]),
         ]);
 
-        // Run 3: after the two deletes and the page merge.
+        // Run 4: after the three deletes and the page merge.
         $this->assertSame(
             '{"anchor_text":"SLA","section":"Drift"}',
-            $client->runs[3]['parameters']['links'][0]['metadata'],
+            $client->runs[4]['parameters']['links'][0]['metadata'],
         );
     }
 

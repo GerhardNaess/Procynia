@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityItem;
@@ -11,6 +13,7 @@ use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 /**
  * Seeds stable test users for Playwright E2E tests.
@@ -66,6 +69,20 @@ class E2ETestSeeder extends Seeder
      * rather than a copy of it. See tests/e2e/quality-flow-subprocess.spec.js.
      */
     private const PARENT_FLOW_CODE = 'E2E-FLOW-P';
+
+    /**
+     * A process one of whose activities is carried out against knowledge written down in Wiki.
+     *
+     * Two pages rather than one, deliberately: the indicator is a count, and a count is only
+     * checkable when it is not 1. See tests/e2e/quality-flow-activity-knowledge.spec.js.
+     */
+    private const KNOWLEDGE_FLOW_CODE = 'E2E-FLOW-K';
+
+    /** @var list<string> */
+    private const KNOWLEDGE_PAGE_TITLES = [
+        'E2E Anskaffelsesrutine',
+        'E2E Terskelverdier',
+    ];
 
     public function run(): void
     {
@@ -196,6 +213,73 @@ class E2ETestSeeder extends Seeder
         }
 
         $this->seedParentProcess($customer, $owner);
+        $this->seedKnowledgeProcess($customer, $owner);
+    }
+
+    /**
+     * The knowledge case: one activity carried out against two Wiki pages.
+     *
+     * The flow holds nothing but the pages' ids — Wiki owns what they say — so the pages have to
+     * exist before the blueprint can name them. Both are drafts, which is the honest state of a
+     * page nobody has taken through approval and no obstacle to pointing an activity at one.
+     */
+    private function seedKnowledgeProcess(Customer $customer, User $owner): void
+    {
+        $pageIds = [];
+
+        foreach (self::KNOWLEDGE_PAGE_TITLES as $title) {
+            $page = EnterpriseWikiPage::query()->updateOrCreate(
+                ['customer_id' => $customer->id, 'slug' => Str::slug($title)],
+                [
+                    'title' => $title,
+                    'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+                    'status' => EnterpriseWikiPage::STATUS_DRAFT,
+                    'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+                    'last_source_hash' => str_pad('e2e', 64, '0'),
+                ],
+            );
+
+            EnterpriseWikiPageVersion::query()->updateOrCreate(
+                ['enterprise_wiki_page_id' => $page->id, 'version_number' => 1],
+                ['is_current' => true, 'content_markdown' => 'Fast E2E-innhold.'],
+            );
+
+            $pageIds[] = (int) $page->id;
+        }
+
+        $item = QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::KNOWLEDGE_FLOW_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => 'E2E prosess med kunnskap',
+                'purpose' => 'Fast testprosess for E2E, med en aktivitet koblet til Wiki-artikler.',
+                'status' => QualityItem::STATUS_DRAFT,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
+
+        QualityProcessBlueprint::query()->updateOrCreate(
+            ['quality_item_id' => $item->id],
+            [
+                'customer_id' => $customer->id,
+                'payload' => [
+                    'lanes' => [['key' => 'innkjoper', 'label' => 'Innkjøper']],
+                    'nodes' => [
+                        ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldes', 'description' => null, 'subprocess_quality_item_id' => null, 'knowledge_page_ids' => []],
+                        ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder anskaffelsen', 'description' => null, 'subprocess_quality_item_id' => null, 'knowledge_page_ids' => $pageIds],
+                        ['key' => 'slutt', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Anskaffelsen er besluttet', 'description' => null, 'subprocess_quality_item_id' => null, 'knowledge_page_ids' => []],
+                    ],
+                    'edges' => [
+                        ['from' => 'start', 'to' => 'vurder', 'label' => null],
+                        ['from' => 'vurder', 'to' => 'slutt', 'label' => null],
+                    ],
+                ],
+                'status' => QualityProcessBlueprint::STATUS_DRAFT,
+                'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                'generated_at' => now(),
+                'generated_by_user_id' => $owner->id,
+            ],
+        );
     }
 
     /**

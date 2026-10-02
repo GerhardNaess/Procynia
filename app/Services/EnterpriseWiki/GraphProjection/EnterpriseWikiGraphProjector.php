@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
+use App\Models\QualityProcessBlueprint;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -121,6 +122,11 @@ class EnterpriseWikiGraphProjector
             ->values()
             ->all();
 
+        // The flow's activities and the knowledge behind them, for the same reason the rest of
+        // Kvalitet travels here: the rebuild deletes the customer's QualityActivity nodes first, so
+        // activities left out would be dropped by a routine Wiki rebuild and never come back.
+        [$activities, $knowledgeLinks] = $this->processActivityPayloads($customerId, $itemIds, $pageIds);
+
         $this->projection->replaceCustomerWikiGraph(
             $customerId,
             $pages,
@@ -128,7 +134,87 @@ class EnterpriseWikiGraphProjector
             $items,
             $qualityRelations,
             $qualityWikiLinks,
+            $activities,
+            $knowledgeLinks,
         );
+    }
+
+    /**
+     * Every activity of every process this customer has, and every knowledge edge leaving one.
+     *
+     * The blueprint payload is the source of truth: an activity is a node on a flow, and the
+     * knowledge behind it is the page ids that node holds. Both ends of a knowledge edge must be
+     * part of this rebuild or the MERGE would silently match nothing, so a page the Wiki query
+     * skipped drops the edge rather than the activity.
+     *
+     * @param  list<int>  $itemIds
+     * @param  list<int>  $pageIds
+     * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
+     */
+    private function processActivityPayloads(int $customerId, array $itemIds, array $pageIds): array
+    {
+        $projectablePages = array_fill_keys(array_map('intval', $pageIds), true);
+
+        $activities = [];
+        $knowledgeLinks = [];
+
+        QualityProcessBlueprint::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $itemIds)
+            ->orderBy('quality_item_id')
+            ->get()
+            ->each(function (QualityProcessBlueprint $blueprint) use (
+                $customerId,
+                $projectablePages,
+                &$activities,
+                &$knowledgeLinks,
+            ): void {
+                $itemId = (int) $blueprint->quality_item_id;
+                $updatedAt = $blueprint->updated_at?->toIso8601String();
+
+                $laneLabels = [];
+
+                foreach ($blueprint->lanes() as $lane) {
+                    $laneLabels[(string) ($lane['key'] ?? '')] = (string) ($lane['label'] ?? '');
+                }
+
+                foreach (array_values($blueprint->nodes()) as $position => $node) {
+                    $key = (string) ($node['key'] ?? '');
+
+                    if ($key === '') {
+                        continue;
+                    }
+
+                    $activities[] = [
+                        'customer_id' => $customerId,
+                        'quality_item_id' => $itemId,
+                        'activity_key' => $key,
+                        'label' => (string) ($node['label'] ?? ''),
+                        'activity_type' => (string) ($node['type'] ?? QualityProcessBlueprint::NODE_STEP),
+                        'role' => $laneLabels[(string) ($node['lane'] ?? '')] ?? null,
+                        'position' => $position,
+                        'updated_at' => $updatedAt,
+                    ];
+
+                    foreach ($node['knowledge_page_ids'] ?? [] as $pageId) {
+                        $pageId = (int) $pageId;
+
+                        if ($pageId <= 0 || ! isset($projectablePages[$pageId])) {
+                            continue;
+                        }
+
+                        $knowledgeLinks[] = [
+                            'customer_id' => $customerId,
+                            'quality_item_id' => $itemId,
+                            'activity_key' => $key,
+                            'page_id' => $pageId,
+                            'updated_at' => $updatedAt,
+                        ];
+                    }
+                }
+            });
+
+        return [$activities, $knowledgeLinks];
     }
 
     private function pagePayload(EnterpriseWikiPage $page): array

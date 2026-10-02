@@ -5,8 +5,10 @@ namespace Tests\Unit\Services\Quality;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
+use App\Models\QualityProcessBlueprint;
 use App\Services\EnterpriseWiki\GraphProjection\EnterpriseWikiGraphProjector;
 use App\Services\Quality\QualityGraphProjector;
+use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Support\RecordingGraphProjectionService;
@@ -194,6 +196,149 @@ class QualityGraphProjectionTest extends TestCase
         );
     }
 
+    /**
+     * The requested model, as the projection writes it: prosess -> aktivitet -> Wiki-artikkel.
+     *
+     * An activity is a node on the process's flow and a node in the graph of its own. The edge
+     * cannot leave the process instead, because two activities of one process routinely rest on the
+     * same page for different reasons and an edge from the process could not tell them apart.
+     */
+    public function test_an_activity_is_projected_between_the_process_and_the_wiki_page(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+
+        $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $rutine = $this->createWikiPageWithVersion($customer, 'Anskaffelsesrutine', 'Text.');
+        $terskler = $this->createWikiPageWithVersion($customer, 'Terskelverdier', 'Text.');
+
+        $this->flowFor($customer->id, $process->id, [$rutine->id, $terskler->id]);
+
+        (new QualityGraphProjector($writer))->projectItem($process->id);
+
+        $replaced = $writer->replacedProcessActivities[0];
+
+        $this->assertSame($process->id, $replaced['quality_item_id']);
+        $this->assertSame(
+            ['start', 'vurder', 'ferdig'],
+            array_column($replaced['activities'], 'activity_key'),
+        );
+
+        // The lane's label, not its key: "who does this" is the question the graph is asked.
+        $this->assertSame('Saksbehandler', $replaced['activities'][1]['role']);
+        $this->assertSame('step', $replaced['activities'][1]['activity_type']);
+
+        // One activity, two Wiki pages.
+        $this->assertSame(
+            [['vurder', $rutine->id], ['vurder', $terskler->id]],
+            array_map(
+                static fn (array $link): array => [$link['activity_key'], $link['page_id']],
+                $replaced['knowledge_links'],
+            ),
+        );
+
+        // Nothing of what the pages say reaches the graph — only their identity.
+        $this->assertSame(
+            ['customer_id', 'quality_item_id', 'activity_key', 'page_id', 'updated_at'],
+            array_keys($replaced['knowledge_links'][0]),
+        );
+
+        // And the page nodes exist before the edges pointing at them are written.
+        $this->assertSame([$rutine->id, $terskler->id], array_column($writer->upsertedPages, 'page_id'));
+    }
+
+    public function test_a_removed_connection_leaves_no_relation_behind(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+
+        $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $page = $this->createWikiPageWithVersion($customer, 'Anskaffelsesrutine', 'Text.');
+
+        $this->flowFor($customer->id, $process->id, [$page->id]);
+        $this->flowFor($customer->id, $process->id, []);
+
+        (new QualityGraphProjector($writer))->projectItem($process->id);
+
+        $replaced = $writer->replacedProcessActivities[0];
+
+        // The activities are still there; what the user removed is the knowledge behind one of them.
+        $this->assertCount(3, $replaced['activities']);
+        $this->assertSame([], $replaced['knowledge_links']);
+    }
+
+    public function test_an_activity_with_no_knowledge_is_still_an_activity(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+
+        $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        $this->flowFor($customer->id, $process->id, []);
+
+        (new QualityGraphProjector($writer))->projectItem($process->id);
+
+        // The graph has to be able to answer "which activities rest on nothing written down", which
+        // it cannot do if an activity without knowledge is left out of it.
+        $this->assertCount(3, $writer->replacedProcessActivities[0]['activities']);
+        $this->assertSame([], $writer->replacedProcessActivities[0]['knowledge_links']);
+    }
+
+    public function test_a_process_with_no_flow_still_clears_the_activities_it_had(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+
+        $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        (new QualityGraphProjector($writer))->projectItem($process->id);
+
+        $this->assertSame([], $writer->replacedProcessActivities[0]['activities']);
+        $this->assertSame([], $writer->replacedProcessActivities[0]['knowledge_links']);
+    }
+
+    public function test_a_document_without_a_flow_has_no_activities_to_project(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+
+        $policy = $this->item($customer->id, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+
+        (new QualityGraphProjector($writer))->projectItem($policy->id);
+
+        // quality_type is immutable, so a policy can never have left activities behind to clear.
+        $this->assertSame([], $writer->replacedProcessActivities);
+    }
+
+    public function test_a_customer_rebuild_carries_the_activities_and_their_knowledge(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+
+        $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $page = $this->createWikiPageWithVersion($customer, 'Anskaffelsesrutine', 'Text.');
+
+        $this->flowFor($customer->id, $process->id, [$page->id]);
+
+        (new EnterpriseWikiGraphProjector($writer))->rebuildCustomer($customer->id);
+
+        $rebuild = $writer->rebuilds[0];
+
+        // The rebuild deletes the customer's QualityActivity nodes first, so activities left out of
+        // it are dropped by a routine Wiki rebuild and never come back.
+        $this->assertSame(
+            ['start', 'vurder', 'ferdig'],
+            array_column($rebuild['process_activities'], 'activity_key'),
+        );
+        $this->assertSame(
+            [['vurder', $page->id]],
+            array_map(
+                static fn (array $link): array => [$link['activity_key'], $link['page_id']],
+                $rebuild['activity_knowledge_links'],
+            ),
+        );
+    }
+
     public function test_deleting_an_item_from_the_graph_names_the_customer_it_belonged_to(): void
     {
         $writer = new RecordingGraphProjectionService;
@@ -225,6 +370,41 @@ class QualityGraphProjectionTest extends TestCase
             'relation_type' => $relationType,
             'source' => QualityItemRelation::SOURCE_MANUAL,
         ]);
+    }
+
+    /**
+     * A three-step flow whose middle activity rests on the given Wiki pages.
+     *
+     * Written through the one gate every blueprint write goes through, so the payload under test is
+     * the payload the application would actually store — knowledge references included.
+     *
+     * @param  list<int>  $knowledgePageIds
+     */
+    private function flowFor(int $customerId, int $itemId, array $knowledgePageIds): void
+    {
+        app(QualityProcessBlueprintService::class)->store(
+            $customerId,
+            QualityItem::query()->findOrFail($itemId),
+            [
+                'lanes' => [['key' => 'saksbehandler', 'label' => 'Saksbehandler']],
+                'nodes' => [
+                    ['key' => 'start', 'lane' => 'saksbehandler', 'type' => 'start', 'label' => 'Behov oppstar'],
+                    [
+                        'key' => 'vurder',
+                        'lane' => 'saksbehandler',
+                        'type' => 'step',
+                        'label' => 'Vurder anskaffelsen',
+                        'knowledge_page_ids' => $knowledgePageIds,
+                    ],
+                    ['key' => 'ferdig', 'lane' => 'saksbehandler', 'type' => 'end', 'label' => 'Ferdig'],
+                ],
+                'edges' => [
+                    ['from' => 'start', 'to' => 'vurder'],
+                    ['from' => 'vurder', 'to' => 'ferdig'],
+                ],
+            ],
+            QualityProcessBlueprint::SOURCE_MANUAL,
+        );
     }
 
     private function link(

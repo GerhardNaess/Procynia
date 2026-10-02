@@ -246,6 +246,23 @@ return [
             'subprocess_without_flow' => 'This subprocess has no flow yet. Open it as its own process to describe how it is carried out.',
             'trail_label' => 'Where you are in the process',
             'trail_back' => 'Back to :title',
+            // The knowledge behind an activity. The content itself stays in Wiki and is never
+            // copied here — the flow holds only the connection, so an edited Wiki page changes the
+            // knowledge without the process having to be edited.
+            'knowledge_heading' => 'Knowledge behind the activity',
+            'knowledge_help' => 'Connect the activity to the Wiki pages it is carried out against. The content stays in Wiki — only the connection is stored here, so the page can change without the flow having to be edited.',
+            'knowledge_count' => ':count knowledge sources',
+            'knowledge_count_one' => ':count knowledge source',
+            'knowledge_empty' => 'No knowledge sources are connected to this activity.',
+            'knowledge_none' => 'No knowledge sources.',
+            'knowledge_open' => 'Show the knowledge sources for :label',
+            'knowledge_open_page' => 'Open in Wiki',
+            'knowledge_close' => 'Close',
+            'knowledge_search' => 'Search for a Wiki page',
+            'knowledge_search_placeholder' => 'Title or slug',
+            'knowledge_add' => 'Add a knowledge source for :label',
+            'knowledge_add_none' => '— add a knowledge source —',
+            'knowledge_remove' => 'Remove :title',
             'node_types' => [
                 'start' => 'Start',
                 'step' => 'Step',

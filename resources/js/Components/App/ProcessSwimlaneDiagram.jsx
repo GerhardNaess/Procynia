@@ -45,7 +45,14 @@ const NODE_TONES = {
     step: { fill: '#ffffff', stroke: '#cbd5e1', text: '#0f172a' },
 };
 
-export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb = {}, onOpenSubprocess = null }) {
+export default function ProcessSwimlaneDiagram({
+    blueprint,
+    title,
+    emptyText,
+    tb = {},
+    onOpenSubprocess = null,
+    onOpenActivity = null,
+}) {
     const layout = layoutBlueprint(blueprint);
 
     if (layout.isEmpty) {
@@ -56,7 +63,15 @@ export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb
         );
     }
 
-    return <ZoomableDiagram layout={layout} title={title} tb={tb} onOpenSubprocess={onOpenSubprocess} />;
+    return (
+        <ZoomableDiagram
+            layout={layout}
+            title={title}
+            tb={tb}
+            onOpenSubprocess={onOpenSubprocess}
+            onOpenActivity={onOpenActivity}
+        />
+    );
 }
 
 /**
@@ -65,7 +80,7 @@ export default function ProcessSwimlaneDiagram({ blueprint, title, emptyText, tb
  * Split out from the exported component so the hooks below are never conditional on an empty
  * blueprint — an empty flow renders a sentence, not a zoomable surface.
  */
-function ZoomableDiagram({ layout, title, tb, onOpenSubprocess }) {
+function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity }) {
     const surfaceRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [scale, setScale] = useState(null);
@@ -254,7 +269,13 @@ function ZoomableDiagram({ layout, title, tb, onOpenSubprocess }) {
                         ))}
 
                         {layout.nodes.map((node) => (
-                            <Node key={node.key} node={node} tb={tb} onOpenSubprocess={onOpenSubprocess} />
+                            <Node
+                                key={node.key}
+                                node={node}
+                                tb={tb}
+                                onOpenSubprocess={onOpenSubprocess}
+                                onOpenActivity={onOpenActivity}
+                            />
                         ))}
                     </svg>
                 </div>
@@ -431,7 +452,8 @@ function Edge({ edge }) {
 }
 
 /**
- * One node, and — when it stands for another process — the way into it.
+ * One node, and — when it stands for another process, or rests on knowledge in Wiki — the way into
+ * it.
  *
  * A subprocess node is still a node: same box, same lane colour, same shape, because it is still a
  * step in this flow and redrawing it as something else would make the diagram harder to read for
@@ -440,22 +462,42 @@ function Edge({ edge }) {
  * deciding whether to open it: BPMN's ⊞ with the number spelled out, because a kvalitetshåndbok is
  * read by people who do not know BPMN.
  *
+ * An activity that draws on Wiki pages is marked the same way and just as quietly, by a count on
+ * its top edge. The count is the whole statement — what the pages say is Wiki's business, and the
+ * diagram would be unreadable if it tried to say any of it.
+ *
  * The whole node becomes the control, not the pill. The pill is 16 pixels tall on a diagram that is
  * routinely viewed at 60 %, and a target that small is a target nobody hits — so the box is the
  * button, the pill is the sign that says so.
+ *
+ * ONE NODE, ONE ACTION. A node that both stands for a process and carries knowledge opens the
+ * process: drilling in is the bigger move, and the reader who went in can still see the knowledge
+ * on the step list either side of the trail. Two controls on one 64-pixel box would be two targets
+ * nobody can tell apart at the zoom these diagrams are actually read at.
  */
-function Node({ node, tb = {}, onOpenSubprocess = null }) {
+function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null }) {
     const shape = nodeShape(node);
     const tone = NODE_TONES[node.type] ?? NODE_TONES.step;
     const firstLineY = node.y + (node.height / 2) - (((node.lines.length - 1) * 15) / 2) + 4;
 
     const subprocess = node.subprocess ?? null;
-    const openable = subprocess !== null && typeof onOpenSubprocess === 'function';
+    const knowledge = node.knowledge ?? [];
+
+    const opensSubprocess = subprocess !== null && typeof onOpenSubprocess === 'function';
+    const opensActivity = ! opensSubprocess && knowledge.length > 0 && typeof onOpenActivity === 'function';
+    const openable = opensSubprocess || opensActivity;
 
     const open = openable
         ? (event) => {
             event.stopPropagation();
-            onOpenSubprocess(subprocess, node);
+
+            if (opensSubprocess) {
+                onOpenSubprocess(subprocess, node);
+
+                return;
+            }
+
+            onOpenActivity(node);
         }
         : undefined;
 
@@ -490,6 +532,8 @@ function Node({ node, tb = {}, onOpenSubprocess = null }) {
             </text>
 
             {subprocess && <SubprocessMarker node={node} subprocess={subprocess} tb={tb} />}
+
+            {knowledge.length > 0 && <KnowledgeMarker node={node} count={knowledge.length} tb={tb} />}
         </>
     );
 
@@ -497,15 +541,16 @@ function Node({ node, tb = {}, onOpenSubprocess = null }) {
         return <g>{body}</g>;
     }
 
-    const name = (tb.subprocess_open ?? 'Åpne underprosessen :title')
-        .replace(':title', subprocess.title ?? '');
+    const name = opensSubprocess
+        ? (tb.subprocess_open ?? 'Åpne underprosessen :title').replace(':title', subprocess.title ?? '')
+        : (tb.knowledge_open ?? 'Vis kunnskapskildene for :label').replace(':label', node.label ?? '');
 
     return (
         <g
             role="button"
             tabIndex={0}
             aria-label={name}
-            className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+            className={`cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${opensSubprocess ? 'focus-visible:outline-violet-600' : 'focus-visible:outline-sky-600'}`}
             onClick={open}
             onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -559,6 +604,52 @@ function SubprocessMarker({ node, subprocess, tb }) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />
+        </g>
+    );
+}
+
+/**
+ * The pill that says this activity rests on knowledge in Wiki.
+ *
+ * A count and nothing else. The Wiki pages have titles that are routinely longer than the node, and
+ * a diagram that tried to name them would stop being a diagram — so this says how many there are,
+ * which is the one thing a reader needs in order to decide whether to open the activity. The names
+ * are in the panel that opens, where they are links.
+ *
+ * On the top edge, right-aligned, because the bottom centre belongs to the subprocess pill: a step
+ * that is both a process and knowledge-backed has to be able to say both at once. The 9 pixels it
+ * hangs above the box come out of the 20-pixel row gap, so it can never reach the node above it.
+ *
+ * Width is counted from the text rather than measured, for the same reason wrapLabel() counts
+ * characters: measuring needs a DOM, and this has to draw identically everywhere.
+ */
+function KnowledgeMarker({ node, count, tb }) {
+    // One source is a case a reader meets routinely, and ":count kunnskapskilder" reads as a bug
+    // when the count is 1. The grammatical number is part of the string, so it is a key of its own.
+    const template = count === 1
+        ? (tb.knowledge_count_one ?? ':count kunnskapskilde')
+        : (tb.knowledge_count ?? ':count kunnskapskilder');
+    const text = template.replace(':count', String(count));
+
+    // 16 for the glyph, 6.4 per character, 10 of padding.
+    const width = 16 + (text.length * 6.4) + 10;
+    const x = node.x + node.width - width - 10;
+    const y = node.y - 9;
+
+    return (
+        <g aria-hidden="true">
+            <rect x={x} y={y} width={width} height="17" rx="8.5" fill="#ffffff" stroke="#7dd3fc" strokeWidth="1.2" />
+
+            {/* An open book, small enough to read as a bullet. */}
+            <path
+                d={`M ${x + 7} ${y + 5} h 3.5 v 7 h -3.5 z M ${x + 11.5} ${y + 5} h 3.5 v 7 h -3.5 z`}
+                fill="none"
+                stroke="#0284c7"
+                strokeWidth="1.1"
+                strokeLinejoin="round"
+            />
+
+            <text x={x + 19} y={y + 12} fontSize="10.5" fontWeight="600" fill="#075985">{text}</text>
         </g>
     );
 }

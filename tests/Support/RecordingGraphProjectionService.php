@@ -27,6 +27,9 @@ class RecordingGraphProjectionService implements GraphProjectionService
     /** @var list<array{customer_id: int, quality_item_id: int, links: list<array<string, mixed>>}> */
     public array $replacedQualityWikiLinks = [];
 
+    /** @var list<array{customer_id: int, quality_item_id: int, activities: list<array<string, mixed>>, knowledge_links: list<array<string, mixed>>}> */
+    public array $replacedProcessActivities = [];
+
     /** @var list<array<string, mixed>> */
     public array $rebuilds = [];
 
@@ -116,6 +119,25 @@ class RecordingGraphProjectionService implements GraphProjectionService
         ];
     }
 
+    public function replaceProcessActivities(
+        int $customerId,
+        int $qualityItemId,
+        array $activities,
+        array $knowledgeLinks,
+    ): void {
+        $this->replacedProcessActivities[] = [
+            'customer_id' => $customerId,
+            'quality_item_id' => $qualityItemId,
+            'activities' => $activities,
+            'knowledge_links' => $knowledgeLinks,
+        ];
+        $this->calls[] = [
+            'method' => 'replaceProcessActivities',
+            'customer_id' => $customerId,
+            'quality_item_id' => $qualityItemId,
+        ];
+    }
+
     public function replaceCustomerWikiGraph(
         int $customerId,
         array $pages,
@@ -123,6 +145,8 @@ class RecordingGraphProjectionService implements GraphProjectionService
         array $qualityItems = [],
         array $qualityItemRelations = [],
         array $qualityWikiLinks = [],
+        array $processActivities = [],
+        array $activityKnowledgeLinks = [],
     ): void {
         $this->rebuilds[] = [
             'customer_id' => $customerId,
@@ -131,6 +155,8 @@ class RecordingGraphProjectionService implements GraphProjectionService
             'quality_items' => $qualityItems,
             'quality_item_relations' => $qualityItemRelations,
             'quality_wiki_links' => $qualityWikiLinks,
+            'process_activities' => $processActivities,
+            'activity_knowledge_links' => $activityKnowledgeLinks,
         ];
         $this->calls[] = ['method' => 'replaceCustomerWikiGraph', 'customer_id' => $customerId];
     }

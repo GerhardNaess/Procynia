@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
+use App\Models\QualityProcessBlueprint;
 use App\Services\EnterpriseWiki\GraphProjection\GraphProjectionService;
 
 /**
@@ -43,6 +44,12 @@ class QualityGraphProjector
 
         $this->projectRelations($customerId, $itemId);
         $this->projectWikiLinks($customerId, $itemId);
+
+        // Only a process has a flow, and quality_type is immutable — QualityItemService refuses to
+        // retype an item — so a policy can never have left activities behind to clear.
+        if ($item->quality_type === QualityItem::TYPE_PROCESS) {
+            $this->projectActivities($customerId, $itemId);
+        }
     }
 
     public function deleteItem(int $customerId, int $itemId): void
@@ -120,6 +127,93 @@ class QualityGraphProjector
             ->all();
 
         $this->projection->replaceQualityItemWikiLinks($customerId, $itemId, $payloads);
+    }
+
+    /**
+     * The process's activities, and the Wiki pages each of them is carried out against.
+     *
+     * The blueprint payload is the source of truth for both: an activity is a node on the flow, and
+     * the knowledge behind it is the list of page ids that node holds. Nothing about the page is
+     * read into the graph beyond its identity — editing a Wiki page changes the knowledge without
+     * the relation moving.
+     */
+    private function projectActivities(int $customerId, int $itemId): void
+    {
+        $blueprint = QualityProcessBlueprint::query()
+            ->where('customer_id', $customerId)
+            ->where('quality_item_id', $itemId)
+            ->first();
+
+        $nodes = $blueprint === null ? [] : $blueprint->nodes();
+        $laneLabels = [];
+
+        foreach ($blueprint === null ? [] : $blueprint->lanes() as $lane) {
+            $laneLabels[(string) ($lane['key'] ?? '')] = (string) ($lane['label'] ?? '');
+        }
+
+        $updatedAt = $blueprint?->updated_at?->toIso8601String();
+
+        $activities = [];
+        $askedPageIds = [];
+
+        foreach (array_values($nodes) as $position => $node) {
+            $key = (string) ($node['key'] ?? '');
+
+            if ($key === '') {
+                continue;
+            }
+
+            $activities[] = [
+                'customer_id' => $customerId,
+                'quality_item_id' => $itemId,
+                'activity_key' => $key,
+                'label' => (string) ($node['label'] ?? ''),
+                'activity_type' => (string) ($node['type'] ?? QualityProcessBlueprint::NODE_STEP),
+                // The lane's label rather than its key: the key is an implementation detail of the
+                // payload, and "who does this" is the question the graph is asked.
+                'role' => $laneLabels[(string) ($node['lane'] ?? '')] ?? null,
+                'position' => $position,
+                'updated_at' => $updatedAt,
+            ];
+
+            foreach ($node['knowledge_page_ids'] ?? [] as $pageId) {
+                $pageId = (int) $pageId;
+
+                if ($pageId > 0) {
+                    $askedPageIds[$pageId][] = $key;
+                }
+            }
+        }
+
+        // Same reason as the item-level Wiki links: the page at the other end has to be a node
+        // already, and it may legitimately not be projected yet because the Wiki projection runs on
+        // its own schedule. Only pages of this same customer qualify, so a reference that somehow
+        // named another tenant's page stays out of the graph rather than becoming a placeholder.
+        $pages = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('id', array_keys($askedPageIds))
+            ->orderBy('id')
+            ->get();
+
+        $knowledgeLinks = [];
+
+        foreach ($pages as $page) {
+            $this->projection->upsertWikiPage($this->pagePayload($page));
+
+            foreach ($askedPageIds[(int) $page->id] as $activityKey) {
+                $knowledgeLinks[] = [
+                    'customer_id' => $customerId,
+                    'quality_item_id' => $itemId,
+                    'activity_key' => $activityKey,
+                    'page_id' => (int) $page->id,
+                    'updated_at' => $updatedAt,
+                ];
+            }
+        }
+
+        // Always called, including with empty lists: this is what removes activities and knowledge
+        // edges the flow no longer holds.
+        $this->projection->replaceProcessActivities($customerId, $itemId, $activities, $knowledgeLinks);
     }
 
     /**

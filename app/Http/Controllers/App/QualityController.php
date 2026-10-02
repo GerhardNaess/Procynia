@@ -22,6 +22,7 @@ use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowInterpreter;
+use App\Services\Quality\QualityProcessKnowledgeService;
 use App\Services\Quality\QualityProcessSubprocessService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
@@ -84,6 +85,7 @@ class QualityController extends Controller
         private readonly QualityFlowClarificationService $flowClarifications,
         private readonly QualityProcessDescriptionClarifier $flowClarifier,
         private readonly QualityProcessSubprocessService $subprocesses,
+        private readonly QualityProcessKnowledgeService $knowledge,
     ) {}
 
     public function index(Request $request): Response
@@ -137,6 +139,11 @@ class QualityController extends Controller
             // it is read from the subprocess's own blueprint every time it is opened.
             'subprocess_view' => $this->subprocessView($customerId, $item, $request),
             'subprocess_options' => $this->subprocessOptions($customerId, $item, $user),
+            // The Wiki picker for the flow's activities. Its own prop and its own search parameter,
+            // separate from the item-level `wiki_page_options`, so searching for a page to hang on
+            // one activity cannot reset the picker on the Dokument tab — or the other way round.
+            'knowledge_page_options' => $this->knowledgePageOptions($customerId, $item, $user, $request),
+            'knowledge_search' => trim((string) $request->query('knowledge_search', '')),
             // A proposal is not stored, so it travels in the session across the one redirect
             // between interpreting a description and seeing the result. Reloading the page drops
             // it, which is the honest behaviour: nothing was adopted.
@@ -652,6 +659,11 @@ class QualityController extends Controller
             // The process this step opens into. Whether it may point there at all — same customer,
             // actually a process, no cycle — is QualityProcessSubprocessService's call, not a rule's.
             'nodes.*.subprocess_quality_item_id' => ['nullable', 'integer'],
+            // The Wiki pages this activity is carried out against. Whether a page may be pointed at
+            // at all — same customer, still exists — is QualityProcessKnowledgeService's call, not
+            // a rule's, exactly as with the subprocess reference above.
+            'nodes.*.knowledge_page_ids' => ['nullable', 'array', 'max:'.QualityProcessKnowledgeService::MAX_PER_ACTIVITY],
+            'nodes.*.knowledge_page_ids.*' => ['integer'],
             'edges' => ['present', 'array', 'max:200'],
             'edges.*.from' => ['nullable', 'string', 'max:80'],
             'edges.*.to' => ['nullable', 'string', 'max:80'],
@@ -977,15 +989,49 @@ class QualityController extends Controller
      */
     private function nodeRows(int $customerId, QualityProcessBlueprint $blueprint): array
     {
+        $nodes = $blueprint->nodes();
+
+        // Every page the whole flow points at, read once. `knowledge_page_ids` is the stored truth
+        // and the only thing written back; `knowledge` is what those ids resolve to now — title,
+        // slug and how far the page has got through publication — so an activity shows the Wiki
+        // page as it currently is. A page that has been deleted simply does not resolve, and the
+        // activity is shown with one knowledge source fewer rather than a broken one.
+        $described = $this->knowledge->describeAll($customerId, $nodes);
+
         return array_map(
             fn (array $node): array => $node + [
                 'subprocess' => $this->subprocesses->describe(
                     $customerId,
                     $node['subprocess_quality_item_id'] ?? null,
                 ),
+                'knowledge' => array_values(array_filter(array_map(
+                    static fn (mixed $pageId): ?array => $described[(int) $pageId] ?? null,
+                    $node['knowledge_page_ids'] ?? [],
+                ))),
             ],
-            $blueprint->nodes(),
+            $nodes,
         );
+    }
+
+    /**
+     * The Wiki pages an activity on this flow may be pointed at.
+     *
+     * Only sent to someone who can edit the flow, for the same reason the subprocess options are:
+     * it is the content of one picker in the manual structure editor, and a reader has no use for a
+     * list of pages they cannot attach. What a reader does get is `knowledge` on each node — the
+     * pages the flow already points at.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function knowledgePageOptions(?int $customerId, QualityItem $item, ?User $user, Request $request): array
+    {
+        if ($customerId === null
+            || $item->quality_type !== QualityItem::TYPE_PROCESS
+            || ! ($user?->canApproveWikiClaims() ?? false)) {
+            return [];
+        }
+
+        return $this->knowledge->options($customerId, (string) $request->query('knowledge_search', ''));
     }
 
     /**

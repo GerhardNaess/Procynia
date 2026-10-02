@@ -246,6 +246,23 @@ return [
             'subprocess_without_flow' => 'Denne underprosessen har ingen flyt ennå. Åpne den som egen prosess for å beskrive hvordan den gjennomføres.',
             'trail_label' => 'Hvor du er i prosessen',
             'trail_back' => 'Tilbake til :title',
+            // Kunnskapen bak en aktivitet. Selve innholdet ligger i Wiki og kopieres aldri hit —
+            // flyten holder bare koblingen, så en endret Wiki-side endrer kunnskapen uten at
+            // prosessen må redigeres.
+            'knowledge_heading' => 'Kunnskap bak aktiviteten',
+            'knowledge_help' => 'Koble aktiviteten til Wiki-sidene den utføres etter. Innholdet blir liggende i Wiki — her lagres bare koblingen, så siden kan endres uten at flyten må redigeres.',
+            'knowledge_count' => ':count kunnskapskilder',
+            'knowledge_count_one' => ':count kunnskapskilde',
+            'knowledge_empty' => 'Ingen kunnskapskilder er koblet til denne aktiviteten.',
+            'knowledge_none' => 'Ingen kunnskapskilder.',
+            'knowledge_open' => 'Vis kunnskapskildene for :label',
+            'knowledge_open_page' => 'Åpne i Wiki',
+            'knowledge_close' => 'Lukk',
+            'knowledge_search' => 'Søk etter Wiki-side',
+            'knowledge_search_placeholder' => 'Tittel eller slug',
+            'knowledge_add' => 'Legg til kunnskapskilde for :label',
+            'knowledge_add_none' => '— legg til kunnskapskilde —',
+            'knowledge_remove' => 'Fjern :title',
             'node_types' => [
                 'start' => 'Start',
                 'step' => 'Steg',

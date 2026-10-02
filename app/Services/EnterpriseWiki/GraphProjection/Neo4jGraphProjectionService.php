@@ -50,6 +50,25 @@ class Neo4jGraphProjectionService implements GraphProjectionService
      */
     private const SUPPORTED_BY = 'SUPPORTED_BY';
 
+    /**
+     * The edge from a process to one of its activities.
+     *
+     * An activity is a node on the process's flow. It is a graph node of its own rather than a
+     * property on the process, because the question the knowledge layer exists to answer is about
+     * one step and not about the whole process: two activities of one process routinely rest on the
+     * same Wiki page for different reasons, and an edge from the process could not tell them apart.
+     */
+    private const HAS_ACTIVITY = 'HAS_ACTIVITY';
+
+    /**
+     * The edge from an activity to the Wiki page it is carried out against.
+     *
+     * Carries no content whatsoever — no excerpt, no title, no version. Wiki/SQL owns what the page
+     * says; the graph records only that the activity depends on it, so editing the page changes the
+     * knowledge without the relation moving at all.
+     */
+    private const REQUIRES_KNOWLEDGE = 'REQUIRES_KNOWLEDGE';
+
     private readonly Neo4jConnection $connection;
 
     public function __construct(
@@ -79,6 +98,17 @@ class Neo4jGraphProjectionService implements GraphProjectionService
             CREATE CONSTRAINT quality_item_customer_item_unique IF NOT EXISTS
             FOR (q:QualityItem)
             REQUIRE (q.customer_id, q.quality_item_id) IS UNIQUE
+            CYPHER,
+        );
+
+        // An activity is identified by the process it belongs to and the node key it carries on
+        // that process's flow. The key is unique within one blueprint, never across them, so the
+        // process id is part of the identity rather than a property hanging off it.
+        $this->client()->run(
+            <<<'CYPHER'
+            CREATE CONSTRAINT quality_activity_customer_item_key_unique IF NOT EXISTS
+            FOR (a:QualityActivity)
+            REQUIRE (a.customer_id, a.quality_item_id, a.activity_key) IS UNIQUE
             CYPHER,
         );
     }
@@ -167,10 +197,14 @@ class Neo4jGraphProjectionService implements GraphProjectionService
 
     public function deleteQualityItem(int $customerId, int $qualityItemId): void
     {
+        // The item's activities go with it. They hang off the item and have no meaning without it,
+        // so deleting only the item would leave orphan QualityActivity nodes behind — DETACH DELETE
+        // removes an edge, never the node at the other end of it.
         $this->client()->run(
-            <<<'CYPHER'
-            MATCH (q:QualityItem {customer_id: $customer_id, quality_item_id: $quality_item_id})
-            DETACH DELETE q
+            <<<CYPHER
+            MATCH (q:QualityItem {customer_id: \$customer_id, quality_item_id: \$quality_item_id})
+            OPTIONAL MATCH (q)-[:{$this->hasActivity()}]->(a:QualityActivity)
+            DETACH DELETE a, q
             CYPHER,
             [
                 'customer_id' => $customerId,
@@ -261,6 +295,72 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         );
     }
 
+    /**
+     * One process's activities, and the Wiki pages each of them requires, as the complete set.
+     *
+     * Four statements in one write transaction, in this order because each depends on the one
+     * before it: activities that are no longer on the flow go first (with their edges), the ones
+     * that are left are upserted and hung off the process, every knowledge edge they still hold is
+     * cleared, and the current set is written. A failure halfway through must not leave the process
+     * with half its activities or a mix of two flows.
+     *
+     * The knowledge edges are cleared wholesale rather than diffed for the same reason the Wiki
+     * links are: a reference removed from the payload leaves nothing behind to carry its own
+     * removal.
+     */
+    public function replaceProcessActivities(
+        int $customerId,
+        int $qualityItemId,
+        array $activities,
+        array $knowledgeLinks,
+    ): void {
+        foreach ($activities as $activity) {
+            $this->assertProjectableProperties($activity, 'QualityActivity');
+        }
+
+        foreach ($knowledgeLinks as $link) {
+            $this->assertProjectableProperties($link, 'REQUIRES_KNOWLEDGE');
+        }
+
+        $keys = array_values(array_map(
+            static fn (array $activity): string => (string) ($activity['activity_key'] ?? ''),
+            $activities,
+        ));
+
+        $this->client()->writeTransaction(
+            function (TransactionInterface $tsx) use ($customerId, $qualityItemId, $activities, $knowledgeLinks, $keys): void {
+                $tsx->run(
+                    <<<'CYPHER'
+                    MATCH (a:QualityActivity {customer_id: $customer_id, quality_item_id: $quality_item_id})
+                    WHERE NOT a.activity_key IN $keys
+                    DETACH DELETE a
+                    CYPHER,
+                    [
+                        'customer_id' => $customerId,
+                        'quality_item_id' => $qualityItemId,
+                        'keys' => $keys,
+                    ],
+                );
+
+                $tsx->run($this->activityMergeQuery(), ['activities' => array_values($activities)]);
+
+                $tsx->run(
+                    <<<CYPHER
+                    MATCH (a:QualityActivity {customer_id: \$customer_id, quality_item_id: \$quality_item_id})
+                          -[old:{$this->requiresKnowledge()}]->(:EnterpriseWikiPage {customer_id: \$customer_id})
+                    DELETE old
+                    CYPHER,
+                    [
+                        'customer_id' => $customerId,
+                        'quality_item_id' => $qualityItemId,
+                    ],
+                );
+
+                $tsx->run($this->knowledgeMergeQuery(), ['links' => array_values($knowledgeLinks)]);
+            },
+        );
+    }
+
     public function replaceCustomerWikiGraph(
         int $customerId,
         array $pages,
@@ -268,6 +368,8 @@ class Neo4jGraphProjectionService implements GraphProjectionService
         array $qualityItems = [],
         array $qualityItemRelations = [],
         array $qualityWikiLinks = [],
+        array $processActivities = [],
+        array $activityKnowledgeLinks = [],
     ): void {
         foreach ($pages as $page) {
             $this->assertProjectableProperties($page, 'EnterpriseWikiPage');
@@ -279,6 +381,14 @@ class Neo4jGraphProjectionService implements GraphProjectionService
 
         foreach ($qualityWikiLinks as $link) {
             $this->assertProjectableProperties($link, 'SUPPORTED_BY');
+        }
+
+        foreach ($processActivities as $activity) {
+            $this->assertProjectableProperties($activity, 'QualityActivity');
+        }
+
+        foreach ($activityKnowledgeLinks as $link) {
+            $this->assertProjectableProperties($link, 'REQUIRES_KNOWLEDGE');
         }
 
         $encodedLinks = $this->encodeLinkMetadata($links);
@@ -307,6 +417,8 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                 $qualityItems,
                 $groupedRelations,
                 $qualityWikiLinks,
+                $processActivities,
+                $activityKnowledgeLinks,
             ): void {
                 $tsx->run(
                     <<<'CYPHER'
@@ -320,6 +432,17 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                     <<<'CYPHER'
                     MATCH (q:QualityItem {customer_id: $customer_id})
                     DETACH DELETE q
+                    CYPHER,
+                    ['customer_id' => $customerId],
+                );
+
+                // Deleted in its own statement rather than as part of the item delete above: a
+                // DETACH DELETE removes the edge, not the node at the other end, so activities left
+                // out here would survive every rebuild as orphans and accumulate forever.
+                $tsx->run(
+                    <<<'CYPHER'
+                    MATCH (a:QualityActivity {customer_id: $customer_id})
+                    DETACH DELETE a
                     CYPHER,
                     ['customer_id' => $customerId],
                 );
@@ -397,6 +520,12 @@ class Neo4jGraphProjectionService implements GraphProjectionService
                     CYPHER,
                     ['links' => array_values($qualityWikiLinks)],
                 );
+
+                // After the items, because an activity hangs off the process it belongs to, and
+                // after the pages, because the knowledge merge matches the page rather than
+                // creating it.
+                $tsx->run($this->activityMergeQuery(), ['activities' => array_values($processActivities)]);
+                $tsx->run($this->knowledgeMergeQuery(), ['links' => array_values($activityKnowledgeLinks)]);
             },
         );
     }
@@ -404,6 +533,69 @@ class Neo4jGraphProjectionService implements GraphProjectionService
     private function supportedBy(): string
     {
         return self::SUPPORTED_BY;
+    }
+
+    private function hasActivity(): string
+    {
+        return self::HAS_ACTIVITY;
+    }
+
+    private function requiresKnowledge(): string
+    {
+        return self::REQUIRES_KNOWLEDGE;
+    }
+
+    /**
+     * One activity, hung off the process it belongs to.
+     *
+     * The ids travel on the row rather than as call parameters so the same statement serves both
+     * paths: one process's activities, and every activity of a customer rebuild. MATCH on the
+     * process rather than MERGE — an activity whose process is not in the graph must be skipped,
+     * never create a placeholder item node.
+     */
+    private function activityMergeQuery(): string
+    {
+        return <<<CYPHER
+        UNWIND \$activities AS activity
+        MATCH (q:QualityItem {customer_id: activity.customer_id, quality_item_id: activity.quality_item_id})
+        MERGE (a:QualityActivity {
+            customer_id: activity.customer_id,
+            quality_item_id: activity.quality_item_id,
+            activity_key: activity.activity_key
+        })
+        SET a.label = activity.label,
+            a.activity_type = activity.activity_type,
+            a.role = activity.role,
+            a.position = activity.position,
+            a.updated_at = activity.updated_at
+        MERGE (q)-[:{$this->hasActivity()}]->(a)
+        CYPHER;
+    }
+
+    /**
+     * One activity's dependency on one Wiki page.
+     *
+     * Both ends are matched, never created: an activity or a page that is not in the graph leaves
+     * the edge out rather than inventing a node for it. The edge carries the identity of the two
+     * ends and nothing about what the page says.
+     */
+    private function knowledgeMergeQuery(): string
+    {
+        return <<<CYPHER
+        UNWIND \$links AS link
+        MATCH (a:QualityActivity {
+            customer_id: link.customer_id,
+            quality_item_id: link.quality_item_id,
+            activity_key: link.activity_key
+        })
+        MATCH (p:EnterpriseWikiPage {customer_id: link.customer_id, page_id: link.page_id})
+        MERGE (a)-[rel:{$this->requiresKnowledge()}]->(p)
+        SET rel.customer_id = link.customer_id,
+            rel.quality_item_id = link.quality_item_id,
+            rel.activity_key = link.activity_key,
+            rel.page_id = link.page_id,
+            rel.updated_at = link.updated_at
+        CYPHER;
     }
 
     private function qualityRelationMergeQuery(string $relationshipType): string

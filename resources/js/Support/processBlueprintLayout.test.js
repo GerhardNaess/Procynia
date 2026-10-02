@@ -478,3 +478,68 @@ describe('a step that stands for another process', () => {
         );
     });
 });
+
+/**
+ * An activity may rest on knowledge written down in Wiki. Exactly as with a subprocess, the layout
+ * only has to hand the reference over untouched and move nothing: what the indicator says is the
+ * diagram's business, and what the page says is Wiki's.
+ */
+describe('an activity that rests on knowledge in Wiki', () => {
+    const withKnowledge = {
+        lanes: [{ key: 'l', label: 'Innkjøper' }],
+        nodes: [
+            { key: 'start', lane: 'l', type: 'start', label: 'Behov meldes' },
+            {
+                key: 'vurder',
+                lane: 'l',
+                type: 'step',
+                label: 'Vurder leverandøren',
+                knowledge_page_ids: [7, 9],
+                knowledge: [
+                    { page_id: 7, title: 'Anskaffelsesrutine', url: '/app/wiki/anskaffelsesrutine' },
+                    { page_id: 9, title: 'Terskelverdier', url: '/app/wiki/terskelverdier' },
+                ],
+            },
+            { key: 'slutt', lane: 'l', type: 'end', label: 'Bestilt' },
+        ],
+        edges: [
+            { from: 'start', to: 'vurder', label: null },
+            { from: 'vurder', to: 'slutt', label: null },
+        ],
+    };
+
+    test('the connections reach the drawing unchanged', () => {
+        const node = layoutBlueprint(withKnowledge).nodes.find((row) => row.key === 'vurder');
+
+        assert.deepEqual(node.knowledge.map((page) => page.title), ['Anskaffelsesrutine', 'Terskelverdier']);
+    });
+
+    test('an activity that rests on nothing written down carries an empty list, never undefined', () => {
+        const node = layoutBlueprint(withKnowledge).nodes.find((row) => row.key === 'start');
+
+        assert.deepEqual(node.knowledge, []);
+    });
+
+    /** The indicator is drawn from the node, so the step list's rows need it too. */
+    test('the reading order carries them too', () => {
+        const steps = flowReadingOrder(withKnowledge);
+
+        assert.equal(steps.find((row) => row.key === 'vurder').knowledge.length, 2);
+        assert.deepEqual(steps.find((row) => row.key === 'slutt').knowledge, []);
+    });
+
+    test('connecting knowledge moves nothing', () => {
+        const plain = layoutBlueprint({
+            ...withKnowledge,
+            nodes: withKnowledge.nodes.map(({ knowledge, knowledge_page_ids: _ids, ...node }) => node),
+        });
+        const linked = layoutBlueprint(withKnowledge);
+
+        assert.equal(linked.width, plain.width);
+        assert.equal(linked.height, plain.height);
+        assert.deepEqual(
+            linked.nodes.map((node) => [node.key, node.x, node.y]),
+            plain.nodes.map((node) => [node.key, node.x, node.y]),
+        );
+    });
+});

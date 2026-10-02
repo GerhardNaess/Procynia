@@ -44,6 +44,15 @@ class NullGraphProjectionService implements GraphProjectionService
         //
     }
 
+    public function replaceProcessActivities(
+        int $customerId,
+        int $qualityItemId,
+        array $activities,
+        array $knowledgeLinks,
+    ): void {
+        //
+    }
+
     public function replaceCustomerWikiGraph(
         int $customerId,
         array $pages,
@@ -51,6 +60,8 @@ class NullGraphProjectionService implements GraphProjectionService
         array $qualityItems = [],
         array $qualityItemRelations = [],
         array $qualityWikiLinks = [],
+        array $processActivities = [],
+        array $activityKnowledgeLinks = [],
     ): void {
         //
     }

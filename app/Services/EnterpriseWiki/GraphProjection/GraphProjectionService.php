@@ -51,6 +51,32 @@ interface GraphProjectionService
     public function replaceQualityItemWikiLinks(int $customerId, int $qualityItemId, array $links): void;
 
     /**
+     * One process's activities and the knowledge each of them requires, as the complete set.
+     *
+     * An activity is a node on the process's flow, and it is a node in the graph of its own:
+     * `(:QualityItem)-[:HAS_ACTIVITY]->(:QualityActivity)-[:REQUIRES_KNOWLEDGE]->(:EnterpriseWikiPage)`.
+     * That is the question this exists to answer — which single step of which process rests on
+     * which Wiki page — and an edge from the process itself could not answer it, because two
+     * activities of one process routinely draw on the same page for different reasons.
+     *
+     * The knowledge is never copied into the graph. A REQUIRES_KNOWLEDGE edge carries no content,
+     * no excerpt and no title: Wiki/SQL owns what the page says, and this records only that the
+     * activity depends on it.
+     *
+     * Called with empty lists to clear them, exactly like replaceOutgoingWikilinks — an activity
+     * removed from a flow leaves no payload behind to carry its own removal.
+     *
+     * @param  list<array<string, mixed>>  $activities
+     * @param  list<array<string, mixed>>  $knowledgeLinks
+     */
+    public function replaceProcessActivities(
+        int $customerId,
+        int $qualityItemId,
+        array $activities,
+        array $knowledgeLinks,
+    ): void;
+
+    /**
      * Rebuild everything this customer has in the graph, from SQL.
      *
      * Quality travels with the Wiki rebuild rather than in a call of its own because the rebuild
@@ -62,6 +88,8 @@ interface GraphProjectionService
      * @param  list<array<string, mixed>>  $qualityItems
      * @param  list<array<string, mixed>>  $qualityItemRelations
      * @param  list<array<string, mixed>>  $qualityWikiLinks
+     * @param  list<array<string, mixed>>  $processActivities
+     * @param  list<array<string, mixed>>  $activityKnowledgeLinks
      */
     public function replaceCustomerWikiGraph(
         int $customerId,
@@ -70,5 +98,7 @@ interface GraphProjectionService
         array $qualityItems = [],
         array $qualityItemRelations = [],
         array $qualityWikiLinks = [],
+        array $processActivities = [],
+        array $activityKnowledgeLinks = [],
     ): void;
 }

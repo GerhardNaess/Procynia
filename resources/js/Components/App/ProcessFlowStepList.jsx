@@ -12,7 +12,7 @@ import { flowReadingOrder } from '../../Support/processBlueprintLayout';
  * of sentences than across a swimlane, and the list is also what survives being read aloud in a
  * review meeting.
  */
-export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = null }) {
+export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = null, onOpenActivity = null }) {
     const steps = flowReadingOrder(blueprint);
 
     if (steps.length === 0) {
@@ -71,6 +71,28 @@ export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = 
                             )
                         )}
 
+                        {(step.knowledge ?? []).length > 0 && (
+                            /* The same count the diagram puts on the node, in the view that can be
+                               read aloud and by a screen reader. It is the way into the activity's
+                               knowledge whether or not the step also stands for a process — on the
+                               diagram the box can only do one thing, and drilling in wins there. */
+                            onOpenActivity ? (
+                                <button
+                                    type="button"
+                                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-sm font-semibold text-sky-800 transition hover:border-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                                    onClick={() => onOpenActivity(step)}
+                                    aria-label={(tb.knowledge_open ?? 'Vis kunnskapskildene for :label')
+                                        .replace(':label', step.label ?? '')}
+                                >
+                                    {knowledgeLabel(tb, step.knowledge)}
+                                </button>
+                            ) : (
+                                <p className="mt-1 text-sm font-medium text-sky-800">
+                                    {knowledgeLabel(tb, step.knowledge)}
+                                </p>
+                            )
+                        )}
+
                         {step.outcomes.length > 0 && (
                             <p className="mt-1 text-sm text-slate-500">
                                 {(tb.step_outcomes ?? 'Utfall: :outcomes').replace(':outcomes', step.outcomes.join(' / '))}
@@ -81,6 +103,15 @@ export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = 
             ))}
         </ol>
     );
+}
+
+/** "2 kunnskapskilder" — a count, never the titles: see the diagram's KnowledgeMarker. */
+function knowledgeLabel(tb, knowledge) {
+    const template = knowledge.length === 1
+        ? (tb.knowledge_count_one ?? ':count kunnskapskilde')
+        : (tb.knowledge_count ?? ':count kunnskapskilder');
+
+    return template.replace(':count', String(knowledge.length));
 }
 
 /** "Underprosess: Leverandørkontroll (6 steg)" — the name first, because that is what is clicked. */
