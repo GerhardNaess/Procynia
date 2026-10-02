@@ -228,6 +228,7 @@ export default function ProcessFlowPanel({
                                 blueprint={draft}
                                 title={`${tb.heading ?? 'Prosessflyt'} — ${item.title}`}
                                 emptyText={tb.diagram_empty ?? 'Flyten har ingen steg å tegne.'}
+                                tb={tb}
                             />
                         </div>
                     </section>

@@ -5,7 +5,10 @@ namespace Database\Seeders;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityItem;
+use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -24,11 +27,28 @@ use Illuminate\Support\Facades\Hash;
 class E2ETestSeeder extends Seeder
 {
     private const SUPER_ADMIN_EMAIL = 'e2e.superadmin@procynia.test';
+
     private const SUPER_ADMIN_PASSWORD = 'E2eAdmin123!';
+
     private const SYSTEM_OWNER_EMAIL = 'e2e.systemowner@procynia.test';
+
     private const USER_EMAIL = 'e2e.user@procynia.test';
+
     private const E2E_PASSWORD = 'E2eUser123!';
+
     private const CUSTOMER_SLUG = 'e2e-test-customer';
+
+    /**
+     * Two process flows whose only job is to be different sizes.
+     *
+     * The Flyt tab's zoom controls only mean anything relative to the surface the diagram is given,
+     * so the one case that has to exist is a flow that cannot fit: a two-node process and a
+     * fourteen-step one across six lanes put fit-to-view on both sides of the line. See
+     * tests/e2e/quality-flow-zoom.spec.js.
+     */
+    private const SMALL_FLOW_CODE = 'E2E-FLOW-S';
+
+    private const LARGE_FLOW_CODE = 'E2E-FLOW-L';
 
     public function run(): void
     {
@@ -66,7 +86,7 @@ class E2ETestSeeder extends Seeder
         );
 
         // System owner — bid_role=system_owner gives access to /app/billing
-        User::query()->updateOrCreate(
+        $systemOwner = User::query()->updateOrCreate(
             ['email' => self::SYSTEM_OWNER_EMAIL],
             [
                 'name' => 'E2E System Owner',
@@ -90,5 +110,93 @@ class E2ETestSeeder extends Seeder
                 'is_active' => true,
             ],
         );
+
+        $this->seedQualityProcessFlows($customer, $systemOwner);
+    }
+
+    /**
+     * A small and a large process, each with a saved flow.
+     *
+     * Entitlement comes first: Kvalitet is an orderable module, so without the package the routes
+     * redirect to Hjem and every quality spec would skip rather than fail — which is the worst of
+     * both, a green run that tested nothing.
+     */
+    private function seedQualityProcessFlows(Customer $customer, User $owner): void
+    {
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'quality', $owner);
+
+        $flows = [
+            [self::SMALL_FLOW_CODE, 'E2E liten prosess', $this->smallFlowPayload()],
+            [self::LARGE_FLOW_CODE, 'E2E stor prosess', $this->largeFlowPayload()],
+        ];
+
+        foreach ($flows as [$code, $title, $payload]) {
+            $item = QualityItem::query()->updateOrCreate(
+                ['customer_id' => $customer->id, 'code' => $code],
+                [
+                    'quality_type' => QualityItem::TYPE_PROCESS,
+                    'title' => $title,
+                    'purpose' => 'Fast testprosess for E2E.',
+                    'status' => QualityItem::STATUS_DRAFT,
+                    'created_by_user_id' => $owner->id,
+                ],
+            );
+
+            QualityProcessBlueprint::query()->updateOrCreate(
+                ['quality_item_id' => $item->id],
+                [
+                    'customer_id' => $customer->id,
+                    'payload' => $payload,
+                    'status' => QualityProcessBlueprint::STATUS_DRAFT,
+                    'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                    'generated_at' => now(),
+                    'generated_by_user_id' => $owner->id,
+                ],
+            );
+        }
+    }
+
+    /** Two nodes in one lane: smaller than the diagram surface on any screen. */
+    private function smallFlowPayload(): array
+    {
+        return [
+            'lanes' => [['key' => 'saksbehandler', 'label' => 'Saksbehandler']],
+            'nodes' => [
+                ['key' => 'start', 'lane' => 'saksbehandler', 'type' => 'start', 'label' => 'Avvik meldes'],
+                ['key' => 'slutt', 'lane' => 'saksbehandler', 'type' => 'end', 'label' => 'Avviket er lukket'],
+            ],
+            'edges' => [['from' => 'start', 'to' => 'slutt', 'label' => null]],
+        ];
+    }
+
+    /** Fourteen steps across six lanes: several times wider than the surface. */
+    private function largeFlowPayload(): array
+    {
+        $lanes = [];
+        $nodes = [];
+        $edges = [];
+
+        for ($index = 0; $index < 6; $index++) {
+            $lanes[] = ['key' => "lane-{$index}", 'label' => 'Rolle nummer '.($index + 1)];
+        }
+
+        for ($index = 0; $index < 14; $index++) {
+            $nodes[] = [
+                'key' => "node-{$index}",
+                'lane' => 'lane-'.($index % 6),
+                'type' => match ($index) {
+                    0 => 'start',
+                    13 => 'end',
+                    default => 'step',
+                },
+                'label' => 'Steg '.($index + 1).' i en lang prosess',
+            ];
+
+            if ($index > 0) {
+                $edges[] = ['from' => 'node-'.($index - 1), 'to' => "node-{$index}", 'label' => null];
+            }
+        }
+
+        return ['lanes' => $lanes, 'nodes' => $nodes, 'edges' => $edges];
     }
 }
