@@ -184,7 +184,7 @@ return [
             'clarification_submit' => 'Use the answer',
             'clarification_answer_label' => 'Answer',
             'clarification_answer_placeholder' => 'For example: a supplier is critical when the delivery cannot be replaced within a week.',
-            'clarification_answer_help' => 'The answer is added to the description, and the flow is interpreted again.',
+            'clarification_answer_help' => 'Procynia rewrites the description so the answer is part of it, then interprets the flow again. The question itself is never added to the description.',
             'error_heading' => 'The flow could not be used',
             'steps_heading' => 'Steps',
             'steps_list_empty' => 'The flow has no steps.',
@@ -382,6 +382,7 @@ return [
             'flow_ai_disabled' => 'AI interpretation of process descriptions is not enabled for this installation.',
             'flow_ai_unavailable' => 'The process description could not be interpreted right now. Try again shortly.',
             'flow_not_coherent' => 'The description was read, but the flow does not hold together as a process. Clarify the points below and try again.',
+            'flow_clarification_failed' => 'The answer could not be woven into the description. The description is unchanged — try putting the answer differently.',
         ],
     ],
     'common' => [

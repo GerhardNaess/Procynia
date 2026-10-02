@@ -21,6 +21,7 @@ use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintGenerator;
 use App\Services\Quality\QualityProcessBlueprintService;
+use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowInterpreter;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
@@ -82,6 +83,7 @@ class QualityController extends Controller
         private readonly QualityProcessBlueprintGenerator $blueprintGenerator,
         private readonly QualityProcessFlowInterpreter $flowInterpreter,
         private readonly QualityFlowClarificationService $flowClarifications,
+        private readonly QualityProcessDescriptionClarifier $flowClarifier,
     ) {}
 
     public function index(Request $request): Response
@@ -424,28 +426,89 @@ class QualityController extends Controller
                 $validated['description'],
                 $this->customerContext->resolveLanguageCode($user),
             );
-        } catch (ProcessFlowInterpretationException $exception) {
-            // Flashed rather than thrown as a validation error: the description is well-formed, so
-            // marking the field invalid would be wrong, and the problem list needs more room than
-            // an error bag gives it.
-            return back()->with('flow_error', [
-                'quality_item_id' => (int) $item->id,
-                'message' => $exception->getMessage(),
-                'problems' => $exception->problems,
-                'description' => $validated['description'],
-            ]);
-        } catch (AiCostControlException $exception) {
-            // Quota, entitlement, suspension and the platform stop each need their own sentence —
-            // see AiCostControlPresenter. Shown in the same place as every other reason the flow
-            // could not be read, because to the user it is the same moment.
-            return back()->with('flow_error', [
-                'quality_item_id' => (int) $item->id,
-                'message' => app(AiCostControlPresenter::class)->message($exception, $user?->customer),
-                'problems' => [],
-                'description' => $validated['description'],
+        } catch (ProcessFlowInterpretationException|AiCostControlException $exception) {
+            return $this->flowFailed($item, $user, $exception, $validated['description']);
+        }
+
+        return $this->flowProposed($item, $proposal);
+    }
+
+    /**
+     * "Bruk svaret" on one of the suggestions beside a proposal.
+     *
+     * WHY THE ANSWER IS NOT SIMPLY ADDED TO THE DESCRIPTION.
+     *
+     * It was, and it produced a description that grew a transcript at the bottom: the question
+     * Procynia asked, then the sentence the user typed, then the next question, then the next
+     * sentence. A process description is read by the people carrying the process out. What they
+     * need is one text saying how the work is done — so the answer is woven into the sentence that
+     * raised it, by QualityProcessDescriptionClarifier, and the question is never written down at
+     * all.
+     *
+     * TWO CALLS, ONE DECISION.
+     *
+     * The rewrite and the re-reading happen together because to the user they are one action: they
+     * answered a question and want to see what it did to the flow. The order matters — the
+     * description is revised first, and the flow is read from the revised text, so the proposal on
+     * screen and the description in the box are the same statement about the process.
+     *
+     * NOTHING IS WRITTEN HERE EITHER. The revised description travels back as part of the proposal
+     * and becomes the process's description if and when the user adopts the flow. A rewrite that
+     * cannot be used — or a reading that fails afterwards — leaves the description exactly as the
+     * user wrote it, which is what lets the browser put the suggestion back rather than lose it.
+     */
+    public function answerFlowClarification(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        if (! ProcessFlowInterpretationAiClient::isAvailable()) {
+            throw ValidationException::withMessages([
+                'description' => __('procynia.quality.errors.flow_ai_disabled'),
             ]);
         }
 
+        $validated = $request->validate([
+            // The same floor and ceiling as interpreting, because that is what happens next.
+            'description' => ['required', 'string', 'min:30', 'max:8000'],
+            'question' => ['required', 'string', 'max:500'],
+            // A definition is a sentence or two. The ceiling is there so a pasted document cannot
+            // arrive through this field and become the process description.
+            'answer' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $languageCode = $this->customerContext->resolveLanguageCode($user);
+
+        try {
+            $description = $this->flowClarifier->integrate(
+                $item,
+                $validated['description'],
+                $validated['question'],
+                $validated['answer'],
+                $languageCode,
+            );
+
+            $proposal = $this->flowInterpreter->interpret($item, $description, $languageCode);
+        } catch (ProcessFlowInterpretationException|AiCostControlException $exception) {
+            // The description the user wrote, not the rewrite — whatever failed, nothing they typed
+            // was changed, and the box has to go on saying so.
+            return $this->flowFailed($item, $user, $exception, $validated['description']);
+        }
+
+        return $this->flowProposed($item, $proposal);
+    }
+
+    /**
+     * A proposal on its way to the screen.
+     *
+     * @param  array{payload: array<string, mixed>, blocking_questions: list<string>, optional_clarifications: list<string>, description: string}  $proposal
+     */
+    private function flowProposed(QualityItem $item, array $proposal): RedirectResponse
+    {
         return back()->with('flow_proposal', [
             'quality_item_id' => (int) $item->id,
             'lanes' => $proposal['payload']['lanes'],
@@ -456,6 +519,34 @@ class QualityController extends Controller
             'blocking_questions' => $proposal['blocking_questions'],
             'optional_clarifications' => $proposal['optional_clarifications'],
             'description' => $proposal['description'],
+        ]);
+    }
+
+    /**
+     * Why the flow could not be produced, and the description it was produced from.
+     *
+     * Flashed rather than thrown as a validation error: the description is well-formed, so marking
+     * the field invalid would be wrong, and the problem list needs more room than an error bag
+     * gives it.
+     *
+     * A commercial stop is the one case with its own sentence per reason — quota, entitlement,
+     * suspension and the platform stop are different news, and AiCostControlPresenter is what knows
+     * which. It is shown in the same place as every other reason, because to the user it is the
+     * same moment.
+     */
+    private function flowFailed(
+        QualityItem $item,
+        ?User $user,
+        ProcessFlowInterpretationException|AiCostControlException $exception,
+        string $description,
+    ): RedirectResponse {
+        return back()->with('flow_error', [
+            'quality_item_id' => (int) $item->id,
+            'message' => $exception instanceof AiCostControlException
+                ? app(AiCostControlPresenter::class)->message($exception, $user?->customer)
+                : $exception->getMessage(),
+            'problems' => $exception instanceof ProcessFlowInterpretationException ? $exception->problems : [],
+            'description' => $description,
         ]);
     }
 

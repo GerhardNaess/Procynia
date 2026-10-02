@@ -184,7 +184,7 @@ return [
             'clarification_submit' => 'Bruk svaret',
             'clarification_answer_label' => 'Svar',
             'clarification_answer_placeholder' => 'For eksempel: En leverandør er kritisk når leveransen ikke kan erstattes innen en uke.',
-            'clarification_answer_help' => 'Svaret legges til i beskrivelsen, og flyten tolkes på nytt.',
+            'clarification_answer_help' => 'Procynia skriver om beskrivelsen slik at svaret inngår i den, og tolker flyten på nytt. Spørsmålet blir ikke stående i beskrivelsen.',
             'error_heading' => 'Flyten kunne ikke brukes',
             'steps_heading' => 'Steg',
             'steps_list_empty' => 'Flyten har ingen steg.',
@@ -382,6 +382,7 @@ return [
             'flow_ai_disabled' => 'AI-tolkning av prosessbeskrivelser er ikke slått på for denne installasjonen.',
             'flow_ai_unavailable' => 'Prosessbeskrivelsen kunne ikke tolkes nå. Prøv igjen om litt.',
             'flow_not_coherent' => 'Beskrivelsen ble lest, men flyten henger ikke sammen som en prosess. Presiser det som står under, og prøv igjen.',
+            'flow_clarification_failed' => 'Svaret kunne ikke flettes inn i beskrivelsen. Beskrivelsen er uendret — prøv å formulere svaret på en annen måte.',
         ],
     ],
     'common' => [

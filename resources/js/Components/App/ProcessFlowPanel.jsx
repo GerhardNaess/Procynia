@@ -76,6 +76,10 @@ export default function ProcessFlowPanel({
     // has to be gone on the click — the server is being told so it stays gone next time, which is a
     // different question from what the user is looking at now.
     const [declined, setDeclined] = useState([]);
+    // Suggestions answered with "Avklar". Same reason as `declined` and a different question: the
+    // round trip rewrites the description and reads it again, which takes a moment, and a user who
+    // has just answered something should not watch it sit there being asked.
+    const [answered, setAnswered] = useState([]);
 
     const reviewing = proposal !== null && ! dismissed;
 
@@ -92,6 +96,10 @@ export default function ProcessFlowPanel({
         setIsDirty(false);
         setDismissed(false);
         setDeclined([]);
+        // Cleared rather than carried, so the new reading has the last word. A suggestion answered
+        // well is gone because the revised description defines the term and the model stops asking;
+        // one the answer did not actually cover comes back, which is the truth about it.
+        setAnswered([]);
 
         if (proposal?.description) {
             setDescription(proposal.description);
@@ -174,15 +182,27 @@ export default function ProcessFlowPanel({
         });
     }
 
-    // "Avklar". The answer goes into the description and the description is read again — so there
-    // is one place the process is written down, the user can see and edit what their answer became,
-    // and adopting the result stores a text that actually says what the flow shows. Anything else
-    // here would be a second source of truth, or a chat.
+    // "Avklar". The server revises the description so the answer is part of it, then reads the
+    // revised text — so there is one place the process is written down, the user can see and edit
+    // what their answer became, and adopting the result stores a text that actually says what the
+    // flow shows. Anything else here would be a second source of truth, or a chat.
+    //
+    // The description is not touched locally. What comes back is authoritative, and a failed
+    // rewrite must leave the box saying exactly what the user wrote.
     function clarify(question, answer) {
-        const next = `${description.trim()}\n\n${question} ${answer.trim()}`;
+        setAnswered((current) => [...current, question]);
 
-        setDescription(next);
-        interpret(next);
+        setSaving(true);
+        setDescriptionError(null);
+        router.post(`/app/quality/items/${item.id}/blueprint/clarifications/answer`, {
+            question,
+            answer: answer.trim(),
+            description,
+        }, {
+            preserveScroll: true,
+            onError: (errors) => setDescriptionError(errors.description ?? null),
+            onFinish: () => setSaving(false),
+        });
     }
 
     // The payload travels as it stands in the editor, corrections included — the user is adopting
@@ -239,7 +259,7 @@ export default function ProcessFlowPanel({
                             replaces={blueprint !== null}
                             blocking={proposal.blocking_questions ?? []}
                             optional={(proposal.optional_clarifications ?? [])
-                                .filter((question) => ! declined.includes(question))}
+                                .filter((question) => ! declined.includes(question) && ! answered.includes(question))}
                             onClarify={clarify}
                             onDecline={declineClarification}
                             busy={saving}
@@ -559,11 +579,13 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
  * coming back on the next generation — but the screen does not wait for that, because a user who
  * dismisses something and watches it sit there will click it again.
  *
- * "Avklar" opens one field. The answer is appended to the process description and the description
- * is read again, so the clarification ends up in the one text the process is written down in rather
- * than in a conversation beside it. That is also why this is not a wizard: there is no sequence to
- * work through, no state between the suggestions, and no step that has to be completed. Answer one,
- * answer none, dismiss the rest — the flow is adoptable either way.
+ * "Avklar" opens one field. The answer is woven into the process description — into the sentence
+ * that raised it, by a rewrite — and the revised description is read again, so the clarification
+ * ends up in the one text the process is written down in rather than in a conversation beside it.
+ * The question is never written into that text; an answered suggestion leaves no trace except a
+ * description that now says what it means. That is also why this is not a wizard: there is no
+ * sequence to work through, no state between the suggestions, and no step that has to be completed.
+ * Answer one, answer none, dismiss the rest — the flow is adoptable either way.
  */
 function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, canManage }) {
     const [answering, setAnswering] = useState(null);
@@ -607,7 +629,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
                                     placeholder={tb.clarification_answer_placeholder ?? ''}
                                 />
                                 <p className="text-sm text-slate-500">
-                                    {tb.clarification_answer_help ?? 'Svaret legges til i beskrivelsen, og flyten tolkes på nytt.'}
+                                    {tb.clarification_answer_help ?? 'Procynia skriver om beskrivelsen slik at svaret inngår i den, og tolker flyten på nytt. Spørsmålet blir ikke stående i beskrivelsen.'}
                                 </p>
                                 <div className="flex flex-wrap gap-2">
                                     <button

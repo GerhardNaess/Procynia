@@ -14,6 +14,7 @@ use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\Quality\QualityProcessFlowValidator;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -54,6 +55,19 @@ class QualityProcessFlowInterpretationTest extends TestCase
      * rule: noticed, reported, and never in the way.
      */
     private const CRITICAL_SUPPLIER_QUESTION = 'Hva gjør at en leverandør regnes som kritisk?';
+
+    /** What the user types into the one field "Avklar" opens. */
+    private const CRITICAL_SUPPLIER_ANSWER = 'Når verdien av anskaffelsen er over kr. 100000.';
+
+    /**
+     * The description once the answer is part of it — the worked example from the brief.
+     *
+     * The defining clause has taken the place of the undefined word in the sentence that branched
+     * on it. Every other sentence is untouched, the question is nowhere, and nothing stands at the
+     * bottom explaining what was asked. That shape is the whole point of the rewrite: a process
+     * description is read by people carrying the process out, not by the person who answered.
+     */
+    private const CLARIFIED_DESCRIPTION = 'Når en ny leverandør skal opprettes registrerer innkjøper leverandøren i systemet. Dersom verdien av anskaffelsen er over kr. 100 000, regnes leverandøren som kritisk og skal kontrolleres av sikkerhetsansvarlig. Deretter godkjenner økonomi leverandøren.';
 
     protected function setUp(): void
     {
@@ -786,6 +800,307 @@ class QualityProcessFlowInterpretationTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // Answering a clarification: woven in, never transcribed
+    // ---------------------------------------------------------------------
+
+    /**
+     * The brief's worked example, end to end.
+     *
+     * What is defended here is the difference between a process description and a transcript. The
+     * answer belongs in the sentence that raised the question; the question belongs nowhere. A
+     * description that accumulates "Hva gjør at en leverandør regnes som kritisk? Når verdien er
+     * over …" at the bottom is still technically an answered clarification, and it is useless to
+     * the person who has to carry the process out.
+     */
+    public function test_answering_a_clarification_weaves_the_answer_into_the_description(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        // The rewrite first, then the reading of what it produced.
+        $this->fakeResponses([
+            ['description' => self::CLARIFIED_DESCRIPTION],
+            $this->definedSupplierProposal(),
+        ]);
+
+        $proposal = $this->answerClarification(
+            $owner,
+            $process,
+            self::CRITICAL_SUPPLIER_QUESTION,
+            self::CRITICAL_SUPPLIER_ANSWER,
+        )['flow_proposal'];
+
+        $this->assertSame(self::CLARIFIED_DESCRIPTION, $proposal['description']);
+
+        // The answer is in the text, in the sentence that branched on the undefined word.
+        $this->assertStringContainsString('over kr. 100 000', $proposal['description']);
+        $this->assertStringContainsString('regnes leverandøren som kritisk', $proposal['description']);
+
+        // And the rest of the description survived it: this is an integration, not a rewrite of
+        // the process.
+        $this->assertStringContainsString('registrerer innkjøper leverandøren', $proposal['description']);
+        $this->assertStringContainsString('Deretter godkjenner økonomi leverandøren', $proposal['description']);
+
+        // Still a proposal. Answering a question is not adopting a flow.
+        $this->assertSame(0, QualityProcessBlueprint::query()->count());
+    }
+
+    /**
+     * The question itself never reaches the description, and neither does loose Q&A.
+     *
+     * Asserted on the text rather than on the prompt, because "do not write the question" is a
+     * request to a model and this is the one promise the feature cannot keep by asking nicely. The
+     * deterministic half lives in QualityProcessDescriptionClarifier; this is what it buys.
+     */
+    public function test_the_question_is_never_written_into_the_description(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponses([
+            ['description' => self::CLARIFIED_DESCRIPTION],
+            $this->definedSupplierProposal(),
+        ]);
+
+        $description = $this->answerClarification(
+            $owner,
+            $process,
+            self::CRITICAL_SUPPLIER_QUESTION,
+            self::CRITICAL_SUPPLIER_ANSWER,
+        )['flow_proposal']['description'];
+
+        $this->assertStringNotContainsString(self::CRITICAL_SUPPLIER_QUESTION, $description);
+        $this->assertStringNotContainsString('Hva gjør at', $description);
+        $this->assertStringNotContainsString('?', $description, 'A process description is not an interview.');
+
+        // The model was told what was asked — it cannot weave an answer in without knowing what it
+        // answers — and the flow was read from the revised text, not from the original.
+        $requests = Http::recorded();
+        $this->assertCount(2, $requests);
+
+        $rewrite = $this->sentText($requests[0][0]);
+        $this->assertStringContainsString('Hva gjør at en leverandør regnes som kritisk', $rewrite);
+        $this->assertStringContainsString('over kr. 100000', $rewrite);
+
+        $this->assertStringContainsString(
+            'Dersom verdien av anskaffelsen er over kr. 100 000',
+            $this->sentText($requests[1][0]),
+        );
+    }
+
+    /**
+     * The suggestion is gone, and gone because it was answered rather than because it was silenced.
+     *
+     * No dismissal is recorded. That distinction is the whole behaviour: a dismissal suppresses a
+     * question about a description that still raises it, whereas an answer changes the description
+     * so there is nothing left to raise. Recording one here would hide the case below.
+     */
+    public function test_an_answered_clarification_is_gone_from_the_proposal_without_being_suppressed(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponses([
+            ['description' => self::CLARIFIED_DESCRIPTION],
+            $this->definedSupplierProposal(),
+        ]);
+
+        $proposal = $this->answerClarification(
+            $owner,
+            $process,
+            self::CRITICAL_SUPPLIER_QUESTION,
+            self::CRITICAL_SUPPLIER_ANSWER,
+        )['flow_proposal'];
+
+        $this->assertSame([], $proposal['optional_clarifications']);
+        $this->assertSame([], $proposal['blocking_questions']);
+        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+
+        // The flow is still the flow. Defining the term changed what the decision is called, not
+        // that the process branches or who does what.
+        $this->assertSame(
+            ['Innkjøper', 'Sikkerhetsansvarlig', 'Økonomi'],
+            array_column($proposal['lanes'], 'label'),
+        );
+    }
+
+    /**
+     * And it stays gone when the process is read again.
+     *
+     * This is the regeneration case: the user answers, then presses "Generer prosessflyt" on the
+     * revised description. Nothing suppresses the question — the text now defines the criterion,
+     * so there is nothing to ask. A description that still left it open would raise it again, which
+     * is the next test.
+     */
+    public function test_an_answered_clarification_does_not_return_when_the_revised_description_defines_the_term(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponses([
+            ['description' => self::CLARIFIED_DESCRIPTION],
+            $this->definedSupplierProposal(),
+            $this->definedSupplierProposal(),
+        ]);
+
+        $description = $this->answerClarification(
+            $owner,
+            $process,
+            self::CRITICAL_SUPPLIER_QUESTION,
+            self::CRITICAL_SUPPLIER_ANSWER,
+        )['flow_proposal']['description'];
+
+        $regenerated = $this->interpret($owner, $process, $description)['flow_proposal'];
+
+        $this->assertSame([], $regenerated['optional_clarifications']);
+        $this->assertSame($description, $regenerated['description']);
+        $this->assertSame(0, QualityFlowClarificationDismissal::query()->count());
+    }
+
+    /**
+     * An answer that did not actually settle the question leaves the question standing.
+     *
+     * The honest outcome, and the reason answering records nothing. "Avvis" is how a user says a
+     * term is left to judgement; "Avklar" is how they define it, and a definition that does not
+     * define it has not earned the silence.
+     */
+    public function test_a_clarification_the_answer_did_not_cover_is_raised_again(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $vague = self::DESCRIPTION.' En kritisk leverandør vurderes særskilt.';
+
+        $this->fakeResponses([
+            ['description' => $vague],
+            $this->supplierProposal(),
+        ]);
+
+        $proposal = $this->answerClarification(
+            $owner,
+            $process,
+            self::CRITICAL_SUPPLIER_QUESTION,
+            'Det vurderes i hvert enkelt tilfelle.',
+        )['flow_proposal'];
+
+        $this->assertSame([self::CRITICAL_SUPPLIER_QUESTION], $proposal['optional_clarifications']);
+    }
+
+    /**
+     * A rewrite that put the question in the text is refused, and refusing costs the user nothing.
+     *
+     * The description stands exactly as they wrote it, no flow is read from the bad rewrite, and
+     * the message tells them the one thing that can help. Repairing it instead would mean editing
+     * their process description on a guess about which words were theirs.
+     */
+    public function test_a_rewrite_that_still_carries_the_question_is_refused_and_changes_nothing(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponses([[
+            'description' => self::DESCRIPTION."\n\n".self::CRITICAL_SUPPLIER_QUESTION.' '.self::CRITICAL_SUPPLIER_ANSWER,
+        ]]);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/blueprint/clarifications/answer", [
+                'description' => self::DESCRIPTION,
+                'question' => self::CRITICAL_SUPPLIER_QUESTION,
+                'answer' => self::CRITICAL_SUPPLIER_ANSWER,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['flow_proposal']);
+        $this->assertNotNull($props['flow_error']);
+        $this->assertSame(
+            __('procynia.quality.errors.flow_clarification_failed'),
+            $props['flow_error']['message'],
+        );
+
+        // The description the user wrote, unchanged — which is what lets the browser put the
+        // suggestion back rather than lose it.
+        $this->assertSame(self::DESCRIPTION, $props['flow_error']['description']);
+
+        // And the flow was never read from it: one call made, not two.
+        Http::assertSentCount(1);
+        $this->assertSame(0, QualityProcessBlueprint::query()->count());
+    }
+
+    /**
+     * A rewrite that changed nothing is refused for the same reason.
+     *
+     * Re-reading an identical description would take the suggestion off the screen while changing
+     * nothing about why it was raised — the user would believe they had answered it.
+     */
+    public function test_a_rewrite_that_left_the_description_untouched_is_refused(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer, 'Leverandøropprettelse');
+
+        $this->fakeResponses([['description' => self::DESCRIPTION]]);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/blueprint/clarifications/answer", [
+                'description' => self::DESCRIPTION,
+                'question' => self::CRITICAL_SUPPLIER_QUESTION,
+                'answer' => self::CRITICAL_SUPPLIER_ANSWER,
+            ])
+            ->assertRedirect();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['flow_proposal']);
+        $this->assertNotNull($props['flow_error']);
+        Http::assertSentCount(1);
+    }
+
+    /** Answering on someone else's process, or without the right to manage this one. */
+    public function test_answering_a_clarification_passes_the_same_gates_as_every_other_flow_write(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        ['customer' => $other] = $this->context();
+
+        $process = $this->process($customer, 'Leverandøropprettelse');
+        $foreign = $this->process($other, 'Andres prosess');
+        $contributor = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
+
+        Http::fake([]);
+        Http::preventStrayRequests();
+
+        $payload = [
+            'description' => self::DESCRIPTION,
+            'question' => self::CRITICAL_SUPPLIER_QUESTION,
+            'answer' => self::CRITICAL_SUPPLIER_ANSWER,
+        ];
+
+        $this->actingAs($contributor)
+            ->post("/app/quality/items/{$process->id}/blueprint/clarifications/answer", $payload)
+            ->assertForbidden();
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$foreign->id}/blueprint/clarifications/answer", $payload)
+            ->assertNotFound();
+
+        // An answer with nothing in it never reaches a provider either.
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/blueprint/clarifications/answer", [
+                'description' => self::DESCRIPTION,
+                'question' => self::CRITICAL_SUPPLIER_QUESTION,
+                'answer' => '   ',
+            ])
+            ->assertSessionHasErrors('answer');
+
+        Http::assertNothingSent();
+    }
+
+    // ---------------------------------------------------------------------
     // Input rules, authorisation and tenancy
     // ---------------------------------------------------------------------
 
@@ -1062,6 +1377,39 @@ class QualityProcessFlowInterpretationTest extends TestCase
             ->assertSessionHasNoErrors();
     }
 
+    /**
+     * What one request actually carried, with the provider's unicode escaping undone.
+     *
+     * The body is JSON, so "kritisk" travels as \u escapes and a naive assertion on it passes or
+     * fails for reasons that have nothing to do with the prompt.
+     */
+    private function sentText(Request $request): string
+    {
+        return (string) json_encode($request->data(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    /** "Bruk svaret" on one suggestion, as the panel sends it. */
+    private function answerClarification(
+        User $owner,
+        QualityItem $item,
+        string $question,
+        string $answer,
+        ?string $description = null,
+    ): array {
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$item->id}/blueprint/clarifications/answer", [
+                'description' => $description ?? self::DESCRIPTION,
+                'question' => $question,
+                'answer' => $answer,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        return $this->actingAs($owner)
+            ->get("/app/quality/items/{$item->id}?tab=flow")
+            ->viewData('page')['props'];
+    }
+
     /** @return array<string, mixed> */
     private function interpret(User $owner, QualityItem $item, ?string $description = null): array
     {
@@ -1131,6 +1479,24 @@ class QualityProcessFlowInterpretationTest extends TestCase
             // class of observation the prompt does ask for. See CRITICAL_SUPPLIER_QUESTION.
             'optional_clarifications' => [['question' => self::CRITICAL_SUPPLIER_QUESTION]],
         ];
+    }
+
+    /**
+     * The same flow read from a description that now says what "kritisk" means.
+     *
+     * The structure is identical — defining the criterion does not change who does what — and the
+     * decision carries the threshold instead of the undefined word. Nothing is left to clarify.
+     *
+     * @return array<string, mixed>
+     */
+    private function definedSupplierProposal(): array
+    {
+        $proposal = $this->supplierProposal();
+
+        $proposal['steps'][1]['label'] = 'Er verdien over kr. 100 000?';
+        $proposal['optional_clarifications'] = [];
+
+        return $proposal;
     }
 
     /** The same flow with the "Nei" branch missing — a decision that is not one. */

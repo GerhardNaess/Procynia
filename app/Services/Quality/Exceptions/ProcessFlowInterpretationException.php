@@ -35,4 +35,16 @@ class ProcessFlowInterpretationException extends RuntimeException
     {
         return new self(__('procynia.quality.errors.flow_not_coherent'), $problems);
     }
+
+    /**
+     * The third way, and the only one that is about an answer rather than a description.
+     *
+     * The rewrite came back, and it was not something to put in front of the user — it still
+     * carried the question, or it changed nothing at all. Nothing has been altered, so the advice
+     * is the one thing that can help: say it differently. See QualityProcessDescriptionClarifier.
+     */
+    public static function clarificationNotIntegrated(): self
+    {
+        return new self(__('procynia.quality.errors.flow_clarification_failed'));
+    }
 }

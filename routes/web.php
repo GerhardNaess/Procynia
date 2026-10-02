@@ -209,6 +209,13 @@ Route::prefix('app')
             // in front of the user every time they regenerate.
             Route::post('/items/{item}/blueprint/clarifications/dismiss', [QualityController::class, 'dismissFlowClarification'])
                 ->name('items.blueprint.clarifications.dismiss');
+
+            // Answering one instead. Separate from interpret because the description is revised
+            // before it is read — the answer is woven into the text rather than appended to it, and
+            // the question itself is never written down. Still writes nothing: what comes back is a
+            // proposal carrying the revised description.
+            Route::post('/items/{item}/blueprint/clarifications/answer', [QualityController::class, 'answerFlowClarification'])
+                ->name('items.blueprint.clarifications.answer');
             Route::put('/items/{item}/blueprint', [QualityController::class, 'updateBlueprint'])
                 ->name('items.blueprint.update');
             Route::post('/items/{item}/blueprint/approve', [QualityController::class, 'approveBlueprint'])
