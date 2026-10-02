@@ -192,8 +192,12 @@ Route::prefix('app')
             // Prosessflyt. Only a process has one — the controller refuses the rest through
             // QualityProcessBlueprintService — and the blueprint is the source of truth: the
             // swimlane is drawn from it client-side and never stored.
-            Route::post('/items/{item}/blueprint/generate', [QualityController::class, 'generateBlueprint'])
-                ->name('items.blueprint.generate');
+            //
+            // There is deliberately no "generate" route. A deterministic generator used to seed a
+            // flow — from the process's own steps, or from a worked ITIL example when it had none —
+            // and it wrote straight over whatever the process already had. A flow a person
+            // described and adopted is now only ever replaced by a person: by adopting another
+            // proposal, or by saving the editor. See QualityProcessBlueprintService::store().
 
             // Describing the process in plain language, and adopting what comes back. Two routes
             // rather than one because they are two decisions: interpreting writes nothing, and

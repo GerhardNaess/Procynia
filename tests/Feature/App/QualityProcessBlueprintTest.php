@@ -8,13 +8,14 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
-use App\Models\QualityProcessIo;
-use App\Models\QualityProcessStep;
 use App\Models\User;
+use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -25,8 +26,8 @@ use Tests\TestCase;
  *
  *  - The blueprint is the source of truth. It is normalised on the way in so that what is stored is
  *    always drawable, and no geometry is ever persisted.
- *  - "Generer struktur" reads the process's own steps when it has them, and only falls back to the
- *    worked example when there is nothing to read. It calls no model.
+ *  - Nothing generates a flow. A blueprint is written only by a person — adopting a proposal, or
+ *    saving the editor — and no seeded flow can displace one.
  *  - Approval is a statement about one specific flow, so editing the flow clears it.
  *  - The flow belongs to a process and to nothing else — neither the tab nor the endpoints exist
  *    for a policy or a control.
@@ -129,120 +130,99 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
-    // Generating
+    // No generator
     // ---------------------------------------------------------------------
 
     /**
-     * The generator reads the document, it does not invent one. Roles become lanes in the order
-     * they first appear, steps become nodes in the order they are written, and the input and output
-     * become the ends of the flow.
+     * The regression this section exists for.
+     *
+     * A deterministic generator sat behind a "Generer struktur på nytt" button. When a process had
+     * no steps to read it seeded a worked ITIL Incident Management example instead — and because a
+     * blueprint is keyed on its process, storing it replaced whatever flow was already there. A
+     * user who had described their own process, corrected the proposal and adopted it could lose
+     * all of it to one click, and be left looking at servicedesk steps that had nothing to do with
+     * their work.
+     *
+     * The button, the endpoint and the generator are gone. These tests prove it stays that way:
+     * the route does not exist, and the one gate every write goes through refuses a seeded source
+     * outright — so a future example, demo or step seeder cannot quietly take the old one's place.
      */
-    public function test_generating_reads_the_processs_own_steps(): void
+    public function test_there_is_no_endpoint_that_generates_a_flow(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
-        $this->step($process, 1, 'Registrer avviket', 'Servicedesk');
-        $this->step($process, 2, 'Vurder alvorlighet', 'Servicedesk');
-        $this->step($process, 3, 'Iverksett tiltak', 'Fagansvarlig');
-        $this->io($process, 'input', 'Avvik meldt inn');
-        $this->io($process, 'output', 'Avviket er lukket');
+
+        $this->assertFalse(
+            Route::has('app.quality.items.blueprint.generate'),
+            'the generate endpoint is gone and must stay gone',
+        );
 
         $this->actingAs($owner)
             ->post("/app/quality/items/{$process->id}/blueprint/generate")
-            ->assertRedirect();
+            ->assertNotFound();
 
-        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
-
-        $this->assertSame(QualityProcessBlueprint::SOURCE_DERIVED, $blueprint->source);
-        $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $blueprint->status);
-
-        // One lane per distinct role, in first-appearance order. The catch-all lane is dropped,
-        // because every step named a role.
-        $this->assertSame(['Servicedesk', 'Fagansvarlig'], array_column($blueprint->lanes(), 'label'));
-
-        $this->assertSame(
-            ['Avvik meldt inn', 'Registrer avviket', 'Vurder alvorlighet', 'Iverksett tiltak', 'Avviket er lukket'],
-            array_column($blueprint->nodes(), 'label'),
-        );
-
-        $types = array_column($blueprint->nodes(), 'type');
-        $this->assertSame(QualityProcessBlueprint::NODE_START, $types[0]);
-        $this->assertSame(QualityProcessBlueprint::NODE_END, $types[4]);
-
-        // Chained, so the flow is drawable the moment it is generated.
-        $this->assertCount(4, $blueprint->edges());
-    }
-
-    public function test_a_step_without_a_named_role_lands_in_the_catch_all_lane(): void
-    {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
-
-        $process = $this->process($customer, 'Avvikshåndtering');
-        $this->step($process, 1, 'Registrer avviket', 'Servicedesk');
-        $this->step($process, 2, 'Følg opp', null);
-
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate");
-
-        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
-        $lanes = collect($blueprint->lanes())->keyBy('key');
-        $nodes = collect($blueprint->nodes())->keyBy('label');
-
-        $this->assertCount(2, $lanes);
-        $this->assertNotSame($nodes['Registrer avviket']['lane'], $nodes['Følg opp']['lane']);
+        $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
     }
 
     /**
-     * No steps means nothing to read, so a worked example is seeded instead — something to edit
-     * rather than a blank page. `source` is what keeps the two apart afterwards.
+     * The guarantee itself, at the only place a blueprint is ever written: an adopted flow cannot
+     * be replaced by a seeded one, whatever calls store().
      */
-    public function test_a_process_with_no_steps_is_seeded_from_the_incident_management_example(): void
+    public function test_a_seeded_flow_cannot_replace_a_flow_the_user_adopted(): void
     {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
 
-        $process = $this->process($customer, 'Incident Management');
+        $process = $this->process($customer, 'Leverandøropprettelse');
+        $service = app(QualityProcessBlueprintService::class);
 
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate");
-
-        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
-
-        $this->assertSame(QualityProcessBlueprint::SOURCE_EXAMPLE, $blueprint->source);
-        $this->assertCount(4, $blueprint->lanes());
-        $this->assertCount(14, $blueprint->nodes());
-        $this->assertCount(16, $blueprint->edges());
-
-        // The example earns its place by having the shapes a step list cannot express.
-        $types = array_column($blueprint->nodes(), 'type');
-        $this->assertContains(QualityProcessBlueprint::NODE_DECISION, $types);
-        $this->assertContains(QualityProcessBlueprint::NODE_START, $types);
-        $this->assertContains(QualityProcessBlueprint::NODE_END, $types);
-
-        $outcomes = array_values(array_filter(array_column($blueprint->edges(), 'label')));
-        $this->assertNotEmpty($outcomes, 'a branch with unnamed outcomes is unreadable');
-    }
-
-    public function test_generating_again_replaces_the_flow_and_clears_its_approval(): void
-    {
-        ['owner' => $owner, 'customer' => $customer] = $this->context();
-
-        $process = $this->process($customer, 'Avvikshåndtering');
-        $this->step($process, 1, 'Registrer avviket', 'Servicedesk');
-
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate");
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
-
-        $this->assertSame(
-            QualityProcessBlueprint::STATUS_APPROVED,
-            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->status,
+        $adopted = $service->store(
+            (int) $customer->id,
+            $process,
+            $this->simpleFlow(),
+            QualityProcessBlueprint::SOURCE_AI,
+            $owner,
         );
 
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate");
+        foreach (QualityProcessBlueprint::RETIRED_SOURCES as $seeded) {
+            try {
+                $service->store((int) $customer->id, $process, $this->incidentManagementFlow(), $seeded, $owner);
+                $this->fail("a blueprint with source [{$seeded}] must be refused");
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('source', $exception->errors());
+            }
+        }
 
-        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
+        $after = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
 
-        $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $blueprint->status);
-        $this->assertNull($blueprint->approved_at);
-        $this->assertNull($blueprint->approved_by_user_id);
+        $this->assertSame($adopted->id, $after->id);
+        $this->assertSame(QualityProcessBlueprint::SOURCE_AI, $after->source);
+        $this->assertSame(['Start', 'Vurder saken', 'Ferdig'], array_column($after->nodes(), 'label'));
+    }
+
+    /**
+     * Not only "cannot overwrite" — cannot be stored at all. An empty process is where the example
+     * used to land, and a seeded flow on a blank page is still a claim about work nobody described.
+     */
+    public function test_a_seeded_flow_cannot_be_stored_on_a_process_that_has_none(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+
+        $this->expectException(ValidationException::class);
+
+        try {
+            app(QualityProcessBlueprintService::class)->store(
+                (int) $customer->id,
+                $process,
+                $this->incidentManagementFlow(),
+                QualityProcessBlueprint::SOURCE_EXAMPLE,
+                $owner,
+            );
+        } finally {
+            $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
+        }
     }
 
     public function test_one_process_has_at_most_one_flow(): void
@@ -251,8 +231,8 @@ class QualityProcessBlueprintTest extends TestCase
 
         $process = $this->process($customer, 'Avvikshåndtering');
 
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate");
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate");
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
 
         $this->assertSame(
             1,
@@ -502,10 +482,6 @@ class QualityProcessBlueprintTest extends TestCase
         $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste tilbud');
 
         $this->actingAs($owner)
-            ->post("/app/quality/items/{$checklist->id}/blueprint/generate")
-            ->assertSessionHasErrors('quality_type');
-
-        $this->actingAs($owner)
             ->put("/app/quality/items/{$checklist->id}/blueprint", $this->simpleFlow())
             ->assertSessionHasErrors('quality_type');
     }
@@ -516,10 +492,6 @@ class QualityProcessBlueprintTest extends TestCase
 
         $contributor = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
         $process = $this->process($customer, 'Avvikshåndtering');
-
-        $this->actingAs($contributor)
-            ->post("/app/quality/items/{$process->id}/blueprint/generate")
-            ->assertForbidden();
 
         $this->actingAs($contributor)
             ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
@@ -536,10 +508,6 @@ class QualityProcessBlueprintTest extends TestCase
         ['customer' => $other] = $this->context();
 
         $theirs = $this->process($other, 'Deres prosess');
-
-        $this->actingAs($owner)
-            ->post("/app/quality/items/{$theirs->id}/blueprint/generate")
-            ->assertNotFound();
 
         $this->actingAs($owner)
             ->put("/app/quality/items/{$theirs->id}/blueprint", $this->simpleFlow())
@@ -562,7 +530,7 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Avvikshåndtering');
 
         $this->actingAs($owner)
-            ->post("/app/quality/items/{$process->id}/blueprint/generate")
+            ->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow())
             ->assertRedirect(route('app.dashboard'));
 
         $this->assertSame(0, QualityProcessBlueprint::query()->count());
@@ -591,6 +559,30 @@ class QualityProcessBlueprintTest extends TestCase
             'edges' => [
                 ['from' => 'start', 'to' => 'vurder', 'label' => null],
                 ['from' => 'vurder', 'to' => 'ferdig', 'label' => null],
+            ],
+        ];
+    }
+
+    /**
+     * A stand-in for the flow the retired generator used to seed: somebody else's process, with
+     * somebody else's roles, landing on a process that never described any of it.
+     *
+     * @return array<string, mixed>
+     */
+    private function incidentManagementFlow(): array
+    {
+        return [
+            'lanes' => [
+                ['key' => 'servicedesk', 'label' => 'Servicedesk (1. linje)'],
+            ],
+            'nodes' => [
+                ['key' => 'melding', 'lane' => 'servicedesk', 'type' => 'start', 'label' => 'Hendelse meldes inn'],
+                ['key' => 'registrer', 'lane' => 'servicedesk', 'type' => 'step', 'label' => 'Registrer og kategoriser hendelsen'],
+                ['key' => 'lukket', 'lane' => 'servicedesk', 'type' => 'end', 'label' => 'Hendelsen er lukket'],
+            ],
+            'edges' => [
+                ['from' => 'melding', 'to' => 'registrer', 'label' => null],
+                ['from' => 'registrer', 'to' => 'lukket', 'label' => null],
             ],
         ];
     }
@@ -656,27 +648,5 @@ class QualityProcessBlueprintTest extends TestCase
     private function process(Customer $customer, string $title): QualityItem
     {
         return $this->item($customer, QualityItem::TYPE_PROCESS, $title);
-    }
-
-    private function step(QualityItem $process, int $position, string $title, ?string $responsibility): void
-    {
-        QualityProcessStep::query()->create([
-            'customer_id' => $process->customer_id,
-            'quality_item_id' => $process->id,
-            'position' => $position,
-            'title' => $title,
-            'responsibility' => $responsibility,
-        ]);
-    }
-
-    private function io(QualityItem $process, string $direction, string $label): void
-    {
-        QualityProcessIo::query()->create([
-            'customer_id' => $process->customer_id,
-            'quality_item_id' => $process->id,
-            'direction' => $direction,
-            'position' => 1,
-            'label' => $label,
-        ]);
     }
 }

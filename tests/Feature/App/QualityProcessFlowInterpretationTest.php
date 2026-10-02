@@ -157,8 +157,18 @@ class QualityProcessFlowInterpretationTest extends TestCase
         ['owner' => $owner, 'customer' => $customer] = $this->context();
         $process = $this->process($customer, 'Leverandøropprettelse');
 
-        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/generate")
-            ->assertRedirect();
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", [
+            'lanes' => [['key' => 'innkjoper', 'label' => 'Innkjøper']],
+            'nodes' => [
+                ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldt'],
+                ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder leverandøren'],
+                ['key' => 'ferdig', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Leverandøren er opprettet'],
+            ],
+            'edges' => [
+                ['from' => 'start', 'to' => 'vurder', 'label' => null],
+                ['from' => 'vurder', 'to' => 'ferdig', 'label' => null],
+            ],
+        ])->assertRedirect();
 
         $existing = QualityProcessBlueprint::query()->firstOrFail();
 
@@ -169,7 +179,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
 
         $this->assertSame($existing->id, $after->id);
         $this->assertSame($existing->payload, $after->payload);
-        $this->assertSame(QualityProcessBlueprint::SOURCE_EXAMPLE, $after->source);
+        $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $after->source);
     }
 
     public function test_an_adopted_proposal_becomes_the_flow_and_records_where_it_came_from(): void

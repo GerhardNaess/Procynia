@@ -11,6 +11,13 @@ use Illuminate\Validation\ValidationException;
 /**
  * Every write to a process blueprint goes through here.
  *
+ * A blueprint is only ever written by a person: adopting a proposal they read and corrected, or
+ * saving the editor. Nothing generates one. A deterministic generator once did — seeding a flow
+ * from the process's steps, or from a worked ITIL Incident Management example when it had none —
+ * and because store() is keyed on the process it replaced whatever was already there, approval
+ * and all. store() now refuses every seeded source outright; see
+ * QualityProcessBlueprint::RETIRED_SOURCES.
+ *
  * The one rule this class exists to enforce: what reaches the database is always drawable. The
  * swimlane is laid out from the payload with no error handling of its own — it is a pure function
  * over lanes, nodes and edges — so a node in a lane that does not exist, or an edge to a node that
@@ -50,6 +57,16 @@ class QualityProcessBlueprintService
         ?string $description = null,
     ): QualityProcessBlueprint {
         $this->assertProcess($customerId, $item);
+
+        // A seeded flow may not be stored at all, over an existing blueprint or onto an empty
+        // process. The generator that produced these is gone; this is the structural guarantee
+        // that no future example, demo or step seeder can take its place and overwrite a flow a
+        // person described, corrected and adopted.
+        if (in_array($source, QualityProcessBlueprint::RETIRED_SOURCES, true)) {
+            throw ValidationException::withMessages([
+                'source' => __('procynia.quality.errors.seeded_blueprint_source'),
+            ]);
+        }
 
         if (! in_array($source, QualityProcessBlueprint::SOURCES, true)) {
             throw ValidationException::withMessages([

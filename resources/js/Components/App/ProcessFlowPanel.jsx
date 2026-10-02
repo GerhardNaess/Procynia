@@ -129,18 +129,6 @@ export default function ProcessFlowPanel({
         };
     }
 
-    function generate() {
-        if (blueprint && ! window.confirm(tb.regenerate_confirm ?? 'Generer strukturen på nytt?')) {
-            return;
-        }
-
-        setSaving(true);
-        router.post(`/app/quality/items/${item.id}/blueprint/generate`, {}, {
-            preserveScroll: true,
-            onFinish: () => setSaving(false),
-        });
-    }
-
     function save() {
         setSaving(true);
         router.put(`/app/quality/items/${item.id}/blueprint`, draft, {
@@ -235,21 +223,18 @@ export default function ProcessFlowPanel({
             {flowError && ! reviewing && <FlowErrorCard tb={tb} flowError={flowError} />}
 
             <section className={CARD}>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <h2 className="text-xl font-semibold text-slate-950">{tb.heading ?? 'Prosessflyt'}</h2>
-                        <p className="mt-1 max-w-2xl text-base leading-6 text-slate-600">
-                            {tb.help ?? 'Flyten viser hvem som gjør hva, i hvilken rekkefølge.'}
-                        </p>
-                    </div>
-
-                    {canManage && (
-                        <button type="button" className={SECONDARY_ACTION} onClick={generate} disabled={saving}>
-                            {blueprint
-                                ? (tb.regenerate ?? 'Generer struktur på nytt')
-                                : (tb.generate ?? 'Generer struktur')}
-                        </button>
-                    )}
+                {/*
+                  * No "generer struktur" button. It called a deterministic generator that seeded a
+                  * flow over whatever the process already had — from its steps, or from a worked
+                  * ITIL example when it had none — so one click could replace a flow the user had
+                  * described, corrected and adopted. A flow is written here only by adopting a
+                  * proposal or by saving the editor below.
+                  */}
+                <div>
+                    <h2 className="text-xl font-semibold text-slate-950">{tb.heading ?? 'Prosessflyt'}</h2>
+                    <p className="mt-1 max-w-2xl text-base leading-6 text-slate-600">
+                        {tb.help ?? 'Flyten viser hvem som gjør hva, i hvilken rekkefølge.'}
+                    </p>
                 </div>
 
                 {reviewing

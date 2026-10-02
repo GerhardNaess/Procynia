@@ -26,10 +26,10 @@ class QualityProcessBlueprint extends Model
         self::STATUS_APPROVED,
     ];
 
-    /** Built from the process's own steps, inputs and outputs. Today's generator. */
+    /** Retired. Was built from the process's own steps, inputs and outputs. */
     public const SOURCE_DERIVED = 'derived';
 
-    /** Seeded from a worked example because the process had no steps to derive from. */
+    /** Retired. Was seeded from a worked example when the process had no steps to derive from. */
     public const SOURCE_EXAMPLE = 'example';
 
     /** Interpreted from a plain-language description by a model, and adopted by a person. */
@@ -38,12 +38,32 @@ class QualityProcessBlueprint extends Model
     /** Edited by a person. Any save through the editor lands here. */
     public const SOURCE_MANUAL = 'manual';
 
-    /** @var list<string> */
+    /**
+     * The sources a blueprint may be written with: a flow a person adopted, and a flow a person
+     * edited. Both are a person's statement about their own process.
+     *
+     * @var list<string>
+     */
     public const SOURCES = [
-        self::SOURCE_DERIVED,
-        self::SOURCE_EXAMPLE,
         self::SOURCE_AI,
         self::SOURCE_MANUAL,
+    ];
+
+    /**
+     * Sources that exist in rows written before the generator was removed, and that may never be
+     * written again.
+     *
+     * The generator seeded a flow — from the process's steps, or from a worked ITIL Incident
+     * Management example when there were none — and stored it straight over whatever the process
+     * already had. A seeded flow is not a statement about the customer's process, so it must never
+     * be able to displace one that is. The constants stay so an old row still has a name; the
+     * allowlist above is what decides what can be stored.
+     *
+     * @var list<string>
+     */
+    public const RETIRED_SOURCES = [
+        self::SOURCE_DERIVED,
+        self::SOURCE_EXAMPLE,
     ];
 
     /** Where the flow begins. Exactly one per blueprint. */

@@ -19,7 +19,6 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
-use App\Services\Quality\QualityProcessBlueprintGenerator;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowInterpreter;
@@ -80,7 +79,6 @@ class QualityController extends Controller
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly EnterpriseWikiDocumentUploadService $documentUploads,
         private readonly QualityProcessBlueprintService $blueprints,
-        private readonly QualityProcessBlueprintGenerator $blueprintGenerator,
         private readonly QualityProcessFlowInterpreter $flowInterpreter,
         private readonly QualityFlowClarificationService $flowClarifications,
         private readonly QualityProcessDescriptionClarifier $flowClarifier,
@@ -329,33 +327,6 @@ class QualityController extends Controller
     // -----------------------------------------------------------------
     // Prosessflyt
     // -----------------------------------------------------------------
-
-    /**
-     * Propose a flow for this process.
-     *
-     * Deterministic — see QualityProcessBlueprintGenerator. The proposal is stored as a draft
-     * rather than held in the browser, because the point of the button is to give the user
-     * something to edit, and an unsaved proposal would be lost by the first reload.
-     *
-     * It overwrites whatever draft was there, including an approved blueprint, which is why the
-     * UI asks first. Regenerating is the user saying the flow should be re-read from the steps.
-     */
-    public function generateBlueprint(QualityItem $item): RedirectResponse
-    {
-        $user = $this->customerContext->currentUser();
-        $customerId = $this->customerContext->currentCustomerId();
-
-        $this->authorizeManagement($user);
-        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
-
-        $generated = $this->blueprintGenerator->generate($item);
-
-        $this->blueprints->store((int) $customerId, $item, $generated['payload'], $generated['source'], $user);
-
-        return back()->with('success', __($generated['source'] === QualityProcessBlueprint::SOURCE_EXAMPLE
-            ? 'procynia.quality.flash.blueprint_seeded'
-            : 'procynia.quality.flash.blueprint_generated'));
-    }
 
     /**
      * Save an edited flow.
