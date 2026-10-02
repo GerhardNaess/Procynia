@@ -45,6 +45,8 @@ const TEXTAREA = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 t
 
 const NODE_TYPES = ['start', 'step', 'decision', 'end'];
 
+const STRUCTURE_EDITOR_ID = 'process-flow-structure-editor';
+
 export default function ProcessFlowPanel({
     tq,
     item,
@@ -62,6 +64,11 @@ export default function ProcessFlowPanel({
     const [edges, setEdges] = useState(() => (proposal ?? blueprint)?.edges ?? []);
     const [isDirty, setIsDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    // The row-by-row editor is folded away by default. It is the fallback for a correction the
+    // description could not express, not the way a flow is normally built — and left open it is
+    // the loudest thing on the tab, so the diagram and the steps, which are what the user came to
+    // read, start below three tables of keys and dropdowns.
+    const [editingStructure, setEditingStructure] = useState(false);
 
     // The description the user typed. Seeded from whichever of the three sources knows it: the
     // proposal being reviewed, the attempt that failed, or the flow that was adopted from it.
@@ -96,6 +103,8 @@ export default function ProcessFlowPanel({
         setIsDirty(false);
         setDismissed(false);
         setDeclined([]);
+        // A new flow arrived from the server, so whatever the editor was open for is settled.
+        setEditingStructure(false);
         // Cleared rather than carried, so the new reading has the last word. A suggestion answered
         // well is gone because the revised description defines the term and the model stops asking;
         // one the answer did not actually cover comes back, which is the truth about it.
@@ -283,34 +292,56 @@ export default function ProcessFlowPanel({
 
                     <section className={CARD}>
                         <h2 className="text-xl font-semibold text-slate-950">{tb.structure_heading ?? 'Struktur'}</h2>
+                        <p className="mt-1 max-w-2xl text-base leading-6 text-slate-600">
+                            {tb.structure_help
+                                ?? 'Roller, noder og forbindelser bak diagrammet. Rediger dem direkte når beskrivelsen ikke treffer.'}
+                        </p>
 
-                        <div className="mt-4 space-y-8">
-                            <LaneEditor
-                                tb={tb}
-                                lanes={lanes}
-                                setLanes={edit(setLanes)}
-                                nodes={nodes}
-                                setNodes={edit(setNodes)}
-                                canManage={canManage}
-                            />
-                            <NodeEditor
-                                tb={tb}
-                                nodeTypeLabels={nodeTypeLabels}
-                                lanes={lanes}
-                                nodes={nodes}
-                                setNodes={edit(setNodes)}
-                                edges={edges}
-                                setEdges={edit(setEdges)}
-                                canManage={canManage}
-                            />
-                            <EdgeEditor
-                                tb={tb}
-                                nodes={nodes}
-                                edges={edges}
-                                setEdges={edit(setEdges)}
-                                canManage={canManage}
-                            />
+                        <div className="mt-4">
+                            <button
+                                type="button"
+                                className={SECONDARY_ACTION}
+                                onClick={() => setEditingStructure((open) => ! open)}
+                                aria-expanded={editingStructure}
+                                aria-controls={STRUCTURE_EDITOR_ID}
+                            >
+                                {editingStructure
+                                    ? (tb.structure_edit_hide ?? 'Skjul manuell redigering')
+                                    : canManage
+                                        ? (tb.structure_edit_open ?? 'Rediger struktur manuelt')
+                                        : (tb.structure_show ?? 'Vis struktur')}
+                            </button>
                         </div>
+
+                        {editingStructure && (
+                            <div id={STRUCTURE_EDITOR_ID} className="mt-6 space-y-8">
+                                <LaneEditor
+                                    tb={tb}
+                                    lanes={lanes}
+                                    setLanes={edit(setLanes)}
+                                    nodes={nodes}
+                                    setNodes={edit(setNodes)}
+                                    canManage={canManage}
+                                />
+                                <NodeEditor
+                                    tb={tb}
+                                    nodeTypeLabels={nodeTypeLabels}
+                                    lanes={lanes}
+                                    nodes={nodes}
+                                    setNodes={edit(setNodes)}
+                                    edges={edges}
+                                    setEdges={edit(setEdges)}
+                                    canManage={canManage}
+                                />
+                                <EdgeEditor
+                                    tb={tb}
+                                    nodes={nodes}
+                                    edges={edges}
+                                    setEdges={edit(setEdges)}
+                                    canManage={canManage}
+                                />
+                            </div>
+                        )}
 
                         {canManage && reviewing && (
                             <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
