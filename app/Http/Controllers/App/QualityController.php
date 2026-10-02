@@ -389,6 +389,14 @@ class QualityController extends Controller
             // A floor as well as a ceiling: two words cannot describe a process, and letting them
             // through only spends a provider call to tell the user something a rule can.
             'description' => ['required', 'string', 'min:30', 'max:8000'],
+        ], [
+            // Said in the user's own language and in terms of the field they are looking at. The
+            // button is no longer withheld until the browser thinks the field has enough in it, so
+            // this is the message an empty or thin description actually comes back with — it has
+            // to tell the user what to do next, not name a rule.
+            'description.required' => __('procynia.quality.errors.flow_description_required'),
+            'description.min' => __('procynia.quality.errors.flow_description_too_short'),
+            'description.max' => __('procynia.quality.errors.flow_description_too_long'),
         ]);
 
         try {

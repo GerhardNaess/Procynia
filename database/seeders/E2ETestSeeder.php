@@ -50,6 +50,14 @@ class E2ETestSeeder extends Seeder
 
     private const LARGE_FLOW_CODE = 'E2E-FLOW-L';
 
+    /**
+     * A process that has no flow at all, which is a case of its own: it is the only state in which
+     * the tab has nothing to show but the invitation to describe the process, and the state that
+     * once told the user to press a button that had been removed. See
+     * tests/e2e/quality-flow-describe-without-flow.spec.js.
+     */
+    private const NO_FLOW_CODE = 'E2E-FLOW-0';
+
     public function run(): void
     {
         // Internal super admin — no customer, full Filament access
@@ -124,7 +132,7 @@ class E2ETestSeeder extends Seeder
     }
 
     /**
-     * A small and a large process, each with a saved flow.
+     * A small and a large process, each with a saved flow, and one with none.
      *
      * Entitlement comes first: Kvalitet is an orderable module, so without the package the routes
      * redirect to Hjem and every quality spec would skip rather than fail — which is the worst of
@@ -138,6 +146,20 @@ class E2ETestSeeder extends Seeder
             [self::SMALL_FLOW_CODE, 'E2E liten prosess', $this->smallFlowPayload()],
             [self::LARGE_FLOW_CODE, 'E2E stor prosess', $this->largeFlowPayload()],
         ];
+
+        QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::NO_FLOW_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                // Deliberately without the word "flyt" in it: the specs reach the tab with
+                // getByRole('link', { name: 'Flyt' }), which matches on a substring, and a row in
+                // the Kvalitet list carrying that word is picked up as the tab.
+                'title' => 'E2E prosess uten struktur',
+                'purpose' => 'Fast testprosess for E2E, uten lagret flyt.',
+                'status' => QualityItem::STATUS_DRAFT,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
 
         foreach ($flows as [$code, $title, $payload]) {
             $item = QualityItem::query()->updateOrCreate(

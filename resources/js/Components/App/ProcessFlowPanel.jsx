@@ -391,13 +391,17 @@ export default function ProcessFlowPanel({
  *
  * The flow is drawn against the purpose — "does this picture do what the document says it does?" —
  * and sending the reader back to another tab to check breaks exactly the comparison this tab is for.
+ *
+ * It is headed "Formål", which is what the field it mirrors is called under Dokument. It was headed
+ * "Prosessbeskrivelse", directly above the field where the process description is actually written,
+ * and a reader who went looking for that field found this read-only card first.
  */
 function DescriptionCard({ tq, tb, item }) {
     const stepCount = (item.steps ?? []).length;
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tb.description_heading ?? 'Prosessbeskrivelse'}</h2>
+            <h2 className="text-xl font-semibold text-slate-950">{tb.description_heading ?? 'Formål'}</h2>
 
             {item.purpose ? (
                 <p className="mt-2 max-w-3xl whitespace-pre-line text-base leading-6 text-slate-700">{item.purpose}</p>
@@ -447,8 +451,17 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                 </p>
             ) : (
                 <>
-                    <label className="mt-4 block">
-                        <span className="sr-only">{tb.ai_label ?? 'Prosessbeskrivelse'}</span>
+                    {/*
+                      * The label is on screen, not only for a screen reader. The card above this
+                      * one is headed with the process's purpose, and while this field's own label
+                      * was hidden, the only thing on the tab that said "prosessbeskrivelse" was
+                      * that read-only card — so the one box you can actually write the description
+                      * in looked like it belonged to something else.
+                      */}
+                    <label className="mt-4 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">
+                            {tb.ai_label ?? 'Prosessbeskrivelse'}
+                        </span>
                         <textarea
                             className={TEXTAREA}
                             rows={6}
@@ -473,7 +486,15 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                             // walks it looking for files until the stack runs out. Nothing here
                             // wants the event, so nothing here is given it.
                             onClick={() => onSubmit()}
-                            disabled={busy || value.trim() === ''}
+                            // Off only while a reading is actually running. It used to be off
+                            // until this component's own copy of the text was non-empty, which
+                            // made the one control on the tab depend on client state the user
+                            // cannot see or correct: anything that kept `value` empty left a
+                            // button that could not be pressed and said nothing about why. The
+                            // floor on the description is enforced where it is authoritative —
+                            // the request is refused before any model is called, and the reason
+                            // comes back into the field's error line below.
+                            disabled={busy}
                         >
                             {busy ? (tb.ai_working ?? 'Leser beskrivelsen …') : (tb.ai_submit ?? 'Generer prosessflyt')}
                         </button>

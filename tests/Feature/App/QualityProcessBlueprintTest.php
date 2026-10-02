@@ -166,6 +166,59 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     /**
+     * The page must not send the user after a control that no longer exists.
+     *
+     * Removing the generator left its instruction behind. A process with no flow was told "Generer
+     * struktur for å få et utkast å redigere" — a button deleted in the same change — while the one
+     * control that does build a flow sat greyed out above it, waiting for a description field whose
+     * only label was for a screen reader. The tab therefore read as broken on exactly the processes
+     * it matters most on: the ones with no flow yet.
+     *
+     * Both locales, because the English copy carried the same instruction.
+     */
+    public function test_a_process_with_no_flow_is_pointed_at_the_description_not_at_a_removed_button(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['blueprint'], 'this is the flow-less case');
+
+        $copy = $props['translations']['quality']['blueprint'];
+
+        foreach (['no', 'en'] as $locale) {
+            $empty = __('procynia.quality.blueprint.empty', [], $locale);
+            $unavailable = __('procynia.quality.blueprint.ai_unavailable', [], $locale);
+
+            foreach ([$empty, $unavailable] as $text) {
+                $this->assertStringNotContainsStringIgnoringCase(
+                    'generer struktur',
+                    $text,
+                    "the retired generator must not be promised in {$locale}",
+                );
+                $this->assertStringNotContainsStringIgnoringCase(
+                    'generate a structure',
+                    $text,
+                    "the retired generator must not be promised in {$locale}",
+                );
+            }
+        }
+
+        // What the empty state does point at: the field the description is written in, which is
+        // the only way a flow-less process gets a flow.
+        $this->assertStringContainsStringIgnoringCase('prosessbeskrivelse', $copy['empty']);
+
+        // And that field is named on screen rather than only to a screen reader, so "Formål" — the
+        // read-only card above it — is no longer the only thing on the tab called a description.
+        $this->assertSame('Prosessbeskrivelse', $copy['ai_label']);
+        $this->assertNotSame($copy['ai_label'], $copy['description_heading']);
+    }
+
+    /**
      * The guarantee itself, at the only place a blueprint is ever written: an adopted flow cannot
      * be replaced by a seeded one, whatever calls store().
      */
