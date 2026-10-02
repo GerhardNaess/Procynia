@@ -149,6 +149,8 @@ export default function ProcessFlowPanel({
         });
     }
 
+    // `text` is the description to read, and it is never an event: see InterpretCard's button for
+    // what happens when a handler with a meaningful first argument is wired to onClick directly.
     function interpret(text = description) {
         setSaving(true);
         setDescriptionError(null);
@@ -429,7 +431,12 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                         <button
                             type="button"
                             className={PRIMARY_ACTION}
-                            onClick={onSubmit}
+                            // Called with no arguments on purpose. onClick hands its handler the
+                            // click event, and onSubmit takes the description to interpret — wired
+                            // straight through, the event becomes the request payload, and Inertia
+                            // walks it looking for files until the stack runs out. Nothing here
+                            // wants the event, so nothing here is given it.
+                            onClick={() => onSubmit()}
                             disabled={busy || value.trim() === ''}
                         >
                             {busy ? (tb.ai_working ?? 'Leser beskrivelsen …') : (tb.ai_submit ?? 'Generer prosessflyt')}
