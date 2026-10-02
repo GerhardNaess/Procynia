@@ -169,6 +169,19 @@ return [
              * `frame-ancestors 'none'` means nothing may frame Procynia; it pairs with
              * X-Frame-Options: DENY. `frame-src 'self'` is separate and is required — the AI
              * document preview frames a same-origin PDF (resources/js/Pages/App/AI/DocumentPreview.jsx).
+             *
+             * The policy is enforced everywhere, development included. There is no list of Vite dev
+             * origins here on purpose: the only origin that matters is whatever laravel-vite-plugin
+             * wrote into public/hot when `npm run dev` started, and a second copy in config drifts —
+             * a taken port sends Vite to 5174 and a hand-maintained list silently stops matching.
+             * AddSecurityHeaders reads public/hot and admits exactly that origin, nothing wider, and
+             * only in the local environment.
+             *
+             * What config cannot derive is the part vite.config.js fixes: CSP's host-source grammar
+             * has no way to express an IPv6 literal, and a browser discards the whole token —
+             * "contains an invalid source: 'http://[::1]:5173'. It will be ignored." Pinning the dev
+             * server to an IPv4 loopback host keeps its origin expressible, which is what lets
+             * development run this same enforcing policy instead of a report-only one.
              */
             'csp' => [
                 'base' => [
@@ -201,43 +214,6 @@ return [
                  */
                 'admin_script_src' => "'self' 'unsafe-inline' 'unsafe-eval'",
 
-                /*
-                 * Vite's dev server, for local development only.
-                 *
-                 * Note what is NOT here: `http://[::1]:5173`. CSP's host-source grammar has no way to
-                 * express an IPv6 literal, and a browser discards the whole token —
-                 * "contains an invalid source: 'http://[::1]:5173'. It will be ignored." Vite binds
-                 * to localhost, which resolves to ::1 on macOS, so laravel-vite-plugin writes exactly
-                 * that origin into public/hot and the browser then requests it. An enforcing CSP
-                 * therefore cannot admit the dev server on such a host, which is why development
-                 * runs the policy in report-only mode (see 'enforce_in_development' below).
-                 *
-                 * These entries still matter: they keep the report-only output quiet for developers
-                 * whose Vite resolves to an IPv4 host.
-                 */
-                'dev_script_origins' => [
-                    'http://localhost:5173',
-                    'http://127.0.0.1:5173',
-                ],
-
-                'dev_connect_origins' => [
-                    'http://localhost:5173',
-                    'http://127.0.0.1:5173',
-                    'ws://localhost:5173',
-                    'ws://127.0.0.1:5173',
-                ],
-
-                /*
-                 * Enforce in production, report-only while the Vite dev server is running.
-                 *
-                 * This is not a way to dodge a hard policy: production — the surface that matters —
-                 * gets an enforcing Content-Security-Policy. Locally, an enforcing policy would block
-                 * Vite on an IPv6 host and leave the developer with a blank page, so the same policy
-                 * is sent as Content-Security-Policy-Report-Only instead. Violations still show up in
-                 * the browser console, so a developer introducing a pattern that would break
-                 * production still sees it.
-                 */
-                'enforce_in_development' => false,
             ],
         ],
     ],

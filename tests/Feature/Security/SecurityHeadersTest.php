@@ -218,6 +218,88 @@ class SecurityHeadersTest extends TestCase
         $this->assertNull($response->headers->get('Content-Security-Policy'));
     }
 
+    /**
+     * Put a hot file in place for the duration of one assertion, restoring whatever was there.
+     *
+     * A developer may well have `npm run dev` running while the suite executes, and public/hot is
+     * that server's own file. Laravel only reads it per request, so borrowing it briefly is safe as
+     * long as the original comes back.
+     */
+    private function withViteHotFile(string $contents, callable $assertions): void
+    {
+        $hotFile = public_path('hot');
+        $original = is_file($hotFile) ? file_get_contents($hotFile) : null;
+
+        $this->app['env'] = 'local';
+        file_put_contents($hotFile, $contents);
+
+        try {
+            $assertions();
+        } finally {
+            if ($original === null) {
+                @unlink($hotFile);
+            } else {
+                file_put_contents($hotFile, $original);
+            }
+        }
+    }
+
+    public function test_the_vite_dev_server_origin_is_read_from_the_hot_file(): void
+    {
+        // The port is deliberately not 5173: Vite falls back when 5173 is taken, and the policy has
+        // to follow the origin Vite actually wrote rather than a hardcoded guess.
+        $this->withViteHotFile('http://127.0.0.1:5199', function (): void {
+            $directives = $this->cspDirectives(
+                $this->get('/login')->headers->get('Content-Security-Policy'),
+            );
+
+            $this->assertStringContainsString('http://127.0.0.1:5199', $directives['script-src'] ?? '');
+            $this->assertStringContainsString('http://127.0.0.1:5199', $directives['style-src'] ?? '');
+            $this->assertStringContainsString('http://127.0.0.1:5199', $directives['connect-src'] ?? '');
+
+            // HMR runs over a WebSocket from the same origin, and only connect-src governs it.
+            $this->assertStringContainsString('ws://127.0.0.1:5199', $directives['connect-src'] ?? '');
+            $this->assertStringNotContainsString('ws://', $directives['script-src'] ?? '');
+        });
+    }
+
+    public function test_an_ipv6_literal_dev_origin_is_never_emitted(): void
+    {
+        // CSP's host-source grammar cannot express `[::1]`; a browser discards the whole token and
+        // takes the rest of the directive with it. Pinning the Vite host in vite.config.js is what
+        // prevents this, but emitting it would be worse than not admitting the dev server at all.
+        $this->withViteHotFile('http://[::1]:5173', function (): void {
+            $policy = $this->get('/login')->headers->get('Content-Security-Policy');
+
+            $this->assertStringNotContainsString('[::1]', $policy);
+            $this->assertSame("'self'", $this->cspDirectives($policy)['script-src'] ?? null);
+        });
+    }
+
+    public function test_the_dev_server_never_widens_the_policy_outside_local(): void
+    {
+        $hotFile = public_path('hot');
+        $original = is_file($hotFile) ? file_get_contents($hotFile) : null;
+
+        file_put_contents($hotFile, 'http://127.0.0.1:5173');
+
+        try {
+            // Environment stays `testing`, standing in for a stray hot file in a built image.
+            $directives = $this->cspDirectives(
+                $this->get('/login')->headers->get('Content-Security-Policy'),
+            );
+
+            $this->assertSame("'self'", $directives['script-src'] ?? null);
+            $this->assertSame("'self'", $directives['connect-src'] ?? null);
+        } finally {
+            if ($original === null) {
+                @unlink($hotFile);
+            } else {
+                file_put_contents($hotFile, $original);
+            }
+        }
+    }
+
     public function test_the_legacy_xss_protection_header_is_not_reintroduced(): void
     {
         // X-XSS-Protection is deprecated and its filter has itself been a source of vulnerabilities.
