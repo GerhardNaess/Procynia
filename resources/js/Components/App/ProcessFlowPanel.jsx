@@ -257,11 +257,12 @@ export default function ProcessFlowPanel({
     if (trail.length > 0) {
         return (
             <div className="space-y-6">
-                <SubprocessTrail tb={tb} rootTitle={item.title} trail={trail} onNavigate={navigateTrail} />
                 <SubprocessFlow
                     tb={tb}
-                    current={trail[trail.length - 1]}
+                    rootTitle={item.title}
+                    trail={trail}
                     blueprint={subprocessView?.blueprint ?? null}
+                    onNavigate={navigateTrail}
                     onOpenSubprocess={openSubprocess}
                 />
             </div>
@@ -453,41 +454,51 @@ export default function ProcessFlowPanel({
 }
 
 /**
- * Hovedprosess > Underprosess > …
+ * ← Hovedprosess / Underprosess
  *
- * Every crumb but the last is a way back, and the last is where you are — the ordinary contract of
- * a breadcrumb, which is why it is one rather than a "tilbake" button. A reader three levels down
- * needs to reach the top in one click, not three.
+ * The one navigation for a drilled-in reader, sitting directly above the diagram it belongs to.
+ * The step back is the visible part: the parent is a link carrying the arrow, because "where do I
+ * get out of here" is the question a reader three clicks into somebody else's process actually
+ * asks. Where the reader is, is the last crumb, as plain emphasised text.
  *
- * The first crumb is the process whose page this is, so the trail always says where it started even
- * at depth one.
+ * Deeper than one level, the crumbs above the parent are links too — reaching the top is still one
+ * click, not three — and the arrow stays on the parent, where it marks the single step back rather
+ * than claiming to be the whole way out.
+ *
+ * It is still a breadcrumb, not a "tilbake" button: navigation goes through the same history-pushing
+ * trail navigation as a drill-down, so browser back keeps working.
  */
 function SubprocessTrail({ tb, rootTitle, trail, onNavigate }) {
-    const crumbs = [{ id: null, title: rootTitle }, ...trail];
+    const ancestors = [{ id: null, title: rootTitle }, ...trail.slice(0, -1)];
+    const current = trail[trail.length - 1];
 
     return (
-        <nav className="flex flex-wrap items-center gap-1 text-base" aria-label={tb.trail_label ?? 'Hvor du er i prosessen'}>
-            {crumbs.map((crumb, index) => {
-                const last = index === crumbs.length - 1;
+        <nav
+            className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-base"
+            aria-label={tb.trail_label ?? 'Hvor du er i prosessen'}
+        >
+            {ancestors.map((crumb, index) => {
+                const parent = index === ancestors.length - 1;
 
                 return (
-                    <span key={crumb.id ?? 'root'} className="flex items-center gap-1">
-                        {index > 0 && <span aria-hidden="true" className="text-slate-400">›</span>}
+                    <span key={crumb.id ?? 'root'} className="flex items-center gap-1.5">
+                        {index > 0 && <span aria-hidden="true" className="text-slate-400">/</span>}
 
-                        {last ? (
-                            <span className="font-semibold text-slate-950" aria-current="page">{crumb.title}</span>
-                        ) : (
-                            <button
-                                type="button"
-                                className="rounded-lg px-1.5 py-0.5 font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-                                onClick={() => onNavigate(trail.slice(0, index).map((step) => step.id))}
-                            >
-                                {crumb.title}
-                            </button>
-                        )}
+                        <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                            onClick={() => onNavigate(ancestors.slice(1, index + 1).map((step) => step.id))}
+                            aria-label={parent ? (tb.trail_back ?? 'Tilbake til :title').replace(':title', crumb.title) : undefined}
+                        >
+                            {parent && <span aria-hidden="true">←</span>}
+                            {crumb.title}
+                        </button>
                     </span>
                 );
             })}
+
+            <span aria-hidden="true" className="text-slate-400">/</span>
+            <span className="px-1 font-semibold text-slate-950" aria-current="page">{current.title}</span>
         </nav>
     );
 }
@@ -502,11 +513,13 @@ function SubprocessTrail({ tb, rootTitle, trail, onNavigate }) {
  * It can be drilled into further: a subprocess whose own steps are processes behaves exactly the
  * same, because the trail is just one hop longer.
  */
-function SubprocessFlow({ tb, current, blueprint, onOpenSubprocess }) {
+function SubprocessFlow({ tb, rootTitle, trail, blueprint, onNavigate, onOpenSubprocess }) {
+    const current = trail[trail.length - 1];
+
     if (blueprint === null) {
         return (
             <section className={CARD}>
-                <h2 className="text-xl font-semibold text-slate-950">{current.title}</h2>
+                <SubprocessTrail tb={tb} rootTitle={rootTitle} trail={trail} onNavigate={onNavigate} />
                 <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-base text-slate-600">
                     {tb.subprocess_without_flow ?? 'Denne underprosessen har ingen flyt ennå.'}
                 </p>
@@ -518,8 +531,8 @@ function SubprocessFlow({ tb, current, blueprint, onOpenSubprocess }) {
     return (
         <>
             <section className={CARD}>
-                <h2 className="text-xl font-semibold text-slate-950">{current.title}</h2>
-                <p className="mt-1 max-w-2xl text-base leading-6 text-slate-600">
+                <SubprocessTrail tb={tb} rootTitle={rootTitle} trail={trail} onNavigate={onNavigate} />
+                <p className="mt-2 max-w-2xl text-base leading-6 text-slate-600">
                     {tb.subprocess_intro ?? 'Dette er underprosessens egen flyt, slik den er lagret på den prosessen.'}
                 </p>
 
@@ -546,12 +559,19 @@ function SubprocessFlow({ tb, current, blueprint, onOpenSubprocess }) {
     );
 }
 
+/**
+ * Kept, but quiet.
+ *
+ * Navigation is the trail above the diagram now, and this link is not navigation — it is the way to
+ * go edit the subprocess on its own page. Rendered as loudly as before it read as the way out, and
+ * competed with the trail for exactly the reader who was looking for one.
+ */
 function SubprocessOwnPageLink({ tb, current }) {
     return (
         <p className="mt-4 border-t border-slate-100 pt-4">
             <Link
                 href={`/app/quality/items/${current.id}?tab=flow`}
-                className="text-base font-semibold text-slate-700 hover:underline"
+                className="text-sm text-slate-500 transition hover:text-slate-800 hover:underline"
             >
                 {(tb.subprocess_open_page ?? 'Åpne :title som egen prosess').replace(':title', current.title)} →
             </Link>

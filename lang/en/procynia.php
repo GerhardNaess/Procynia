@@ -245,6 +245,7 @@ return [
             'subprocess_intro' => "This is the subprocess's own flow, as it is stored on that process. Change it there and the change shows here the next time you open it.",
             'subprocess_without_flow' => 'This subprocess has no flow yet. Open it as its own process to describe how it is carried out.',
             'trail_label' => 'Where you are in the process',
+            'trail_back' => 'Back to :title',
             'node_types' => [
                 'start' => 'Start',
                 'step' => 'Step',

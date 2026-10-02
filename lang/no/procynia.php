@@ -245,6 +245,7 @@ return [
             'subprocess_intro' => 'Dette er underprosessens egen flyt, slik den er lagret på den prosessen. Endres den der, vises endringen her neste gang du åpner den.',
             'subprocess_without_flow' => 'Denne underprosessen har ingen flyt ennå. Åpne den som egen prosess for å beskrive hvordan den gjennomføres.',
             'trail_label' => 'Hvor du er i prosessen',
+            'trail_back' => 'Tilbake til :title',
             'node_types' => [
                 'start' => 'Start',
                 'step' => 'Steg',

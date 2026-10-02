@@ -52,18 +52,19 @@ test.describe('drilling into a subprocess', () => {
         ).toBeVisible();
         await expect(page).toHaveURL(/subprocess=\d+/);
 
-        // Hovedprosess > Underprosess.
+        // ← Hovedprosess / Underprosess, directly above the diagram.
         const trail = page.getByRole('navigation', { name: 'Hvor du er i prosessen' });
 
         await expect(trail).toBeVisible();
-        await expect(trail.getByRole('button', { name: PARENT })).toBeVisible();
+        await expect(trail.getByRole('button', { name: `Tilbake til ${PARENT}` })).toBeVisible();
+        await expect(trail.getByText(CHILD, { exact: true })).toBeVisible();
 
         // Nothing that edits the parent is on screen while a child is.
         await expect(page.getByRole('button', { name: 'Lagre struktur' })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Godkjenn struktur' })).toHaveCount(0);
 
         // And back, in one click, to the process we came from.
-        await trail.getByRole('button', { name: PARENT }).click();
+        await trail.getByRole('button', { name: `Tilbake til ${PARENT}` }).click();
 
         await expect(page.getByRole('img', { name: `Prosessflyt — ${PARENT}` })).toBeVisible();
         await expect(page.getByRole('navigation', { name: 'Hvor du er i prosessen' })).toHaveCount(0);
