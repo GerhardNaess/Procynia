@@ -26,6 +26,9 @@ class CustomerModuleEntitlementTest extends TestCase
 {
     use UsesProjectPostgresConnection;
 
+    /** This file is about which packages a customer holds, so it starts from none. */
+    protected bool $customersHoldTenderPackage = false;
+
     protected function setUp(): void
     {
         parent::setUp();
