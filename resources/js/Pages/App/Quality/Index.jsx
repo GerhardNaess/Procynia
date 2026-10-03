@@ -3,6 +3,7 @@ import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import FilePickerField from '../../../Components/App/FilePickerField';
+import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import {
     DESTRUCTIVE_COLOURS,
@@ -95,6 +96,8 @@ export default function QualityIndex() {
                 <ItemTable
                     items={items}
                     tq={tq}
+                    canManage={canManage}
+                    activeTab={activeTab}
                     typeLabels={typeLabels}
                     statusLabels={statusLabels}
                 />
@@ -160,7 +163,7 @@ function Tabs({ activeTab, tq }) {
     );
 }
 
-function ItemTable({ items, tq, typeLabels, statusLabels }) {
+function ItemTable({ items, tq, canManage, activeTab, typeLabels, statusLabels }) {
     const table = tq.table ?? {};
 
     if (items.length === 0) {
@@ -185,6 +188,11 @@ function ItemTable({ items, tq, typeLabels, statusLabels }) {
                             <th className="pb-2">{table.status ?? 'Status'}</th>
                             <th className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
                             <th className="pb-2">{table.wiki ?? 'Wiki'}</th>
+                            {canManage && (
+                                <th className="pb-2 text-right">
+                                    <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
+                                </th>
+                            )}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -212,6 +220,16 @@ function ItemTable({ items, tq, typeLabels, statusLabels }) {
                                     {item.next_review_at ?? (tq.no_review ?? 'Ingen revisjonssyklus')}
                                 </td>
                                 <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
+                                {canManage && (
+                                    <td className="py-3 pl-4 text-right">
+                                        <QualityItemActions
+                                            tq={tq}
+                                            item={item}
+                                            variant="row"
+                                            tab={activeTab}
+                                        />
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>

@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
-import ActionDialog from '../../../Components/App/ActionDialog';
+import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import ProcessFlowPanel from '../../../Components/App/ProcessFlowPanel';
 import {
     DESTRUCTIVE_COLOURS,
-    DESTRUCTIVE_CONFIRM,
-    DISCLOSURE_INLINE,
     PRIMARY_ACTION,
     SECONDARY_ACTION,
 } from '../../../Support/actionStyles';
@@ -114,7 +112,7 @@ export default function QualityItem() {
                     </div>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
-                        {canManage && <ItemActionsMenu tq={tq} item={item} isProcess={isProcess} />}
+                        {canManage && <QualityItemActions tq={tq} item={item} />}
                     </div>
                     {item.purpose && (
                         <p className="max-w-3xl whitespace-pre-line text-base leading-6 text-slate-600">
@@ -193,168 +191,6 @@ export default function QualityItem() {
                 )}
             </div>
         </CustomerAppLayout>
-    );
-}
-
-/**
- * The document's own handlingsmeny, in the header rather than at the foot of a panel.
- *
- * Deleting used to sit at the bottom of Styringsinformasjon, which put a process's only destructive
- * action on a tab a process does not open: the Flyt tab replaces that whole panel, so a user looking
- * at the flow they wanted to be rid of had nowhere to act. A header menu belongs to the item, not to
- * one of its tabs, and is reachable from both.
- *
- * The confirmation is a dialog rather than window.confirm because what the delete keeps matters as
- * much as what it removes: the articles the process's activities were the source of stay in Wiki,
- * and a one-line browser prompt has no room to say so. See QualityItemService::deleteItem.
- */
-function ItemActionsMenu({ tq, item, isProcess }) {
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-    const [deleting, setDeleting] = useState(false);
-    const menuRef = useRef(null);
-    const triggerRef = useRef(null);
-    const cancelRef = useRef(null);
-
-    useEffect(() => {
-        if (! isMenuOpen) {
-            return undefined;
-        }
-
-        const handlePointerDown = (event) => {
-            if (! menuRef.current?.contains(event.target)) {
-                setIsMenuOpen(false);
-            }
-        };
-
-        const handleKeyDown = (event) => {
-            if (event.key === 'Escape') {
-                setIsMenuOpen(false);
-                triggerRef.current?.focus();
-            }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('keydown', handleKeyDown);
-
-        return () => {
-            document.removeEventListener('mousedown', handlePointerDown);
-            document.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [isMenuOpen]);
-
-    const deleteLabel = isProcess
-        ? (tq.delete_process ?? 'Slett prosess')
-        : (tq.delete_item ?? 'Slett dokument');
-
-    return (
-        <>
-            <div ref={menuRef} className="relative">
-                <button
-                    ref={triggerRef}
-                    type="button"
-                    className={DISCLOSURE_INLINE}
-                    aria-haspopup="menu"
-                    aria-expanded={isMenuOpen}
-                    onClick={() => setIsMenuOpen((open) => ! open)}
-                >
-                    {tq.actions_menu ?? 'Handlinger'}
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                    </svg>
-                </button>
-
-                {isMenuOpen && (
-                    <div
-                        role="menu"
-                        className="absolute right-0 z-20 mt-2 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg"
-                    >
-                        <button
-                            type="button"
-                            role="menuitem"
-                            className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-rose-700 transition hover:bg-rose-50"
-                            onClick={() => {
-                                setIsMenuOpen(false);
-                                setIsConfirmOpen(true);
-                            }}
-                        >
-                            {deleteLabel}
-                        </button>
-                    </div>
-                )}
-            </div>
-
-            <ActionDialog
-                isOpen={isConfirmOpen}
-                onClose={() => setIsConfirmOpen(false)}
-                closeDisabled={deleting}
-                titleId="quality-item-delete-title"
-                initialFocusRef={cancelRef}
-                returnFocusRef={triggerRef}
-            >
-                <h2 id="quality-item-delete-title" className="text-xl font-semibold tracking-tight text-slate-950">
-                    {isProcess
-                        ? (tq.delete_dialog_title_process ?? 'Slett prosessen?')
-                        : (tq.delete_dialog_title_item ?? 'Slett dokumentet?')}
-                </h2>
-                <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
-
-                <dl className="mt-5 space-y-4">
-                    <div>
-                        <dt className="text-sm font-semibold uppercase tracking-wide text-rose-700">
-                            {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
-                        </dt>
-                        <dd className="mt-1 text-base leading-6 text-slate-700">
-                            {isProcess
-                                ? (tq.delete_dialog_removed_process ?? 'Prosessen, prosessflyten med aktivitetene sine, relasjonene og koblingene til Wiki-sider og filer — og prosessen med aktivitetene sine i kunnskapsgrafen.')
-                                : (tq.delete_dialog_removed_item ?? 'Dokumentet, strukturen, relasjonene og koblingene til Wiki-sider og filer.')}
-                        </dd>
-                    </div>
-                    <div>
-                        <dt className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                            {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
-                        </dt>
-                        <dd className="mt-1 text-base leading-6 text-slate-700">
-                            {tq.delete_dialog_kept_body ?? 'Wiki-sidene, artiklene aktivitetene har vært kilde til, og filene i kildedokumentene. Kunnskap som allerede er produsert forsvinner ikke med prosessen.'}
-                        </dd>
-                    </div>
-                </dl>
-
-                <p className="mt-4 text-base font-semibold text-slate-700">
-                    {tq.delete_dialog_irreversible ?? 'Handlingen kan ikke angres.'}
-                </p>
-
-                <div className="mt-6 flex flex-wrap gap-3">
-                    <button
-                        type="button"
-                        className={DESTRUCTIVE_CONFIRM}
-                        disabled={deleting}
-                        onClick={() => {
-                            setDeleting(true);
-                            // The controller redirects to the Kvalitet index, so there is nothing to
-                            // navigate to here — only a reason to keep the dialog from being used
-                            // twice while the request is in flight.
-                            router.delete(`/app/quality/items/${item.id}`, {
-                                onFinish: () => setDeleting(false),
-                            });
-                        }}
-                    >
-                        {deleting
-                            ? (tq.delete_dialog_deleting ?? 'Sletter …')
-                            : (tq.delete_dialog_confirm ?? 'Slett')}
-                    </button>
-                    <button
-                        ref={cancelRef}
-                        type="button"
-                        className={SECONDARY_ACTION}
-                        disabled={deleting}
-                        onClick={() => setIsConfirmOpen(false)}
-                    >
-                        {tq.delete_dialog_cancel ?? 'Avbryt'}
-                    </button>
-                </div>
-            </ActionDialog>
-        </>
     );
 }
 

@@ -268,7 +268,16 @@ class QualityController extends Controller
         return back()->with('success', __('procynia.quality.flash.item_updated'));
     }
 
-    public function destroyItem(QualityItem $item): RedirectResponse
+    /**
+     * Deleting a styrende dokument.
+     *
+     * The redirect lands on the Kvalitet index, and keeps the tab the request carries. Deleting is
+     * reachable from the list as well as from the document's own page, and a user who removed a
+     * process from Prosesser means to go on looking at Prosesser — bouncing them to Oversikt would
+     * make them find their way back before they could delete the next one. An unknown tab is
+     * dropped rather than refused: the validity rule is the index's own, in self::TABS.
+     */
+    public function destroyItem(Request $request, QualityItem $item): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
@@ -278,8 +287,10 @@ class QualityController extends Controller
 
         $this->items->deleteItem((int) $customerId, $item);
 
+        $tab = in_array($request->query('tab'), self::TABS, true) ? $request->query('tab') : null;
+
         return redirect()
-            ->route('app.quality.index')
+            ->route('app.quality.index', $tab !== null ? ['tab' => $tab] : [])
             ->with('success', __('procynia.quality.flash.item_deleted'));
     }
 

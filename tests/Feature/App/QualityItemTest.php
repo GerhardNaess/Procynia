@@ -586,6 +586,42 @@ class QualityItemTest extends TestCase
         );
     }
 
+    /**
+     * Deleting is reachable from the Prosesser list as well as from the process's own page, so the
+     * redirect keeps the tab the request came from. A user clearing out two processes should not
+     * have to find their way back to Prosesser between them.
+     */
+    public function test_deleting_from_a_tab_comes_back_to_that_tab(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Leverandorkontroll');
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/items/{$process->id}?tab=processes")
+            ->assertRedirect('/app/quality?tab=processes');
+
+        $this->assertNull(QualityItem::query()->find($process->id));
+    }
+
+    /**
+     * A tab the index does not have is dropped rather than refused. The rule lives in one place —
+     * QualityController::TABS — and a hand-edited URL must not be able to put a value the index
+     * would ignore into the address the user lands on.
+     */
+    public function test_an_unknown_tab_falls_back_to_the_quality_index(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Leverandorkontroll');
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/items/{$process->id}?tab=finnes-ikke")
+            ->assertRedirect('/app/quality');
+    }
+
     // ---------------------------------------------------------------------
     // The seam to the document store
     // ---------------------------------------------------------------------
