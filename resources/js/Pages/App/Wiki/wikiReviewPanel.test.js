@@ -105,9 +105,9 @@ describe('final approval says what it does', () => {
     });
 
     test('it is offered only when the backend says it is available', () => {
-        // One flag decides, for a draft and for a page in review alike — the backend works out
-        // which of those the actor may publish.
-        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(/);
+        // Publishing ends a review: the backend flag, and only for a page that is in review.
+        assert.match(panel, /const canApproveFinal = isInReview && reviewAssignment\.can_approve_final === true;/);
+        assert.match(panel, /\{canApproveFinal && \(/);
     });
 
     test('a System Owner stepping into somebody else\'s assignment is labelled as such', () => {
@@ -269,7 +269,7 @@ describe('the reviewer can act on the page', () => {
     });
 
     test('publishing and returning render on their own conditions', () => {
-        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(\s*\n\s*<button/);
+        assert.match(panel, /\{canApproveFinal && \(\s*\n\s*<button/);
         assert.match(panel, /\{canSendBack && \(\s*\n\s*<button/);
         // The old single branch that hid both together must be gone.
         assert.ok(!panel.includes('{isInReview && reviewAssignment.can_approve_final && (\n                    <>'));
@@ -333,20 +333,22 @@ describe('stepping in reads differently from being asked', () => {
     });
 });
 
-/** A System Owner's draft offers both routes; review is the voluntary one. */
-describe('a draft can be published directly', () => {
-    test('publishing is no longer gated on the page being in review', () => {
-        assert.match(panel, /\{reviewAssignment\.can_approve_final && \(\s*\n\s*<button/);
-        assert.match(panel, /const canPublishDraft = page\.status === 'draft' && reviewAssignment\.can_approve_final === true;/);
+/** One rule: a page is published by somebody other than the person who sent it in. */
+describe('a draft is never published directly', () => {
+    test('there is no draft-publish route in the panel', () => {
+        assert.ok(!panel.includes('canPublishDraft'));
+        assert.ok(!panel.includes('{reviewAssignment.can_approve_final && ('));
     });
 
-    test('the panel renders for a draft that can be published', () => {
-        assert.match(panel, /showsAnything = canSubmit \|\| canReopen \|\| isInReview \|\| isReturned \|\| canPublishDraft/);
-    });
-
-    test('sending it for review remains on offer beside it', () => {
+    test('sending it for review is the way forward', () => {
         assert.match(panel, /\{canSubmit && \(/);
         assert.match(panel, /tw\.submit_button \?\? 'Send til gjennomgang'/);
+    });
+
+    test('the missing-reviewer text names the permission, not a role', () => {
+        assert.ok(!panel.includes('rollen «Wiki-godkjenner»'));
+        assert.match(panel, /\.replace\(':permission', approvePermissionLabel\)/);
+        assert.match(panel, /reviewAssignment\.approve_permission_label/);
     });
 });
 

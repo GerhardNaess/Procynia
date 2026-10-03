@@ -472,20 +472,13 @@ class User extends Authenticatable implements FilamentUser
     /**
      * May this user make the final decision to publish this version?
      *
-     * Two different authorities, deliberately not one:
-     *
-     * A WIKI APPROVER decides the page they were handed. Being able to approve Wiki pages is not
-     * the same as being asked to approve this one, and the four-eyes rule holds for them — you do
-     * not publish what you yourself sent for review.
-     *
-     * A SYSTEM OWNER is the customer's final authority over their own Wiki. They do not have to be
-     * chosen as reviewer to finish a page, and they are not stopped by having submitted it. That is
-     * a deliberate trade: a System Owner can take a page from draft to published alone, which is
-     * what "final authority" means, and the audit trail says who did it.
+     * Only the person the version was handed to, and never the person who handed it over. Being
+     * able to approve Wiki pages is not the same as being asked to approve this one, and the
+     * four-eyes rule holds for everyone — System Owner included: you do not publish what you
+     * yourself sent for review, and nothing is published without having been sent.
      *
      * Not a licence over another customer's Wiki, and not a way to decide an unassigned version:
-     * reaching pending_review means somebody handed the version over through submit(), and a
-     * missing reviewer is broken state rather than an opening.
+     * a draft goes through submit(), which names a reviewer other than the submitter.
      *
      * Sending a page BACK is a separate question — see canReviewEnterpriseWikiVersion().
      */
@@ -499,26 +492,20 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        // A version that has been handed over belongs to the person it was handed to. Sending a
-        // page for review is a choice to have somebody else look at it, and a System Owner who
-        // makes that choice has chosen it for this version — stepping back in to approve would
-        // make the reviewer's turn decorative, and the handover a formality anyone could skip.
+        // A version that has been handed over belongs to the person it was handed to. Not a dead
+        // end for a review that stalls: sending the page back is a separate authority
+        // (canReviewEnterpriseWikiVersion), and the page can then be handed to somebody else.
         //
-        // Not a dead end for a review that stalls: sending the page back is a separate authority
-        // (canReviewEnterpriseWikiVersion), and once it returns to draft the direct route is open
-        // again.
-        if ($version->reviewer_user_id !== null) {
-            return (int) $version->reviewer_user_id === (int) $this->id
-                // submit() already refuses a reviewer who is the submitter; this holds the same
-                // line against data that predates it.
-                && (int) $version->submitted_by_user_id !== (int) $this->id;
+        // No handover, no decision. A draft nobody was asked to look at is published by sending it
+        // to somebody, not by its author signing it off.
+        if ($version->reviewer_user_id === null) {
+            return false;
         }
 
-        // Nothing was handed to anybody. A System Owner is the customer's final authority over
-        // their own Wiki and may publish such a draft outright; everybody else has to be asked,
-        // because being able to approve Wiki pages is not the same as having been asked to approve
-        // this one.
-        return $this->isSystemOwner();
+        return (int) $version->reviewer_user_id === (int) $this->id
+            // submit() already refuses a reviewer who is the submitter; this holds the same
+            // line against data that predates it.
+            && (int) $version->submitted_by_user_id !== (int) $this->id;
     }
 
     /**

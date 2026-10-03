@@ -303,9 +303,12 @@ export default function WikiReviewPanel({
     // back waits for neither, and is the way out of both. Gating them on one flag hid the only
     // action a blocked reviewer still had.
     const canSendBack = isInReview && reviewAssignment.can_send_back === true;
-    // A System Owner can publish a draft without sending it anywhere first. Review stays on offer
-    // beside it as the voluntary thing it is, rather than as the only way forward.
-    const canPublishDraft = page.status === 'draft' && reviewAssignment.can_approve_final === true;
+    // Publishing ends a review; there is no direct route from draft. The backend refuses it for the
+    // submitter and for a page nobody was asked to look at, and the button never suggests otherwise.
+    const canApproveFinal = isInReview && reviewAssignment.can_approve_final === true;
+    // The permission, not a role name: roles are the customer's own, so the label a role happens to
+    // carry says nothing about whether it can approve.
+    const approvePermissionLabel = reviewAssignment.approve_permission_label ?? 'Godkjenne Wiki-sider';
     // Being able to decide a page is not the same as having been asked to. A System Owner can
     // finish any page in their customer's Wiki, and telling them it is waiting on them would be
     // false — somebody else was named, and is presumably working on it.
@@ -320,7 +323,7 @@ export default function WikiReviewPanel({
     // stands, and a writing action in among the review decisions read as one of them.
     // A published page with nothing outstanding used to render nothing at all, which left the most
     // important fact about it — that it is published — the one thing the page never said.
-    const showsAnything = canSubmit || canReopen || isInReview || isReturned || canPublishDraft
+    const showsAnything = canSubmit || canReopen || isInReview || isReturned
         || publication !== null;
 
     if (! showsAnything) {
@@ -543,7 +546,7 @@ export default function WikiReviewPanel({
                             ? `${tw.review_with_reviewer ?? 'Siden er til gjennomgang hos'} ${reviewAssignment.reviewer.name}.`
                             : (tw.review_in_review ?? 'Siden er til gjennomgang.')}
                     </p>
-                    {reviewAssignment.can_approve_final && (
+                    {canApproveFinal && (
                         <p className="mt-1 text-base leading-6 text-slate-600">
                             {tw.review_system_owner_may_finish
                                 ?? 'Som System Owner kan du ferdigstille siden uten å være tildelt kontrollør.'}
@@ -590,9 +593,11 @@ export default function WikiReviewPanel({
                     <p className="text-base leading-6 text-slate-600">
                         {reviewAssignment.actor_can_approve_wiki_pages
                             ? (tw.review_only_approver_is_you
-                                ?? 'Du er den eneste som kan godkjenne Wiki-sider. En side må kontrolleres av en annen enn den som sender den inn, så gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.')
+                                ?? 'Du er den eneste som kan godkjenne Wiki-sider. En side må gjennomgås av en annen enn den som sender den inn, så gi minst én annen bruker en rolle med rettigheten «:permission» under Tilganger.')
+                                .replace(':permission', approvePermissionLabel)
                             : (tw.review_no_eligible_reviewers
-                                ?? 'Ingen andre brukere kan godkjenne Wiki-siden. Gi minst én annen bruker rollen «Wiki-godkjenner» under Tilganger.')}
+                                ?? 'Ingen andre brukere kan godkjenne Wiki-siden. Gi minst én annen bruker en rolle med rettigheten «:permission» under Tilganger.')
+                                .replace(':permission', approvePermissionLabel)}
                     </p>
                 )}
 
@@ -607,7 +612,7 @@ export default function WikiReviewPanel({
                     </button>
                 )}
 
-                {reviewAssignment.can_approve_final && (
+                {canApproveFinal && (
                     <button
                         type="button"
                         disabled={busy}

@@ -1684,6 +1684,9 @@ class WikiController extends Controller
                 // access screen to fix something that is not broken.
                 'actor_can_approve_wiki_pages' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_APPROVE)
                     && $user->canApproveWikiPages(),
+                // What to grant when nobody else can approve. Roles are named by the customer, so the
+                // page names the permission a role needs rather than any one role.
+                'approve_permission_label' => CustomerPermissionCatalog::label(CustomerPermissionCatalog::WIKI_APPROVE),
                 'published_version_id' => $page->published_version_id !== null ? (int) $page->published_version_id : null,
                 // The number, not just the id: the page says "Publisert versjon v3", and looking it
                 // up in the client would mean shipping every version just to render one label.
@@ -1729,10 +1732,6 @@ class WikiController extends Controller
                     'is_assigned_reviewer' => $currentVersion !== null
                         && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
                         && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
-                    // So the next step names the shorter route when there is one.
-                    'can_publish_draft' => $page->status === EnterpriseWikiPage::STATUS_DRAFT
-                        && $currentVersion !== null
-                        && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
                 ],
                 [
                     'total' => $claimCollection->count(),
@@ -3021,21 +3020,13 @@ class WikiController extends Controller
      */
     private function finalApprovalBlocker(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, User $user): ?string
     {
-        // A System Owner may publish a draft outright. Review is a way of getting a second pair of
-        // eyes, not a toll every page has to pay: sending a page to yourself, or to somebody whose
-        // approval you can overrule anyway, is paperwork rather than control. Everyone else still
-        // has to be handed the page.
-        $directPublish = $page->status === EnterpriseWikiPage::STATUS_DRAFT && $user->isSystemOwner();
-
+        // Publishing is the end of a review, for everyone. A draft has to be sent to somebody else
+        // first — the four-eyes rule leaves no direct route, System Owner included.
         return match (true) {
-            ! $directPublish
-                && $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
-            // A draft has no handover to be stale against; the check is about a version that moved
-            // after somebody was asked to look at it.
-            ! $directPublish
-                && ($version->reviewer_user_id === null
-                    || $version->submitted_by_user_id === null
-                    || $version->submitted_at === null) => 'missing_assignment',
+            $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
+            $version->reviewer_user_id === null
+                || $version->submitted_by_user_id === null
+                || $version->submitted_at === null => 'missing_assignment',
             // Same blocker for both halves of the answer: the customer never gave this person
             // approval work, or the Wiki's own capability matrix does not. Either way the page
             // says the capability is missing rather than silently offering nothing.
