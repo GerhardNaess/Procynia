@@ -36,3 +36,89 @@ export function withStepEdited(nodes, key, { label, lane }) {
 export function stepEditIsValid({ label, lane }, lanes) {
     return String(label ?? '').trim() !== '' && lanes.some((candidate) => candidate.key === lane);
 }
+
+/**
+ * Whether a new activity may be put on this arrow from the diagram.
+ *
+ * Both ends must exist, and the arrow must not leave a decision: that is a branch, and a branch is
+ * the decision's own statement — "ja" goes there — which a click between two boxes should not
+ * reword. Branches stay with "Rediger struktur manuelt".
+ */
+export function canInsertStepOn(edge, nodes) {
+    const from = nodes.find((node) => node.key === edge.from);
+    const to = nodes.find((node) => node.key === edge.to);
+
+    return from !== undefined && to !== undefined && (from.type ?? 'step') !== 'decision';
+}
+
+/**
+ * A key no node in the flow has. Slug-shaped, so the server keeps it rather than renaming it.
+ */
+export function freshStepKey(nodes, base = 'step') {
+    const taken = new Set(nodes.map((node) => node.key));
+    let index = nodes.length + 1;
+
+    while (taken.has(`${base}-${index}`)) {
+        index += 1;
+    }
+
+    return `${base}-${index}`;
+}
+
+/**
+ * The flow with one activity put on one arrow: from → new → to instead of from → to.
+ *
+ * The arrow is replaced where it stood rather than removed and appended, and the node goes in right
+ * after the step it follows, so the payload still reads in the order the flow runs and a diff of the
+ * save shows exactly one step added. A label on the old arrow stays on the leg out of the step it
+ * described. Any other arrow between the same two steps is left alone: only the one clicked moves.
+ */
+export function withStepInserted({ nodes, edges }, edge, { key, label, lane }) {
+    const step = { key, lane, type: 'step', label: String(label ?? '').trim(), description: null };
+    const fromIndex = nodes.findIndex((node) => node.key === edge.from);
+    const at = fromIndex === -1 ? nodes.length : fromIndex + 1;
+    const edgeIndex = edges.findIndex((candidate) => candidate.from === edge.from
+        && candidate.to === edge.to
+        && (candidate.label ?? null) === (edge.label ?? null));
+
+    const legs = [
+        { from: edge.from, to: key, label: edge.label ?? null },
+        { from: key, to: edge.to, label: null },
+    ];
+
+    return {
+        nodes: [...nodes.slice(0, at), step, ...nodes.slice(at)],
+        edges: edgeIndex === -1
+            ? [...edges, ...legs]
+            : [...edges.slice(0, edgeIndex), ...legs, ...edges.slice(edgeIndex + 1)],
+    };
+}
+
+/**
+ * Where the "+" for an arrow is drawn: halfway along the line as routed, so it sits on the arrow
+ * whether it runs straight, changes lane or loops back underneath. A labelled arrow has its label
+ * at the middle, so its "+" moves on towards the arrowhead instead of covering the word.
+ */
+export function insertAnchor(points, labelled = false) {
+    if (! Array.isArray(points) || points.length < 2) {
+        return null;
+    }
+
+    const lengths = points.slice(1).map((point, index) => Math.hypot(point.x - points[index].x, point.y - points[index].y));
+    let remaining = lengths.reduce((sum, length) => sum + length, 0) * (labelled ? 0.75 : 0.5);
+
+    for (let index = 0; index < lengths.length; index += 1) {
+        if (remaining <= lengths[index] && lengths[index] > 0) {
+            const ratio = remaining / lengths[index];
+
+            return {
+                x: points[index].x + ((points[index + 1].x - points[index].x) * ratio),
+                y: points[index].y + ((points[index + 1].y - points[index].y) * ratio),
+            };
+        }
+
+        remaining -= lengths[index];
+    }
+
+    return { ...points[points.length - 1] };
+}

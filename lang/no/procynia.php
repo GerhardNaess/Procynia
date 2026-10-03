@@ -347,6 +347,10 @@ return [
             'step_edit_cancel' => 'Avbryt',
             'step_edit_articles' => 'Kunnskap fra steget',
             'step_edit_failed' => 'Steget kunne ikke lagres.',
+            'step_insert_open' => 'Legg til en aktivitet mellom «:from» og «:to»',
+            'step_insert_heading' => 'Legg til aktivitet',
+            'step_insert_between' => 'Mellom «:from» og «:to».',
+            'step_insert_save' => 'Legg til aktiviteten',
             'node_types' => [
                 'start' => 'Start',
                 'step' => 'Steg',

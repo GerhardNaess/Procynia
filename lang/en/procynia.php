@@ -345,6 +345,10 @@ return [
             'step_edit_cancel' => 'Cancel',
             'step_edit_articles' => 'Knowledge from this step',
             'step_edit_failed' => 'The step could not be saved.',
+            'step_insert_open' => 'Add an activity between “:from” and “:to”',
+            'step_insert_heading' => 'Add activity',
+            'step_insert_between' => 'Between “:from” and “:to”.',
+            'step_insert_save' => 'Add the activity',
             'node_types' => [
                 'start' => 'Start',
                 'step' => 'Step',

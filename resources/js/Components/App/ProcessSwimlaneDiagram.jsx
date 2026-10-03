@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { METRICS, edgePath, layoutBlueprint, nodeShape } from '../../Support/processBlueprintLayout';
-import { isEditableStep } from '../../Support/processStepEdit';
+import { canInsertStepOn, insertAnchor, isEditableStep } from '../../Support/processStepEdit';
 import {
     ZOOM_LIMITS,
     anchoredScroll,
@@ -56,6 +56,8 @@ export default function ProcessSwimlaneDiagram({
     // Given only where the reader may change the flow. Editing is still editing the blueprint: the
     // handler is told which node was clicked, and the picture follows from what it saves.
     onEditStep = null,
+    // Same terms as onEditStep: told which arrow was clicked, the picture follows from what it saves.
+    onInsertStep = null,
 }) {
     const layout = layoutBlueprint(blueprint);
 
@@ -75,6 +77,7 @@ export default function ProcessSwimlaneDiagram({
             onOpenSubprocess={onOpenSubprocess}
             onOpenActivity={onOpenActivity}
             onEditStep={onEditStep}
+            onInsertStep={onInsertStep}
         />
     );
 }
@@ -85,7 +88,7 @@ export default function ProcessSwimlaneDiagram({
  * Split out from the exported component so the hooks below are never conditional on an empty
  * blueprint — an empty flow renders a sentence, not a zoomable surface.
  */
-function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, onEditStep }) {
+function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, onEditStep, onInsertStep }) {
     const surfaceRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [scale, setScale] = useState(null);
@@ -283,6 +286,19 @@ function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, 
                                 onEditStep={onEditStep}
                             />
                         ))}
+
+                        {/* Last, so a "+" is never under a box it happens to sit beside. */}
+                        {typeof onInsertStep === 'function' && layout.edges
+                            .filter((edge) => canInsertStepOn(edge, layout.nodes))
+                            .map((edge) => (
+                                <InsertHandle
+                                    key={`insert:${edge.from}->${edge.to}#${edge.label ?? ''}`}
+                                    edge={edge}
+                                    nodes={layout.nodes}
+                                    tb={tb}
+                                    onInsert={onInsertStep}
+                                />
+                            ))}
                     </svg>
                 </div>
             </div>
@@ -453,6 +469,63 @@ function Edge({ edge }) {
                     </text>
                 </g>
             )}
+        </g>
+    );
+}
+
+/**
+ * The "+" on an arrow: put a new activity between the two steps it joins.
+ *
+ * Small and quiet, because a diagram covered in buttons is no longer a diagram — but always there
+ * rather than on hover, so it can be reached by keyboard and touch. Not on an arrow out of a
+ * decision (see canInsertStepOn).
+ */
+function InsertHandle({ edge, nodes, tb, onInsert }) {
+    const anchor = insertAnchor(edge.points, Boolean(edge.label));
+
+    if (anchor === null) {
+        return null;
+    }
+
+    const labelOf = (key) => nodes.find((node) => node.key === key)?.label ?? '';
+    const name = (tb.step_insert_open ?? 'Legg til en aktivitet mellom «:from» og «:to»')
+        .replace(':from', labelOf(edge.from))
+        .replace(':to', labelOf(edge.to));
+    const activate = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onInsert({ from: edge.from, to: edge.to, label: edge.label ?? null });
+    };
+
+    return (
+        <g
+            role="button"
+            tabIndex={0}
+            aria-label={name}
+            className="group cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
+            onClick={activate}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    activate(event);
+                }
+            }}
+        >
+            <title>{name}</title>
+            <circle
+                cx={anchor.x}
+                cy={anchor.y}
+                r="9"
+                fill="#ffffff"
+                stroke="#94a3b8"
+                strokeWidth="1.5"
+                className="transition group-hover:fill-slate-100 group-hover:stroke-slate-600"
+            />
+            <path
+                d={`M ${anchor.x - 4} ${anchor.y} H ${anchor.x + 4} M ${anchor.x} ${anchor.y - 4} V ${anchor.y + 4}`}
+                stroke="#475569"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+            />
         </g>
     );
 }

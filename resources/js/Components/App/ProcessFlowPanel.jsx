@@ -5,7 +5,14 @@ import ProcessFlowStepList from './ProcessFlowStepList';
 import ActionDialog from './ActionDialog';
 import StatusBadge from './StatusBadge';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
-import { isEditableStep, stepEditIsValid, withStepEdited } from '../../Support/processStepEdit';
+import {
+    canInsertStepOn,
+    freshStepKey,
+    isEditableStep,
+    stepEditIsValid,
+    withStepEdited,
+    withStepInserted,
+} from '../../Support/processStepEdit';
 import {
     DESTRUCTIVE_ACTION,
     DESTRUCTIVE_COLOURS,
@@ -119,6 +126,8 @@ export default function ProcessFlowPanel({
     const [activityKey, setActivityKey] = useState(null);
     // Which step is open for editing from the diagram — by key, for the same reason as activityKey.
     const [editingStepKey, setEditingStepKey] = useState(null);
+    // Which arrow a new activity is being put on from the diagram: { from, to, label }.
+    const [insertingOn, setInsertingOn] = useState(null);
 
     // The description the user typed. Seeded from whichever of the three sources knows it: the
     // proposal being reviewed, the attempt that failed, or the flow that was adopted from it.
@@ -158,6 +167,7 @@ export default function ProcessFlowPanel({
         setEditingStructure(false);
         setActivityKey(null);
         setEditingStepKey(null);
+        setInsertingOn(null);
         // Cleared rather than carried, so the new reading has the last word. A suggestion answered
         // well is gone because the revised description defines the term and the model stops asking;
         // one the answer did not actually cover comes back, which is the truth about it.
@@ -217,6 +227,24 @@ export default function ProcessFlowPanel({
             lanes,
             nodes: withStepEdited(nodes, key, change),
             edges,
+        }, {
+            preserveScroll: true,
+            onError,
+            onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Put a new activity on one arrow from the diagram's "+": from → new → to.
+     *
+     * Same terms as saveStep — the working version as the editor holds it, with that one change, by
+     * the same PUT — so the new step is in the diagram only once the server has stored it.
+     */
+    function saveInsertion(edge, step, { onError }) {
+        setSaving(true);
+        router.put(`/app/quality/items/${item.id}/blueprint`, {
+            lanes,
+            ...withStepInserted({ nodes, edges }, edge, step),
         }, {
             preserveScroll: true,
             onError,
@@ -476,6 +504,7 @@ export default function ProcessFlowPanel({
                                 // Not while a proposal is on screen: saving there would write the
                                 // proposal over the working version without it being adopted.
                                 onEditStep={canEdit && ! reviewing ? (node) => setEditingStepKey(node.key) : null}
+                                onInsertStep={canEdit && ! reviewing ? setInsertingOn : null}
                             />
                         </div>
                     </section>
@@ -639,12 +668,33 @@ export default function ProcessFlowPanel({
                 lanes={lanes}
                 hasUnsavedChanges={isDirty}
                 busy={saving}
-                onSave={saveStep}
+                onSave={(change, options) => saveStep(editingStepKey, change, options)}
                 onOpenActivity={(key) => {
                     setEditingStepKey(null);
                     setActivityKey(key);
                 }}
                 onClose={() => setEditingStepKey(null)}
+            />
+
+            <StepEditDialog
+                tb={tb}
+                inserting
+                // Only while the arrow is still in the flow: the editor may have moved it since.
+                step={insertingOn !== null && edges.some((edge) => edge.from === insertingOn.from && edge.to === insertingOn.to && canInsertStepOn(edge, nodes))
+                    ? {
+                        key: freshStepKey(nodes),
+                        type: 'step',
+                        label: '',
+                        // The role of the step it follows: the likeliest answer, and one click to change.
+                        lane: nodes.find((node) => node.key === insertingOn.from)?.lane ?? lanes[0]?.key ?? '',
+                        between: [insertingOn.from, insertingOn.to].map((key) => nodes.find((node) => node.key === key)?.label ?? ''),
+                    }
+                    : null}
+                lanes={lanes}
+                hasUnsavedChanges={isDirty}
+                busy={saving}
+                onSave={(change, options) => saveInsertion(insertingOn, { key: freshStepKey(nodes), ...change }, options)}
+                onClose={() => setInsertingOn(null)}
             />
 
             {/* Deleting the flow is not deleting the process, and the dialog's job is to make that
@@ -742,8 +792,8 @@ function activityByKey(blueprint, key) {
  * once per opening and owned by the dialog until it saves or closes, so a re-render of the panel
  * does not throw away what the user is typing.
  */
-function StepEditDialog({ tb, step, lanes, hasUnsavedChanges, busy, onSave, onOpenActivity, onClose }) {
-    const titleId = 'process-step-edit-title';
+function StepEditDialog({ tb, step, inserting = false, lanes, hasUnsavedChanges, busy, onSave, onOpenActivity = null, onClose }) {
+    const titleId = inserting ? 'process-step-insert-title' : 'process-step-edit-title';
     const [label, setLabel] = useState('');
     const [lane, setLane] = useState('');
     const [error, setError] = useState(null);
@@ -752,7 +802,7 @@ function StepEditDialog({ tb, step, lanes, hasUnsavedChanges, busy, onSave, onOp
         setLabel(step?.label ?? '');
         setLane(step?.lane ?? lanes[0]?.key ?? '');
         setError(null);
-    }, [step?.key]);
+    }, [step?.key, step?.between?.join('\u0000')]);
 
     const change = { label, lane };
     const valid = stepEditIsValid(change, lanes);
@@ -766,7 +816,7 @@ function StepEditDialog({ tb, step, lanes, hasUnsavedChanges, busy, onSave, onOp
 
         setError(null);
         // Closed by the panel when the saved flow comes back; kept open with the reason when not.
-        onSave(step.key, change, {
+        onSave(change, {
             onError: (errors) => setError(Object.values(errors)[0] ?? tb.step_edit_failed ?? 'Steget kunne ikke lagres.'),
         });
     }
@@ -776,10 +826,20 @@ function StepEditDialog({ tb, step, lanes, hasUnsavedChanges, busy, onSave, onOp
             {step !== null && (
                 <form onSubmit={submit}>
                     <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
-                        {step.type === 'decision'
+                        {inserting
+                            ? (tb.step_insert_heading ?? 'Legg til aktivitet')
+                            : step.type === 'decision'
                             ? (tb.step_edit_heading_decision ?? 'Rediger beslutning')
                             : (tb.step_edit_heading ?? 'Rediger steg')}
                     </h2>
+
+                    {inserting && (
+                        <p className="mt-2 text-sm leading-5 text-slate-600">
+                            {(tb.step_insert_between ?? 'Mellom «:from» og «:to».')
+                                .replace(':from', step.between?.[0] ?? '')
+                                .replace(':to', step.between?.[1] ?? '')}
+                        </p>
+                    )}
 
                     <label className="mt-5 block space-y-1">
                         <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_label ?? 'Aktivitet'}</span>
@@ -827,20 +887,25 @@ function StepEditDialog({ tb, step, lanes, hasUnsavedChanges, busy, onSave, onOp
 
                     <div className="mt-6 flex flex-wrap items-center gap-3">
                         <button type="submit" className={PRIMARY_ACTION} disabled={! valid || busy}>
-                            {busy ? (tb.step_edit_saving ?? 'Lagrer …') : (tb.step_edit_save ?? 'Lagre steget')}
+                            {busy
+                                ? (tb.step_edit_saving ?? 'Lagrer …')
+                                : inserting
+                                ? (tb.step_insert_save ?? 'Legg til aktiviteten')
+                                : (tb.step_edit_save ?? 'Lagre steget')}
                         </button>
                         <button type="button" className={SECONDARY_ACTION} onClick={onClose} disabled={busy}>
                             {tb.step_edit_cancel ?? 'Avbryt'}
                         </button>
-                        {/* The box used to open the activity's knowledge; it still can, one step on. */}
-                        <button
+                        {/* The box used to open the activity's knowledge; it still can, one step on. A
+                            step not yet added has none. */}
+                        {! inserting && typeof onOpenActivity === 'function' && <button
                             type="button"
                             className="ml-auto text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
                             onClick={() => onOpenActivity(step.key)}
                             disabled={busy}
                         >
                             {tb.step_edit_articles ?? 'Kunnskap fra steget'} →
-                        </button>
+                        </button>}
                     </div>
                 </form>
             )}
