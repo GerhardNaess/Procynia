@@ -209,6 +209,11 @@ Route::prefix('app')
             Route::post('/items/{item}/blueprint/adopt', [QualityController::class, 'adoptFlowProposal'])
                 ->name('items.blueprint.adopt');
 
+            // Asking for a change to the flow that exists. Writes nothing, like interpret: what comes
+            // back is a list of proposed changes the user reads before anything is accepted.
+            Route::post('/items/{item}/blueprint/changes/propose', [QualityController::class, 'proposeFlowChange'])
+                ->name('items.blueprint.changes.propose');
+
             // Turning down one of the suggestions beside a proposal. A third decision, and the only
             // one that is remembered: it writes no flow, and it exists so the same note is not put
             // in front of the user every time they regenerate.

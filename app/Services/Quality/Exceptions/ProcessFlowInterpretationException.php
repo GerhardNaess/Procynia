@@ -37,6 +37,21 @@ class ProcessFlowInterpretationException extends RuntimeException
     }
 
     /**
+     * The same two failures for a requested change to an existing flow. Told in terms of the
+     * change rather than the description, because the description is not what the user just wrote.
+     */
+    public static function changeUnavailable(?Throwable $previous = null): self
+    {
+        return new self(__('procynia.quality.errors.flow_change_unavailable'), [], $previous);
+    }
+
+    /** @param list<string> $problems */
+    public static function changeUnusable(array $problems): self
+    {
+        return new self(__('procynia.quality.errors.flow_change_not_coherent'), $problems);
+    }
+
+    /**
      * The third way, and the only one that is about an answer rather than a description.
      *
      * The rewrite came back, and it was not something to put in front of the user — it still
