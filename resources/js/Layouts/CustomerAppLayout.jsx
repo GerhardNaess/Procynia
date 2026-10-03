@@ -388,7 +388,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'quality-overview', label: tq.tab_overview ?? 'Oversikt', href: buildHref('/app/quality', { tab: 'overview' }) },
                 { key: 'quality-processes', label: tq.tab_processes ?? 'Prosesser', href: buildHref('/app/quality', { tab: 'processes' }) },
                 { key: 'quality-controls', label: tq.tab_controls ?? 'Kontroller', href: buildHref('/app/quality', { tab: 'controls' }) },
-                { key: 'quality-checklists', label: tq.tab_checklists ?? 'Sjekklister', href: buildHref('/app/quality', { tab: 'checklists' }) },
+                { key: 'quality-tools', label: tq.tab_tools ?? 'Verktøy', href: buildHref('/app/quality', { tab: 'tools' }) },
             ];
         }
 

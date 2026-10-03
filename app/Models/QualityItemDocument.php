@@ -37,8 +37,28 @@ class QualityItemDocument extends Model
     /** Anything else that belongs with the document without being any of the above. */
     public const RELATION_TYPE_ATTACHMENT = 'attachment';
 
+    /**
+     * A verktøy from the Kvalitet library that a control is carried out with. Only ever written by
+     * linking a QualityTool, never chosen in the general document form — see linkTool().
+     */
+    public const RELATION_TYPE_TOOL = 'tool';
+
     /** @var list<string> */
     public const RELATION_TYPES = [
+        self::RELATION_TYPE_SOURCE,
+        self::RELATION_TYPE_TEMPLATE,
+        self::RELATION_TYPE_EVIDENCE,
+        self::RELATION_TYPE_ATTACHMENT,
+        self::RELATION_TYPE_TOOL,
+    ];
+
+    /**
+     * The capacities the general Dokumenter form offers. Evidence and tools have their own sections
+     * on a control, with their own forms, so they are written there and nowhere else.
+     *
+     * @var list<string>
+     */
+    public const GENERAL_RELATION_TYPES = [
         self::RELATION_TYPE_SOURCE,
         self::RELATION_TYPE_TEMPLATE,
         self::RELATION_TYPE_EVIDENCE,

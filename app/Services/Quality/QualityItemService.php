@@ -534,7 +534,7 @@ class QualityItemService
             ]);
         }
 
-        if (! in_array($relationType, QualityItemDocument::RELATION_TYPES, true)) {
+        if (! in_array($relationType, QualityItemDocument::GENERAL_RELATION_TYPES, true)) {
             throw ValidationException::withMessages([
                 'relation_type' => __('procynia.quality.errors.unknown_document_relation_type'),
             ]);

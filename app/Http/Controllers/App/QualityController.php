@@ -16,6 +16,7 @@ use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityTool;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowChangeAiClient;
@@ -33,9 +34,11 @@ use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowChangeProposer;
 use App\Services\Quality\QualityProcessFlowInterpreter;
 use App\Services\Quality\QualityProcessSubprocessService;
+use App\Services\Quality\QualityToolService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\EnterpriseWikiDocumentFileResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -45,6 +48,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Kvalitet — the virksomhet's styrende dokumenter as objects of their own.
@@ -60,7 +64,7 @@ use Inertia\Response;
  */
 class QualityController extends Controller
 {
-    private const TABS = ['overview', 'processes', 'controls', 'checklists'];
+    private const TABS = ['overview', 'processes', 'controls', 'tools'];
 
     /**
      * The tabs on one document's page.
@@ -85,7 +89,8 @@ class QualityController extends Controller
         'overview' => QualityItem::TYPES,
         'processes' => [QualityItem::TYPE_PROCESS],
         'controls' => [QualityItem::TYPE_CONTROL],
-        'checklists' => [QualityItem::TYPE_CHECKLIST],
+        // Verktøy is a library of files, not of quality items — see QualityToolService.
+        'tools' => [],
     ];
 
     public function __construct(
@@ -102,6 +107,7 @@ class QualityController extends Controller
         private readonly QualityActivityArticleService $activityArticles,
         private readonly QualityActivityControlService $activityControls,
         private readonly CustomerPermissionService $permissions,
+        private readonly QualityToolService $tools,
     ) {}
 
     public function index(Request $request): Response
@@ -120,10 +126,16 @@ class QualityController extends Controller
             // What this person may do here, resolved from the customer's own roles. The page uses
             // it to decide what to offer; the gates above decide what is accepted.
             'permissions' => $this->permissionPayload($user),
-            'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
+            'items' => self::TAB_TYPES[$tab] === [] ? [] : $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
             // Kontroller is a register, not a list of documents: what each control checks and where
             // in the processes it is applied. Read for that tab only.
             'control_register' => $tab === 'controls' ? $this->controlRegister($customerId) : (object) [],
+            // Verktøy: the library, each tool with the controls carried out with it. The archive
+            // picker lets a file the virksomhet already has become a tool without a second upload.
+            'tools' => $tab === 'tools' && $customerId !== null ? $this->tools->library((int) $customerId) : [],
+            'tool_categories' => QualityTool::CATEGORIES,
+            'tool_document_options' => $tab === 'tools' ? $this->documentOptions($customerId, $request) : [],
+            'document_search' => trim((string) $request->query('document_search', '')),
             'type_counts' => $this->typeCounts($customerId),
             'quality_types' => QualityItem::TYPES,
             'statuses' => QualityItem::STATUSES,
@@ -209,17 +221,19 @@ class QualityController extends Controller
             'wiki_search' => trim((string) $request->query('wiki_search', '')),
             // On a control, evidence has its own section and its own form (name, description,
             // optional file), so the general document list leaves that capacity out rather than
-            // offering a second way to record the same thing.
+            // offering a second way to record the same thing. Tools are the same: they have their
+            // own section, and are never listed or chosen in the general one.
             'document_relation_types' => $isControl
-                ? array_values(array_diff(QualityItemDocument::RELATION_TYPES, [QualityItemDocument::RELATION_TYPE_EVIDENCE]))
-                : QualityItemDocument::RELATION_TYPES,
-            'documents' => $isControl
-                ? array_values(array_filter(
-                    $this->documentRows($item),
-                    static fn (array $row): bool => $row['relation_type'] !== QualityItemDocument::RELATION_TYPE_EVIDENCE,
-                ))
-                : $this->documentRows($item),
+                ? array_values(array_diff(QualityItemDocument::GENERAL_RELATION_TYPES, [QualityItemDocument::RELATION_TYPE_EVIDENCE]))
+                : QualityItemDocument::GENERAL_RELATION_TYPES,
+            'documents' => array_values(array_filter(
+                $this->documentRows($item),
+                static fn (array $row): bool => $row['relation_type'] !== QualityItemDocument::RELATION_TYPE_TOOL
+                    && (! $isControl || $row['relation_type'] !== QualityItemDocument::RELATION_TYPE_EVIDENCE),
+            )),
             'control_evidence' => $isControl ? $this->controlEvidenceRows($item) : [],
+            'control_tools' => $isControl && $customerId !== null ? $this->tools->forControl((int) $customerId, $item) : [],
+            'control_tool_options' => $isControl && $customerId !== null ? $this->tools->optionsForControl((int) $customerId, $item) : [],
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
             'relations' => $relations = $this->relationsForItem($customerId, (int) $item->id),
@@ -1416,6 +1430,90 @@ class QualityController extends Controller
         $this->items->unlinkDocument((int) $customerId, $link);
 
         return back()->with('success', __('procynia.quality.flash.document_unlinked'));
+    }
+
+    /**
+     * Put a document into the Verktøy library: a new upload, or a file the archive already has.
+     *
+     * The upload is the same one storeDocument() runs — EnterpriseWikiDocumentUploadService — so the
+     * file lands in the virksomhet's archive and nowhere else, and bytes it already holds are reused
+     * rather than written twice. Registering a tool is composing the kvalitetssystem, so it rides on
+     * quality.edit.
+     */
+    public function storeTool(Request $request): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'category' => ['nullable', 'string', Rule::in(QualityTool::CATEGORIES)],
+            'file' => ['nullable', 'required_without:enterprise_wiki_document_id', 'file', 'mimes:pdf,docx', 'max:20480'],
+            'enterprise_wiki_document_id' => ['nullable', 'required_without:file', 'integer'],
+        ]);
+
+        if ($request->hasFile('file')) {
+            $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
+            $document = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user?->id)['document'];
+        } else {
+            $document = EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->findOrFail($validated['enterprise_wiki_document_id']);
+        }
+
+        $this->tools->register((int) $customerId, $document, $validated, $user);
+
+        return back()->with('success', __('procynia.quality.flash.tool_registered'));
+    }
+
+    /**
+     * Open or download a tool's file.
+     *
+     * Kvalitet's own route rather than Wiki's download, because reading a tool is reading the
+     * kvalitetssystem: quality.view is what a person needs to carry out a control, and Wiki access
+     * is a separate grant they may not have. It reaches only files registered as tools, so it is no
+     * way into the rest of the archive.
+     */
+    public function toolFile(Request $request, QualityTool $tool): BinaryFileResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_VIEW);
+        $this->assertOwnedByCustomer((int) $tool->customer_id, $customerId);
+
+        $document = $tool->document;
+        abort_if($document === null, 404);
+
+        return EnterpriseWikiDocumentFileResponse::make($document, $request->boolean('download'));
+    }
+
+    /**
+     * Say that a control is carried out with a tool from the library. Removal is
+     * destroyDocumentLink() — the use is a document-link row, and the file stays.
+     */
+    public function storeControlTool(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'quality_tool_id' => ['required', 'integer'],
+        ]);
+
+        $tool = QualityTool::query()
+            ->where('customer_id', $customerId)
+            ->findOrFail($validated['quality_tool_id']);
+
+        $this->tools->linkToControl((int) $customerId, $item, $tool, $user);
+
+        return back()->with('success', __('procynia.quality.flash.tool_linked'));
     }
 
     // -----------------------------------------------------------------

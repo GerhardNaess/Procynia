@@ -1195,7 +1195,7 @@ class QualityItemTest extends TestCase
         // Two seams, two props. A Wiki page never appears as a document, or the other way round.
         $this->assertCount(1, $props['wiki_links']);
         $this->assertSame((int) $page->id, $props['wiki_links'][0]['page_id']);
-        $this->assertSame(QualityItemDocument::RELATION_TYPES, $props['document_relation_types']);
+        $this->assertSame(QualityItemDocument::GENERAL_RELATION_TYPES, $props['document_relation_types']);
     }
 
     public function test_the_document_picker_is_scoped_to_the_customer_and_searchable(): void

@@ -48,7 +48,7 @@ const LABEL = 'block text-sm font-semibold text-slate-700';
 const ROW_DESTRUCTIVE = `ml-auto inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 const TAB_ACTIVE = 'inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700';
 
-const TABS = ['overview', 'processes', 'controls', 'checklists'];
+const TABS = ['overview', 'processes', 'controls', 'tools'];
 
 export default function QualityIndex() {
     const {
@@ -64,6 +64,9 @@ export default function QualityIndex() {
         relation_item_options: relationItemOptions = [],
         owner_options: ownerOptions = [],
         control_register: controlRegister = {},
+        tools = [],
+        tool_categories: toolCategories = [],
+        tool_document_options: toolDocumentOptions = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -103,7 +106,18 @@ export default function QualityIndex() {
                     </p>
                 )}
 
-                {activeTab === 'controls' ? (
+                {activeTab === 'tools' ? (
+                    <>
+                        <ToolLibrary tools={tools} tq={tq} />
+                        {canEdit && (
+                            <RegisterToolPanel
+                                tq={tq}
+                                categories={toolCategories}
+                                documentOptions={toolDocumentOptions}
+                            />
+                        )}
+                    </>
+                ) : activeTab === 'controls' ? (
                     <ControlRegister
                         items={items}
                         register={controlRegister}
@@ -356,6 +370,221 @@ function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
                     </tbody>
                 </table>
             </div>
+        </section>
+    );
+}
+
+/**
+ * Verktøy as a library: what each document is for, and the controls carried out with it.
+ *
+ * Cards rather than a file table, because the question a reader brings is "which document do I need
+ * for this control?" — so each tool says what it is, what it helps with and where it is used before
+ * it says what the file is called.
+ */
+function ToolLibrary({ tools, tq }) {
+    const tt = tq.tools ?? {};
+    const categoryLabels = tq.tool_categories ?? {};
+
+    if (tools.length === 0) {
+        return (
+            <EmptyStateBox
+                title={tt.empty ?? 'Ingen verktøy er registrert ennå.'}
+                description={tt.empty_help ?? 'Registrer det første verktøyet nedenfor, og koble det til kontrollene som skal utføres med det.'}
+            />
+        );
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tt.heading ?? 'Verktøy'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tt.help ?? ''}</p>
+
+            <ul className="mt-5 grid gap-4 lg:grid-cols-2">
+                {tools.map((tool) => (
+                    <li key={tool.id} className="flex flex-col rounded-2xl border border-slate-200 p-5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <StatusBadge tone={tool.category ? 'emerald' : 'slate'}>
+                                {tool.category ? (categoryLabels[tool.category] ?? tool.category) : (tt.no_category ?? 'Uten kategori')}
+                            </StatusBadge>
+                        </div>
+                        <h3 className="mt-3 text-lg font-semibold text-slate-950">{tool.title}</h3>
+                        {tool.description && (
+                            <p className="mt-1 whitespace-pre-line text-base leading-6 text-slate-700">{tool.description}</p>
+                        )}
+
+                        <div className="mt-4">
+                            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{tt.used_in ?? 'Brukes i'}</p>
+                            {tool.controls.length === 0 ? (
+                                <p className="mt-1 text-sm text-slate-500">
+                                    {tt.unused ?? 'Ikke koblet til noen kontroll ennå. Koble det til fra kontrollen.'}
+                                </p>
+                            ) : (
+                                <ul className="mt-2 flex flex-wrap gap-2">
+                                    {tool.controls.map((control) => (
+                                        <li key={control.id}>
+                                            <Link
+                                                href={control.url}
+                                                className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
+                                            >
+                                                {itemLabel(control)}
+                                            </Link>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+
+                        <div className="mt-auto pt-5">
+                            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+                                <a href={tool.open_url} target="_blank" rel="noreferrer" className={SECONDARY_ACTION}>
+                                    {tt.open ?? 'Åpne'}
+                                </a>
+                                <a href={tool.download_url} className={SECONDARY_ACTION}>
+                                    {tt.download ?? 'Last ned'}
+                                </a>
+                                {tool.filename && (
+                                    <span className="min-w-0 break-all text-sm text-slate-500">{tool.filename}</span>
+                                )}
+                            </div>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </section>
+    );
+}
+
+/**
+ * Registering a tool: a name and a purpose for a file in the archive — uploaded here, or picked from
+ * what the archive already holds. Either way the file is not copied.
+ */
+function RegisterToolPanel({ tq, categories, documentOptions }) {
+    const tt = tq.tools ?? {};
+    const categoryLabels = tq.tool_categories ?? {};
+    const [source, setSource] = useState('upload');
+    const [fileInputKey, setFileInputKey] = useState(0);
+    const form = useForm({
+        title: '',
+        description: '',
+        category: '',
+        file: null,
+        enterprise_wiki_document_id: '',
+    });
+
+    function submit(event) {
+        event.preventDefault();
+        form.transform((data) => (source === 'upload'
+            ? { ...data, enterprise_wiki_document_id: '' }
+            : { ...data, file: null }));
+        form.post('/app/quality/tools', {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                form.reset();
+                setFileInputKey((key) => key + 1);
+            },
+        });
+    }
+
+    const hasDocument = source === 'upload' ? form.data.file !== null : form.data.enterprise_wiki_document_id !== '';
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tt.add_heading ?? 'Registrer verktøy'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tt.add_help ?? ''}</p>
+
+            <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field label={tt.field_title ?? 'Navn'} error={form.errors.title}>
+                    <input
+                        className={INPUT}
+                        value={form.data.title}
+                        placeholder={tt.field_title_placeholder ?? ''}
+                        onChange={(event) => form.setData('title', event.target.value)}
+                    />
+                </Field>
+
+                <Field label={tt.field_category ?? 'Type verktøy'} error={form.errors.category}>
+                    <select
+                        className={INPUT}
+                        value={form.data.category}
+                        onChange={(event) => form.setData('category', event.target.value)}
+                    >
+                        <option value="">{tt.field_category_placeholder ?? 'Ikke angitt'}</option>
+                        {categories.map((category) => (
+                            <option key={category} value={category}>{categoryLabels[category] ?? category}</option>
+                        ))}
+                    </select>
+                </Field>
+
+                <div className="md:col-span-2">
+                    <Field label={tt.field_description ?? 'Kort beskrivelse'} error={form.errors.description}>
+                        <textarea
+                            rows={2}
+                            className={INPUT}
+                            value={form.data.description}
+                            placeholder={tt.field_description_placeholder ?? ''}
+                            onChange={(event) => form.setData('description', event.target.value)}
+                        />
+                    </Field>
+                </div>
+
+                <fieldset className="space-y-3 md:col-span-2">
+                    <div className="flex flex-wrap gap-4">
+                        {['upload', 'existing'].map((option) => (
+                            <label key={option} className="inline-flex items-center gap-2 text-base text-slate-800">
+                                <input
+                                    type="radio"
+                                    name="tool-source"
+                                    value={option}
+                                    checked={source === option}
+                                    onChange={() => setSource(option)}
+                                />
+                                {option === 'upload'
+                                    ? (tt.source_upload ?? 'Last opp nytt dokument')
+                                    : (tt.source_existing ?? 'Velg fra dokumentarkivet')}
+                            </label>
+                        ))}
+                    </div>
+
+                    {source === 'upload' ? (
+                        <FilePickerField
+                            id="quality-tool-file"
+                            inputKey={fileInputKey}
+                            label={tt.field_file ?? 'Dokument'}
+                            accept=".pdf,.docx"
+                            file={form.data.file}
+                            buttonLabel={tq.file_choose ?? 'Velg fil'}
+                            emptyLabel={tq.file_none_selected ?? 'Ingen fil valgt'}
+                            help={tt.field_file_help ?? 'PDF eller Word (DOCX), maks 20 MB.'}
+                            error={form.errors.file}
+                            onChange={(file) => form.setData('file', file)}
+                        />
+                    ) : (
+                        <Field label={tt.field_document ?? 'Dokument i arkivet'} error={form.errors.enterprise_wiki_document_id}>
+                            <select
+                                className={INPUT}
+                                value={form.data.enterprise_wiki_document_id}
+                                onChange={(event) => form.setData('enterprise_wiki_document_id', event.target.value)}
+                            >
+                                <option value="">{tt.field_document_placeholder ?? 'Velg dokument …'}</option>
+                                {documentOptions.map((option) => (
+                                    <option key={option.document_id} value={option.document_id}>{option.filename}</option>
+                                ))}
+                            </select>
+                        </Field>
+                    )}
+                </fieldset>
+
+                <div className="md:col-span-2">
+                    <button
+                        type="submit"
+                        className={PRIMARY_ACTION}
+                        disabled={form.processing || form.data.title.trim() === '' || ! hasDocument}
+                    >
+                        {tt.submit ?? 'Registrer verktøy'}
+                    </button>
+                </div>
+            </form>
         </section>
     );
 }

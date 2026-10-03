@@ -94,6 +94,8 @@ export default function QualityItem() {
         focus_activity_key: focusActivityKey = null,
         control_placements: controlPlacements = [],
         control_evidence: controlEvidence = [],
+        control_tools: controlTools = [],
+        control_tool_options: controlToolOptions = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -209,6 +211,17 @@ export default function QualityItem() {
 
                         {item.quality_type === 'control' && (
                             <ControlPlacementsPanel td={td} placements={controlPlacements} />
+                        )}
+
+                        {item.quality_type === 'control' && (
+                            <ControlToolsPanel
+                                tq={tq}
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                tools={controlTools}
+                                options={controlToolOptions}
+                            />
                         )}
 
                         {item.quality_type === 'control' && (
@@ -441,6 +454,122 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
                         {td.evidence_submit ?? 'Legg til evidens'}
                     </button>
                 </form>
+            )}
+        </section>
+    );
+}
+
+/**
+ * The documents this control is carried out with, from the Verktøy library.
+ *
+ * Linking is a document-link row in the `tool` capacity; removing it is the seam's own removal,
+ * so the document stays in the library and in the archive, still in use by every other control.
+ */
+function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
+    const tt = tq.tools ?? {};
+    const categoryLabels = tq.tool_categories ?? {};
+    const form = useForm({ quality_tool_id: '' });
+
+    function submit(event) {
+        event.preventDefault();
+        form.post(`/app/quality/items/${item.id}/tools`, {
+            preserveScroll: true,
+            onSuccess: () => form.reset(),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.tools_heading ?? 'Verktøy'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.tools_help ?? ''}</p>
+
+            {tools.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.tools_empty ?? 'Ingen verktøy er koblet til denne kontrollen ennå.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {tools.map((tool) => (
+                        <li key={tool.link_id} className="flex flex-wrap items-start gap-3 py-3">
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-semibold text-slate-950">{tool.title}</p>
+                                    {tool.category && (
+                                        <span className="text-sm text-slate-500">· {categoryLabels[tool.category] ?? tool.category}</span>
+                                    )}
+                                </div>
+                                {tool.description && (
+                                    <p className="whitespace-pre-line text-sm text-slate-700">{tool.description}</p>
+                                )}
+                                {tool.filename && <p className="break-all text-sm text-slate-500">{tool.filename}</p>}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <a href={tool.open_url} target="_blank" rel="noreferrer" className={SECONDARY_ACTION}>
+                                    {tt.open ?? 'Åpne'}
+                                </a>
+                                <a href={tool.download_url} className={SECONDARY_ACTION}>
+                                    {tt.download ?? 'Last ned'}
+                                </a>
+                                {canEdit && (
+                                    <button
+                                        type="button"
+                                        className={ROW_DESTRUCTIVE}
+                                        onClick={() => {
+                                            if (window.confirm(td.tools_remove_confirm ?? 'Fjern verktøyet fra kontrollen? Dokumentet beholdes.')) {
+                                                router.delete(`/app/quality/document-links/${tool.link_id}`, { preserveScroll: true });
+                                            }
+                                        }}
+                                    >
+                                        {td.tools_remove ?? 'Fjern'}
+                                    </button>
+                                )}
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && (
+                <div className="mt-6 border-t border-slate-100 pt-6">
+                    {options.length === 0 ? (
+                        <p className="text-sm text-slate-500">
+                            {tools.length === 0
+                                ? (td.tools_library_empty ?? 'Verktøybiblioteket er tomt. Verktøy registreres under Kvalitet → Verktøy.')
+                                : (td.tools_none_available ?? 'Alle verktøy i biblioteket er allerede koblet til.')}{' '}
+                            <Link href="/app/quality?tab=tools" className="font-semibold text-slate-700 hover:underline">
+                                {td.tools_library_link ?? 'Gå til verktøybiblioteket'}
+                            </Link>
+                        </p>
+                    ) : (
+                        <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+                            <div className="min-w-[16rem] flex-1">
+                                <Field label={td.tools_pick ?? 'Verktøy fra biblioteket'} error={form.errors.quality_tool_id}>
+                                    <select
+                                        className={INPUT}
+                                        value={form.data.quality_tool_id}
+                                        onChange={(event) => form.setData('quality_tool_id', event.target.value)}
+                                    >
+                                        <option value="">{td.tools_pick_placeholder ?? 'Velg verktøy …'}</option>
+                                        {options.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.category
+                                                    ? `${option.title} (${categoryLabels[option.category] ?? option.category})`
+                                                    : option.title}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </Field>
+                            </div>
+                            <button
+                                type="submit"
+                                className={PRIMARY_ACTION}
+                                disabled={form.processing || form.data.quality_tool_id === ''}
+                            >
+                                {td.tools_add ?? 'Koble til verktøy'}
+                            </button>
+                        </form>
+                    )}
+                </div>
             )}
         </section>
     );

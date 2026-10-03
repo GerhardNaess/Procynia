@@ -279,6 +279,14 @@ Route::prefix('app')
             Route::post('/items/{item}/evidence', [QualityController::class, 'storeControlEvidence'])
                 ->name('items.evidence.store');
 
+            // Verktøy — documents a control is carried out with. The file is in the same archive as
+            // above; a tool is its name and purpose, and a control's use of it is a document-link
+            // row in the `tool` capacity, so removing one is document-links.destroy.
+            Route::post('/tools', [QualityController::class, 'storeTool'])->name('tools.store');
+            Route::get('/tools/{tool}/file', [QualityController::class, 'toolFile'])->name('tools.file');
+            Route::post('/items/{item}/tools', [QualityController::class, 'storeControlTool'])
+                ->name('items.tools.store');
+
             Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
             Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
         });
