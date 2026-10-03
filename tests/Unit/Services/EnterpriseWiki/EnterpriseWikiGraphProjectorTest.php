@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiPageLink;
 use App\Services\EnterpriseWiki\GraphProjection\EnterpriseWikiGraphProjector;
+use App\Services\Quality\QualityActivityKnowledgeResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Support\RecordingGraphProjectionService;
@@ -25,7 +26,7 @@ class EnterpriseWikiGraphProjectorTest extends TestCase
         $this->createWikilink($customer, $source, $target);
         $this->createWikilink($customer, $other, $target);
 
-        (new EnterpriseWikiGraphProjector($writer))->projectPage($source->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectPage($source->id);
 
         $this->assertSame($source->id, $writer->upsertedPages[0]['page_id']);
         $this->assertSame($customer->id, $writer->replacedOutgoing[0]['customer_id']);
@@ -48,7 +49,7 @@ class EnterpriseWikiGraphProjectorTest extends TestCase
         $this->createWikilink($customer, $a, $b);
         $this->createWikilink($otherCustomer, $foreignA, $foreignB);
 
-        $projector = new EnterpriseWikiGraphProjector($writer);
+        $projector = new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver);
         $projector->rebuildCustomer($customer->id);
         $first = $writer->rebuilds[0];
 
@@ -74,7 +75,7 @@ class EnterpriseWikiGraphProjectorTest extends TestCase
         $b = $this->createWikiPageWithVersion($customer, 'B', 'B text.');
         $this->createWikilink($customer, $a, $b);
 
-        (new EnterpriseWikiGraphProjector($writer))->projectPage($a->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectPage($a->id);
 
         $upsertedPageIds = collect($writer->calls)
             ->where('method', 'upsertWikiPage')
@@ -113,7 +114,7 @@ class EnterpriseWikiGraphProjectorTest extends TestCase
             'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
         ]);
 
-        (new EnterpriseWikiGraphProjector($writer))->projectPage($source->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectPage($source->id);
 
         $this->assertSame([$source->id], collect($writer->upsertedPages)->pluck('page_id')->all());
         $this->assertSame([], $writer->replacedOutgoing[0]['links']);
@@ -125,7 +126,7 @@ class EnterpriseWikiGraphProjectorTest extends TestCase
         $customer = $this->createWikiCustomer();
         $page = $this->createWikiPageWithVersion($customer, 'Lonely', 'No links here.');
 
-        (new EnterpriseWikiGraphProjector($writer))->projectPage($page->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectPage($page->id);
 
         // The empty call is what removes edges that were valid in an earlier version.
         $this->assertCount(1, $writer->replacedOutgoing);
@@ -148,7 +149,7 @@ class EnterpriseWikiGraphProjectorTest extends TestCase
             'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
         ]);
 
-        (new EnterpriseWikiGraphProjector($writer))->rebuildCustomer($customer->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->rebuildCustomer($customer->id);
 
         $this->assertCount(0, $writer->rebuilds[0]['links']);
     }

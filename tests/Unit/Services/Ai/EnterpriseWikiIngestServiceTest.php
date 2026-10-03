@@ -13,46 +13,46 @@ class EnterpriseWikiIngestServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new EnterpriseWikiIngestService();
+        $this->service = new EnterpriseWikiIngestService;
     }
 
     // --- Source hash ---
 
     public function test_source_hash_is_deterministic_for_same_inputs(): void
     {
-        $hash1 = $this->service->computeSourceHash(42, 'abc123filecontentsha256');
-        $hash2 = $this->service->computeSourceHash(42, 'abc123filecontentsha256');
+        $hash1 = $this->service->computeDocumentSourceHash(42, 'abc123filecontentsha256');
+        $hash2 = $this->service->computeDocumentSourceHash(42, 'abc123filecontentsha256');
 
         $this->assertSame($hash1, $hash2);
     }
 
-    public function test_source_hash_changes_when_version_id_changes(): void
+    public function test_source_hash_changes_when_document_id_changes(): void
     {
-        $hash1 = $this->service->computeSourceHash(42, 'abc123');
-        $hash2 = $this->service->computeSourceHash(43, 'abc123');
+        $hash1 = $this->service->computeDocumentSourceHash(42, 'abc123');
+        $hash2 = $this->service->computeDocumentSourceHash(43, 'abc123');
 
         $this->assertNotSame($hash1, $hash2);
     }
 
     public function test_source_hash_changes_when_file_hash_changes(): void
     {
-        $hash1 = $this->service->computeSourceHash(42, 'abc123');
-        $hash2 = $this->service->computeSourceHash(42, 'xyz999differentfile');
+        $hash1 = $this->service->computeDocumentSourceHash(42, 'abc123');
+        $hash2 = $this->service->computeDocumentSourceHash(42, 'xyz999differentfile');
 
         $this->assertNotSame($hash1, $hash2);
     }
 
     public function test_source_hash_is_64_character_hex_string(): void
     {
-        $hash = $this->service->computeSourceHash(1, 'somehash');
+        $hash = $this->service->computeDocumentSourceHash(1, 'somehash');
 
         $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $hash);
     }
 
-    public function test_source_hash_encodes_version_id_so_id_1_and_11_differ(): void
+    public function test_source_hash_encodes_document_id_so_id_1_and_11_differ(): void
     {
-        $hash1 = $this->service->computeSourceHash(1, 'hash');
-        $hash11 = $this->service->computeSourceHash(11, 'hash');
+        $hash1 = $this->service->computeDocumentSourceHash(1, 'hash');
+        $hash11 = $this->service->computeDocumentSourceHash(11, 'hash');
 
         $this->assertNotSame($hash1, $hash11);
     }
