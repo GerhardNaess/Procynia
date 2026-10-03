@@ -3,7 +3,6 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
-use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
@@ -13,10 +12,10 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
-use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -37,6 +36,7 @@ use Tests\TestCase;
 class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -591,34 +591,6 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $this->grantWikiPermissions($customer, $user);
 
         return $user;
-    }
-
-    /**
-     * Give the user a customer role holding the whole Wiki permission catalogue.
-     *
-     * Enterprise Wiki is gated by the customer's own roles on top of its own authority model (see
-     * WikiPermissionTest, where the permissions themselves are varied). These tests are about that
-     * authority model — the handover and the four-eyes rule — so they start from a person the
-     * customer has given Wiki work to.
-     */
-    private function grantWikiPermissions(Customer $customer, User $user): void
-    {
-        $role = CustomerRole::query()->create([
-            'customer_id' => $customer->id,
-            'name' => 'Wiki '.Str::upper(Str::random(8)),
-            'is_active' => true,
-        ]);
-
-        $role->syncPermissions([
-            CustomerPermissionCatalog::WIKI_VIEW,
-            CustomerPermissionCatalog::WIKI_EDIT,
-            CustomerPermissionCatalog::WIKI_REVIEW,
-            CustomerPermissionCatalog::WIKI_APPROVE,
-            CustomerPermissionCatalog::WIKI_DELETE,
-            CustomerPermissionCatalog::WIKI_SOURCE_MANAGE,
-        ]);
-
-        $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
     }
 
     private function customer(string $name = 'Systemeier AS'): Customer
