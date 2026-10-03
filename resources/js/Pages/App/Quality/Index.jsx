@@ -67,6 +67,7 @@ export default function QualityIndex() {
         tools = [],
         tool_categories: toolCategories = [],
         tool_document_options: toolDocumentOptions = [],
+        attention = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -99,6 +100,8 @@ export default function QualityIndex() {
                 )}
 
                 <Tabs activeTab={activeTab} tq={tq} />
+
+                {activeTab === 'overview' && <AttentionPanel findings={attention} tq={tq} />}
 
                 {! canChange && (
                     <p className="text-sm text-slate-500">
@@ -174,6 +177,76 @@ function TypeCounts({ counts, types, labels }) {
                 </div>
             ))}
         </div>
+    );
+}
+
+/**
+ * What in the kvalitetssystem needs attention. Each finding is a fixed rule the server applies to
+ * the rows that already exist — see QualityAttentionService — so this only shows the count, says
+ * what the rule means and leads to the objects it found.
+ */
+function AttentionPanel({ findings, tq }) {
+    const ta = tq.attention ?? {};
+
+    return (
+        <section aria-labelledby="quality-attention-heading" className={CARD}>
+            <h2 id="quality-attention-heading" className="text-xl font-semibold text-slate-950">
+                {ta.heading ?? 'Trenger oppmerksomhet'}
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{ta.help ?? ''}</p>
+
+            <ul className="mt-4 grid gap-3 lg:grid-cols-2">
+                {findings.map((finding) => (
+                    <AttentionFinding key={finding.key} finding={finding} ta={ta} />
+                ))}
+            </ul>
+        </section>
+    );
+}
+
+function AttentionFinding({ finding, ta }) {
+    const [open, setOpen] = useState(false);
+    const copy = ta[finding.key] ?? {};
+    const count = finding.items.length;
+    const listId = `quality-attention-${finding.key}`;
+
+    return (
+        <li className={`rounded-2xl border px-4 py-3 ${count > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+            <div className="flex items-start gap-3">
+                <p className={`text-2xl font-semibold ${count > 0 ? 'text-amber-800' : 'text-slate-400'}`}>{count}</p>
+                <div className="min-w-0 flex-1">
+                    <h3 className="text-base font-semibold text-slate-950">{copy.title ?? finding.key}</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{copy.help ?? ''}</p>
+                </div>
+            </div>
+
+            {count === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">{ta.clear ?? 'Ingen funn'}</p>
+            ) : (
+                <>
+                    <button
+                        type="button"
+                        className="mt-2 text-sm font-semibold text-violet-700 hover:text-violet-900"
+                        aria-expanded={open}
+                        aria-controls={listId}
+                        onClick={() => setOpen((value) => ! value)}
+                    >
+                        {open ? (ta.hide ?? 'Skjul') : (ta.show ?? 'Vis')}
+                    </button>
+                    {open && (
+                        <ul id={listId} className="mt-2 space-y-1">
+                            {finding.items.map((item) => (
+                                <li key={item.id}>
+                                    <Link href={item.url} className="text-sm font-medium text-slate-800 underline-offset-2 hover:underline">
+                                        {item.code ? `${item.code} ${item.title}` : item.title}
+                                    </Link>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </>
+            )}
+        </li>
     );
 }
 

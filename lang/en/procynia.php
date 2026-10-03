@@ -128,6 +128,29 @@ return [
             'field_document_placeholder' => 'Choose a document …',
             'submit' => 'Register tool',
         ],
+        'attention' => [
+            'heading' => 'Needs attention',
+            'help' => 'Fixed rules over what is registered in the quality system. Retired documents are not counted.',
+            'clear' => 'Nothing found',
+            'show' => 'Show',
+            'hide' => 'Hide',
+            'controls_without_evidence' => [
+                'title' => 'Controls without evidence',
+                'help' => 'Nothing has been recorded to show that the control has been carried out.',
+            ],
+            'controls_without_activity' => [
+                'title' => 'Controls without an activity',
+                'help' => 'The control is not linked to any activity in a process flow, so it does not say where in the work it applies.',
+            ],
+            'processes_without_governing_policy' => [
+                'title' => 'Processes without a governing document',
+                'help' => 'No policy in force governs the process. Link a policy to the process with the "governs" relation.',
+            ],
+            'processes_overdue_for_review' => [
+                'title' => 'Processes overdue for review',
+                'help' => 'The next review date has passed. The process should be reviewed and the review recorded.',
+            ],
+        ],
         'register' => [
             'heading' => 'Control register',
             'help' => 'Every control in the quality system, and the process activities it is used in.',

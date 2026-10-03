@@ -27,6 +27,7 @@ use App\Services\Permissions\CustomerPermissionService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityActivityArticleService;
 use App\Services\Quality\QualityActivityControlService;
+use App\Services\Quality\QualityAttentionService;
 use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintService;
@@ -108,6 +109,7 @@ class QualityController extends Controller
         private readonly QualityActivityControlService $activityControls,
         private readonly CustomerPermissionService $permissions,
         private readonly QualityToolService $tools,
+        private readonly QualityAttentionService $attention,
     ) {}
 
     public function index(Request $request): Response
@@ -127,6 +129,9 @@ class QualityController extends Controller
             // it to decide what to offer; the gates above decide what is accepted.
             'permissions' => $this->permissionPayload($user),
             'items' => self::TAB_TYPES[$tab] === [] ? [] : $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
+            // Oversikt opens on what needs attention: fixed rules over the rows above, recomputed
+            // on every read and never stored. See QualityAttentionService.
+            'attention' => $tab === 'overview' && $customerId !== null ? $this->attention->findings((int) $customerId) : [],
             // Kontroller is a register, not a list of documents: what each control checks and where
             // in the processes it is applied. Read for that tab only.
             'control_register' => $tab === 'controls' ? $this->controlRegister($customerId) : (object) [],

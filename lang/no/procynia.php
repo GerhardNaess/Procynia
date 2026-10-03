@@ -128,6 +128,29 @@ return [
             'field_document_placeholder' => 'Velg dokument …',
             'submit' => 'Registrer verktøy',
         ],
+        'attention' => [
+            'heading' => 'Trenger oppmerksomhet',
+            'help' => 'Faste regler over det som er registrert i kvalitetssystemet. Utgåtte dokumenter regnes ikke med.',
+            'clear' => 'Ingen funn',
+            'show' => 'Vis',
+            'hide' => 'Skjul',
+            'controls_without_evidence' => [
+                'title' => 'Kontroller uten evidens',
+                'help' => 'Det er ikke registrert noe som viser at kontrollen er gjennomført.',
+            ],
+            'controls_without_activity' => [
+                'title' => 'Kontroller uten aktivitet',
+                'help' => 'Kontrollen er ikke koblet til noen aktivitet i en prosessflyt, og sier derfor ikke hvor i arbeidet den gjelder.',
+            ],
+            'processes_without_governing_policy' => [
+                'title' => 'Prosesser uten styrende dokument',
+                'help' => 'Ingen gjeldende policy styrer prosessen. Koble en policy til prosessen med relasjonen «styrer».',
+            ],
+            'processes_overdue_for_review' => [
+                'title' => 'Prosesser forfalt til revisjon',
+                'help' => 'Neste revisjonsdato har passert. Prosessen bør gjennomgås og revisjonen registreres.',
+            ],
+        ],
         'register' => [
             'heading' => 'Kontrollregister',
             'help' => 'Alle kontroller i kvalitetssystemet, og hvilke prosessaktiviteter de brukes i.',
