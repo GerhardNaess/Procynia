@@ -13,6 +13,7 @@ use App\Models\Nationality;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiClaimsKnowledgeLayerTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     public function test_source_based_claim_is_counted_in_graph_relationship_data(): void
@@ -177,7 +179,7 @@ class EnterpriseWikiClaimsKnowledgeLayerTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Knowledge Layer Tester',
             'email' => Str::lower(Str::random(8)).'@knowledge-layer-test.invalid',
             'password' => bcrypt('secret'),
@@ -185,7 +187,7 @@ class EnterpriseWikiClaimsKnowledgeLayerTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createDocument(Customer $customer): EnterpriseWikiDocument

@@ -32,10 +32,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 class WikiSourceControllerTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -1782,7 +1784,7 @@ class WikiSourceControllerTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Wiki Uploader',
             'email' => Str::lower(Str::random(8)).'@wiki-test.invalid',
             'password' => bcrypt('secret'),
@@ -1790,6 +1792,6 @@ class WikiSourceControllerTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 }

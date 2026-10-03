@@ -19,7 +19,11 @@ use Illuminate\Support\Str;
  */
 trait GrantsWikiPermissions
 {
-    protected function grantWikiPermissions(Customer|int $customer, User $user): User
+    /**
+     * @param  list<string>|null  $permissions  a subset of the catalogue, for a reader who must not
+     *                                          also become an editor; null grants all of it
+     */
+    protected function grantWikiPermissions(Customer|int $customer, User $user, ?array $permissions = null): User
     {
         $customerId = $customer instanceof Customer ? (int) $customer->id : $customer;
 
@@ -29,7 +33,7 @@ trait GrantsWikiPermissions
             'is_active' => true,
         ]);
 
-        $role->syncPermissions([
+        $role->syncPermissions($permissions ?? [
             CustomerPermissionCatalog::WIKI_VIEW,
             CustomerPermissionCatalog::WIKI_EDIT,
             CustomerPermissionCatalog::WIKI_REVIEW,

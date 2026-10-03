@@ -14,6 +14,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ use Tests\TestCase;
 class InfoCenterWikiQaTaskTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -363,7 +365,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
 
     private function user(Customer $customer, string $bidRole, bool $isQa = false): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Bruker '.Str::random(5),
             'email' => Str::lower(Str::random(9)).'@infosenter.test',
             'password' => bcrypt('secret'),
@@ -372,7 +374,7 @@ class InfoCenterWikiQaTaskTest extends TestCase
             'customer_id' => $customer->id,
             'is_active' => true,
             'is_qa' => $isQa,
-        ]);
+        ]));
     }
 
     private function customer(string $name = 'Infosenter QA AS'): Customer

@@ -13,6 +13,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,10 @@ use Tests\TestCase;
 class WikiPageApprovalPermissionTest extends TestCase
 {
     use DatabaseTransactions;
+
+    // The customer's own Wiki roles are held constant so that the legacy approval grid, which
+    // reviewer eligibility still requires on top of wiki.review, is the one thing varied here.
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -507,7 +512,7 @@ class WikiPageApprovalPermissionTest extends TestCase
 
     private function user(Customer $customer, string $bidRole, bool $isQa = false, bool $isWikiApprover = false): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Tilgang '.Str::random(4),
             'email' => Str::lower(Str::random(10)).'@wiki-permission.invalid',
             'password' => bcrypt('secret'),
@@ -517,7 +522,7 @@ class WikiPageApprovalPermissionTest extends TestCase
             'is_active' => true,
             'is_qa' => $isQa,
             'is_wiki_approver' => $isWikiApprover,
-        ]);
+        ]));
     }
 
     private function customer(): Customer

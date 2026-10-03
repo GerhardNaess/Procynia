@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ use Tests\TestCase;
 class WikiGraphReturnNavigationTest extends TestCase
 {
     use CreatesEnterpriseWikiFixtures;
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -200,7 +202,7 @@ class WikiGraphReturnNavigationTest extends TestCase
 
     private function createViewer(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Graph Navigator',
             'email' => Str::lower(Str::random(8)).'@graph-return-test.invalid',
             'password' => bcrypt('secret'),
@@ -208,6 +210,6 @@ class WikiGraphReturnNavigationTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 }

@@ -23,6 +23,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -39,6 +40,7 @@ use Tests\TestCase;
 class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -654,7 +656,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Owner '.Str::random(5),
             'email' => Str::lower(Str::random(8)).'@example.test',
             'password' => bcrypt('secret'),
@@ -662,7 +664,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createDocument(Customer $customer, ?User $owner = null): EnterpriseWikiDocument

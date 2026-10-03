@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\ViewErrorBag;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\CreatesWikiManualEditFixture;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ class WikiWorkingVersionEditControllerTest extends TestCase
     use CreatesEnterpriseWikiFixtures;
     use CreatesWikiManualEditFixture;
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -650,12 +652,12 @@ class WikiWorkingVersionEditControllerTest extends TestCase
     /** @param array<string, mixed> $fixture */
     private function contributor(array $fixture): User
     {
-        return User::factory()->create([
+        return $this->grantWikiPermissions($fixture['customer'], User::factory()->create([
             'customer_id' => $fixture['customer']->id,
             'role' => User::ROLE_USER,
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function workingVersionUrl(EnterpriseWikiPage $page): string

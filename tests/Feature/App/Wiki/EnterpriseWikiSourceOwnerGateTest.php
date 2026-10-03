@@ -16,6 +16,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -37,6 +38,7 @@ use Tests\TestCase;
 class EnterpriseWikiSourceOwnerGateTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     private EnterpriseWikiDocumentOwnerApprovalService $approvals;
 
@@ -470,7 +472,7 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
 
     private function user(Customer $customer, string $bidRole = User::BID_ROLE_CONTRIBUTOR): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Bruker '.Str::random(5),
             'email' => Str::lower(Str::random(8)).'@kildeport.test',
             'password' => bcrypt('secret'),
@@ -480,7 +482,7 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function document(Customer $customer, User $owner): EnterpriseWikiDocument

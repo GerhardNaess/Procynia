@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -23,6 +24,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiWikilinkGraphEdgeTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     public function test_materialized_wikilink_produces_a_real_graph_edge(): void
@@ -144,7 +146,7 @@ class EnterpriseWikiWikilinkGraphEdgeTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Test User',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -152,7 +154,7 @@ class EnterpriseWikiWikilinkGraphEdgeTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createPageWithVersion(
