@@ -5,6 +5,7 @@ import ProcessFlowStepList from './ProcessFlowStepList';
 import ActionDialog from './ActionDialog';
 import StatusBadge from './StatusBadge';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
+import { isEditableStep, stepEditIsValid, withStepEdited } from '../../Support/processStepEdit';
 import {
     DESTRUCTIVE_ACTION,
     DESTRUCTIVE_COLOURS,
@@ -21,9 +22,11 @@ import {
  * finally the approval.
  *
  * The diagram is deliberately downstream of the editor and not beside it. It redraws from local
- * state on every keystroke, so a change to a lane or an arrow is visible before it is saved — but
- * there is nothing on the diagram to click, because the blueprint is the source of truth and giving
- * the picture its own handles would create a second one.
+ * state on every keystroke, so a change to a lane or an arrow is visible before it is saved. The
+ * picture has no handles of its own, because the blueprint is the source of truth and giving it some
+ * would create a second one. Clicking a step opens a small dialog for its text and role — but that
+ * dialog edits the blueprint's node and saves the working version through the same route as the
+ * structure editor; the diagram only redraws from what comes back.
  *
  * Unsaved state lives here, not on the server. `isDirty` is what the approve button reads: you
  * cannot approve a flow that is not the flow that would be saved.
@@ -114,6 +117,8 @@ export default function ProcessFlowPanel({
     // show the activity as it is now, and holding the object would leave it showing a label the
     // user has since corrected.
     const [activityKey, setActivityKey] = useState(null);
+    // Which step is open for editing from the diagram — by key, for the same reason as activityKey.
+    const [editingStepKey, setEditingStepKey] = useState(null);
 
     // The description the user typed. Seeded from whichever of the three sources knows it: the
     // proposal being reviewed, the attempt that failed, or the flow that was adopted from it.
@@ -152,6 +157,7 @@ export default function ProcessFlowPanel({
         // A new flow arrived from the server, so whatever the editor was open for is settled.
         setEditingStructure(false);
         setActivityKey(null);
+        setEditingStepKey(null);
         // Cleared rather than carried, so the new reading has the last word. A suggestion answered
         // well is gone because the revised description defines the term and the model stops asking;
         // one the answer did not actually cover comes back, which is the truth about it.
@@ -193,6 +199,27 @@ export default function ProcessFlowPanel({
         setSaving(true);
         router.put(`/app/quality/items/${item.id}/blueprint`, draft, {
             preserveScroll: true,
+            onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Save one step's text and role from the diagram's dialog.
+     *
+     * The working version is saved as the editor holds it, with that one node changed — the same
+     * PUT "Lagre struktur" makes, so it clears an approval the same way and is the same kind of
+     * change. The local nodes are not touched first: what the diagram shows next is what the
+     * server stored, and a refused save leaves the flow exactly as it was.
+     */
+    function saveStep(key, change, { onError }) {
+        setSaving(true);
+        router.put(`/app/quality/items/${item.id}/blueprint`, {
+            lanes,
+            nodes: withStepEdited(nodes, key, change),
+            edges,
+        }, {
+            preserveScroll: true,
+            onError,
             onFinish: () => setSaving(false),
         });
     }
@@ -446,6 +473,9 @@ export default function ProcessFlowPanel({
                                 // Unlike a subprocess, the activity panel needs nothing from the
                                 // server to open: it reads the node the editor holds.
                                 onOpenActivity={openActivity}
+                                // Not while a proposal is on screen: saving there would write the
+                                // proposal over the working version without it being adopted.
+                                onEditStep={canEdit && ! reviewing ? (node) => setEditingStepKey(node.key) : null}
                             />
                         </div>
                     </section>
@@ -603,6 +633,20 @@ export default function ProcessFlowPanel({
                 onClose={() => setActivityKey(null)}
             />
 
+            <StepEditDialog
+                tb={tb}
+                step={editingStepKey === null ? null : nodes.find((node) => node.key === editingStepKey && isEditableStep(node)) ?? null}
+                lanes={lanes}
+                hasUnsavedChanges={isDirty}
+                busy={saving}
+                onSave={saveStep}
+                onOpenActivity={(key) => {
+                    setEditingStepKey(null);
+                    setActivityKey(key);
+                }}
+                onClose={() => setEditingStepKey(null)}
+            />
+
             {/* Deleting the flow is not deleting the process, and the dialog's job is to make that
                 difference impossible to miss — a user who has just written articles off the back of
                 these activities needs to be told, before they press it, that the articles stay. */}
@@ -688,6 +732,120 @@ function activityByKey(blueprint, key) {
     }
 
     return flowReadingOrder(blueprint).find((step) => step.key === key) ?? null;
+}
+
+/**
+ * One step, opened from the diagram: what it says and who does it.
+ *
+ * Deliberately two fields. Type, arrows and subprocess change the shape of the flow and stay in the
+ * structure editor; a role is chosen among the flow's own, not created here. The fields are seeded
+ * once per opening and owned by the dialog until it saves or closes, so a re-render of the panel
+ * does not throw away what the user is typing.
+ */
+function StepEditDialog({ tb, step, lanes, hasUnsavedChanges, busy, onSave, onOpenActivity, onClose }) {
+    const titleId = 'process-step-edit-title';
+    const [label, setLabel] = useState('');
+    const [lane, setLane] = useState('');
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        setLabel(step?.label ?? '');
+        setLane(step?.lane ?? lanes[0]?.key ?? '');
+        setError(null);
+    }, [step?.key]);
+
+    const change = { label, lane };
+    const valid = stepEditIsValid(change, lanes);
+
+    function submit(event) {
+        event.preventDefault();
+
+        if (! valid || busy) {
+            return;
+        }
+
+        setError(null);
+        // Closed by the panel when the saved flow comes back; kept open with the reason when not.
+        onSave(step.key, change, {
+            onError: (errors) => setError(Object.values(errors)[0] ?? tb.step_edit_failed ?? 'Steget kunne ikke lagres.'),
+        });
+    }
+
+    return (
+        <ActionDialog isOpen={step !== null} onClose={onClose} closeDisabled={busy} titleId={titleId}>
+            {step !== null && (
+                <form onSubmit={submit}>
+                    <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
+                        {step.type === 'decision'
+                            ? (tb.step_edit_heading_decision ?? 'Rediger beslutning')
+                            : (tb.step_edit_heading ?? 'Rediger steg')}
+                    </h2>
+
+                    <label className="mt-5 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_label ?? 'Aktivitet'}</span>
+                        <input
+                            type="text"
+                            className={INPUT}
+                            value={label}
+                            maxLength={200}
+                            onChange={(event) => setLabel(event.target.value)}
+                            disabled={busy}
+                        />
+                    </label>
+
+                    <label className="mt-4 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_lane ?? 'Ansvarlig rolle'}</span>
+                        <select
+                            className={INPUT}
+                            value={lane}
+                            onChange={(event) => setLane(event.target.value)}
+                            disabled={busy}
+                        >
+                            {lanes.map((candidate) => (
+                                <option key={candidate.key} value={candidate.key}>
+                                    {candidate.label || (tb.default_lane ?? 'Uten angitt rolle')}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <p className="mt-4 text-sm leading-5 text-slate-500">
+                        {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
+                    </p>
+
+                    {/* Saving writes the working version as the editor holds it, so edits made under
+                        "Rediger struktur manuelt" and not yet saved go with it. Said before the click. */}
+                    {hasUnsavedChanges && (
+                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {tb.step_edit_unsaved_help ?? 'Du har ulagrede endringer i strukturen. De lagres sammen med dette steget.'}
+                        </p>
+                    )}
+
+                    {error && (
+                        <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p>
+                    )}
+
+                    <div className="mt-6 flex flex-wrap items-center gap-3">
+                        <button type="submit" className={PRIMARY_ACTION} disabled={! valid || busy}>
+                            {busy ? (tb.step_edit_saving ?? 'Lagrer …') : (tb.step_edit_save ?? 'Lagre steget')}
+                        </button>
+                        <button type="button" className={SECONDARY_ACTION} onClick={onClose} disabled={busy}>
+                            {tb.step_edit_cancel ?? 'Avbryt'}
+                        </button>
+                        {/* The box used to open the activity's knowledge; it still can, one step on. */}
+                        <button
+                            type="button"
+                            className="ml-auto text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                            onClick={() => onOpenActivity(step.key)}
+                            disabled={busy}
+                        >
+                            {tb.step_edit_articles ?? 'Kunnskap fra steget'} →
+                        </button>
+                    </div>
+                </form>
+            )}
+        </ActionDialog>
+    );
 }
 
 /**
