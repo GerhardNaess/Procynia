@@ -3,6 +3,7 @@
 namespace Tests\Feature\App;
 
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
+use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\EnterpriseWikiDocument;
@@ -1374,6 +1375,65 @@ class QualityProcessBlueprintTest extends TestCase
         $this->assertNotSame((int) $first->id, (int) $second->id);
         $this->assertSame(2, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
         $this->assertSame(2, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    /**
+     * "Slett flyt" removes the flow and nothing else.
+     *
+     * The distinction this pins is the whole point of the action existing. Deleting the flow is a
+     * kvalitetsleder saying "this is wrong, let me describe it again" — not "this process should
+     * not exist", which is the Kvalitet list's delete. So the process stands, the source document
+     * an activity handed to Wiki stands, the page the run made of it stands, and the provenance row
+     * joining them stands. Only the blueprint goes, and the tab falls back to the empty state the
+     * next description is written in.
+     *
+     * The activity nodes do leave the graph, which is why the reprojection is asserted: there is no
+     * longer an activity for an edge to leave. QualityGraphProjector drops those edges without
+     * touching the row or the page — see its projectActivities.
+     */
+    public function test_deleting_the_flow_keeps_the_process_its_documents_and_its_wiki_knowledge(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->process($customer, 'Avvikshandtering');
+
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
+
+        // The activity "vurder" hands a source to Wiki, and the run makes a page of it.
+        $document = $this->createArticleSource($owner, $process, 'Vurdering av avvik');
+        $page = $this->runProducedPage($customer, $document, 'Vurdering av avvik', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->assertSame(1, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
+
+        Queue::fake();
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/items/{$process->id}/blueprint")
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        // The flow is gone.
+        $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
+
+        // Everything else stands.
+        $this->assertNotNull(QualityItem::query()->find($process->id));
+        $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($page->id));
+        $this->assertSame(1, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
+
+        // The graph is told, so the activities stop being nodes.
+        Queue::assertPushed(
+            ProjectQualityItemToGraph::class,
+            fn (ProjectQualityItemToGraph $job): bool => $job->itemId === (int) $process->id
+                && $job->deletedForCustomerId === null,
+        );
+
+        // And the tab is back to the state a new flow is described in.
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertTrue($props['has_flow']);
+        $this->assertNull($props['blueprint']);
     }
 
     // ---------------------------------------------------------------------

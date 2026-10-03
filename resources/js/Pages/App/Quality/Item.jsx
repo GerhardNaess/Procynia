@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
-import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import ProcessFlowPanel from '../../../Components/App/ProcessFlowPanel';
@@ -110,10 +109,11 @@ export default function QualityItem() {
                         </StatusBadge>
                         {item.code && <span className="text-base text-slate-500">{item.code}</span>}
                     </div>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
-                        {canManage && <QualityItemActions tq={tq} item={item} />}
-                    </div>
+                    {/* No handlingsmeny here. Deleting a whole process is done from the Kvalitet
+                        list, where the process is one row among the others and the consequence is
+                        plain; the Flyt tab's "Slett flyt" removes the flow alone. A page about one
+                        document is not the place to decide that document should not exist. */}
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
                     {item.purpose && (
                         <p className="max-w-3xl whitespace-pre-line text-base leading-6 text-slate-600">
                             {item.purpose}

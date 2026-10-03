@@ -222,12 +222,7 @@ function ItemTable({ items, tq, canManage, activeTab, typeLabels, statusLabels }
                                 <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
                                 {canManage && (
                                     <td className="py-3 pl-4 text-right">
-                                        <QualityItemActions
-                                            tq={tq}
-                                            item={item}
-                                            variant="row"
-                                            tab={activeTab}
-                                        />
+                                        <QualityItemActions tq={tq} item={item} tab={activeTab} />
                                     </td>
                                 )}
                             </tr>

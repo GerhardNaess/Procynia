@@ -6,7 +6,9 @@ import ActionDialog from './ActionDialog';
 import StatusBadge from './StatusBadge';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
 import {
+    DESTRUCTIVE_ACTION,
     DESTRUCTIVE_COLOURS,
+    DESTRUCTIVE_CONFIRM,
     PRIMARY_ACTION,
     SECONDARY_ACTION,
 } from '../../Support/actionStyles';
@@ -84,6 +86,7 @@ export default function ProcessFlowPanel({
     const [edges, setEdges] = useState(() => (proposal ?? blueprint)?.edges ?? []);
     const [isDirty, setIsDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
     // The row-by-row editor is folded away by default. It is the fallback for a correction the
     // description could not express, not the way a flow is normally built — and left open it is
     // the loudest thing on the tab, so the diagram and the steps, which are what the user came to
@@ -176,6 +179,22 @@ export default function ProcessFlowPanel({
         router.post(`/app/quality/items/${item.id}/blueprint/approve`, {}, {
             preserveScroll: true,
             onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Remove the flow and nothing else. The server deletes the blueprint, the props come back with
+     * `blueprint: null`, and the tab falls through to its own empty state — which is already where
+     * a new flow is described or generated, so there is nowhere else to send the user.
+     */
+    function deleteFlow() {
+        setSaving(true);
+        router.delete(`/app/quality/items/${item.id}/blueprint`, {
+            preserveScroll: true,
+            onFinish: () => {
+                setSaving(false);
+                setConfirmingDelete(false);
+            },
         });
     }
 
@@ -483,6 +502,16 @@ export default function ProcessFlowPanel({
                                 <p className="text-sm text-slate-500">
                                     {tb.approval_cleared_help ?? 'Endrer du strukturen, faller godkjenningen bort.'}
                                 </p>
+                                {/* Pushed to the far end on purpose. Lagre and Godkjenn are two
+                                    steps of one sequence; starting the flow over is not a third. */}
+                                <button
+                                    type="button"
+                                    className={`ml-auto ${DESTRUCTIVE_ACTION}`}
+                                    onClick={() => setConfirmingDelete(true)}
+                                    disabled={saving}
+                                >
+                                    {tb.delete_flow ?? 'Slett flyt'}
+                                </button>
                             </div>
                         )}
                     </section>
@@ -499,6 +528,60 @@ export default function ProcessFlowPanel({
                 error={articleError}
                 onClose={() => setActivityKey(null)}
             />
+
+            {/* Deleting the flow is not deleting the process, and the dialog's job is to make that
+                difference impossible to miss — a user who has just written articles off the back of
+                these activities needs to be told, before they press it, that the articles stay. */}
+            <ActionDialog
+                isOpen={confirmingDelete}
+                onClose={() => setConfirmingDelete(false)}
+                closeDisabled={saving}
+                titleId="process-flow-delete-title"
+            >
+                <h2 id="process-flow-delete-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                    {tb.delete_flow_title ?? 'Slett prosessflyten?'}
+                </h2>
+                <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
+
+                <dl className="mt-5 space-y-4">
+                    <div>
+                        <dt className="text-sm font-semibold uppercase tracking-wide text-rose-700">
+                            {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
+                        </dt>
+                        <dd className="mt-1 text-base leading-6 text-slate-700">
+                            {tb.delete_flow_removed ?? 'Flyten med aktivitetene sine, og beskrivelsen den ble lest ut av.'}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                            {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
+                        </dt>
+                        <dd className="mt-1 text-base leading-6 text-slate-700">
+                            {tb.delete_flow_kept ?? 'Prosessen selv, dokumentdataene og kunnskapen i Wiki — også artiklene aktivitetene har vært kilde til. Det er bare flyten som starter på nytt.'}
+                        </dd>
+                    </div>
+                </dl>
+
+                <p className="mt-4 text-base text-slate-600">
+                    {tb.delete_flow_next ?? 'Etterpå kan du beskrive eller generere en ny flyt.'}
+                </p>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                    <button type="button" className={DESTRUCTIVE_CONFIRM} onClick={deleteFlow} disabled={saving}>
+                        {saving
+                            ? (tb.delete_flow_deleting ?? 'Sletter …')
+                            : (tb.delete_flow_confirm ?? 'Slett flyt')}
+                    </button>
+                    <button
+                        type="button"
+                        className={SECONDARY_ACTION}
+                        onClick={() => setConfirmingDelete(false)}
+                        disabled={saving}
+                    >
+                        {tb.delete_flow_cancel ?? 'Avbryt'}
+                    </button>
+                </div>
+            </ActionDialog>
         </div>
     );
 }

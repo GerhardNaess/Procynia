@@ -225,6 +225,13 @@ Route::prefix('app')
             Route::post('/items/{item}/blueprint/approve', [QualityController::class, 'approveBlueprint'])
                 ->name('items.blueprint.approve');
 
+            // Removing the flow alone. A separate decision from deleting the process, which lives
+            // on the Kvalitet list: this one says the flow is wrong and should be described again,
+            // and leaves the process, its documents and the Wiki knowledge its activities produced
+            // exactly where they were.
+            Route::delete('/items/{item}/blueprint', [QualityController::class, 'destroyBlueprint'])
+                ->name('items.blueprint.destroy');
+
             // An activity as a SOURCE of knowledge. Two routes for the same reason interpreting and
             // adopting a flow are two: drafting writes nothing, and creating is the user saying the
             // article — as they corrected it — is what should go into Wiki. Only the second touches

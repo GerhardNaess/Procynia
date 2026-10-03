@@ -699,6 +699,30 @@ class QualityController extends Controller
     }
 
     /**
+     * "Slett flyt" — the flow alone.
+     *
+     * Deliberately not the same action as deleting the process, and deliberately not reachable from
+     * the same place. This is a kvalitetsleder saying the flow is wrong and they want to describe it
+     * again; the process, its document data and the Wiki knowledge its activities produced are all
+     * still wanted. Removing the whole process is the Kvalitet list's job.
+     *
+     * Afterwards the Flyt tab falls back to its empty state, which is where a new flow is described
+     * or generated — so `back()` lands the user exactly where the next step is.
+     */
+    public function destroyBlueprint(QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeManagement($user);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $this->blueprints->delete((int) $customerId, $item);
+
+        return back()->with('success', __('procynia.quality.flash.blueprint_deleted'));
+    }
+
+    /**
      * "Opprett kunnskapsartikkel" — step one of two.
      *
      * An activity is a place where the virksomhet knows something that is not written down. This

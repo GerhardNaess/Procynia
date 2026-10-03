@@ -137,6 +137,42 @@ class QualityProcessBlueprintService
         return $blueprint;
     }
 
+    /**
+     * Remove the flow, and nothing else.
+     *
+     * The process stays, with its number, owner, status, structure, files and Wiki links intact —
+     * this is "start the flow over", not "delete the process", which is QualityItemService's job.
+     * Deleting is tolerant of there being nothing to delete: the button is only shown when a flow
+     * exists, but two tabs open on the same process would otherwise turn the second click into an
+     * error about something the user had already achieved.
+     *
+     * The description goes with it. It is a column on the blueprint row, and it is the text THIS
+     * flow was read out of — keeping it would leave the describe box pre-filled with the account of
+     * a flow that no longer exists, which is the opposite of starting over.
+     *
+     * What survives on purpose: the articles the activities were the source of. Those rows point at
+     * the process and an activity key, not at the blueprint, and the knowledge in Wiki is the
+     * virksomhet's rather than the flow's. The projection drops their edges because there is no
+     * longer an activity node for one to leave — see QualityGraphProjector::projectActivities — and
+     * the rows and the pages are left standing.
+     */
+    public function delete(int $customerId, QualityItem $item): void
+    {
+        $this->assertProcess($customerId, $item);
+
+        $blueprint = $this->forItem($customerId, $item);
+
+        if ($blueprint === null) {
+            return;
+        }
+
+        $blueprint->delete();
+
+        // The activities were nodes in the graph. Reprojecting the item is what clears them: the
+        // projector reads SQL, finds no blueprint, and replaces the activity set with an empty one.
+        ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
+    }
+
     public function forItem(int $customerId, QualityItem $item): ?QualityProcessBlueprint
     {
         return QualityProcessBlueprint::query()
