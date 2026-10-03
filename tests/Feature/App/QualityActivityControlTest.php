@@ -5,15 +5,18 @@ namespace Tests\Feature\App;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityActivityControl;
 use App\Models\QualityItem;
+use App\Models\QualityItemDocument;
 use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
@@ -242,6 +245,132 @@ class QualityActivityControlTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // Evidence on a control
+    // ---------------------------------------------------------------------
+
+    public function test_an_editor_records_evidence_with_a_name_and_description_and_no_file(): void
+    {
+        $customer = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $control = $this->control($customer);
+
+        $this->actingAs($editor)
+            ->post("/app/quality/items/{$control->id}/evidence", [
+                'title' => 'Protokoll ledelsens gjennomgang 2026',
+                'description' => 'Ligger i styreportalen.',
+            ])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect();
+
+        $evidence = QualityItemDocument::query()->where('quality_item_id', $control->id)->sole();
+        $this->assertSame(QualityItemDocument::RELATION_TYPE_EVIDENCE, $evidence->relation_type);
+        $this->assertNull($evidence->enterprise_wiki_document_id);
+        $this->assertSame((int) $customer->id, (int) $evidence->customer_id);
+
+        $props = $this->actingAs($editor)->get("/app/quality/items/{$control->id}")->assertOk()->viewData('page')['props'];
+        $this->assertSame('Protokoll ledelsens gjennomgang 2026', $props['control_evidence'][0]['title']);
+        $this->assertSame('Ligger i styreportalen.', $props['control_evidence'][0]['description']);
+        $this->assertNull($props['control_evidence'][0]['download_url']);
+    }
+
+    public function test_evidence_may_point_at_an_existing_document_and_removing_it_keeps_the_file(): void
+    {
+        $customer = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $control = $this->control($customer);
+        $document = $this->document($customer, 'kontrollskjema-q1.pdf');
+
+        $this->actingAs($editor)
+            ->post("/app/quality/items/{$control->id}/evidence", [
+                'title' => 'Signert kontrollskjema Q1',
+                'enterprise_wiki_document_id' => $document->id,
+            ])
+            ->assertSessionHasNoErrors();
+
+        $props = $this->actingAs($editor)->get("/app/quality/items/{$control->id}")->assertOk()->viewData('page')['props'];
+        $this->assertSame('kontrollskjema-q1.pdf', $props['control_evidence'][0]['filename']);
+        $this->assertNotNull($props['control_evidence'][0]['download_url']);
+        // One place for evidence on a control: the general document list leaves it out.
+        $this->assertSame([], $props['documents']);
+        $this->assertNotContains(QualityItemDocument::RELATION_TYPE_EVIDENCE, $props['document_relation_types']);
+
+        // The same file twice as evidence for one control is refused, not silently merged.
+        $this->actingAs($editor)
+            ->post("/app/quality/items/{$control->id}/evidence", [
+                'title' => 'Igjen',
+                'enterprise_wiki_document_id' => $document->id,
+            ])
+            ->assertSessionHasErrors('enterprise_wiki_document_id');
+
+        $evidenceId = $props['control_evidence'][0]['id'];
+        $this->actingAs($editor)->delete("/app/quality/document-links/{$evidenceId}")->assertRedirect();
+
+        $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $control->id)->count());
+        $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
+    }
+
+    public function test_quality_view_sees_evidence_but_cannot_add_or_remove_it(): void
+    {
+        $customer = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $control = $this->control($customer);
+
+        $this->actingAs($editor)->post("/app/quality/items/{$control->id}/evidence", ['title' => 'Logg over tilgangsgjennomgang']);
+        $evidence = QualityItemDocument::query()->where('quality_item_id', $control->id)->sole();
+
+        $props = $this->actingAs($reader)->get("/app/quality/items/{$control->id}")->assertOk()->viewData('page')['props'];
+        $this->assertSame(['Logg over tilgangsgjennomgang'], array_column($props['control_evidence'], 'title'));
+
+        $this->actingAs($reader)->post("/app/quality/items/{$control->id}/evidence", ['title' => 'Ny'])->assertForbidden();
+        $this->actingAs($reader)->delete("/app/quality/document-links/{$evidence->id}")->assertForbidden();
+
+        $this->assertSame(1, QualityItemDocument::query()->where('quality_item_id', $control->id)->count());
+    }
+
+    public function test_evidence_needs_a_name_a_control_and_the_customers_own_document(): void
+    {
+        $customer = $this->customer();
+        $other = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $control = $this->control($customer);
+
+        $this->actingAs($editor)->post("/app/quality/items/{$control->id}/evidence", ['title' => ''])
+            ->assertSessionHasErrors('title');
+
+        $process = $this->process($customer);
+        $this->actingAs($editor)->post("/app/quality/items/{$process->id}/evidence", ['title' => 'Ikke en kontroll'])
+            ->assertSessionHasErrors('title');
+
+        $foreignDocument = $this->document($other, 'fremmed.pdf');
+        $this->actingAs($editor)
+            ->post("/app/quality/items/{$control->id}/evidence", ['title' => 'Fremmed', 'enterprise_wiki_document_id' => $foreignDocument->id])
+            ->assertNotFound();
+
+        $outsider = $this->member($other, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $this->actingAs($outsider)->post("/app/quality/items/{$control->id}/evidence", ['title' => 'Inntrenger'])
+            ->assertNotFound();
+
+        $this->assertSame(0, QualityItemDocument::query()->count());
+    }
+
+    public function test_only_evidence_may_exist_without_a_file(): void
+    {
+        $customer = $this->customer();
+        $control = $this->control($customer);
+
+        $this->expectException(QueryException::class);
+
+        DB::transaction(fn () => QualityItemDocument::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $control->id,
+            'enterprise_wiki_document_id' => null,
+            'relation_type' => QualityItemDocument::RELATION_TYPE_TEMPLATE,
+            'title' => 'Mal uten fil',
+        ]));
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures
 
     private function blueprintedProcess(Customer $customer): QualityItem
@@ -292,6 +421,28 @@ class QualityActivityControlTest extends TestCase
         $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
 
         return $user;
+    }
+
+    private function control(Customer $customer): QualityItem
+    {
+        return QualityItem::query()->create([
+            'customer_id' => $customer->id,
+            'quality_type' => QualityItem::TYPE_CONTROL,
+            'title' => 'Kvartalsvis tilgangsgjennomgang',
+            'status' => QualityItem::STATUS_DRAFT,
+        ]);
+    }
+
+    private function document(Customer $customer, string $filename): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => $filename,
+            'file_path' => sprintf('customers/%d/wiki-documents/%s', $customer->id, Str::ulid()),
+            'file_hash_sha256' => hash('sha256', $filename.Str::random(8)),
+            'extracted_text' => 'Innhold i '.$filename,
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
     }
 
     private function process(Customer $customer): QualityItem

@@ -93,6 +93,7 @@ export default function QualityItem() {
         activity_article_error: articleError = null,
         focus_activity_key: focusActivityKey = null,
         control_placements: controlPlacements = [],
+        control_evidence: controlEvidence = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -210,6 +211,16 @@ export default function QualityItem() {
                             <ControlPlacementsPanel td={td} placements={controlPlacements} />
                         )}
 
+                        {item.quality_type === 'control' && (
+                            <ControlEvidencePanel
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                evidence={controlEvidence}
+                                documentOptions={documentOptions}
+                            />
+                        )}
+
                         {! isProcess && (
                             <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
                         )}
@@ -299,6 +310,129 @@ function ControlPlacementsPanel({ td, placements }) {
                         </li>
                     ))}
                 </ul>
+            )}
+        </section>
+    );
+}
+
+/**
+ * Documentation that the control is met.
+ *
+ * The same seam as Dokumenter below, in the `evidence` capacity — with a name and a description of
+ * its own, because evidence is often recorded before (or without) a file. The file, when there is
+ * one, is picked from what the store already holds; removing evidence never removes the file.
+ */
+function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) {
+    const form = useForm({ title: '', description: '', enterprise_wiki_document_id: '' });
+
+    function submit(event) {
+        event.preventDefault();
+        form.post(`/app/quality/items/${item.id}/evidence`, {
+            preserveScroll: true,
+            onSuccess: () => form.reset(),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.evidence_heading ?? 'Evidens'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.evidence_help ?? ''}</p>
+
+            {evidence.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.evidence_empty ?? 'Ingen evidens er registrert for denne kontrollen ennå.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {evidence.map((entry) => (
+                        <li key={entry.id} className="flex flex-wrap items-start gap-3 py-3">
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <p className="font-semibold text-slate-950">{entry.title}</p>
+                                {entry.description && (
+                                    <p className="whitespace-pre-line text-sm text-slate-700">{entry.description}</p>
+                                )}
+                                <p className="text-sm text-slate-500">
+                                    {entry.download_url && (
+                                        <>
+                                            <a
+                                                href={entry.download_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="font-semibold text-slate-700 hover:underline"
+                                            >
+                                                {entry.filename}
+                                            </a>
+                                            {' · '}
+                                        </>
+                                    )}
+                                    {entry.added_by ? `${td.evidence_added_by ?? 'Lagt til av'} ${entry.added_by}` : ''}
+                                    {entry.added_by && entry.added_at ? ' · ' : ''}
+                                    {entry.added_at ?? ''}
+                                </p>
+                            </div>
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className={ROW_DESTRUCTIVE}
+                                    onClick={() => {
+                                        if (window.confirm(td.evidence_remove_confirm ?? 'Fjern evidensen fra kontrollen?')) {
+                                            router.delete(`/app/quality/document-links/${entry.id}`, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    {td.evidence_remove ?? 'Fjern'}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && (
+                <form onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-6">
+                    <h3 className="text-base font-semibold text-slate-900">
+                        {td.evidence_add_heading ?? 'Legg til evidens'}
+                    </h3>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <Field label={td.evidence_title ?? 'Navn'} error={form.errors.title}>
+                            <input
+                                className={INPUT}
+                                value={form.data.title}
+                                placeholder={td.evidence_title_placeholder ?? ''}
+                                onChange={(e) => form.setData('title', e.target.value)}
+                            />
+                        </Field>
+                        <Field label={td.evidence_document ?? 'Dokument (valgfritt)'} error={form.errors.enterprise_wiki_document_id}>
+                            <select
+                                className={INPUT}
+                                value={form.data.enterprise_wiki_document_id}
+                                onChange={(e) => form.setData('enterprise_wiki_document_id', e.target.value)}
+                            >
+                                <option value="">{td.evidence_no_document ?? 'Ikke koble til dokument'}</option>
+                                {documentOptions.map((option) => (
+                                    <option key={option.document_id} value={option.document_id}>
+                                        {option.filename}
+                                    </option>
+                                ))}
+                            </select>
+                        </Field>
+                    </div>
+                    <Field label={td.evidence_description ?? 'Beskrivelse'} error={form.errors.description}>
+                        <textarea
+                            className={INPUT}
+                            rows={3}
+                            value={form.data.description}
+                            onChange={(e) => form.setData('description', e.target.value)}
+                        />
+                    </Field>
+                    <button
+                        type="submit"
+                        className={PRIMARY_ACTION}
+                        disabled={form.processing || form.data.title.trim() === ''}
+                    >
+                        {td.evidence_submit ?? 'Legg til evidens'}
+                    </button>
+                </form>
             )}
         </section>
     );

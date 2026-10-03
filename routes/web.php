@@ -274,6 +274,11 @@ Route::prefix('app')
             Route::delete('/document-links/{link}', [QualityController::class, 'destroyDocumentLink'])
                 ->name('document-links.destroy');
 
+            // Evidence that a control is met: a name, a description and optionally a file the store
+            // already has. Written to the same seam as above, so removal is document-links.destroy.
+            Route::post('/items/{item}/evidence', [QualityController::class, 'storeControlEvidence'])
+                ->name('items.evidence.store');
+
             Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
             Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
         });

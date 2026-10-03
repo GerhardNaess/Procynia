@@ -16,6 +16,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * The file itself is an EnterpriseWikiDocument: the virksomhet's one uploaded-file store, reused
  * rather than duplicated. See the migration for why. Removing this row removes the connection and
  * nothing else — the file stays where it is, still attached to every other item that uses it.
+ *
+ * Evidence on a control is the one capacity that may exist without a file: it carries its own
+ * title, and the file is optional. Every other capacity is a statement about a file.
  */
 class QualityItemDocument extends Model
 {
@@ -47,6 +50,7 @@ class QualityItemDocument extends Model
         'quality_item_id',
         'enterprise_wiki_document_id',
         'relation_type',
+        'title',
         'note',
         'source',
         'created_by_user_id',

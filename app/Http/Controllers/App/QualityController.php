@@ -148,6 +148,7 @@ class QualityController extends Controller
         $item->loadMissing(['owner', 'processSteps', 'processIo', 'checklistItems', 'controlDetail']);
 
         $tab = $this->detailTab($request, $item);
+        $isControl = $item->quality_type === QualityItem::TYPE_CONTROL;
         $subprocessView = $this->subprocessView($customerId, $item, $request);
         $publication = $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
             ? $this->blueprints->publicationState((int) $customerId, $item)
@@ -206,8 +207,19 @@ class QualityController extends Controller
             'wiki_links' => $this->wikiLinkRows($item, $user),
             'wiki_page_options' => $this->wikiPageOptions($customerId, $user, $request),
             'wiki_search' => trim((string) $request->query('wiki_search', '')),
-            'document_relation_types' => QualityItemDocument::RELATION_TYPES,
-            'documents' => $this->documentRows($item),
+            // On a control, evidence has its own section and its own form (name, description,
+            // optional file), so the general document list leaves that capacity out rather than
+            // offering a second way to record the same thing.
+            'document_relation_types' => $isControl
+                ? array_values(array_diff(QualityItemDocument::RELATION_TYPES, [QualityItemDocument::RELATION_TYPE_EVIDENCE]))
+                : QualityItemDocument::RELATION_TYPES,
+            'documents' => $isControl
+                ? array_values(array_filter(
+                    $this->documentRows($item),
+                    static fn (array $row): bool => $row['relation_type'] !== QualityItemDocument::RELATION_TYPE_EVIDENCE,
+                ))
+                : $this->documentRows($item),
+            'control_evidence' => $isControl ? $this->controlEvidenceRows($item) : [],
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
             'relations' => $relations = $this->relationsForItem($customerId, (int) $item->id),
@@ -1302,6 +1314,44 @@ class QualityController extends Controller
     }
 
     /**
+     * Record evidence that a control is met.
+     *
+     * Composing the control's documentation, so it rides on edit — the same permission attaching
+     * an existing file does. No upload here: the optional file is one the store already holds.
+     */
+    public function storeControlEvidence(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'enterprise_wiki_document_id' => ['nullable', 'integer'],
+        ]);
+
+        $document = isset($validated['enterprise_wiki_document_id'])
+            ? EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->findOrFail($validated['enterprise_wiki_document_id'])
+            : null;
+
+        $this->items->addControlEvidence(
+            (int) $customerId,
+            $item,
+            $validated['title'],
+            $validated['description'] ?? null,
+            $document,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.evidence_added'));
+    }
+
+    /**
      * Upload a file and attach it in one step.
      *
      * The upload itself is the existing one — EnterpriseWikiDocumentUploadService is literally what
@@ -1846,6 +1896,38 @@ class QualityController extends Controller
                 'download_url' => $link->document !== null
                     ? route('app.wiki.sources.download', ['document' => $link->document->id])
                     : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The evidence recorded on one control, file or no file.
+     *
+     * Unlike documentRows(), a row without a file is kept: evidence names itself, and the file is
+     * optional. Removal posts to destroyDocumentLink() — it is the same row.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function controlEvidenceRows(QualityItem $item): array
+    {
+        return QualityItemDocument::query()
+            ->where('quality_item_id', $item->id)
+            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            ->with(['document:id,original_filename', 'createdBy:id,name'])
+            ->orderBy('id')
+            ->get()
+            ->map(static fn (QualityItemDocument $evidence): array => [
+                'id' => (int) $evidence->id,
+                // Evidence attached as a plain file before evidence had a name falls back to it.
+                'title' => $evidence->title ?? $evidence->document?->original_filename,
+                'description' => $evidence->note,
+                'filename' => $evidence->document?->original_filename,
+                'download_url' => $evidence->document !== null
+                    ? route('app.wiki.sources.download', ['document' => $evidence->document->id])
+                    : null,
+                'added_by' => $evidence->createdBy?->name,
+                'added_at' => $evidence->created_at?->toDateString(),
             ])
             ->values()
             ->all();
