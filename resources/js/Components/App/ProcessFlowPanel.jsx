@@ -177,6 +177,10 @@ export default function ProcessFlowPanel({
 
     const draft = { lanes, nodes, edges };
     const hasFlow = reviewing || blueprint !== null;
+    // Once a revision has been approved, removing the flow only discards the working version: the
+    // revision in force stays in force, so the action, its dialog and the empty state say so.
+    const publishedRevision = publication?.revision_number ?? null;
+    const discards = publishedRevision !== null;
 
     function edit(setter) {
         return (value) => {
@@ -410,7 +414,10 @@ export default function ProcessFlowPanel({
 
                 {! hasFlow && (
                     <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-base text-slate-600">
-                        {tb.empty ?? 'Ingen flyt er laget for denne prosessen ennå.'}
+                        {discards
+                            ? (tb.empty_published ?? 'Det finnes ingen arbeidsversjon. Gjeldende revisjon :number gjelder fortsatt.')
+                                .replace(':number', String(publishedRevision))
+                            : (tb.empty ?? 'Ingen flyt er laget for denne prosessen ennå.')}
                     </p>
                 )}
             </section>
@@ -555,7 +562,9 @@ export default function ProcessFlowPanel({
                                         onClick={() => setConfirmingDelete(true)}
                                         disabled={saving}
                                     >
-                                        {tb.delete_flow ?? 'Slett flyt'}
+                                        {discards
+                                            ? (tb.discard_working_version ?? 'Forkast arbeidsversjon')
+                                            : (tb.delete_flow ?? 'Slett flyt')}
                                     </button>
                                 )}
                             </div>
@@ -598,7 +607,9 @@ export default function ProcessFlowPanel({
                 titleId="process-flow-delete-title"
             >
                 <h2 id="process-flow-delete-title" className="text-xl font-semibold tracking-tight text-slate-950">
-                    {tb.delete_flow_title ?? 'Slett prosessflyten?'}
+                    {discards
+                        ? (tb.discard_working_version_title ?? 'Forkast arbeidsversjonen?')
+                        : (tb.delete_flow_title ?? 'Slett prosessflyten?')}
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
 
@@ -608,7 +619,9 @@ export default function ProcessFlowPanel({
                             {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
-                            {tb.delete_flow_removed ?? 'Flyten med aktivitetene sine, og beskrivelsen den ble lest ut av.'}
+                            {discards
+                                ? (tb.discard_working_version_removed ?? 'Arbeidsversjonen av flyten — endringene som ikke er godkjent og publisert, og beskrivelsen den ble lest ut av.')
+                                : (tb.delete_flow_removed ?? 'Flyten med aktivitetene sine, og beskrivelsen den ble lest ut av.')}
                         </dd>
                     </div>
                     <div>
@@ -616,20 +629,29 @@ export default function ProcessFlowPanel({
                             {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
-                            {tb.delete_flow_kept ?? 'Prosessen selv, dokumentdataene og kunnskapen i Wiki — også artiklene aktivitetene har vært kilde til. Det er bare flyten som starter på nytt.'}
+                            {discards
+                                ? (tb.discard_working_version_kept ?? 'Gjeldende revisjon :number og alle tidligere godkjente revisjoner, prosessen selv, dokumentdataene og kunnskapen i Wiki.')
+                                    .replace(':number', String(publishedRevision))
+                                : (tb.delete_flow_kept ?? 'Prosessen selv, dokumentdataene og kunnskapen i Wiki — også artiklene aktivitetene har vært kilde til. Det er bare flyten som starter på nytt.')}
                         </dd>
                     </div>
                 </dl>
 
                 <p className="mt-4 text-base text-slate-600">
-                    {tb.delete_flow_next ?? 'Etterpå kan du beskrive eller generere en ny flyt.'}
+                    {discards
+                        ? (tb.discard_working_version_next ?? 'Gjeldende revisjon fortsetter å gjelde. Etterpå kan du beskrive eller generere en ny arbeidsversjon.')
+                        : (tb.delete_flow_next ?? 'Etterpå kan du beskrive eller generere en ny flyt.')}
                 </p>
 
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" className={DESTRUCTIVE_CONFIRM} onClick={deleteFlow} disabled={saving}>
-                        {saving
-                            ? (tb.delete_flow_deleting ?? 'Sletter …')
-                            : (tb.delete_flow_confirm ?? 'Slett flyt')}
+                        {discards
+                            ? (saving
+                                ? (tb.discard_working_version_discarding ?? 'Forkaster …')
+                                : (tb.discard_working_version ?? 'Forkast arbeidsversjon'))
+                            : (saving
+                                ? (tb.delete_flow_deleting ?? 'Sletter …')
+                                : (tb.delete_flow_confirm ?? 'Slett flyt'))}
                     </button>
                     <button
                         type="button"

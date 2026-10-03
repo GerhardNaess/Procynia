@@ -621,10 +621,44 @@ class QualityProcessBlueprintTest extends TestCase
         $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
 
-        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")->assertSessionHasNoErrors();
+        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', __('procynia.quality.flash.blueprint_discarded'));
 
         $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
         $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+
+        // Discarding the working version is not unpublishing: revision 1 is still in force, and
+        // there is no working version left to differ from it.
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['blueprint']);
+        $this->assertSame([
+            'state' => 'current',
+            'revision_number' => 1,
+            'has_unpublished_changes' => false,
+        ], $props['process_publication']);
+        $this->assertSame(QualityItem::STATUS_ACTIVE, $process->fresh()->status);
+    }
+
+    public function test_deleting_a_flow_that_was_never_published_is_reported_as_deleted(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+
+        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', __('procynia.quality.flash.blueprint_deleted'));
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertSame('unpublished', $props['process_publication']['state']);
     }
 
     public function test_the_page_carries_the_revision_history_newest_first(): void

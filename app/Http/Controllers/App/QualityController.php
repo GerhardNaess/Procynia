@@ -778,6 +778,10 @@ class QualityController extends Controller
      *
      * Afterwards the Flyt tab falls back to its empty state, which is where a new flow is described
      * or generated — so `back()` lands the user exactly where the next step is.
+     *
+     * Once a revision has been approved the same request is "Forkast arbeidsversjon": only the
+     * working version goes, the revisions stay, and the latest one is still in force. The action is
+     * identical; only what it is called, and what the user is told afterwards, differs.
      */
     public function destroyBlueprint(QualityItem $item): RedirectResponse
     {
@@ -787,9 +791,13 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_DELETE);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
+        $published = $this->blueprints->latestRevision((int) $customerId, $item) !== null;
+
         $this->blueprints->delete((int) $customerId, $item);
 
-        return back()->with('success', __('procynia.quality.flash.blueprint_deleted'));
+        return back()->with('success', __($published
+            ? 'procynia.quality.flash.blueprint_discarded'
+            : 'procynia.quality.flash.blueprint_deleted'));
     }
 
     /**
