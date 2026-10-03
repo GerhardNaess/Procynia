@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
+use App\Models\QualityActivityControl;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
@@ -24,6 +25,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityActivityArticleService;
+use App\Services\Quality\QualityActivityControlService;
 use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintService;
@@ -98,6 +100,7 @@ class QualityController extends Controller
         private readonly QualityProcessFlowChangeProposer $flowChanges,
         private readonly QualityProcessSubprocessService $subprocesses,
         private readonly QualityActivityArticleService $activityArticles,
+        private readonly QualityActivityControlService $activityControls,
         private readonly CustomerPermissionService $permissions,
     ) {}
 
@@ -1108,6 +1111,63 @@ class QualityController extends Controller
         return back()->with('success', __('procynia.quality.flash.article_queued'));
     }
 
+    /**
+     * Places a new control on an activity of this process's flow.
+     *
+     * The control is registered as an ordinary `control` quality item — see
+     * QualityActivityControlService. quality.edit, because it changes how the process is run; the
+     * flow itself is not written.
+     */
+    public function storeActivityControl(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        $validated = $request->validate([
+            'activity_key' => ['required', 'string', 'max:80'],
+            'title' => ['required', 'string', 'max:255'],
+            'criterion' => ['nullable', 'string', 'max:2000'],
+        ], [
+            'title.required' => __('procynia.quality.errors.control_title_required'),
+        ]);
+
+        $blueprint = $this->blueprints->forItem((int) $customerId, $item)
+            ?? abort(404);
+
+        $activityKey = (string) $validated['activity_key'];
+
+        abort_unless($this->activityControls->hasActivity($blueprint, $activityKey), 404);
+
+        $this->activityControls->add(
+            $item,
+            $blueprint,
+            $activityKey,
+            (string) $validated['title'],
+            $validated['criterion'] ?? null,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.control_added'));
+    }
+
+    /** Takes a control off its activity. The control stays in the register. */
+    public function destroyActivityControl(QualityActivityControl $control): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $control->customer_id, $customerId);
+
+        $this->activityControls->remove($control);
+
+        return back()->with('success', __('procynia.quality.flash.control_removed'));
+    }
+
     public function storeRelation(Request $request): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
@@ -1467,6 +1527,9 @@ class QualityController extends Controller
         // as it currently is in Wiki. A page that has been deleted took its provenance row with it
         // and is simply not here.
         $articles = $this->activityArticles->describeForItem($customerId, (int) $blueprint->quality_item_id);
+        // The controls placed on each activity, read the same way: by key, fresh from the control
+        // items, never stored on the node.
+        $controls = $this->activityControls->describeForItem($customerId, (int) $blueprint->quality_item_id);
 
         return array_map(
             fn (array $node): array => $node + [
@@ -1475,6 +1538,7 @@ class QualityController extends Controller
                     $node['subprocess_quality_item_id'] ?? null,
                 ),
                 'articles' => $articles[(string) ($node['key'] ?? '')] ?? [],
+                'controls' => $controls[(string) ($node['key'] ?? '')] ?? [],
             ],
             $nodes,
         );

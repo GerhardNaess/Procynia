@@ -180,7 +180,16 @@ export default function ProcessFlowPanel({
     // What the server stored, as a value. generated_at is to the second, so two saves from the
     // diagram inside one second would otherwise leave the editor holding the flow before the
     // second — and the next save would write that stale flow back.
-    const storedFlow = JSON.stringify([blueprint?.lanes ?? null, blueprint?.nodes ?? null, blueprint?.edges ?? null]);
+    //
+    // A node's controls are left out: they are not part of the flow, and adding one must not reset
+    // the editor or close the activity panel it was added from. They are read from the server's
+    // blueprint through savedControls instead.
+    const storedFlow = JSON.stringify([
+        blueprint?.lanes ?? null,
+        blueprint?.nodes?.map(({ controls, ...node }) => node) ?? null,
+        blueprint?.edges ?? null,
+    ]);
+    const savedControls = controlsByKey(blueprint);
 
     // The server is authoritative after every round trip — generate, save and approve all come back
     // through props. Resetting on the blueprint's identity rather than on every render is what lets
@@ -493,6 +502,8 @@ export default function ProcessFlowPanel({
                     tb={tb}
                     itemId={shownItemId}
                     activity={activityByKey(shown, activityKey)}
+                    controls={controlsByKey(shown)[activityKey]}
+                    canEditControls={canEdit}
                     canCreate={canCreateWikiArticles}
                     aiAvailable={flowAiAvailable}
                     draft={articleDraft}
@@ -625,6 +636,7 @@ export default function ProcessFlowPanel({
                             <ProcessFlowStepList
                                 tb={tb}
                                 blueprint={draft}
+                                controlsByKey={savedControls}
                                 onOpenSubprocess={isDirty ? null : openSubprocess}
                                 onOpenActivity={openActivity}
                             />
@@ -765,6 +777,8 @@ export default function ProcessFlowPanel({
                 tb={tb}
                 itemId={item.id}
                 activity={activityByKey(draft, activityKey)}
+                controls={savedControls[activityKey]}
+                canEditControls={canEdit}
                 canCreate={canCreateWikiArticles}
                 aiAvailable={flowAiAvailable}
                 draft={articleDraft}
@@ -914,6 +928,22 @@ function activityByKey(blueprint, key) {
     }
 
     return flowReadingOrder(blueprint).find((step) => step.key === key) ?? null;
+}
+
+/**
+ * The controls on each saved activity, by key, as the server resolved them.
+ *
+ * Every saved node has an entry, empty or not, so a key that is missing here is an activity that
+ * exists only in the editor — and a control cannot be placed on it until the flow is saved.
+ */
+function controlsByKey(blueprint) {
+    const map = {};
+
+    for (const node of blueprint?.nodes ?? []) {
+        map[node.key] = Array.isArray(node.controls) ? node.controls : [];
+    }
+
+    return map;
 }
 
 /**
@@ -1380,6 +1410,7 @@ function SubprocessFlow({ tb, rootTitle, trail, blueprint, onNavigate, onOpenSub
                     <ProcessFlowStepList
                         tb={tb}
                         blueprint={blueprint}
+                        controlsByKey={controlsByKey(blueprint)}
                         onOpenSubprocess={onOpenSubprocess}
                         onOpenActivity={onOpenActivity}
                     />
@@ -2211,6 +2242,10 @@ function ActivityArticlePanel({
     aiAvailable,
     draft = null,
     error = null,
+    // The controls on this activity, from the saved flow. Undefined when the activity has not been
+    // saved yet, which is the one case a control cannot be added.
+    controls = undefined,
+    canEditControls = false,
     onClose,
 }) {
     const titleId = 'process-activity-articles-title';
@@ -2309,6 +2344,15 @@ function ActivityArticlePanel({
                     {activity.description && (
                         <p className="mt-2 text-base leading-6 text-slate-600">{activity.description}</p>
                     )}
+
+                    <ActivityControls
+                        key={activity.key}
+                        tb={tb}
+                        itemId={itemId}
+                        activityKey={activity.key}
+                        controls={controls}
+                        canEdit={canEditControls}
+                    />
 
                     <h3 className="mt-6 text-base font-semibold text-slate-900">
                         {tb.articles_heading ?? 'Kunnskap fra denne aktiviteten'}
@@ -2454,5 +2498,161 @@ function ActivityArticlePanel({
                 </div>
             )}
         </ActionDialog>
+    );
+}
+
+/**
+ * The controls placed on one activity: what is checked at this step.
+ *
+ * Each is an ordinary control in the quality register — the name links to it — and this list only
+ * shows where it applies. Removing takes it off the activity and leaves it in the register. The
+ * diagram is not involved; it stays a picture of the flow.
+ *
+ * Both writes preserve state, so the dialog stays open on the activity it was used from and any
+ * unsaved work in the flow editor behind it is kept.
+ */
+function ActivityControls({ tb, itemId, activityKey, controls, canEdit }) {
+    const [adding, setAdding] = useState(false);
+    const [title, setTitle] = useState('');
+    const [criterion, setCriterion] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+
+    const list = controls ?? [];
+    const saved = controls !== undefined;
+
+    function add(event) {
+        event.preventDefault();
+        setBusy(true);
+        setError(null);
+
+        router.post(`/app/quality/items/${itemId}/activities/controls`, {
+            activity_key: activityKey,
+            title,
+            criterion,
+        }, {
+            preserveState: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                setAdding(false);
+                setTitle('');
+                setCriterion('');
+            },
+            onError: (errors) => setError(errors.title ?? errors.criterion ?? errors.activity_key ?? Object.values(errors)[0] ?? null),
+            onFinish: () => setBusy(false),
+        });
+    }
+
+    function remove(control) {
+        if (! window.confirm(tb.controls_remove_confirm ?? 'Fjerne kontrollen fra aktiviteten? Den blir liggende i kvalitetssystemet.')) {
+            return;
+        }
+
+        setBusy(true);
+        router.delete(`/app/quality/activity-controls/${control.id}`, {
+            preserveState: true,
+            preserveScroll: true,
+            onFinish: () => setBusy(false),
+        });
+    }
+
+    return (
+        <section className="mt-6" aria-labelledby="process-activity-controls-title">
+            <h3 id="process-activity-controls-title" className="text-base font-semibold text-slate-900">
+                {tb.controls_heading ?? 'Kontroller'}
+            </h3>
+
+            {list.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">
+                    {tb.controls_empty ?? 'Ingen kontroller på denne aktiviteten.'}
+                </p>
+            ) : (
+                <ul className="mt-3 space-y-2">
+                    {list.map((control) => (
+                        <li
+                            key={control.id}
+                            className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3"
+                        >
+                            <div className="min-w-0">
+                                <Link
+                                    href={control.url}
+                                    className="text-base font-semibold text-slate-900 underline-offset-2 hover:underline"
+                                >
+                                    {control.title}
+                                </Link>
+                                {control.criterion && (
+                                    <p className="mt-0.5 whitespace-pre-line text-sm leading-5 text-slate-600">{control.criterion}</p>
+                                )}
+                            </div>
+
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className={ROW_DESTRUCTIVE}
+                                    onClick={() => remove(control)}
+                                    disabled={busy}
+                                    aria-label={(tb.controls_remove_label ?? 'Fjern kontrollen :title fra aktiviteten')
+                                        .replace(':title', control.title ?? '')}
+                                >
+                                    {tb.controls_remove ?? 'Fjern'}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && saved && ! adding && (
+                <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={() => setAdding(true)}>
+                    {tb.controls_add ?? 'Legg til kontroll'}
+                </button>
+            )}
+
+            {canEdit && saved && adding && (
+                <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={add}>
+                    <p className="text-sm leading-5 text-slate-600">
+                        {tb.controls_help
+                            ?? 'Hva skal kontrolleres i dette steget? En kontroll registreres også i kvalitetssystemet, der den kan få eier og frekvens.'}
+                    </p>
+
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-title">
+                        {tb.controls_title ?? 'Navn på kontrollen'}
+                    </label>
+                    <input
+                        id="activity-control-title"
+                        type="text"
+                        className={`mt-1 ${INPUT}`}
+                        value={title}
+                        maxLength={255}
+                        onChange={(event) => setTitle(event.target.value)}
+                    />
+
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-criterion">
+                        {tb.controls_criterion ?? 'Hva skal kontrolleres'}
+                    </label>
+                    <textarea
+                        id="activity-control-criterion"
+                        className={`mt-1 ${TEXTAREA}`}
+                        rows={3}
+                        maxLength={2000}
+                        value={criterion}
+                        onChange={(event) => setCriterion(event.target.value)}
+                    />
+
+                    {error && (
+                        <p className="mt-2 text-sm text-red-700" role="alert">{error}</p>
+                    )}
+
+                    <div className="mt-3 flex flex-wrap justify-end gap-3">
+                        <button type="button" className={SECONDARY_ACTION} onClick={() => setAdding(false)} disabled={busy}>
+                            {tb.controls_cancel ?? 'Avbryt'}
+                        </button>
+                        <button type="submit" className={PRIMARY_ACTION} disabled={busy || title.trim() === ''}>
+                            {tb.controls_save ?? 'Lagre kontroll'}
+                        </button>
+                    </div>
+                </form>
+            )}
+        </section>
     );
 }

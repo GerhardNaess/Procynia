@@ -251,6 +251,13 @@ Route::prefix('app')
             Route::post('/items/{item}/activities/articles', [QualityController::class, 'storeActivityArticle'])
                 ->name('items.activities.articles.store');
 
+            // Controls on an activity. The control is an ordinary `control` quality item; the flow
+            // is not written. Removing takes it off the activity and leaves it in the register.
+            Route::post('/items/{item}/activities/controls', [QualityController::class, 'storeActivityControl'])
+                ->name('items.activities.controls.store');
+            Route::delete('/activity-controls/{control}', [QualityController::class, 'destroyActivityControl'])
+                ->name('activity-controls.destroy');
+
             // The seam to Wiki. Attaching a page changes nothing about the page.
             Route::post('/items/{item}/wiki-links', [QualityController::class, 'storeWikiLink'])
                 ->name('items.wiki-links.store');
