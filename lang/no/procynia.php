@@ -1976,6 +1976,8 @@ return [
         'create_subtitle' => 'Opprett en ny bruker for din kunde. Rollen styrer ansvarsnivået i kundemiljøet, mens abonnement og brukerlisens håndteres separat.',
         'edit_title' => 'Rediger bruker',
         'edit_subtitle' => 'Oppdater rolle, status og passord for brukeren innenfor din egen kunde.',
+        'page_heading' => 'Brukere',
+        'page_subtitle' => 'Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.',
         'field_name' => 'Navn',
         'field_email' => 'E-post',
         'field_role' => 'Rolle',

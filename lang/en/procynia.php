@@ -1975,6 +1975,8 @@ return [
         'create_subtitle' => 'Create a new user for your customer. The role controls the level of responsibility in the customer environment, while the subscription and user license are handled separately.',
         'edit_title' => 'Edit user',
         'edit_subtitle' => 'Update role, status and password for the user within your own customer.',
+        'page_heading' => 'Users',
+        'page_subtitle' => 'Manage users and roles for your own customer. New users are created as active with the password you set.',
         'field_name' => 'Name',
         'field_email' => 'Email',
         'field_role' => 'Role',

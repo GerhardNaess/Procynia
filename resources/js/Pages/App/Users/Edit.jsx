@@ -142,9 +142,11 @@ export default function UsersEdit({
         <CustomerAppLayout title="Rediger bruker" showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Rediger bruker</h1>
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                        {usersFormText.page_heading ?? 'Brukere'}
+                    </h1>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        Oppdater rolle, status og passord for brukeren innenfor din egen kunde.
+                        {usersFormText.page_subtitle ?? 'Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.'}
                     </p>
                 </section>
 
@@ -157,6 +159,15 @@ export default function UsersEdit({
                         {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
                         <input type="hidden" name="_method" value="put" />
                         <input type="hidden" name="redirect_to" value={form.data.redirect_to} />
+
+                        <div className="space-y-1">
+                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                {usersFormText.edit_title ?? 'Rediger bruker'}
+                            </h2>
+                            <p className="text-sm leading-6 text-slate-500">
+                                {usersFormText.edit_subtitle ?? 'Oppdater rolle, status og passord for brukeren innenfor din egen kunde.'}
+                            </p>
+                        </div>
 
                         {firstError ? (
                             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
