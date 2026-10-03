@@ -139,6 +139,9 @@ export default function ProcessFlowPanel({
     // show the activity as it is now, and holding the object would leave it showing a label the
     // user has since corrected.
     const [activityKey, setActivityKey] = useState(focusActivityKey);
+    // Whether the panel opens with its "Legg til kontroll" form already showing — set when the
+    // panel is reached from that action in "Rediger steg", read once as the panel opens.
+    const [activityAddsControl, setActivityAddsControl] = useState(false);
     // The reset below also runs on mount, where it must not close the activity the page was
     // opened on.
     const settledFirstFlow = useRef(false);
@@ -473,7 +476,10 @@ export default function ProcessFlowPanel({
     // Opens the activity, not a page: an activity is where the knowledge behind a step lives, and
     // the panel is both where the articles it has already produced are listed and where the next
     // one is written.
-    const openActivity = (activity) => setActivityKey(activity?.key ?? null);
+    const openActivity = (activity) => {
+        setActivityAddsControl(false);
+        setActivityKey(activity?.key ?? null);
+    };
 
     // The payload travels as it stands in the editor, corrections included — the user is adopting
     // what they are looking at, not what the model first returned.
@@ -787,11 +793,15 @@ export default function ProcessFlowPanel({
                 activity={activityByKey(draft, activityKey)}
                 controls={savedControls[activityKey]}
                 canEditControls={canEdit}
+                startAddingControl={activityAddsControl}
                 canCreate={canCreateWikiArticles}
                 aiAvailable={flowAiAvailable}
                 draft={articleDraft}
                 error={articleError}
-                onClose={() => setActivityKey(null)}
+                onClose={() => {
+                    setActivityKey(null);
+                    setActivityAddsControl(false);
+                }}
             />
 
             <StepEditDialog
@@ -806,6 +816,15 @@ export default function ProcessFlowPanel({
                 onSave={(change, options) => saveStep(editingStepKey, change, options)}
                 onOpenActivity={(key) => {
                     setEditingStepKey(null);
+                    setActivityAddsControl(false);
+                    setActivityKey(key);
+                }}
+                // The controls are kept in the activity panel; the dialog shows them and hands
+                // "Legg til kontroll" over to the panel's own form.
+                controls={editingStepKey === null ? undefined : savedControls[editingStepKey]}
+                onAddControl={(key) => {
+                    setEditingStepKey(null);
+                    setActivityAddsControl(true);
                     setActivityKey(key);
                 }}
                 canMove={editingStepKey !== null && canMoveStep({ nodes, edges }, editingStepKey)}
@@ -978,6 +997,9 @@ function StepEditDialog({
     busy,
     onSave,
     onOpenActivity = null,
+    // The controls on the step, from the saved flow; undefined for a step not saved yet.
+    controls = undefined,
+    onAddControl = null,
     canMove = false,
     onMove = null,
     onClose,
@@ -1173,6 +1195,54 @@ function StepEditDialog({
                                 {tb.step_move_unavailable ?? 'Dette steget kan ikke flyttes herfra. Bare aktiviteter på hovedlinjen, utenfor beslutningsgrener, kan flyttes.'}
                             </p>
                         ))}
+
+                    {/* What is checked at this step. Kept and added in the activity panel — this only
+                        shows it and leads there, so the controls are found from the step itself. */}
+                    {! inserting && typeof onAddControl === 'function' && (
+                        <section className="mt-5" aria-labelledby="process-step-controls-title">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <h3 id="process-step-controls-title" className="text-sm font-semibold text-slate-700">
+                                    {tb.controls_heading ?? 'Kontroller'}
+                                    {(controls ?? []).length > 0 && (
+                                        <span className="ml-2 font-normal text-slate-500">
+                                            {(controls.length === 1
+                                                ? (tb.controls_count_one ?? ':count kontroll')
+                                                : (tb.controls_count ?? ':count kontroller')).replace(':count', String(controls.length))}
+                                        </span>
+                                    )}
+                                </h3>
+                                {controls !== undefined && (
+                                    <button
+                                        type="button"
+                                        className="text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                        onClick={() => onAddControl(step.key)}
+                                        disabled={busy}
+                                    >
+                                        + {tb.controls_add ?? 'Legg til kontroll'}
+                                    </button>
+                                )}
+                            </div>
+
+                            {(controls ?? []).length === 0 ? (
+                                <p className="mt-1 text-sm text-slate-500">
+                                    {tb.controls_empty ?? 'Ingen kontroller på denne aktiviteten.'}
+                                </p>
+                            ) : (
+                                <ul className="mt-2 space-y-1">
+                                    {controls.map((control) => (
+                                        <li key={control.id}>
+                                            <Link
+                                                href={control.url}
+                                                className="text-sm font-semibold text-slate-900 underline-offset-2 hover:underline"
+                                            >
+                                                {control.title}
+                                            </Link>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </section>
+                    )}
 
                     <p className="mt-4 text-sm leading-5 text-slate-500">
                         {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
@@ -2254,6 +2324,8 @@ function ActivityArticlePanel({
     // saved yet, which is the one case a control cannot be added.
     controls = undefined,
     canEditControls = false,
+    // Open with the "Legg til kontroll" form showing, when the panel was reached from that action.
+    startAddingControl = false,
     onClose,
 }) {
     const titleId = 'process-activity-articles-title';
@@ -2360,6 +2432,7 @@ function ActivityArticlePanel({
                         activityKey={activity.key}
                         controls={controls}
                         canEdit={canEditControls}
+                        startAdding={startAddingControl}
                     />
 
                     <h3 className="mt-6 text-base font-semibold text-slate-900">
@@ -2519,8 +2592,9 @@ function ActivityArticlePanel({
  * Both writes preserve state, so the dialog stays open on the activity it was used from and any
  * unsaved work in the flow editor behind it is kept.
  */
-function ActivityControls({ tb, itemId, activityKey, controls, canEdit }) {
-    const [adding, setAdding] = useState(false);
+function ActivityControls({ tb, itemId, activityKey, controls, canEdit, startAdding = false }) {
+    // Mounted afresh each time the panel opens, so the initial value is the one that applies.
+    const [adding, setAdding] = useState(startAdding);
     const [title, setTitle] = useState('');
     const [criterion, setCriterion] = useState('');
     const [busy, setBusy] = useState(false);

@@ -53,3 +53,46 @@ test('an activity gets a control, shows it, and loses it again', async ({ page }
     await controls.getByRole('button', { name: `Fjern kontrollen ${title} fra aktiviteten` }).click();
     await expect(controls.getByRole('link', { name: title })).toHaveCount(0);
 });
+
+test('"Rediger steg" shows the activity\'s controls and leads to adding one', async ({ page }) => {
+    await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
+    await page.goto('/app/quality');
+
+    const link = page.getByRole('link', { name: PROCESS });
+
+    if (await link.count() === 0) {
+        test.skip(true, `No seeded quality process named "${PROCESS}" in this environment.`);
+    }
+
+    await link.first().click();
+    await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
+    await expect(page.getByRole('img', { name: /Prosessflyt/ })).toBeVisible();
+
+    const title = `E2E kontroll fra steget ${Date.now()}`;
+    const dialog = page.getByRole('dialog');
+    const stepControls = dialog.locator('section', { has: page.getByRole('heading', { name: /^Kontroller/ }) });
+
+    // From the step, "Legg til kontroll" opens the activity panel with its form already showing.
+    await page.getByRole('button', { name: `Rediger steget ${ACTIVITY}` }).first().click();
+    await expect(dialog.getByRole('heading', { name: 'Rediger steg' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Kunnskap fra steget/ })).toBeVisible();
+    await stepControls.getByRole('button', { name: /Legg til kontroll/ }).click();
+
+    await dialog.getByLabel('Navn på kontrollen').fill(title);
+    await dialog.getByLabel('Hva skal kontrolleres').fill('Kontrolleres fra Rediger steg.');
+    await dialog.getByRole('button', { name: 'Lagre kontroll' }).click();
+    await expect(dialog.getByRole('link', { name: title })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Lukk' }).click();
+
+    // Back in "Rediger steg": the control is listed, with a count, and can be opened from there.
+    await page.getByRole('button', { name: `Rediger steget ${ACTIVITY}` }).first().click();
+    await expect(stepControls.getByRole('heading', { name: /\d+ kontroll(er)?/ })).toBeVisible();
+    await expect(stepControls.getByRole('link', { name: title })).toBeVisible();
+    await dialog.screenshot({ path: 'test-results/quality-step-edit-controls.png' });
+
+    // Cleaned up through the panel, which is where controls are removed.
+    await dialog.getByRole('button', { name: /Kunnskap fra steget/ }).click();
+    page.once('dialog', (confirm) => confirm.accept());
+    await dialog.getByRole('button', { name: `Fjern kontrollen ${title} fra aktiviteten` }).click();
+    await expect(dialog.getByRole('link', { name: title })).toHaveCount(0);
+});
