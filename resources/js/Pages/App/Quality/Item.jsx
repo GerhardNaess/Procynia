@@ -81,6 +81,8 @@ export default function QualityItem() {
         process_publication: publication = null,
         flow_proposal: flowProposal = null,
         flow_error: flowError = null,
+        flow_change_proposal: flowChangeProposal = null,
+        flow_change_error: flowChangeError = null,
         flow_ai_available: flowAiAvailable = false,
         subprocess_view: subprocessView = null,
         subprocess_options: subprocessOptions = [],
@@ -156,6 +158,8 @@ export default function QualityItem() {
                         canCreateWikiArticles={canCreateWikiArticles}
                         proposal={flowProposal}
                         flowError={flowError}
+                        changeProposal={flowChangeProposal}
+                        changeError={flowChangeError}
                         flowAiAvailable={flowAiAvailable}
                         subprocessView={subprocessView}
                         subprocessOptions={subprocessOptions}
