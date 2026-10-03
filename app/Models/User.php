@@ -573,6 +573,39 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * May this user delete one Enterprise Wiki page?
+     *
+     * The same fallback shape as canDeleteEnterpriseWikiDocument(), for the same reason: no
+     * configurable permission for it exists yet. System Owner may delete any page in their own
+     * customer; any other user may delete only a page they are the registered owner of.
+     *
+     * Deliberately NOT canApproveWikiPages(). Approving is a decision about whether a page is good
+     * enough to publish, and a Wiki approver holds it for the one page handed to them — see
+     * docs/enterprise-wiki-approval-model.md. Removing knowledge from the Wiki is a different act
+     * with a different blast radius, and borrowing the review capability for it would quietly hand
+     * every reviewer a delete button on the page they were asked to read.
+     *
+     * The caller must still enforce customer scoping on the lookup; this only decides role and
+     * ownership once the page is already known to belong to this user's customer.
+     */
+    public function canDeleteEnterpriseWikiPage(EnterpriseWikiPage $page): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        if ((int) $this->customer_id !== (int) $page->customer_id) {
+            return false;
+        }
+
+        if ($this->isSystemOwner()) {
+            return true;
+        }
+
+        return $page->owner_user_id !== null && (int) $page->owner_user_id === (int) $this->id;
+    }
+
+    /**
      * Which EnterpriseWikiPage statuses this user may READ, anywhere in the Enterprise Wiki UI
      * — the ordinary page list (WikiController::visibleStatuses()), the single-page view
      * (WikiController::show()), and the graph (EnterpriseWikiGraphDataService) all call this so

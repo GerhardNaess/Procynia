@@ -4,15 +4,14 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
+use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
-use App\Models\EnterpriseWikiSourceReference;
-use App\Models\EnterpriseWikiPageVersion;
-use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\UsesProjectPostgresConnection;
@@ -82,6 +81,74 @@ class EnterpriseWikiDocumentWikiAnswerStalenessServiceTest extends TestCase
         $this->assertSame('answer body', $answer->answer_text);
 
         $repeat = $service->markAnswersStaleForDeletedDocument($document, collect([123]), collect([$page->id]));
+        $this->assertSame(0, $repeat['stale_wiki_answer_count']);
+    }
+
+    /**
+     * Deleting the PAGE, not the document behind it. The citation alone is the test: an answer
+     * built on a page that is about to disappear is out of date whether or not its snapshot still
+     * matches the page's current text, which is exactly what markAnswersStaleForWikiPageChange()
+     * would check and skip on.
+     */
+    public function test_marks_answers_stale_when_a_cited_page_is_deleted_outright(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $savedNotice = $this->createSavedNotice($customer->id);
+        $aiDocument = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($aiDocument, 'Beskriv prosessen.');
+        $requirement = $this->createRequirement($savedNotice, $aiDocument, $chunk);
+        $page = $this->createWikiPageWithVersion($customer, 'Endringshåndtering', 'Innhold.');
+        $otherPage = $this->createWikiPageWithVersion($customer, 'Kapasitetsstyring', 'Annet innhold.');
+
+        $answer = $this->createWikiAnswer($requirement, [
+            [
+                'enterprise_wiki_page_id' => $page->id,
+                'page_title' => $page->title,
+                'page_slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'selection_type' => 'direct_search',
+                'discovered_from_page_id' => null,
+                'discovered_from_title' => null,
+                'link_direction' => null,
+                'supporting_claim_ids' => [],
+            ],
+        ]);
+
+        // One answer per requirement, so the control answer needs a requirement of its own.
+        $otherRequirement = $this->createRequirement($savedNotice, $aiDocument, $chunk);
+        $untouched = $this->createWikiAnswer($otherRequirement, [
+            [
+                'enterprise_wiki_page_id' => $otherPage->id,
+                'page_title' => $otherPage->title,
+                'page_slug' => $otherPage->slug,
+                'page_type' => $otherPage->page_type,
+                'selection_type' => 'direct_search',
+                'discovered_from_page_id' => null,
+                'discovered_from_title' => null,
+                'link_direction' => null,
+                'supporting_claim_ids' => [],
+            ],
+        ], 'other answer body');
+
+        $service = app(EnterpriseWikiDocumentWikiAnswerStalenessService::class);
+
+        $result = $service->markAnswersStaleForDeletedWikiPages(collect([$page]));
+
+        $this->assertSame(1, $result['stale_wiki_answer_count']);
+
+        $answer->refresh();
+        $untouched->refresh();
+
+        $this->assertTrue($answer->isStale());
+        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::STALE_REASON_WIKI_PAGE_DELETED, $answer->stale_reason);
+        $this->assertSame([$page->id], $answer->stale_context['deleted_page_ids']);
+        $this->assertSame('Endringshåndtering', $answer->stale_context['stale_subject_name']);
+        // Stale is a marking, never a deletion: the answer is still readable.
+        $this->assertSame('answer body', $answer->answer_text);
+
+        $this->assertFalse($untouched->isStale(), 'an answer built on another page is untouched');
+
+        $repeat = $service->markAnswersStaleForDeletedWikiPages(collect([$page]));
         $this->assertSame(0, $repeat['stale_wiki_answer_count']);
     }
 

@@ -421,6 +421,10 @@ Route::prefix('app')
             // authorization, and general editing must not inherit that contract.
             Route::patch('/{slug}/working-version', [WikiController::class, 'updateWorkingVersion'])->name('working-version.update');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
+            // Deleting a Wiki page is the page's own action, not a side effect of deleting the
+            // source document behind it. Reached by DELETE, so it cannot collide with the GET
+            // catch-all above.
+            Route::delete('/{slug}', [WikiController::class, 'destroy'])->name('destroy');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             // Asking for quality assurance, which is separate from handing the page to a
             // reviewer: QA contributes, the Wiki approver decides.

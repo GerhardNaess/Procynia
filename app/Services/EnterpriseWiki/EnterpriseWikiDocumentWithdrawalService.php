@@ -224,17 +224,7 @@ class EnterpriseWikiDocumentWithdrawalService
             $violations[] = "a canonical fact still cites document [{$documentId}]";
         }
 
-        if ($deletedPageIds->isNotEmpty()) {
-            // The slugs are passed in because the pages themselves are gone by the time this runs —
-            // reading them from the database here would silently check nothing.
-            foreach ($this->currentVersionsFor($this->linkingPageIds($deletedPageIds->map('intval')->all(), $deletedPageSlugs)) as $version) {
-                $violations[] = "page [{$version->enterprise_wiki_page_id}] still links to a page this deletion removes";
-            }
-
-            if (EnterpriseWikiPageLink::query()->whereIn('to_page_id', $deletedPageIds)->exists()) {
-                $violations[] = 'a graph edge still points at a page this deletion removes';
-            }
-        }
+        $violations = array_merge($violations, $this->deletedPageViolations($deletedPageIds, $deletedPageSlugs));
 
         if ($violations !== []) {
             throw EnterpriseWikiWithdrawalNotRepresentableException::activeWikiNotClean($documentId, $violations);
@@ -242,9 +232,72 @@ class EnterpriseWikiDocumentWithdrawalService
     }
 
     /**
+     * The page half of the same contract, on its own: nothing in the active Wiki may still point at
+     * a page this deletion removes.
+     *
+     * Exists so deleting a Wiki page directly — EnterpriseWikiPageDeletionService — gets the exact
+     * check a document deletion already applies to the pages it takes with it, rather than a second
+     * implementation of it. Runs inside the deletion transaction, after everything else, so a
+     * violation rolls the whole deletion back.
+     *
+     * @param  Collection<int, int>  $deletedPageIds
+     * @param  list<string>  $deletedPageSlugs  Captured BEFORE the pages were deleted.
+     *
+     * @throws EnterpriseWikiWithdrawalNotRepresentableException
+     */
+    public function assertNoActiveReferencesToDeletedPages(Collection $deletedPageIds, array $deletedPageSlugs): void
+    {
+        $violations = $this->deletedPageViolations($deletedPageIds, $deletedPageSlugs);
+
+        if ($violations !== []) {
+            throw EnterpriseWikiWithdrawalNotRepresentableException::activeWikiStillReferencesDeletedPages($violations);
+        }
+    }
+
+    /**
+     * @param  Collection<int, int>  $deletedPageIds
+     * @param  list<string>  $deletedPageSlugs
+     * @return list<string>
+     */
+    private function deletedPageViolations(Collection $deletedPageIds, array $deletedPageSlugs): array
+    {
+        if ($deletedPageIds->isEmpty()) {
+            return [];
+        }
+
+        $violations = [];
+
+        // The slugs are passed in because the pages themselves are gone by the time this runs —
+        // reading them from the database here would silently check nothing.
+        foreach ($this->currentVersionsFor($this->pagesLinkingTo($deletedPageIds, $deletedPageSlugs)) as $version) {
+            $violations[] = "page [{$version->enterprise_wiki_page_id}] still links to a page this deletion removes";
+        }
+
+        if (EnterpriseWikiPageLink::query()->whereIn('to_page_id', $deletedPageIds)->exists()) {
+            $violations[] = 'a graph edge still points at a page this deletion removes';
+        }
+
+        return $violations;
+    }
+
+    /**
      * Pages whose CURRENT version links to one of the doomed pages — by recorded edge or by the
      * canonical slug appearing in block markdown. Exact matching only.
      *
+     * Public because a caller that deletes pages has to know which other pages this rewrites: their
+     * graph projection is built from their own outgoing links, so they have to be reprojected after
+     * the deletion commits. Asking the same question twice is what would let the two answers drift.
+     *
+     * @param  Collection<int, int>  $doomedPageIds
+     * @param  list<string>  $doomedSlugs
+     * @return Collection<int, int>
+     */
+    public function pagesLinkingTo(Collection $doomedPageIds, array $doomedSlugs): Collection
+    {
+        return $this->linkingPageIds($doomedPageIds->map('intval')->values()->all(), $doomedSlugs);
+    }
+
+    /**
      * @param  list<int>  $doomedIds
      * @param  list<string>  $doomedSlugs
      * @return Collection<int, int>
