@@ -13,7 +13,7 @@ test('Oversikt lists what needs attention and leads to the objects', async ({ pa
     const panel = page.locator('section', { has: page.getByRole('heading', { name: 'Trenger oppmerksomhet' }) });
     await expect(panel).toBeVisible();
 
-    for (const title of ['Kontroller uten evidens', 'Kontroller uten aktivitet', 'Prosesser uten styrende dokument']) {
+    for (const title of ['Kontroller uten evidens', 'Kontroller uten aktivitet', 'Prosesser uten styrende dokument', 'Prosesser forfalt til revisjon']) {
         await expect(panel.getByRole('heading', { name: title })).toBeVisible();
     }
 

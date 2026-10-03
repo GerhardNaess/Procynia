@@ -146,6 +146,10 @@ return [
                 'title' => 'Prosesser uten styrende dokument',
                 'help' => 'Ingen gjeldende policy styrer prosessen. Koble en policy til prosessen med relasjonen «styrer».',
             ],
+            'processes_overdue_for_review' => [
+                'title' => 'Prosesser forfalt til revisjon',
+                'help' => 'Neste revisjonsdato har passert. Prosessen bør gjennomgås og revisjonen registreres.',
+            ],
         ],
         'register' => [
             'heading' => 'Kontrollregister',

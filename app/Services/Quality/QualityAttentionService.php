@@ -18,7 +18,12 @@ use Illuminate\Support\Collection;
  * Retired items are left out throughout. They are no longer in force, so a gap in one is history,
  * not something anybody needs to act on.
  *
- * Deliberately not here: "activity without a responsible role". A flow cannot record that state
+ * Deliberately not here: "a governing policy changed after the process was last approved". A
+ * policy has no revisions and no record of when its content changed — `updated_at` also moves when
+ * its owner, number, status or review date is edited, and the files and Wiki pages that carry its
+ * actual text are separate rows that never touch it — so "changed" could not be told from "touched".
+ *
+ * Nor "activity without a responsible role". A flow cannot record that state
  * reliably — normalisation puts every activity in a lane, and the placeholder lane for "no role"
  * is only recognisable by a translated label or by a key one write path uses and the other does
  * not — so a rule over it would be a guess.
@@ -30,6 +35,8 @@ class QualityAttentionService
     public const CONTROLS_WITHOUT_ACTIVITY = 'controls_without_activity';
 
     public const PROCESSES_WITHOUT_GOVERNING_POLICY = 'processes_without_governing_policy';
+
+    public const PROCESSES_OVERDUE_FOR_REVIEW = 'processes_overdue_for_review';
 
     public function __construct(
         private readonly QualityActivityControlService $activityControls,
@@ -55,6 +62,10 @@ class QualityAttentionService
             [
                 'key' => self::PROCESSES_WITHOUT_GOVERNING_POLICY,
                 'items' => $this->rows($this->processesWithoutGoverningPolicy($customerId)),
+            ],
+            [
+                'key' => self::PROCESSES_OVERDUE_FOR_REVIEW,
+                'items' => $this->rows($this->processesOverdueForReview($customerId)),
             ],
         ];
     }
@@ -115,6 +126,21 @@ class QualityAttentionService
                     ->where('policies.quality_type', QualityItem::TYPE_POLICY)
                     ->where('policies.status', '!=', QualityItem::STATUS_RETIRED);
             })
+            ->get();
+    }
+
+    /**
+     * A process whose next review date has passed. The date is never typed: QualityItemService
+     * derives it from the last review and the interval, so a process with no review cycle has no
+     * date and is not overdue. Due today is not yet overdue.
+     *
+     * @return Collection<int, QualityItem>
+     */
+    private function processesOverdueForReview(int $customerId): Collection
+    {
+        return $this->inForce($customerId, QualityItem::TYPE_PROCESS)
+            ->whereNotNull('next_review_at')
+            ->whereDate('next_review_at', '<', today()->toDateString())
             ->get();
     }
 

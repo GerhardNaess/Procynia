@@ -25,7 +25,7 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Oversikt's "Trenger oppmerksomhet": three fixed rules over Quality's own rows.
+ * Oversikt's "Trenger oppmerksomhet": four fixed rules over Quality's own rows.
  *
  * Each rule is checked from both sides — the object that trips it and the change that clears it —
  * plus the two things every rule shares: retired items are left out, and nothing crosses the
@@ -68,6 +68,7 @@ class QualityAttentionTest extends TestCase
             QualityAttentionService::CONTROLS_WITHOUT_EVIDENCE,
             QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY,
             QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY,
+            QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW,
         ], array_column($attention, 'key'));
         $this->assertSame([(int) $control->id], array_column($attention[0]['items'], 'id'));
         $this->assertSame(route('app.quality.items.show', ['item' => $control->id]), $attention[0]['items'][0]['url']);
@@ -135,11 +136,41 @@ class QualityAttentionTest extends TestCase
         $this->assertSame([(int) $process->id], $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
     }
 
+    public function test_a_process_is_overdue_only_once_its_derived_review_date_has_passed(): void
+    {
+        $customer = $this->customer();
+        $items = app(QualityItemService::class);
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshåndtering');
+        $this->item($customer, QualityItem::TYPE_POLICY, 'Forfalt policy')
+            ->forceFill(['next_review_at' => today()->subYear()])->save();
+
+        // No review cycle: no date, nothing to be overdue against.
+        $this->assertSame([], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
+
+        // Last reviewed 13 months ago on a 12-month cycle: due a month ago.
+        $items->updateItem((int) $customer->id, $process, [
+            'review_interval_months' => 12,
+            'last_reviewed_at' => today()->subMonths(13)->toDateString(),
+        ]);
+        $this->assertSame([(int) $process->id], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
+
+        // Due today is not yet overdue.
+        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->subMonths(12)->toDateString()]);
+        $this->assertSame([], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
+
+        // Recording a fresh review clears it.
+        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->subMonths(13)->toDateString()]);
+        $items->updateItem((int) $customer->id, $process, ['last_reviewed_at' => today()->toDateString()]);
+        $this->assertSame([], $this->ids($customer, QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW));
+    }
+
     public function test_retired_items_are_never_findings(): void
     {
         $customer = $this->customer();
         $this->item($customer, QualityItem::TYPE_CONTROL, 'Utgått kontroll', QualityItem::STATUS_RETIRED);
-        $this->item($customer, QualityItem::TYPE_PROCESS, 'Utgått prosess', QualityItem::STATUS_RETIRED);
+        $this->item($customer, QualityItem::TYPE_PROCESS, 'Utgått prosess', QualityItem::STATUS_RETIRED)
+            ->forceFill(['review_interval_months' => 12, 'last_reviewed_at' => today()->subYears(2), 'next_review_at' => today()->subYear()])
+            ->save();
 
         foreach (app(QualityAttentionService::class)->findings((int) $customer->id) as $finding) {
             $this->assertSame([], $finding['items'], $finding['key']);
@@ -152,8 +183,10 @@ class QualityAttentionTest extends TestCase
         $other = $this->customer();
         $ownControl = $this->item($customer, QualityItem::TYPE_CONTROL, 'Egen kontroll');
         $ownProcess = $this->item($customer, QualityItem::TYPE_PROCESS, 'Egen prosess');
+        $ownProcess->forceFill(['next_review_at' => today()->subDay()])->save();
         $this->item($other, QualityItem::TYPE_CONTROL, 'Annen kundes kontroll');
-        $this->item($other, QualityItem::TYPE_PROCESS, 'Annen kundes prosess');
+        $this->item($other, QualityItem::TYPE_PROCESS, 'Annen kundes prosess')
+            ->forceFill(['next_review_at' => today()->subDay()])->save();
 
         $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
         $attention = collect($this->actingAs($reader)->get('/app/quality')
@@ -163,6 +196,7 @@ class QualityAttentionTest extends TestCase
         $this->assertSame([(int) $ownControl->id], $attention[QualityAttentionService::CONTROLS_WITHOUT_EVIDENCE]);
         $this->assertSame([(int) $ownControl->id], $attention[QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY]);
         $this->assertSame([(int) $ownProcess->id], $attention[QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY]);
+        $this->assertSame([(int) $ownProcess->id], $attention[QualityAttentionService::PROCESSES_OVERDUE_FOR_REVIEW]);
     }
 
     // ---------------------------------------------------------------------

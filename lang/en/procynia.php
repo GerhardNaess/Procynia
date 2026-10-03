@@ -146,6 +146,10 @@ return [
                 'title' => 'Processes without a governing document',
                 'help' => 'No policy in force governs the process. Link a policy to the process with the "governs" relation.',
             ],
+            'processes_overdue_for_review' => [
+                'title' => 'Processes overdue for review',
+                'help' => 'The next review date has passed. The process should be reviewed and the review recorded.',
+            ],
         ],
         'register' => [
             'heading' => 'Control register',

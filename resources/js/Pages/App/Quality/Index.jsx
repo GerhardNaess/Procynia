@@ -195,7 +195,7 @@ function AttentionPanel({ findings, tq }) {
             </h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{ta.help ?? ''}</p>
 
-            <ul className="mt-4 grid gap-3 lg:grid-cols-3">
+            <ul className="mt-4 grid gap-3 lg:grid-cols-2">
                 {findings.map((finding) => (
                     <AttentionFinding key={finding.key} finding={finding} ta={ta} />
                 ))}
