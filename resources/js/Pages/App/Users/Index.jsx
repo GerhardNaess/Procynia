@@ -118,6 +118,18 @@ export default function UsersIndex({ users }) {
                                                     {user.bid_manager_scope_summary}
                                                 </span>
                                             ) : null}
+                                            {(user.customer_roles ?? []).map((role) => (
+                                                <span
+                                                    key={role.id}
+                                                    className={
+                                                        role.is_active
+                                                            ? 'rounded-full bg-violet-100 px-3 py-1 text-violet-700'
+                                                            : 'rounded-full bg-slate-200 px-3 py-1 text-slate-600'
+                                                    }
+                                                >
+                                                    {role.name}
+                                                </span>
+                                            ))}
                                             <span
                                                 className={
                                                     user.is_active
@@ -178,6 +190,7 @@ export default function UsersIndex({ users }) {
                                                     <InfoHint size="sm" align="left" label="Vis forklaring for Rolle" text={tu.hint_role_column} />
                                                 </span>
                                             </th>
+                                            <th className="px-6 py-4">{tu.col_customer_roles ?? 'Egne roller'}</th>
                                             <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4">Opprettet</th>
                                             <th className="px-6 py-4">Handlinger</th>
@@ -203,6 +216,26 @@ export default function UsersIndex({ users }) {
                                                             <div className="text-xs font-medium text-slate-500">{user.bid_manager_scope_summary}</div>
                                                         ) : null}
                                                     </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {(user.customer_roles ?? []).length === 0 ? (
+                                                        <span className="text-slate-500">{tu.no_customer_roles ?? 'Ingen'}</span>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {user.customer_roles.map((role) => (
+                                                                <span
+                                                                    key={role.id}
+                                                                    className={
+                                                                        role.is_active
+                                                                            ? 'inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700'
+                                                                            : 'inline-flex rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600'
+                                                                    }
+                                                                >
+                                                                    {role.name}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span

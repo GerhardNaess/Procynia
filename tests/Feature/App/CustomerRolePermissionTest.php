@@ -11,6 +11,7 @@ use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -74,11 +75,10 @@ class CustomerRolePermissionTest extends TestCase
 
         $contributor = $this->contributor($customer, 'union@example.test');
 
-        $this->actingAs($owner)
-            ->patch("/app/customer-environment/users/{$contributor->id}/roles", [
-                'role_ids' => [$qualityRole->id, $wikiRole->id],
-            ])
-            ->assertRedirect('/app/customer-environment?tab=permissions');
+        // Assignment happens on the user's own edit screen, on the same save as the rest of the
+        // user's identity — Tilganger only defines the roles.
+        $this->assignRoles($owner, $contributor, [$qualityRole->id, $wikiRole->id])
+            ->assertRedirect('/app/users');
 
         $permissions = app(CustomerPermissionService::class)->effectivePermissions($contributor->fresh());
 
@@ -135,12 +135,8 @@ class CustomerRolePermissionTest extends TestCase
         // Another tenant's role cannot be edited, deleted or handed out.
         $this->actingAs($owner)->patch("/app/customer-environment/roles/{$foreignRole->id}", ['name' => 'Kapret'])->assertNotFound();
         $this->actingAs($owner)->delete("/app/customer-environment/roles/{$foreignRole->id}")->assertNotFound();
-        $this->actingAs($owner)
-            ->patch("/app/customer-environment/users/{$ownContributor->id}/roles", ['role_ids' => [$foreignRole->id]])
-            ->assertNotFound();
-        $this->actingAs($owner)
-            ->patch("/app/customer-environment/users/{$foreignContributor->id}/roles", ['role_ids' => []])
-            ->assertNotFound();
+        $this->assignRoles($owner, $ownContributor, [$foreignRole->id])->assertNotFound();
+        $this->assignRoles($owner, $foreignContributor, [])->assertNotFound();
 
         $this->assertSame('Fremmed rolle', $foreignRole->fresh()->name);
         $this->assertSame([], $ownContributor->fresh()->customerRoles()->pluck('customer_roles.id')->all());
@@ -227,6 +223,130 @@ class CustomerRolePermissionTest extends TestCase
         $this->assertSame(1, CustomerRole::query()->where('customer_id', $own->id)->count());
     }
 
+    public function test_the_edit_screen_offers_the_customers_roles_and_remembers_which_are_held(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $contributor = $this->contributor($customer, 'edit-screen@example.test');
+
+        $quality = $this->createRole($customer, 'Kvalitetsleder', [CustomerPermissionCatalog::QUALITY_EDIT]);
+        $wiki = $this->createRole($customer, 'Wiki-redaktør', [CustomerPermissionCatalog::WIKI_EDIT]);
+        $retired = $this->createRole($customer, 'Avviklet rolle', []);
+        $retired->update(['is_active' => false]);
+
+        $contributor->customerRoles()->attach($quality->id, ['customer_id' => $customer->id]);
+
+        $this->actingAs($owner)
+            ->get("/app/users/{$contributor->id}/edit")
+            ->assertOk()
+            ->assertViewHas('page', function ($page) use ($quality, $wiki, $retired): bool {
+                $options = collect(data_get($page, 'props.customerRoleOptions', []));
+
+                return data_get($page, 'props.canEditCustomerRoles') === true
+                    && data_get($page, 'props.user.customer_role_ids') === [$quality->id]
+                    // The retired role is not held, so it is not on offer at all.
+                    && $options->pluck('id')->sort()->values()->all() === collect([$quality->id, $wiki->id])->sort()->values()->all()
+                    && ! $options->pluck('id')->contains($retired->id);
+            });
+    }
+
+    public function test_saving_the_user_assigns_several_roles_without_touching_the_bid_side(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $contributor = $this->contributor($customer, 'multi@example.test');
+        $contributor->forceFill(['is_qa' => true])->save();
+
+        $quality = $this->createRole($customer, 'Kvalitetsleder', [CustomerPermissionCatalog::QUALITY_EDIT]);
+        $wiki = $this->createRole($customer, 'Wiki-redaktør', [CustomerPermissionCatalog::WIKI_EDIT]);
+
+        $this->assignRoles($owner, $contributor, [$quality->id, $wiki->id])
+            ->assertRedirect('/app/users');
+
+        $fresh = $contributor->fresh();
+
+        $this->assertSame(
+            [$quality->id, $wiki->id],
+            $fresh->customerRoles()->pluck('customer_roles.id')->sort()->values()->all(),
+        );
+
+        // Anbud is untouched: role, QA and the hardcoded Wiki approver flag all survive the save.
+        $this->assertSame(User::BID_ROLE_CONTRIBUTOR, $fresh->resolvedBidRole());
+        $this->assertTrue((bool) $fresh->is_qa);
+
+        // And the same screen can take every role away again.
+        $this->assignRoles($owner, $contributor, [])->assertRedirect('/app/users');
+        $this->assertSame([], $contributor->fresh()->customerRoles()->pluck('customer_roles.id')->all());
+    }
+
+    public function test_an_inactive_role_cannot_be_newly_assigned_but_an_existing_one_survives_a_save(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $contributor = $this->contributor($customer, 'retired@example.test');
+
+        $held = $this->createRole($customer, 'Kvalitetsleder', [CustomerPermissionCatalog::QUALITY_EDIT]);
+        $contributor->customerRoles()->attach($held->id, ['customer_id' => $customer->id]);
+        $held->update(['is_active' => false]);
+
+        $fresh = $this->createRole($customer, 'Ny rolle', []);
+        $fresh->update(['is_active' => false]);
+
+        $this->assignRoles($owner, $contributor, [$held->id, $fresh->id])
+            ->assertSessionHasErrors('customer_role_ids');
+
+        // The held-but-inactive role is still offered, so an unrelated save does not drop it.
+        $this->assignRoles($owner, $contributor, [$held->id])->assertRedirect('/app/users');
+
+        $this->assertSame(
+            [$held->id],
+            $contributor->fresh()->customerRoles()->pluck('customer_roles.id')->all(),
+        );
+        $this->assertSame([], app(CustomerPermissionService::class)->effectivePermissions($contributor->fresh()));
+    }
+
+    public function test_a_bid_manager_cannot_hand_out_customer_roles(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $bidManager = $this->bidManager($customer, 'bm@example.test');
+        $contributor = $this->contributor($customer, 'bm-target@example.test');
+
+        $role = $this->createRole($customer, 'Kvalitetsleder', [CustomerPermissionCatalog::QUALITY_EDIT]);
+
+        $this->actingAs($bidManager)
+            ->put("/app/users/{$contributor->id}", [
+                'name' => $contributor->name,
+                'customer_role_ids' => [$role->id],
+            ])
+            ->assertForbidden();
+
+        $this->assertSame([], $contributor->fresh()->customerRoles()->pluck('customer_roles.id')->all());
+
+        // The edit screen does not offer the section to them either.
+        $this->actingAs($bidManager)
+            ->get("/app/users/{$contributor->id}/edit")
+            ->assertOk()
+            ->assertViewHas('page', fn ($page): bool => data_get($page, 'props.canEditCustomerRoles') === false);
+    }
+
+    /**
+     * Hand a user a set of customer roles the way the product does: a save on Rediger bruker.
+     *
+     * @param  list<int>  $roleIds
+     */
+    private function assignRoles(User $actor, User $target, array $roleIds): TestResponse
+    {
+        return $this->actingAs($actor)->put("/app/users/{$target->id}", [
+            'name' => $target->name,
+            'bid_role' => $target->resolvedBidRole(),
+            // The real form posts the whole identity on every save, so the helper does too —
+            // otherwise this would be testing role assignment against a payload no screen sends.
+            'is_qa' => $target->is_qa ? '1' : '0',
+            'is_wiki_approver' => $target->is_wiki_approver ? '1' : '0',
+            'customer_role_ids' => $roleIds,
+        ]);
+    }
+
     private function createRole(Customer $customer, string $name, array $permissionKeys): CustomerRole
     {
         $role = CustomerRole::query()->create([
@@ -247,6 +367,18 @@ class CustomerRolePermissionTest extends TestCase
             'role' => User::ROLE_CUSTOMER_ADMIN,
             'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
             'bid_manager_scope' => null,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+    }
+
+    private function bidManager(Customer $customer, string $email): User
+    {
+        return User::factory()->create([
+            'email' => $email,
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);

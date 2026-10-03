@@ -265,15 +265,14 @@ Route::prefix('app')
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
 
         // Customer-defined roles. System Owner only, enforced in the controller — these sit beside
-        // the fixed bid_role matrix above and never touch anbud authorization.
+        // the fixed bid_role matrix above and never touch anbud authorization. Tilganger defines
+        // a role; handing it to a person happens on the user's own edit screen.
         Route::post('/customer-environment/roles', [CustomerRoleController::class, 'store'])
             ->name('customer-environment.roles.store');
         Route::patch('/customer-environment/roles/{customerRole}', [CustomerRoleController::class, 'update'])
             ->name('customer-environment.roles.update');
         Route::delete('/customer-environment/roles/{customerRole}', [CustomerRoleController::class, 'destroy'])
             ->name('customer-environment.roles.destroy');
-        Route::patch('/customer-environment/users/{user}/roles', [CustomerRoleController::class, 'updateUserRoles'])
-            ->name('customer-environment.users.roles.update');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');

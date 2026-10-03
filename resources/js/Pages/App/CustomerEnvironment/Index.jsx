@@ -589,6 +589,7 @@ export default function CustomerEnvironmentIndex({
                                                 <th className="px-6 py-4">Navn</th>
                                                 <th className="px-6 py-4">E-post</th>
                                                 <th className="px-6 py-4">Rolle</th>
+                                                <th className="px-6 py-4">{tce.col_customer_roles ?? 'Egne roller'}</th>
                                                 <th className="px-6 py-4">Avdelinger</th>
                                                 <th className="px-6 py-4">Status</th>
                                                 <th className="px-6 py-4">Handlinger</th>
@@ -624,6 +625,28 @@ export default function CustomerEnvironmentIndex({
                                                                 {user.bid_manager_scope_summary}
                                                             </div>
                                                         ) : null}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {(user.customer_roles ?? []).length === 0 ? (
+                                                            <span className="text-slate-600">
+                                                                {tce.no_customer_roles ?? 'Ingen'}
+                                                            </span>
+                                                        ) : (
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {user.customer_roles.map((role) => (
+                                                                    <span
+                                                                        key={role.id}
+                                                                        className={
+                                                                            role.is_active
+                                                                                ? 'inline-flex items-center rounded-full bg-violet-100 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700'
+                                                                                : 'inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700'
+                                                                        }
+                                                                    >
+                                                                        {role.name}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4">
                                                         <div className="space-y-3">
@@ -881,7 +904,6 @@ export default function CustomerEnvironmentIndex({
                         {customerRoles ? (
                             <CustomerRolesPanel
                                 customerRoles={customerRoles}
-                                users={users}
                                 modal={EnvironmentModal}
                                 t={tce.roles ?? {}}
                             />

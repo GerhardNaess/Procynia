@@ -20,12 +20,15 @@ function classNames(...values) {
  * simply not part of that conversation — showing it as an empty row only adds noise. The filter is
  * presentation alone: the role list below shows every role, and the edit dialog always offers both
  * permission groups, so extending a role into the other domain stays one checkbox away.
+ *
+ * This panel defines roles; it does not hand them out. Assignment lives on Rediger bruker, where
+ * the rest of a person's identity is set, so an administrator answers "what is this person" in one
+ * place and on one save.
  */
-export default function CustomerRolesPanel({ customerRoles, users, modal: Modal, t = {} }) {
+export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {} }) {
     const { domains = [], roles = [], store_url: storeUrl } = customerRoles;
 
     const [roleModal, setRoleModal] = useState({ mode: null, role: null });
-    const [assignModal, setAssignModal] = useState({ user: null });
     const [savingRoleId, setSavingRoleId] = useState(null);
 
     const roleForm = useForm({
@@ -34,8 +37,6 @@ export default function CustomerRolesPanel({ customerRoles, users, modal: Modal,
         is_active: true,
         permissions: [],
     });
-
-    const assignForm = useForm({ role_ids: [] });
 
     const openCreateRole = () => {
         roleForm.clearErrors();
@@ -115,25 +116,6 @@ export default function CustomerRolesPanel({ customerRoles, users, modal: Modal,
         router.delete(role.delete_url, { preserveScroll: true, preserveState: false });
     };
 
-    const openAssign = (user) => {
-        assignForm.clearErrors();
-        assignForm.setData('role_ids', [...(user.customer_role_ids ?? [])]);
-        setAssignModal({ user });
-    };
-
-    const submitAssignment = (event) => {
-        event.preventDefault();
-
-        if (!assignModal.user) {
-            return;
-        }
-
-        assignForm.patch(assignModal.user.roles_update_url, {
-            preserveScroll: true,
-            onSuccess: () => setAssignModal({ user: null }),
-        });
-    };
-
     const toggleFormPermission = (permissionKey) => {
         const current = roleForm.data.permissions ?? [];
 
@@ -142,15 +124,6 @@ export default function CustomerRolesPanel({ customerRoles, users, modal: Modal,
             current.includes(permissionKey)
                 ? current.filter((key) => key !== permissionKey)
                 : [...current, permissionKey],
-        );
-    };
-
-    const toggleAssignedRole = (roleId) => {
-        const current = assignForm.data.role_ids ?? [];
-
-        assignForm.setData(
-            'role_ids',
-            current.includes(roleId) ? current.filter((id) => id !== roleId) : [...current, roleId],
         );
     };
 
@@ -324,77 +297,6 @@ export default function CustomerRolesPanel({ customerRoles, users, modal: Modal,
                 )}
             </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                <h2 className="text-lg font-semibold text-slate-950">{t.assignment_heading ?? 'Tildeling av roller'}</h2>
-                <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
-                    {t.assignment_subtitle ?? ''}
-                </p>
-
-                <div className="mt-6 overflow-x-auto">
-                    <table className="w-full text-base">
-                        <thead>
-                            <tr className="border-b border-slate-200">
-                                <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {t.col_user ?? 'Bruker'}
-                                </th>
-                                <th className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {t.col_bid_role ?? 'Anbudsrolle'}
-                                </th>
-                                <th className="px-4 pb-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {t.col_customer_roles ?? 'Egne roller'}
-                                </th>
-                                <th className="pb-3 pl-4 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {t.col_actions ?? 'Handlinger'}
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {users.map((user) => (
-                                <tr key={user.id}>
-                                    <td className="py-4 pr-6 text-slate-900">
-                                        <span className="font-medium">{user.name}</span>
-                                        <span className="mt-0.5 block text-base font-normal leading-6 text-slate-500">
-                                            {user.email}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-4 text-slate-600">{user.bid_role}</td>
-                                    <td className="px-4 py-4">
-                                        {(user.customer_roles ?? []).length === 0 ? (
-                                            <span className="text-slate-500">{t.no_roles_assigned ?? 'Ingen'}</span>
-                                        ) : (
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {user.customer_roles.map((role) => (
-                                                    <span
-                                                        key={role.id}
-                                                        className={classNames(
-                                                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-semibold',
-                                                            role.is_active
-                                                                ? 'bg-violet-50 text-violet-700'
-                                                                : 'bg-slate-100 text-slate-500',
-                                                        )}
-                                                    >
-                                                        {role.name}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="py-4 pl-4 text-right">
-                                        <button
-                                            type="button"
-                                            onClick={() => openAssign(user)}
-                                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
-                                        >
-                                            {t.assign ?? 'Endre roller'}
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
             <Modal
                 isOpen={roleModal.mode !== null}
                 title={roleModal.mode === 'edit' ? (t.modal_edit_title ?? 'Rediger rolle') : (t.modal_create_title ?? 'Ny rolle')}
@@ -496,69 +398,6 @@ export default function CustomerRolesPanel({ customerRoles, users, modal: Modal,
                             className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                         >
                             {roleForm.processing ? (t.saving ?? 'Lagrer...') : (t.save ?? 'Lagre rolle')}
-                        </button>
-                    </div>
-                </form>
-            </Modal>
-
-            <Modal
-                isOpen={assignModal.user !== null}
-                title={(t.modal_assign_title ?? 'Roller for :name').replace(':name', assignModal.user?.name ?? '')}
-                description={t.modal_assign_description ?? ''}
-                onClose={() => setAssignModal({ user: null })}
-            >
-                <form onSubmit={submitAssignment} className="space-y-5">
-                    {roles.length === 0 ? (
-                        <p className="text-base leading-6 text-slate-600">{t.no_roles_to_assign ?? ''}</p>
-                    ) : (
-                        <div className="grid gap-2 sm:grid-cols-2">
-                            {roles.map((role) => {
-                                const checked = (assignForm.data.role_ids ?? []).includes(role.id);
-
-                                return (
-                                    <label
-                                        key={role.id}
-                                        className={classNames(
-                                            'flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-base transition',
-                                            checked
-                                                ? 'border-violet-300 bg-violet-50 text-violet-900'
-                                                : 'border-slate-200 text-slate-700 hover:border-slate-300',
-                                        )}
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            onChange={() => toggleAssignedRole(role.id)}
-                                            className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300"
-                                        />
-                                        <span>
-                                            {role.name}
-                                            {!role.is_active ? (
-                                                <span className="ml-2 text-sm font-semibold text-slate-500">
-                                                    ({t.inactive ?? 'Inaktiv'})
-                                                </span>
-                                            ) : null}
-                                        </span>
-                                    </label>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    <div className="flex flex-wrap justify-end gap-3">
-                        <button
-                            type="button"
-                            onClick={() => setAssignModal({ user: null })}
-                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition ${SECONDARY_COLOURS}`}
-                        >
-                            {t.cancel ?? 'Avbryt'}
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={assignForm.processing || roles.length === 0}
-                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
-                        >
-                            {assignForm.processing ? (t.saving ?? 'Lagrer...') : (t.save ?? 'Lagre')}
                         </button>
                     </div>
                 </form>

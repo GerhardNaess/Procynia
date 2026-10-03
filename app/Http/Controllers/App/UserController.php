@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
 use App\Models\Customer;
+use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
 use App\Services\Billing\BillingEntitlementService;
@@ -37,6 +38,7 @@ class UserController extends Controller
                 'primaryDepartment:id,name',
                 'departments:id,name,is_active',
                 'managedDepartments:id,name,is_active',
+                'customerRoles:id,name,is_active',
             ])
             ->orderByDesc('created_at')
             ->get()
@@ -96,6 +98,11 @@ class UserController extends Controller
             ),
             'canEditRole' => $this->canEditBidRole($actor, $record),
             'canEditBidManagerScope' => $this->canEditBidManagerScope($actor, $record),
+            // Assigning the customer's own roles belongs here rather than in Tilganger: this is
+            // the screen an administrator opens to answer "what is this person", and the role is
+            // part of that answer. Tilganger stays the place where a role is defined.
+            'canEditCustomerRoles' => $this->canEditCustomerRoles($actor),
+            'customerRoleOptions' => $this->customerRoleOptions($customerId, $record),
         ]);
     }
 
@@ -230,6 +237,9 @@ class UserController extends Controller
             $departmentIds,
             $record,
         );
+        $customerRoleIds = $this->canEditCustomerRoles($actor)
+            ? $this->validatedCustomerRoleIds($customerId, $validated, $record)
+            : null;
 
         if ($this->wouldRemoveLastActiveSystemOwner($record, $nextBidRole, (bool) $record->is_active)) {
             throw ValidationException::withMessages([
@@ -247,7 +257,9 @@ class UserController extends Controller
             $bidManagerScope,
             $managedDepartmentIds,
             $primaryAffiliationScope,
-            $primaryDepartmentId
+            $primaryDepartmentId,
+            $customerRoleIds,
+            $customerId
         ): void {
             $attributes = [
                 'name' => Str::squish($validated['name']),
@@ -269,6 +281,10 @@ class UserController extends Controller
 
             $this->syncUserDepartments($record, $departmentIds, $primaryDepartmentId);
             $this->syncManagedDepartments($record, $bidManagerScope, $managedDepartmentIds);
+
+            if ($customerRoleIds !== null) {
+                $this->syncCustomerRoles($record, $customerRoleIds, $customerId);
+            }
         });
 
         if ($record->is($actor) && $nextBidRole !== User::BID_ROLE_BID_MANAGER) {
@@ -338,6 +354,7 @@ class UserController extends Controller
                 'primaryDepartment:id,name',
                 'departments:id,name,is_active',
                 'managedDepartments:id,name,is_active',
+                'customerRoles:id,name,is_active',
             ])
             ->whereKey($userId)
             ->firstOrFail();
@@ -379,6 +396,116 @@ class UserController extends Controller
     private function canEditBidManagerScope(User $actor, User $record): bool
     {
         return $actor->isSystemOwner() && ! $record->is($actor);
+    }
+
+    /**
+     * Who may hand out the customer's own roles.
+     *
+     * System Owner only, exactly as in Tilganger where the roles are defined — but unlike bid_role
+     * this one is not withheld on your own account. A customer role cannot lock a System Owner out
+     * of anything: CustomerPermissionService grants them the whole catalogue regardless of which
+     * roles they hold, so ticking or unticking a box on yourself here is always recoverable.
+     */
+    private function canEditCustomerRoles(User $actor): bool
+    {
+        return $actor->isSystemOwner();
+    }
+
+    /**
+     * The roles the form may offer: every active role of the customer, plus any inactive role the
+     * user already holds.
+     *
+     * The second half is what keeps a deactivated role honest. The assignment survives
+     * deactivation on purpose — it is how "turn this off for a while" stays reversible — so the
+     * form has to show it, or saving an unrelated field would silently drop it. It is shown as
+     * inactive and cannot be ticked on; it can only be removed.
+     *
+     * @return list<array{id: int, name: string, is_active: bool}>
+     */
+    private function customerRoleOptions(int $customerId, User $record): array
+    {
+        $heldRoleIds = $this->customerRoleIds($record);
+
+        return CustomerRole::query()
+            ->forCustomer($customerId)
+            ->where(function ($query) use ($heldRoleIds): void {
+                $query->where('is_active', true);
+
+                if ($heldRoleIds !== []) {
+                    $query->orWhereIn('id', $heldRoleIds);
+                }
+            })
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'is_active'])
+            ->map(fn (CustomerRole $role): array => [
+                'id' => (int) $role->id,
+                'name' => $role->name,
+                'is_active' => (bool) $role->is_active,
+            ])
+            ->all();
+    }
+
+    /** @return list<int> */
+    private function customerRoleIds(User $user): array
+    {
+        return $user->customerRoles->pluck('id')->map(fn (mixed $id): int => (int) $id)->all();
+    }
+
+    /** @return list<array{id: int, name: string, is_active: bool}> */
+    private function customerRoleBadges(User $user): array
+    {
+        return $user->customerRoles
+            ->map(fn (CustomerRole $role): array => [
+                'id' => (int) $role->id,
+                'name' => $role->name,
+                'is_active' => (bool) $role->is_active,
+            ])
+            ->all();
+    }
+
+    /**
+     * The role ids the request may actually store.
+     *
+     * A role from another tenant is not found rather than reported, because reporting it would
+     * confirm that someone else's role id exists. A role that is merely inactive is a validation
+     * message instead: the administrator may well be looking at a page rendered before a colleague
+     * deactivated it, and that is an ordinary conflict, not an attack.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return list<int>
+     */
+    private function validatedCustomerRoleIds(int $customerId, array $validated, User $record): array
+    {
+        $requested = array_values(array_unique(array_map(
+            'intval',
+            (array) ($validated['customer_role_ids'] ?? []),
+        )));
+
+        if ($requested === []) {
+            return [];
+        }
+
+        $roles = CustomerRole::query()
+            ->forCustomer($customerId)
+            ->whereIn('id', $requested)
+            ->get(['id', 'is_active']);
+
+        abort_unless($roles->count() === count($requested), 404);
+
+        $heldRoleIds = $this->customerRoleIds($record);
+
+        $newlyInactive = $roles
+            ->filter(fn (CustomerRole $role): bool => ! $role->is_active && ! in_array((int) $role->id, $heldRoleIds, true))
+            ->isNotEmpty();
+
+        if ($newlyInactive) {
+            throw ValidationException::withMessages([
+                'customer_role_ids' => __('procynia.users_form.customer_roles_inactive_error'),
+            ]);
+        }
+
+        return $requested;
     }
 
     private function ensureActorCanAssignBidRole(User $actor, ?User $record, string $targetBidRole): void
@@ -543,6 +670,8 @@ class UserController extends Controller
             'bid_role_value' => $user->resolvedBidRole(),
             'is_qa' => (bool) $user->is_qa,
             'is_wiki_approver' => (bool) $user->is_wiki_approver,
+            'customer_role_ids' => $this->customerRoleIds($user),
+            'customer_roles' => $this->customerRoleBadges($user),
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
@@ -587,6 +716,8 @@ class UserController extends Controller
             'bid_role_label' => $user->bid_role_label,
             'is_qa' => (bool) $user->is_qa,
             'is_wiki_approver' => (bool) $user->is_wiki_approver,
+            'customer_role_ids' => $this->customerRoleIds($user),
+            'customer_roles' => $this->customerRoleBadges($user),
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
@@ -885,6 +1016,26 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * Replace the user's customer roles with exactly the given set.
+     *
+     * customer_id is written onto the pivot rather than inferred: the assignment carries the
+     * tenant it belongs to, so a row that ever points across tenants is visible as bad data and
+     * not only as a wrong answer from the resolver.
+     *
+     * @param  list<int>  $customerRoleIds
+     */
+    private function syncCustomerRoles(User $user, array $customerRoleIds, int $customerId): void
+    {
+        $user->customerRoles()->sync(
+            collect($customerRoleIds)
+                ->mapWithKeys(fn (int $id): array => [$id => ['customer_id' => $customerId]])
+                ->all()
+        );
+
+        $user->unsetRelation('customerRoles');
+    }
+
     private function syncManagedDepartments(User $user, ?string $bidManagerScope, array $managedDepartmentIds): void
     {
         if ($bidManagerScope !== User::BID_MANAGER_SCOPE_DEPARTMENTS) {
@@ -1135,6 +1286,12 @@ class UserController extends Controller
             'is_wiki_approver' => $this->canEditBidRole($actor, $record)
                 ? ['nullable', 'boolean']
                 : ['prohibited'],
+            'customer_role_ids' => $this->canEditCustomerRoles($actor)
+                ? ['nullable', 'array']
+                : ['prohibited'],
+            'customer_role_ids.*' => $this->canEditCustomerRoles($actor)
+                ? ['integer']
+                : ['prohibited'],
             'bid_manager_scope' => $this->canEditBidManagerScope($actor, $record)
                 ? ['nullable', 'string', Rule::in(User::BID_MANAGER_SCOPES)]
                 : ['prohibited'],
@@ -1168,6 +1325,7 @@ class UserController extends Controller
             'bid_role',
             'is_qa',
             'is_wiki_approver',
+            'customer_role_ids',
             'bid_manager_scope',
             'managed_department_ids',
         ];

@@ -364,7 +364,8 @@ class CustomerEnvironmentController extends Controller
                     'is_active' => (bool) $department->is_active,
                 ])
                 ->all(),
-            'customer_role_ids' => $user->customerRoles->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),
+            // Read-only here: the Brukere table shows what a person holds, and Rediger bruker is
+            // where it is changed.
             'customer_roles' => $user->customerRoles
                 ->map(fn (CustomerRole $role): array => [
                     'id' => $role->id,
@@ -372,7 +373,6 @@ class CustomerEnvironmentController extends Controller
                     'is_active' => (bool) $role->is_active,
                 ])
                 ->all(),
-            'roles_update_url' => route('app.customer-environment.users.roles.update', ['user' => $user->id]),
             'managed_department_ids' => $user->managedDepartments->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),
             'managed_departments' => $user->managedDepartments
                 ->map(fn (Department $department): array => [

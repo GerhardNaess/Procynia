@@ -22,6 +22,10 @@ use Illuminate\Validation\ValidationException;
  *
  * Every read and every write is scoped to the acting user's own customer. A role from another
  * tenant is not an authorization failure to be reported — it is not found.
+ *
+ * Defining a role and handing it to a person are separate screens on purpose: this one answers
+ * "what roles do we have", and Rediger bruker answers "what is this person". Assignment therefore
+ * lives in UserController::update(), on the same save as the rest of the user's identity.
  */
 class CustomerRoleController extends Controller
 {
@@ -122,46 +126,6 @@ class CustomerRoleController extends Controller
         abort_unless($customerRole->customer_id === $customerId, 404);
 
         $customerRole->delete();
-
-        return $this->backToPermissions();
-    }
-
-    /**
-     * Replace one user's set of customer roles. The user and every role must belong to the acting
-     * user's customer; a role id from elsewhere is not found rather than silently skipped, because
-     * silently skipping would show the administrator a saved assignment that does not exist.
-     */
-    public function updateUserRoles(Request $request, User $user): RedirectResponse
-    {
-        [$actor, $customerId] = $this->roleAdministrationContext($request);
-
-        abort_unless(
-            $user->customer_id === $customerId
-            && $this->customerContext->canManageCustomerUser($actor, $user),
-            404,
-        );
-
-        $validated = $request->validate([
-            'role_ids' => ['present', 'array'],
-            'role_ids.*' => ['integer'],
-        ]);
-
-        $roleIds = array_values(array_unique(array_map('intval', $validated['role_ids'])));
-
-        $ownedRoleIds = CustomerRole::query()
-            ->forCustomer($customerId)
-            ->whereIn('id', $roleIds ?: [0])
-            ->pluck('id')
-            ->map(fn (mixed $id): int => (int) $id)
-            ->all();
-
-        abort_unless(count($ownedRoleIds) === count($roleIds), 404);
-
-        $user->customerRoles()->sync(
-            collect($ownedRoleIds)
-                ->mapWithKeys(fn (int $id): array => [$id => ['customer_id' => $customerId]])
-                ->all()
-        );
 
         return $this->backToPermissions();
     }

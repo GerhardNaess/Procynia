@@ -79,7 +79,9 @@ describe('the rest of the page is unfiltered', () => {
     });
 
     test('the role list below the matrices iterates every role', () => {
-        assert.ok(panel.includes('{roles.map((role) => {'), 'role list still maps all roles');
+        // The list itself, not the domain matrices above it: `domainRoles` is the filtered name,
+        // so matching on the bare `roles` identifier is what proves the list stayed unfiltered.
+        assert.ok(panel.includes('{roles.map((role) => ('), 'role list still maps all roles');
     });
 
     test('the edit dialog still offers both permission groups', () => {
