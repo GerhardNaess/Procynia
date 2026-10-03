@@ -60,7 +60,7 @@ export default function QualityItem() {
     const {
         translations = {},
         item,
-        can_manage: canManage = false,
+        permissions = {},
         statuses = [],
         frequencies = [],
         link_types: linkTypes = [],
@@ -89,6 +89,13 @@ export default function QualityItem() {
     const td = tq.detail ?? {};
     const typeLabels = tq.types ?? {};
     const statusLabels = tq.statuses ?? {};
+    // One flag per permission the controller gates on. Attaching a Wiki page or a file the
+    // virksomhet already has is composing this document, so it rides on edit; bringing a new file
+    // into the store is create; approving the flow and deleting it are their own.
+    const canCreate = permissions.can_create ?? false;
+    const canEdit = permissions.can_edit ?? false;
+    const canApprove = permissions.can_approve ?? false;
+    const canDelete = permissions.can_delete ?? false;
     /** A process answers "how does this run?" in the Flyt tab, so Dokument does not ask it twice. */
     const isProcess = item.quality_type === 'process';
 
@@ -128,7 +135,10 @@ export default function QualityItem() {
                         tq={tq}
                         item={item}
                         blueprint={blueprint}
-                        canManage={canManage}
+                        canCreate={canCreate}
+                        canEdit={canEdit}
+                        canApprove={canApprove}
+                        canDelete={canDelete}
                         proposal={flowProposal}
                         flowError={flowError}
                         flowAiAvailable={flowAiAvailable}
@@ -143,7 +153,7 @@ export default function QualityItem() {
                             tq={tq}
                             td={td}
                             item={item}
-                            canManage={canManage}
+                            canEdit={canEdit}
                             statuses={statuses}
                             statusLabels={statusLabels}
                             ownerOptions={ownerOptions}
@@ -154,7 +164,7 @@ export default function QualityItem() {
                                 tq={tq}
                                 td={td}
                                 item={item}
-                                canManage={canManage}
+                                canEdit={canEdit}
                                 frequencies={frequencies}
                                 frequencyLabels={tq.frequencies ?? {}}
                             />
@@ -167,7 +177,8 @@ export default function QualityItem() {
                         <DocumentsPanel
                             tq={tq}
                             item={item}
-                            canManage={canManage}
+                            canCreate={canCreate}
+                            canEdit={canEdit}
                             documents={documents}
                             documentOptions={documentOptions}
                             documentSearch={documentSearch}
@@ -179,7 +190,7 @@ export default function QualityItem() {
                         <WikiPanel
                             tq={tq}
                             item={item}
-                            canManage={canManage}
+                            canEdit={canEdit}
                             wikiLinks={wikiLinks}
                             wikiPageOptions={wikiPageOptions}
                             wikiSearch={wikiSearch}
@@ -223,7 +234,7 @@ function DetailTabs({ td, item, activeTab }) {
     );
 }
 
-function MetadataPanel({ tq, td, item, canManage, statuses, statusLabels, ownerOptions }) {
+function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOptions }) {
     const { data, setData, patch, processing, errors } = useForm({
         title: item.title ?? '',
         code: item.code ?? '',
@@ -239,7 +250,7 @@ function MetadataPanel({ tq, td, item, canManage, statuses, statusLabels, ownerO
         patch(`/app/quality/items/${item.id}`);
     }
 
-    if (! canManage) {
+    if (! canEdit) {
         return (
             <section className={CARD}>
                 <h2 className="text-xl font-semibold text-slate-950">{td.metadata_heading ?? 'Styringsinformasjon'}</h2>
@@ -344,7 +355,7 @@ function MetadataPanel({ tq, td, item, canManage, statuses, statusLabels, ownerO
  * A process is not one of the kinds: its steg, input and output live in the Flyt tab now. The
  * endpoint still accepts them, so nothing here needs undoing if they come back.
  */
-function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels }) {
+function StructurePanel({ tq, td, item, canEdit, frequencies, frequencyLabels }) {
     const [checklistItems, setChecklistItems] = useState(item.checklist_items ?? []);
     const [control, setControl] = useState(item.control ?? {
         criterion: '', responsibility: '', frequency: '', method: '',
@@ -391,7 +402,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
                         emptyText={td.checklist_empty ?? 'Ingen punkter er lagt inn ennå.'}
                         addText={td.add_checklist_item ?? 'Legg til punkt'}
                         removeText={td.remove_row ?? 'Fjern'}
-                        canManage={canManage}
+                        canEdit={canEdit}
                         rows={checklistItems}
                         setRows={setChecklistItems}
                         blank={{ text: '', guidance: '', is_required: true }}
@@ -410,7 +421,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
                     <Field label={td.control_criterion ?? 'Kriterium'}>
                         <textarea
                             rows={3}
-                            disabled={! canManage}
+                            disabled={! canEdit}
                             className={INPUT}
                             value={control.criterion ?? ''}
                             onChange={(e) => setControl({ ...control, criterion: e.target.value })}
@@ -419,7 +430,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
                     <Field label={td.control_method ?? 'Metode'}>
                         <textarea
                             rows={3}
-                            disabled={! canManage}
+                            disabled={! canEdit}
                             className={INPUT}
                             value={control.method ?? ''}
                             onChange={(e) => setControl({ ...control, method: e.target.value })}
@@ -427,7 +438,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
                     </Field>
                     <Field label={td.control_responsibility ?? 'Ansvar'}>
                         <input
-                            disabled={! canManage}
+                            disabled={! canEdit}
                             className={INPUT}
                             value={control.responsibility ?? ''}
                             onChange={(e) => setControl({ ...control, responsibility: e.target.value })}
@@ -435,7 +446,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
                     </Field>
                     <Field label={td.control_frequency ?? 'Frekvens'}>
                         <select
-                            disabled={! canManage}
+                            disabled={! canEdit}
                             className={INPUT}
                             value={control.frequency ?? ''}
                             onChange={(e) => setControl({ ...control, frequency: e.target.value })}
@@ -451,7 +462,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
                 </div>
             )}
 
-            {canManage && (
+            {canEdit && (
                 <div className="mt-6">
                     <button type="button" className={PRIMARY_ACTION} onClick={save} disabled={saving}>
                         {tq.save ?? 'Lagre'}
@@ -463,7 +474,7 @@ function StructurePanel({ tq, td, item, canManage, frequencies, frequencyLabels 
 }
 
 function RowEditor({
-    heading, emptyText, addText, removeText, canManage, rows, setRows, blank, fields, numbered = false,
+    heading, emptyText, addText, removeText, canEdit, rows, setRows, blank, fields, numbered = false,
 }) {
     function update(index, key, value) {
         setRows(rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
@@ -488,7 +499,7 @@ function RowEditor({
                                         {field.checkbox ? (
                                             <input
                                                 type="checkbox"
-                                                disabled={! canManage}
+                                                disabled={! canEdit}
                                                 checked={Boolean(row[field.key])}
                                                 onChange={(e) => update(index, field.key, e.target.checked)}
                                                 className="h-5 w-5 rounded border-slate-300"
@@ -496,14 +507,14 @@ function RowEditor({
                                         ) : field.textarea ? (
                                             <textarea
                                                 rows={2}
-                                                disabled={! canManage}
+                                                disabled={! canEdit}
                                                 className={INPUT}
                                                 value={row[field.key] ?? ''}
                                                 onChange={(e) => update(index, field.key, e.target.value)}
                                             />
                                         ) : (
                                             <input
-                                                disabled={! canManage}
+                                                disabled={! canEdit}
                                                 className={INPUT}
                                                 value={row[field.key] ?? ''}
                                                 onChange={(e) => update(index, field.key, e.target.value)}
@@ -512,7 +523,7 @@ function RowEditor({
                                     </Field>
                                 ))}
                             </div>
-                            {canManage && (
+                            {canEdit && (
                                 <button
                                     type="button"
                                     className={`mt-2 ${ROW_DESTRUCTIVE}`}
@@ -526,7 +537,7 @@ function RowEditor({
                 </ul>
             )}
 
-            {canManage && (
+            {canEdit && (
                 <button
                     type="button"
                     className={`${SECONDARY_ACTION} mt-3`}
@@ -585,7 +596,8 @@ function RelationsPanel({ tq, relations, typeLabels }) {
 function DocumentsPanel({
     tq,
     item,
-    canManage,
+    canCreate,
+    canEdit,
     documents,
     documentOptions,
     documentSearch,
@@ -666,7 +678,7 @@ function DocumentsPanel({
                                 {link.uploaded_at ? ` · ${link.uploaded_at}` : ''}
                             </span>
                             {link.note && <span className="text-sm text-slate-600">{link.note}</span>}
-                            {canManage && (
+                            {canEdit && (
                                 <button
                                     type="button"
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
@@ -684,8 +696,12 @@ function DocumentsPanel({
                 </ul>
             )}
 
-            {canManage && (
+            {(canEdit || canCreate) && (
                 <div className="mt-6 space-y-6">
+                    {/* Two different permissions, because they are two different acts. Attaching a
+                        file the virksomhet already has composes this document and rides on edit;
+                        uploading brings a new file into the store, which is create. */}
+                    {canEdit && (
                     <div className="space-y-4">
                         <h3 className="text-base font-semibold text-slate-900">
                             {tdoc.link_existing_heading ?? 'Koble til eksisterende dokument'}
@@ -757,8 +773,10 @@ function DocumentsPanel({
                             </form>
                         )}
                     </div>
+                    )}
 
-                    <div className="space-y-4 border-t border-slate-100 pt-6">
+                    {canCreate && (
+                    <div className={`space-y-4 ${canEdit ? 'border-t border-slate-100 pt-6' : ''}`}>
                         <h3 className="text-base font-semibold text-slate-900">
                             {tdoc.upload_heading ?? 'Last opp nytt dokument'}
                         </h3>
@@ -803,6 +821,7 @@ function DocumentsPanel({
                             </div>
                         </form>
                     </div>
+                    )}
                 </div>
             )}
         </section>
@@ -815,7 +834,7 @@ function DocumentsPanel({
  * Attaching a page changes nothing about the page — no type, no label, no move out of the Wiki
  * catalogue. The same page may back several documents here, and most pages back none.
  */
-function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch, documentSearch, linkTypes, linkTypeLabels }) {
+function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, documentSearch, linkTypes, linkTypeLabels }) {
     const tw = tq.wiki ?? {};
     const [search, setSearch] = useState(wikiSearch ?? '');
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -855,7 +874,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                                 {linkTypeLabels?.[link.link_type] ?? link.link_type}
                             </StatusBadge>
                             {link.note && <span className="text-sm text-slate-600">{link.note}</span>}
-                            {canManage && (
+                            {canEdit && (
                                 <button
                                     type="button"
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
@@ -873,7 +892,7 @@ function WikiPanel({ tq, item, canManage, wikiLinks, wikiPageOptions, wikiSearch
                 </ul>
             )}
 
-            {canManage && (
+            {canEdit && (
                 <div className="mt-6 space-y-4">
                     <div className="flex flex-wrap gap-2">
                         <input

@@ -108,8 +108,10 @@ function CollapseIcon({ collapsed }) {
  * page and must stay fully legible — it is the only module navigation there — so the collapse
  * control itself is hidden and the collapsed classes simply do not apply.
  */
-export default function ModuleSidebar({ modules = {}, activeModules = [], activeKey = null, collapsed = false, onToggleCollapsed = null }) {
-    const groups = partitionModules(activeModules);
+export default function ModuleSidebar({ modules = {}, activeModules = [], permissions = [], activeKey = null, collapsed = false, onToggleCollapsed = null }) {
+    // `groups.not_permitted` is deliberately never rendered — a module this person holds no
+    // permission in is not dimmed, it is simply not theirs. See appModules.moduleAvailability.
+    const groups = partitionModules(activeModules, permissions);
     const plannedHint = modules.planned_hint ?? 'Ikke tilgjengelig ennå';
     const notOrderedHint = modules.not_ordered_hint ?? 'Ikke bestilt — kan bestilles under Abonnement';
     const toggleLabel = collapsed

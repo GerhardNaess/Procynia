@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Services\UserNotificationService;
 use App\Support\CustomerContext;
 use Illuminate\Http\Request;
@@ -17,6 +18,7 @@ class HandleInertiaRequests extends Middleware
         private readonly CustomerContext $customerContext,
         private readonly UserNotificationService $notificationService,
         private readonly ModuleEntitlementService $moduleEntitlements,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function version(Request $request): ?string
@@ -76,6 +78,18 @@ class HandleInertiaRequests extends Middleware
             'entitlements' => [
                 'modules' => $customer !== null
                     ? $this->moduleEntitlements->modulesFor($customer)
+                    : [],
+            ],
+            // What the customer's own roles let this person do, as permission keys. Deliberately
+            // not shared under `permissions`: a page may serve its own `permissions` prop — the
+            // Kvalitet pages do — and a page prop shadows a shared one of the same name, which
+            // would leave the rail reading the wrong shape.
+            //
+            // The rail uses it to stop offering a module the person has no permission in. That is
+            // presentation; every route still enforces the same answer server-side.
+            'access' => [
+                'permissions' => $user instanceof User
+                    ? $this->customerPermissions->effectivePermissions($user)
                     : [],
             ],
             'notifications' => $user instanceof User

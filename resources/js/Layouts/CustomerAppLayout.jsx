@@ -136,6 +136,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     // Which technical modules this customer holds, resolved server-side from their package
     // entitlements. The rail presents it; the routes enforce it.
     const activeModules = page.props.entitlements?.modules ?? [];
+    // What the customer's own roles let this person do, shared on every request. The rail uses it
+    // to stop offering a module they have no permission in; the routes enforce the same answer.
+    const userPermissions = page.props.access?.permissions ?? [];
     const tw = translations?.wiki ?? {};
     const tq = translations?.quality ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
@@ -901,6 +904,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             <ModuleSidebar
                                 modules={modules}
                                 activeModules={activeModules}
+                                permissions={userPermissions}
                                 activeKey={activeModule}
                                 collapsed={sidebarCollapsed}
                                 onToggleCollapsed={toggleSidebarCollapsed}
