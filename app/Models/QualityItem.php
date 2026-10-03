@@ -71,6 +71,27 @@ class QualityItem extends Model
     ];
 
     /**
+     * The statuses a process may hold, given whether it has an approved revision.
+     *
+     * A process's lifecycle is anchored in its revisions, not in the status field: the latest
+     * approved revision is what is in force. "Active" and "under review" both say something is in
+     * force, so neither is true before the first approval — and the first approval is what makes a
+     * process active (QualityProcessBlueprintService::approve()). Once a revision exists, "draft"
+     * would deny it; a process that should stop applying is retired, which keeps the revision as
+     * history without presenting it as current.
+     *
+     * Other types have no revisions and keep every status.
+     *
+     * @return list<string>
+     */
+    public static function processStatusesFor(bool $hasApprovedRevision): array
+    {
+        return $hasApprovedRevision
+            ? [self::STATUS_ACTIVE, self::STATUS_UNDER_REVIEW, self::STATUS_RETIRED]
+            : [self::STATUS_DRAFT, self::STATUS_RETIRED];
+    }
+
+    /**
      * Which types own a structure table. Everything else is described by its purpose alone — a
      * policy has no steps, and giving it an empty step list would invite somebody to fill it in.
      *

@@ -5,6 +5,7 @@ import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import { publicationLabel, publicationTone } from '../../../Support/processPublication';
 import {
     DESTRUCTIVE_COLOURS,
     PRIMARY_ACTION,
@@ -220,9 +221,17 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                                     {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
                                 </td>
                                 <td className="py-3 pr-4">
-                                    <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
-                                        {statusLabels?.[item.status] ?? item.status}
-                                    </StatusBadge>
+                                    {/* A process reads its status from its approved revisions; the
+                                        other types have no revisions and show the stored status. */}
+                                    {item.publication ? (
+                                        <StatusBadge tone={publicationTone(item.publication)}>
+                                            {publicationLabel(item.publication, tq.publication)}
+                                        </StatusBadge>
+                                    ) : (
+                                        <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
+                                            {statusLabels?.[item.status] ?? item.status}
+                                        </StatusBadge>
+                                    )}
                                 </td>
                                 <td className="py-3 pr-4 text-slate-700">
                                     {item.next_review_at ?? (tq.no_review ?? 'Ingen revisjonssyklus')}
@@ -284,7 +293,16 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                     <select
                         className={INPUT}
                         value={data.quality_type}
-                        onChange={(event) => setData('quality_type', event.target.value)}
+                        // A process starts unpublished — it comes into force by approving its flow —
+                        // so a status picked for another type is not carried over.
+                        onChange={(event) => {
+                            const qualityType = event.target.value;
+                            setData((previous) => ({
+                                ...previous,
+                                quality_type: qualityType,
+                                status: qualityType === 'process' ? 'draft' : previous.status,
+                            }));
+                        }}
                     >
                         <option value="">{tq.field_type_placeholder ?? 'Velg type …'}</option>
                         {qualityTypes.map((type) => (
@@ -323,15 +341,21 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                 </Field>
 
                 <Field label={tq.field_status ?? 'Status'} error={errors.status}>
-                    <select
-                        className={INPUT}
-                        value={data.status}
-                        onChange={(event) => setData('status', event.target.value)}
-                    >
-                        {statuses.map((status) => (
-                            <option key={status} value={status}>{statusLabels?.[status] ?? status}</option>
-                        ))}
-                    </select>
+                    {data.quality_type === 'process' ? (
+                        <p className="min-h-10 py-2 text-base text-slate-600">
+                            {tq.publication?.create_status_help ?? 'En prosess blir gjeldende når flyten godkjennes og publiseres.'}
+                        </p>
+                    ) : (
+                        <select
+                            className={INPUT}
+                            value={data.status}
+                            onChange={(event) => setData('status', event.target.value)}
+                        >
+                            {statuses.map((status) => (
+                                <option key={status} value={status}>{statusLabels?.[status] ?? status}</option>
+                            ))}
+                        </select>
+                    )}
                 </Field>
 
                 <Field label={tq.field_review_interval ?? 'Revisjonsintervall (måneder)'} error={errors.review_interval_months}>

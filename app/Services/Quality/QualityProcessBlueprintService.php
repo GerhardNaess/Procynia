@@ -166,7 +166,13 @@ class QualityProcessBlueprintService
 
             $latest = $this->latestRevision($customerId, $item);
 
-            if ($blueprint->isApproved() && $latest !== null && $latest->payload == $blueprint->payload) {
+            // The working version already says exactly what is in force — whether it was never
+            // touched or was edited and then edited back. Nothing new to publish, so no revision.
+            if ($latest !== null && $latest->payload == $blueprint->payload) {
+                if (! $blueprint->isApproved()) {
+                    $blueprint->forceFill(['status' => QualityProcessBlueprint::STATUS_APPROVED])->save();
+                }
+
                 return $blueprint;
             }
 
@@ -190,6 +196,14 @@ class QualityProcessBlueprintService
                 'approved_by_user_id' => $actor?->id,
             ])->save();
 
+            // The first approval publishes the process. Later approvals leave the lifecycle alone:
+            // an active or under-review process stays as it is, and a retired one stays retired —
+            // retiring is an explicit decision an approval does not undo.
+            if ($item->status !== QualityItem::STATUS_RETIRED
+                && ($latest === null || $item->status === QualityItem::STATUS_DRAFT)) {
+                $item->forceFill(['status' => QualityItem::STATUS_ACTIVE])->save();
+            }
+
             return $blueprint;
         });
     }
@@ -205,6 +219,79 @@ class QualityProcessBlueprintService
             ->where('quality_item_id', $item->id)
             ->orderByDesc('revision_number')
             ->first();
+    }
+
+    /**
+     * Where each process stands, read from its revisions — the one source of truth for what is in
+     * force. Nothing here is stored: a stored copy would be a second answer that drifts from the
+     * revisions on the first approval it missed.
+     *
+     *  - unpublished: no approved revision yet.
+     *  - current: the latest revision is in force and the working version matches it.
+     *  - current_with_changes: the latest revision is in force, and the working version has been
+     *    changed since. The changes do not apply until they are approved.
+     *  - retired: explicitly retired. The revisions stay as history but are not presented as current.
+     *
+     * Batched for the process list: one query for revisions and one for blueprints, whatever the
+     * number of processes.
+     *
+     * @param  iterable<QualityItem>  $items
+     * @return array<int, array{state: string, revision_number: ?int, has_unpublished_changes: bool}>
+     */
+    public function publicationStates(int $customerId, iterable $items): array
+    {
+        $processes = collect($items)
+            ->filter(static fn (QualityItem $item): bool => $item->quality_type === QualityItem::TYPE_PROCESS)
+            ->keyBy(static fn (QualityItem $item): int => (int) $item->id);
+
+        if ($processes->isEmpty()) {
+            return [];
+        }
+
+        $ids = $processes->keys()->all();
+
+        $latest = QualityProcessRevision::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $ids)
+            ->orderByDesc('revision_number')
+            ->get(['quality_item_id', 'revision_number', 'payload'])
+            ->unique('quality_item_id')
+            ->keyBy('quality_item_id');
+
+        $working = QualityProcessBlueprint::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $ids)
+            ->get(['quality_item_id', 'payload'])
+            ->keyBy('quality_item_id');
+
+        return $processes
+            ->map(static function (QualityItem $item, int $id) use ($latest, $working): array {
+                $revision = $latest->get($id);
+                $blueprint = $working->get($id);
+                $changed = $revision !== null && $blueprint !== null && $revision->payload != $blueprint->payload;
+
+                $state = match (true) {
+                    $item->status === QualityItem::STATUS_RETIRED => 'retired',
+                    $revision === null => 'unpublished',
+                    $changed => 'current_with_changes',
+                    default => 'current',
+                };
+
+                return [
+                    'state' => $state,
+                    'revision_number' => $revision?->revision_number !== null ? (int) $revision->revision_number : null,
+                    'has_unpublished_changes' => $changed,
+                ];
+            })
+            ->all();
+    }
+
+    /**
+     * @return array{state: string, revision_number: ?int, has_unpublished_changes: bool}
+     */
+    public function publicationState(int $customerId, QualityItem $item): array
+    {
+        return $this->publicationStates($customerId, [$item])[(int) $item->id];
     }
 
     /**

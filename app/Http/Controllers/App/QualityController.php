@@ -139,6 +139,9 @@ class QualityController extends Controller
 
         $tab = $this->detailTab($request, $item);
         $subprocessView = $this->subprocessView($customerId, $item, $request);
+        $publication = $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
+            ? $this->blueprints->publicationState((int) $customerId, $item)
+            : null;
 
         return Inertia::render('App/Quality/Item', [
             'item' => $this->itemDetail($item),
@@ -147,6 +150,9 @@ class QualityController extends Controller
             // strip exists at all — a policy's page is unchanged by any of this.
             'has_flow' => $item->quality_type === QualityItem::TYPE_PROCESS,
             'blueprint' => $this->blueprintPayload($customerId, $item),
+            // Whether the process is published, which revision is in force and whether the working
+            // version has moved on — read from the revisions, never from the status field.
+            'process_publication' => $publication,
             // Approved revisions, newest first. Separate from `blueprint` because they outlive it:
             // the working version can be edited back to draft, or deleted, and what was approved
             // before is still here.
@@ -170,7 +176,7 @@ class QualityController extends Controller
             'flow_ai_available' => $item->quality_type === QualityItem::TYPE_PROCESS
                 && ProcessFlowInterpretationAiClient::isAvailable(),
             'permissions' => $this->permissionPayload($user),
-            'statuses' => QualityItem::STATUSES,
+            'statuses' => $this->statusOptions($item, $publication),
             'frequencies' => QualityControlDetail::FREQUENCIES,
             'link_types' => QualityItemWikiLink::LINK_TYPES,
             'owner_options' => $this->ownerOptions($customerId),
@@ -219,8 +225,14 @@ class QualityController extends Controller
             $this->attachUploadedDocument($request->file('file'), (int) $customerId, $item, $user);
         }
 
+        // A new process has nothing in force until its flow is described and approved, so that is
+        // where the user is sent. Every other type has no flow and lands on its document.
+        $route = $item->quality_type === QualityItem::TYPE_PROCESS
+            ? ['item' => $item->id, 'tab' => 'flow']
+            : ['item' => $item->id];
+
         return redirect()
-            ->route('app.quality.items.show', ['item' => $item->id])
+            ->route('app.quality.items.show', $route)
             ->with('success', __('procynia.quality.flash.item_created'));
     }
 
@@ -1118,9 +1130,10 @@ class QualityController extends Controller
             ->get();
 
         $producedPages = $this->producedWikiPagesByItem($customerId, $items);
+        $publications = $customerId === null ? [] : $this->blueprints->publicationStates($customerId, $items);
 
         return $items
-            ->map(function (QualityItem $item) use ($producedPages, $user): array {
+            ->map(function (QualityItem $item) use ($producedPages, $publications, $user): array {
                 /** @var Collection<int, EnterpriseWikiPage> $pages */
                 $pages = $producedPages[(int) $item->id] ?? collect();
 
@@ -1130,6 +1143,7 @@ class QualityController extends Controller
                     'title' => $item->title,
                     'code' => $item->code,
                     'status' => $item->status,
+                    'publication' => $publications[(int) $item->id] ?? null,
                     'owner_name' => $item->owner?->name,
                     'next_review_at' => $item->next_review_at?->toDateString(),
                     'wiki_link_count' => (int) $item->wiki_links_count,
@@ -1340,6 +1354,28 @@ class QualityController extends Controller
         }
 
         return $this->subprocesses->options($customerId, $item);
+    }
+
+    /**
+     * The statuses the metadata form may offer. A process is limited by its publication — see
+     * QualityItem::processStatusesFor() — and keeps its stored status in the list even when that
+     * predates the rule, so the select shows what is stored rather than silently picking another.
+     *
+     * @param  array{state: string, revision_number: ?int, has_unpublished_changes: bool}|null  $publication
+     * @return list<string>
+     */
+    private function statusOptions(QualityItem $item, ?array $publication): array
+    {
+        if ($item->quality_type !== QualityItem::TYPE_PROCESS) {
+            return QualityItem::STATUSES;
+        }
+
+        $allowed = QualityItem::processStatusesFor(($publication['revision_number'] ?? null) !== null);
+
+        return array_values(array_filter(
+            QualityItem::STATUSES,
+            static fn (string $status): bool => in_array($status, $allowed, true) || $status === $item->status,
+        ));
     }
 
     /**

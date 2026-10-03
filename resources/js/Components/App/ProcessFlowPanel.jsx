@@ -72,6 +72,9 @@ export default function ProcessFlowPanel({
     // Approved revisions, newest first. They outlive the working version, so they are shown even
     // when the process has no flow at the moment.
     revisions = [],
+    // Whether the process is published and which revision is in force — derived server-side from
+    // the revisions. The working version's own status is not the answer to that question.
+    publication = null,
     // One prop per permission the controller gates on, rather than a single "may manage". Saving
     // the flow, vouching for it and starting it over are three decisions the customer may hand to
     // three different roles, so the tab has to be able to offer them one at a time.
@@ -99,7 +102,7 @@ export default function ProcessFlowPanel({
     const [isDirty, setIsDirty] = useState(false);
     const [saving, setSaving] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
-    // Why the last "Godkjenn struktur" was refused: a heading and one line per problem the flow
+    // Why the last "Godkjenn og publiser" was refused: a heading and one line per problem the flow
     // validator found in the stored flow.
     const [approvalErrors, setApprovalErrors] = useState(null);
     // The row-by-row editor is folded away by default. It is the fallback for a correction the
@@ -395,8 +398,14 @@ export default function ProcessFlowPanel({
                             canEdit={canEdit}
                         />
                     )
-                    : blueprint && (
-                        <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} current={revisions[0] ?? null} />
+                    : (
+                        <StatusLine
+                            tq={tq}
+                            blueprint={blueprint}
+                            publication={publication}
+                            isDirty={isDirty}
+                            current={revisions[0] ?? null}
+                        />
                     )}
 
                 {! hasFlow && (
@@ -524,14 +533,17 @@ export default function ProcessFlowPanel({
                                         onClick={approve}
                                         // Approving unsaved edits would vouch for a flow the database
                                         // does not hold. Save first, then approve what was saved.
-                                        disabled={saving || isDirty || blueprint.status === 'approved'}
+                                        // Nothing to publish when the saved flow is what is in force.
+                                        disabled={saving || isDirty || (
+                                            publication?.revision_number != null && ! publication?.has_unpublished_changes
+                                        )}
                                     >
-                                        {tb.approve ?? 'Godkjenn struktur'}
+                                        {tb.approve ?? 'Godkjenn og publiser'}
                                     </button>
                                 )}
                                 {canEdit && (
                                     <p className="text-sm text-slate-500">
-                                        {tb.approval_cleared_help ?? 'Endrer du strukturen, faller godkjenningen bort.'}
+                                        {tb.approval_cleared_help ?? 'Endringer du lagrer, er upubliserte til flyten godkjennes og publiseres.'}
                                     </p>
                                 )}
                                 {/* Pushed to the far end on purpose. Lagre and Godkjenn are two
@@ -1102,38 +1114,52 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
     );
 }
 
-function StatusLine({ tb, blueprint, isDirty, current }) {
-    const statusLabels = tb.statuses ?? {};
+/**
+ * Where the process stands: not published, the revision in force, or retired — and, separately,
+ * whether the working version has moved on from what is in force. Unsaved edits count as
+ * unpublished changes too; they are not even saved yet.
+ */
+function StatusLine({ tq, blueprint, publication, isDirty, current }) {
+    const tb = tq.blueprint ?? {};
+    const tp = tq.publication ?? {};
     const sourceLabels = tb.sources ?? {};
-    const approved = blueprint.status === 'approved' && ! isDirty;
+    const state = publication?.state ?? 'unpublished';
+    const hasChanges = current !== null && state !== 'retired'
+        && (publication?.has_unpublished_changes || isDirty);
 
     return (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-            <StatusBadge tone={approved ? 'green' : 'slate'}>
-                {statusLabels?.[approved ? 'approved' : 'draft'] ?? blueprint.status}
+            <StatusBadge tone={state === 'retired' || state === 'unpublished' ? 'slate' : 'green'}>
+                {state === 'retired' && (tp.retired ?? 'Utgått')}
+                {state === 'unpublished' && (tp.unpublished ?? 'Ikke publisert')}
+                {(state === 'current' || state === 'current_with_changes')
+                    && (tp.flow_current ?? 'Gjeldende revisjon :number')
+                        .replace(':number', String(publication?.revision_number ?? '—'))}
             </StatusBadge>
-            <StatusBadge tone="slate">{sourceLabels?.[blueprint.source] ?? blueprint.source}</StatusBadge>
 
-            <span className="text-sm text-slate-500">
-                {approved
-                    ? (tb.approved_notice ?? 'Strukturen er godkjent av :name :date.')
-                        .replace(':name', blueprint.approved_by_name ?? '—')
-                        .replace(':date', blueprint.approved_at ?? '—')
-                    : (tb.draft_notice ?? 'Strukturen er et utkast og er ikke godkjent.')}
-            </span>
-
-            {/* The working version being a draft does not mean nothing is approved: the last
-                approved revision is still in force until the next approval replaces it. */}
-            {! approved && current && (
-                <span className="text-sm text-slate-500">
-                    {(tb.current_revision_notice ?? 'Gjeldende godkjente versjon er revisjon :number, godkjent av :name :date.')
-                        .replace(':number', String(current.revision_number))
-                        .replace(':name', current.approved_by_name ?? '—')
-                        .replace(':date', current.approved_at ?? '—')}
-                </span>
+            {hasChanges && (
+                <StatusBadge tone="amber">
+                    {tp.unpublished_changes ?? 'Arbeidsversjonen har upubliserte endringer'}
+                </StatusBadge>
             )}
 
-            {blueprint.generated_at && (
+            {blueprint && (
+                <StatusBadge tone="slate">{sourceLabels?.[blueprint.source] ?? blueprint.source}</StatusBadge>
+            )}
+
+            <span className="text-sm text-slate-500">
+                {state === 'unpublished' && (tp.unpublished_help
+                    ?? 'Prosessen blir gjeldende når flyten er godkjent og publisert første gang.')}
+                {state === 'retired' && current && (tp.retired_help
+                    ?? 'Prosessen er utgått. Siste revisjon (:number) er beholdt i historikken, men gjelder ikke lenger.')
+                    .replace(':number', String(current.revision_number))}
+                {state !== 'unpublished' && state !== 'retired' && current
+                    && (tb.history_meta ?? 'Godkjent av :name :date')
+                        .replace(':name', current.approved_by_name ?? '—')
+                        .replace(':date', current.approved_at ?? '—')}
+            </span>
+
+            {blueprint?.generated_at && (
                 <span className="text-sm text-slate-400">
                     {(tb.generated_notice ?? 'Sist generert :date.').replace(':date', blueprint.generated_at)}
                 </span>

@@ -12,6 +12,7 @@ use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessIo;
+use App\Models\QualityProcessRevision;
 use App\Models\QualityProcessStep;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
@@ -65,7 +66,7 @@ class QualityItemService
                 'code' => $this->normaliseCode($customerId, $attributes['code'] ?? null, null),
                 'purpose' => $this->nullableText($attributes['purpose'] ?? null),
                 'owner_user_id' => $this->resolveUserId($customerId, $attributes['owner_user_id'] ?? null, 'owner_user_id'),
-                'status' => $this->normaliseStatus($attributes['status'] ?? null),
+                'status' => $this->normaliseStatus($attributes['status'] ?? null, $qualityType, false),
                 'created_by_user_id' => $actor?->id,
             ] + $this->reviewAttributes($customerId, $attributes));
 
@@ -122,8 +123,17 @@ class QualityItemService
                 $changes['owner_user_id'] = $this->resolveUserId($customerId, $attributes['owner_user_id'], 'owner_user_id');
             }
 
-            if (array_key_exists('status', $attributes)) {
-                $changes['status'] = $this->normaliseStatus($attributes['status']);
+            // Checked only when the status actually changes, so a process stored with a status
+            // from before the lifecycle rule existed does not block an unrelated edit.
+            if (array_key_exists('status', $attributes) && $attributes['status'] !== $item->status) {
+                $changes['status'] = $this->normaliseStatus(
+                    $attributes['status'],
+                    $item->quality_type,
+                    $item->quality_type === QualityItem::TYPE_PROCESS && QualityProcessRevision::query()
+                        ->where('customer_id', $customerId)
+                        ->where('quality_item_id', $item->id)
+                        ->exists(),
+                );
             }
 
             $changes += $this->reviewAttributes($customerId, $attributes, $item, $actor);
@@ -666,7 +676,7 @@ class QualityItemService
         return $code;
     }
 
-    private function normaliseStatus(mixed $status): string
+    private function normaliseStatus(mixed $status, string $qualityType, bool $hasApprovedRevision): string
     {
         if ($status === null || $status === '') {
             return QualityItem::STATUS_DRAFT;
@@ -675,6 +685,17 @@ class QualityItemService
         if (! in_array($status, QualityItem::STATUSES, true)) {
             throw ValidationException::withMessages([
                 'status' => __('procynia.quality.errors.unknown_status'),
+            ]);
+        }
+
+        // A process is published by approving its flow, never by picking a status — see
+        // QualityItem::processStatusesFor().
+        if ($qualityType === QualityItem::TYPE_PROCESS
+            && ! in_array($status, QualityItem::processStatusesFor($hasApprovedRevision), true)) {
+            throw ValidationException::withMessages([
+                'status' => __($hasApprovedRevision
+                    ? 'procynia.quality.errors.process_status_published'
+                    : 'procynia.quality.errors.process_status_unpublished'),
             ]);
         }
 
