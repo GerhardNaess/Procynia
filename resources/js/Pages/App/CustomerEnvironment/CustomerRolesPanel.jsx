@@ -1,6 +1,7 @@
 import { router, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
+import { rolesInDomain } from './customerRoleMatrix';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -13,6 +14,12 @@ function classNames(...values) {
  * page" is a question about the Wiki, not about the role list. The same role appears in both
  * tables when it holds permissions in both, which is the point: the customer decides that their
  * «Kvalitetsdirektør» also publishes Wiki pages, and nothing in the model objects.
+ *
+ * A domain table lists only the roles that hold at least one permission in that domain. A
+ * «Wiki-ansvarlig» with no quality permission is not an unanswered question under Kvalitet, it is
+ * simply not part of that conversation — showing it as an empty row only adds noise. The filter is
+ * presentation alone: the role list below shows every role, and the edit dialog always offers both
+ * permission groups, so extending a role into the other domain stays one checkbox away.
  */
 export default function CustomerRolesPanel({ customerRoles, users, modal: Modal, t = {} }) {
     const { domains = [], roles = [], store_url: storeUrl } = customerRoles;
@@ -174,59 +181,69 @@ export default function CustomerRolesPanel({ customerRoles, users, modal: Modal,
                     </div>
                 ) : (
                     <div className="mt-6 space-y-8">
-                        {domains.map((domain) => (
-                            <div key={domain.key}>
-                                <h3 className="text-base font-semibold text-slate-900">{domain.label}</h3>
-                                <div className="mt-3 overflow-x-auto">
-                                    <table className="w-full text-base">
-                                        <thead>
-                                            <tr className="border-b border-slate-200">
-                                                <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                    {t.col_role ?? 'Rolle'}
-                                                </th>
-                                                {domain.permissions.map((permission) => (
-                                                    <th
-                                                        key={permission.key}
-                                                        className="px-3 pb-3 text-center text-sm font-semibold leading-5 text-slate-600"
-                                                    >
-                                                        {permission.label}
-                                                    </th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {roles.map((role) => (
-                                                <tr key={role.id}>
-                                                    <td className="py-4 pr-6 text-slate-900">
-                                                        <span className="font-medium">{role.name}</span>
-                                                        {!role.is_active ? (
-                                                            <span className="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-sm font-semibold text-slate-600">
-                                                                {t.inactive ?? 'Inaktiv'}
-                                                            </span>
-                                                        ) : null}
-                                                    </td>
-                                                    {domain.permissions.map((permission) => {
-                                                        const checked = role.permission_keys.includes(permission.key);
+                        {domains.map((domain) => {
+                            const domainRoles = rolesInDomain(roles, domain);
 
-                                                        return (
-                                                            <td key={permission.key} className="px-3 py-4 text-center">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={checked}
-                                                                    disabled={savingRoleId === role.id}
-                                                                    onChange={() => togglePermission(role, permission.key)}
-                                                                    className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                />
+                            return (
+                                <div key={domain.key}>
+                                    <h3 className="text-base font-semibold text-slate-900">{domain.label}</h3>
+                                    {domainRoles.length === 0 ? (
+                                        <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-base leading-6 text-slate-600">
+                                            {t.domain_no_roles ?? 'Ingen av rollene har rettigheter her ennå. Rediger en rolle for å gi den rettigheter i dette området.'}
+                                        </p>
+                                    ) : (
+                                        <div className="mt-3 overflow-x-auto">
+                                            <table className="w-full text-base">
+                                                <thead>
+                                                    <tr className="border-b border-slate-200">
+                                                        <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                            {t.col_role ?? 'Rolle'}
+                                                        </th>
+                                                        {domain.permissions.map((permission) => (
+                                                            <th
+                                                                key={permission.key}
+                                                                className="px-3 pb-3 text-center text-sm font-semibold leading-5 text-slate-600"
+                                                            >
+                                                                {permission.label}
+                                                            </th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {domainRoles.map((role) => (
+                                                        <tr key={role.id}>
+                                                            <td className="py-4 pr-6 text-slate-900">
+                                                                <span className="font-medium">{role.name}</span>
+                                                                {!role.is_active ? (
+                                                                    <span className="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-sm font-semibold text-slate-600">
+                                                                        {t.inactive ?? 'Inaktiv'}
+                                                                    </span>
+                                                                ) : null}
                                                             </td>
-                                                        );
-                                                    })}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                                            {domain.permissions.map((permission) => {
+                                                                const checked = role.permission_keys.includes(permission.key);
+
+                                                                return (
+                                                                    <td key={permission.key} className="px-3 py-4 text-center">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={checked}
+                                                                            disabled={savingRoleId === role.id}
+                                                                            onChange={() => togglePermission(role, permission.key)}
+                                                                            className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                        />
+                                                                    </td>
+                                                                );
+                                                            })}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
 
                         <div>
                             <div className="overflow-x-auto">

@@ -2138,6 +2138,7 @@ return [
             'col_actions' => 'Handlinger',
             'no_roles_title' => 'Ingen egne roller ennå',
             'no_roles_hint' => 'Opprett for eksempel «Kvalitetsdirektør» eller «Wiki-ansvarlig», og velg hvilke rettigheter rollen skal inneholde.',
+            'domain_no_roles' => 'Ingen av rollene har rettigheter her ennå. Rediger en rolle for å gi den rettigheter i dette området.',
             'modal_create_title' => 'Ny rolle',
             'modal_edit_title' => 'Rediger rolle',
             'modal_description' => 'Gi rollen et navn dere kjenner igjen, og velg hvilke rettigheter den skal inneholde.',

@@ -2137,6 +2137,7 @@ return [
             'col_actions' => 'Actions',
             'no_roles_title' => 'No custom roles yet',
             'no_roles_hint' => 'Create for example "Quality Director" or "Wiki Owner", and choose which permissions the role should hold.',
+            'domain_no_roles' => 'None of the roles hold permissions here yet. Edit a role to give it permissions in this area.',
             'modal_create_title' => 'New role',
             'modal_edit_title' => 'Edit role',
             'modal_description' => 'Give the role a name you recognise, and choose which permissions it should hold.',
