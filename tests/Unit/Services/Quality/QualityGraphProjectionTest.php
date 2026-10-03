@@ -7,7 +7,9 @@ use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessBlueprint;
+use App\Models\User;
 use App\Services\EnterpriseWiki\GraphProjection\EnterpriseWikiGraphProjector;
+use App\Services\Quality\QualityActivityArticleService;
 use App\Services\Quality\QualityGraphProjector;
 use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -269,6 +271,56 @@ class QualityGraphProjectionTest extends TestCase
         // on this flow, so there is no activity node for the edge to leave.
         $this->assertCount(3, $replaced['activities']);
         $this->assertSame([], $replaced['article_links']);
+    }
+
+    /**
+     * An article born from an activity is an ordinary page in the graph, edges and all.
+     *
+     * Two things reach Neo4j about it, and they are separate: SOURCE_OF_ARTICLE, which says which
+     * activity produced it and is Kvalitet's own, and its ordinary wikilink relations, which are
+     * the Wiki's and come from the page's text. It used to have only the first, because the step
+     * that materializes the second never ran when Kvalitet created the page — so the article
+     * arrived in the graph attached to its activity and to nothing else in the Wiki.
+     */
+    public function test_an_article_created_from_an_activity_projects_its_ordinary_wiki_relations(): void
+    {
+        $writer = new RecordingGraphProjectionService;
+        $customer = $this->createWikiCustomer();
+        $target = $this->createWikiPageWithVersion($customer, 'Leverandorregisteret', 'Slik fores registeret.');
+
+        $actor = User::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'System Owner',
+            'email' => 'owner-'.uniqid().'@example.test',
+            'password' => bcrypt('secret-password'),
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'is_active' => true,
+        ]);
+
+        $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $this->flowFor($customer->id, $process->id);
+
+        $article = app(QualityActivityArticleService::class)->create(
+            QualityItem::query()->findOrFail($process->id),
+            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole(),
+            'vurder',
+            'Terskelverdier ved anskaffelser',
+            "Vurderingen fores i [[{$target->slug}|leverandorregisteret]].",
+            $actor,
+        )['page'];
+
+        (new EnterpriseWikiGraphProjector($writer))->projectPage($article->id);
+
+        $outgoing = collect($writer->replacedOutgoing)
+            ->firstWhere('from_page_id', (int) $article->id);
+
+        $this->assertNotNull($outgoing, 'The article page was never projected.');
+        $this->assertSame([(int) $target->id], array_column($outgoing['links'], 'to_page_id'));
+
+        // The target node is written before the edge pointing at it, or the graph writer would
+        // match nothing and drop the relation without a trace.
+        $this->assertContains((int) $target->id, array_column($writer->upsertedPages, 'page_id'));
     }
 
     public function test_an_activity_that_has_produced_nothing_is_still_an_activity(): void

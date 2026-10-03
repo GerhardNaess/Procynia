@@ -47,6 +47,55 @@ class EnterpriseWikiLinkIntentMaterializer
      */
     public function materializeBlocks(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $sourcePage, array $blocks, array $catalog): array
     {
+        return $this->materialize(
+            [
+                'customer_id' => (int) $run->customer_id,
+                'run_id' => (int) $run->id,
+                'source_page_id' => (int) $sourcePage->id,
+                'source_page_type' => (string) $sourcePage->page_type,
+            ],
+            $blocks,
+            $catalog,
+        );
+    }
+
+    /**
+     * The same materialization for content whose page does not exist yet.
+     *
+     * A draft written outside the ingest pipeline — Kvalitet drafting an article from a
+     * prosessaktivitet — has no run and no page row to be the source of the link, but it must not
+     * get its own link syntax for that reason: the model writing [[...]] itself is exactly the
+     * failure class the intent contract removed. The guarantees that matter are unchanged — page
+     * identity is server-authoritative, the slug is always the stored canonical one, and a target
+     * outside the catalog or outside the customer is a hard rejection. Only the self-link check
+     * drops out, because there is no self to link to yet.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $catalog
+     * @return list<array<string, mixed>>
+     */
+    public function materializeBlocksForNewPage(int $customerId, array $blocks, array $catalog): array
+    {
+        return $this->materialize(
+            [
+                'customer_id' => $customerId,
+                'run_id' => null,
+                'source_page_id' => null,
+                'source_page_type' => null,
+            ],
+            $blocks,
+            $catalog,
+        );
+    }
+
+    /**
+     * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
+     * @param  list<array<string, mixed>>  $blocks
+     * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $catalog
+     * @return list<array<string, mixed>>
+     */
+    private function materialize(array $context, array $blocks, array $catalog): array
+    {
         $catalogByPageId = [];
         foreach ($catalog as $entry) {
             if (isset($entry['page_id']) && is_int($entry['page_id'])) {
@@ -59,19 +108,19 @@ class EnterpriseWikiLinkIntentMaterializer
             $markdown = (string) ($block['markdown'] ?? '');
 
             if (! is_array($intents)) {
-                $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'link_intents was not an array');
+                $this->reject($context, null, null, 'rejected_invalid_intent', 'link_intents was not an array');
             }
 
             // No model may emit the retired marker syntax, with or without intents behind it.
             if (str_contains($markdown, self::RETIRED_MARKER_PREFIX)) {
-                $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'markdown contained retired internal wikilink marker syntax');
+                $this->reject($context, null, null, 'rejected_invalid_intent', 'markdown contained retired internal wikilink marker syntax');
             }
 
             if ($intents === []) {
                 continue;
             }
 
-            $resolvedIntents = $this->validateIntents($run, $sourcePage, $intents, $catalogByPageId);
+            $resolvedIntents = $this->validateIntents($context, $intents, $catalogByPageId);
 
             // Model-authored [[...]] markup is neutralised BEFORE anchors are placed: its target is
             // discarded (only this class may choose a slug) and its visible text becomes ordinary
@@ -85,7 +134,7 @@ class EnterpriseWikiLinkIntentMaterializer
                 $anchorText = trim((string) ($resolvedIntent['intent']['anchor_text'] ?? ''));
 
                 if ($anchorText === '') {
-                    $this->reject($run, $sourcePage, $resolvedIntent['target_page']->id, $resolvedIntent['target_page']->slug, 'rejected_invalid_intent', 'link intent had no anchor_text');
+                    $this->reject($context, $resolvedIntent['target_page']->id, $resolvedIntent['target_page']->slug, 'rejected_invalid_intent', 'link intent had no anchor_text');
                 }
 
                 $offset = $this->firstPlaceableOccurrence($markdown, $anchorText);
@@ -95,8 +144,8 @@ class EnterpriseWikiLinkIntentMaterializer
                     // found in the prose. Dropping the link keeps the page truthful; inventing a
                     // position for it would not.
                     Log::info('[WIKI_LINK_MATERIALIZATION] Valid AI link intent was not materialized.', [
-                        'run_id' => $run->id,
-                        'source_page_id' => $sourcePage->id,
+                        'run_id' => $context['run_id'],
+                        'source_page_id' => $context['source_page_id'],
                         'selected_target_page_id' => $resolvedIntent['target_page']->id,
                         'canonical_target_slug' => $resolvedIntent['target_page']->slug,
                         'outcome' => 'skipped_anchor_not_found',
@@ -109,7 +158,7 @@ class EnterpriseWikiLinkIntentMaterializer
                 $markdown = substr_replace($markdown, $canonical, $offset, strlen($anchorText));
 
                 $materializedIntents[] = $resolvedIntent['intent'];
-                $this->logMaterialized($run, $sourcePage, $resolvedIntent['target_page']);
+                $this->logMaterialized($context, $resolvedIntent['target_page']);
             }
 
             $blocks[$blockIndex]['markdown'] = $markdown;
@@ -186,40 +235,41 @@ class EnterpriseWikiLinkIntentMaterializer
     }
 
     /**
+     * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
      * @param  list<array<string, mixed>>  $intents
      * @param  array<int, array{page_id: int, slug: string, title: string, page_type: string}>  $catalogByPageId
      * @return array<string, array{intent: array<string, mixed>, target_page: EnterpriseWikiPage}>
      */
-    private function validateIntents(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $sourcePage, array $intents, array $catalogByPageId): array
+    private function validateIntents(array $context, array $intents, array $catalogByPageId): array
     {
         $resolved = [];
 
         foreach ($intents as $intent) {
             if (! is_array($intent)) {
-                $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'link intent was not an object');
+                $this->reject($context, null, null, 'rejected_invalid_intent', 'link intent was not an object');
             }
 
             $intentId = trim((string) ($intent['intent_id'] ?? ''));
             if ($intentId === '' || ! preg_match('/^[A-Za-z0-9_-]+$/', $intentId) || isset($resolved[$intentId])) {
-                $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'intent_id was missing, malformed, or duplicated');
+                $this->reject($context, null, null, 'rejected_invalid_intent', 'intent_id was missing, malformed, or duplicated');
             }
 
             $targetPageId = $intent['target_page_id'] ?? null;
             if (! is_int($targetPageId)) {
-                $this->reject($run, $sourcePage, null, null, 'rejected_unknown_target', 'target_page_id was not an integer');
+                $this->reject($context, null, null, 'rejected_unknown_target', 'target_page_id was not an integer');
             }
 
-            if ($targetPageId === $sourcePage->id) {
-                $this->reject($run, $sourcePage, $targetPageId, null, 'rejected_self_link', 'target_page_id selected the source page');
+            if ($context['source_page_id'] !== null && $targetPageId === $context['source_page_id']) {
+                $this->reject($context, $targetPageId, null, 'rejected_self_link', 'target_page_id selected the source page');
             }
 
             $targetPage = EnterpriseWikiPage::query()->find($targetPageId);
-            if ($targetPage !== null && $targetPage->customer_id !== $run->customer_id) {
-                $this->reject($run, $sourcePage, $targetPageId, $targetPage->slug, 'rejected_cross_customer', 'target page belongs to another customer');
+            if ($targetPage !== null && (int) $targetPage->customer_id !== $context['customer_id']) {
+                $this->reject($context, $targetPageId, $targetPage->slug, 'rejected_cross_customer', 'target page belongs to another customer');
             }
 
             if ($targetPage === null || ! array_key_exists($targetPageId, $catalogByPageId)) {
-                $this->reject($run, $sourcePage, $targetPageId, $targetPage?->slug, 'rejected_unknown_target', 'target page is not in the allowed catalog');
+                $this->reject($context, $targetPageId, $targetPage?->slug, 'rejected_unknown_target', 'target page is not in the allowed catalog');
             }
 
             $resolved[$intentId] = [
@@ -248,38 +298,43 @@ class EnterpriseWikiLinkIntentMaterializer
         return [$replacements === [] ? $markdown : strtr($markdown, $replacements), $anchors];
     }
 
-    private function logMaterialized(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $sourcePage, EnterpriseWikiPage $targetPage): void
+    /**
+     * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
+     */
+    private function logMaterialized(array $context, EnterpriseWikiPage $targetPage): void
     {
         Log::info('[WIKI_LINK_MATERIALIZATION] AI link intent materialized.', [
-            'run_id' => $run->id,
-            'source_page_id' => $sourcePage->id,
+            'run_id' => $context['run_id'],
+            'source_page_id' => $context['source_page_id'],
             'selected_target_page_id' => $targetPage->id,
             'canonical_target_slug' => $targetPage->slug,
             'outcome' => 'materialized',
         ]);
     }
 
+    /**
+     * @param  array{customer_id: int, run_id: ?int, source_page_id: ?int, source_page_type: ?string}  $context
+     */
     private function reject(
-        EnterpriseWikiIngestRun $run,
-        EnterpriseWikiPage $sourcePage,
+        array $context,
         ?int $targetPageId,
         ?string $canonicalSlug,
         string $outcome,
         string $detail,
     ): never {
         Log::warning('[WIKI_LINK_MATERIALIZATION] AI link intent rejected.', [
-            'run_id' => $run->id,
-            'source_page_id' => $sourcePage->id,
+            'run_id' => $context['run_id'],
+            'source_page_id' => $context['source_page_id'],
             'selected_target_page_id' => $targetPageId,
             'canonical_target_slug' => $canonicalSlug,
             'outcome' => $outcome,
         ]);
 
         throw new EnterpriseWikiInvalidWikilinksException(sprintf(
-            'Run [%d] page [%d] (%s): AI link intent rejected (%s: %s).',
-            $run->id,
-            $sourcePage->id,
-            $sourcePage->page_type,
+            'Run [%s] page [%s] (%s): AI link intent rejected (%s: %s).',
+            $context['run_id'] === null ? 'none' : (string) $context['run_id'],
+            $context['source_page_id'] === null ? 'new' : (string) $context['source_page_id'],
+            $context['source_page_type'] ?? 'unsaved',
             $outcome,
             $detail,
         ));

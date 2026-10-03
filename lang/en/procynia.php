@@ -254,6 +254,7 @@ return [
             'articles_review_help' => 'Read through and correct the text before creating it. What is created is what stands here — the article goes into Wiki as a draft and is sent for review from there.',
             'articles_structure_help' => 'The article follows a fixed structure: Purpose, When the activity is carried out, Responsibility, Procedure, Key assessments and criteria, Documentation and result, Related process context.',
             'articles_fill_in_help' => 'Where it says “To be filled in”, that is knowledge Procynia did not find in the process. Fill it in yourself — do not leave it standing.',
+            'articles_links_help' => 'Text in double brackets, like [[slug|the words it sits on]], is a link to another Wiki page. It becomes an ordinary link when the article is created. You can remove it or move it onto different words.',
             'article_fill_in' => 'To be filled in',
             'article_section_missing' => 'This section has to be filled in by whoever knows the activity.',
             'article_sections' => [

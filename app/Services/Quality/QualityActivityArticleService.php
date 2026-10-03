@@ -11,6 +11,9 @@ use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkCatalogService;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkIntentMaterializer;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionWriter;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
@@ -38,6 +41,14 @@ use Throwable;
  * through Wiki's own review, approval and publication exactly like a page that arrived from a
  * document ingest.
  *
+ * AN ORDINARY WIKI PAGE MEANS ORDINARY WIKI RELATIONS. The draft is written against the customer's
+ * existing Wiki index (EnterpriseWikiLinkCatalogService), the model names the pages it is genuinely
+ * talking about rather than writing link syntax itself (EnterpriseWikiLinkIntentMaterializer), and
+ * creating the page runs the same link materialization every other Wiki page runs
+ * (EnterpriseWikiBuildPageLinksService::materializeWikilinksForPage), which is also what projects
+ * the page and its edges to Neo4j. Kvalitet owns none of that and reimplements none of it; the only
+ * relation Kvalitet has of its own is the SOURCE_OF_ARTICLE provenance below.
+ *
  * WIKI OWNS THE ARTICLE. Nothing of the page's content is stored anywhere in Kvalitet — not the
  * title, not the text, not the status. The flow holds no article content at all, and this service
  * never writes to a page again after creating it. Editing happens in Wiki, because that is where
@@ -64,6 +75,9 @@ class QualityActivityArticleService
         private readonly ProcessActivityArticleAiClient $client,
         private readonly QualityActivityArticleContextBuilder $contextBuilder,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
+        private readonly EnterpriseWikiLinkCatalogService $linkCatalog,
+        private readonly EnterpriseWikiLinkIntentMaterializer $linkIntentMaterializer,
+        private readonly EnterpriseWikiBuildPageLinksService $buildPageLinks,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly AiCallContextScope $contextScope,
     ) {}
@@ -92,17 +106,35 @@ class QualityActivityArticleService
         $context = $this->contextBuilder->build($item, $blueprint, $activityKey)
             ?? throw new RuntimeException("QualityActivityArticleService: no activity [{$activityKey}] on this flow.");
 
+        // The wiki the article is joining, bounded exactly as the ingest pipeline bounds it. Built
+        // here rather than in the client for the same reason the ingest pipeline builds it in the
+        // service: which pages exist is a read of the customer's Wiki, not part of talking to a
+        // model. There is no page to exclude yet — the article does not exist until the user
+        // creates it.
+        $catalog = $this->linkCatalog->buildForCustomer((int) $item->customer_id)['catalog'];
+        $customerId = (int) $item->customer_id;
+
         return $this->contextScope->within(
             new AiCallContext(
-                customerId: (int) $item->customer_id,
+                customerId: $customerId,
                 feature: 'quality',
                 operation: 'process_activity_article_draft',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),
-            function () use ($context, $languageCode): array {
+            function () use ($context, $languageCode, $catalog, $customerId): array {
                 try {
-                    $drafted = $this->client->draft($context, $languageCode);
+                    $drafted = $this->client->draft($context, $languageCode, $catalog);
+
+                    // The one place [[slug|anchor]] is ever written, shared with the ingest
+                    // pipeline. The model returned prose and a list of pages; the brackets, the
+                    // pipe and the canonical slug are the server's, and a target outside the
+                    // catalog or outside this customer is refused rather than rendered broken.
+                    $markdown = $this->linkIntentMaterializer->materializeBlocksForNewPage(
+                        $customerId,
+                        [['markdown' => $drafted['markdown'], 'link_intents' => $drafted['link_intents']]],
+                        $catalog,
+                    )[0]['markdown'];
                 } catch (AiCostControlException $exception) {
                     throw $exception;
                 } catch (Throwable $exception) {
@@ -111,7 +143,7 @@ class QualityActivityArticleService
 
                 return [
                     'title' => Str::limit($drafted['title'], ProcessActivityArticleAiClient::MAX_TITLE_LENGTH, ''),
-                    'markdown' => Str::limit($drafted['markdown'], ProcessActivityArticleAiClient::MAX_MARKDOWN_LENGTH, ''),
+                    'markdown' => Str::limit($markdown, ProcessActivityArticleAiClient::MAX_MARKDOWN_LENGTH, ''),
                     'model' => ProcessActivityArticleAiClient::model(),
                 ];
             },
@@ -150,6 +182,19 @@ class QualityActivityArticleService
                 'generated_by_model' => null,
                 'created_by_user_id' => (int) $actor->id,
             ]);
+
+            // The step that makes it a page in the Wiki rather than a page stored next to it.
+            // Every other path that gives an Enterprise Wiki page a current version runs this, and
+            // it is the only thing that both turns the text's [[wikilinks]] into
+            // EnterpriseWikiPageLink rows and dispatches the Neo4j projection. Skipping it is why
+            // articles created from an activity arrived isolated: the relations were never
+            // materialized, so the Wiki graph had nothing to draw and the projection never ran.
+            //
+            // Runs on the final text, which is the user's — they may have added, moved or removed
+            // a link after reading the draft, and the text is authoritative for the page's
+            // relations either way. A link whose slug no longer resolves is simply not a relation;
+            // it renders as plain text, exactly as on any other page.
+            $this->buildPageLinks->materializeWikilinksForPage($page->fresh() ?? $page);
 
             $provenance = QualityActivityWikiPage::query()->create([
                 'customer_id' => (int) $item->customer_id,

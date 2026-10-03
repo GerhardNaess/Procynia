@@ -5,6 +5,7 @@ namespace Tests\Feature\App;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityActivityWikiPage;
@@ -22,6 +23,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -47,6 +49,7 @@ use Tests\TestCase;
  */
 class QualityProcessFlowInterpretationTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use UsesProjectPostgresConnection;
 
     private const DESCRIPTION = 'Når en ny leverandør skal opprettes registrerer innkjøper leverandøren i systemet. Dersom leverandøren er kritisk skal sikkerhetsansvarlig kontrollere leverandøren. Deretter godkjenner økonomi leverandøren.';
@@ -1809,6 +1812,233 @@ class QualityProcessFlowInterpretationTest extends TestCase
         $this->assertStringNotContainsString('Kontrollen skal avdekke', $markdown);
     }
 
+    /**
+     * The article is written into the Wiki it is joining, not beside it.
+     *
+     * An article created from an activity used to arrive with nothing pointing out of it and
+     * nothing pointing in: the draft was written without ever being told what the customer's Wiki
+     * contains, so there was no cross-reference to materialize. What it is given is the page index
+     * — titles and ids, no content — which is navigation, not evidence.
+     */
+    public function test_the_draft_is_given_the_wiki_it_is_joining(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $existing = $this->createWikiPageWithVersion($customer, 'Leverandørregisteret', 'Slik føres registeret.');
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse($this->sectionedDraft());
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        $sent = $this->lastRequestPayload();
+        $prompt = json_encode($sent['input'], JSON_UNESCAPED_UNICODE);
+
+        $this->assertStringContainsString('ALLOWED LINK TARGETS', $prompt);
+        $this->assertStringContainsString('target_page_id '.$existing->id, $prompt);
+        $this->assertStringContainsString('Leverandørregisteret', $prompt);
+
+        // The model names the page and the words; it never writes the brackets or the slug. Same
+        // contract as the Wiki's own page generation — see EnterpriseWikiLinkIntentMaterializer.
+        $this->assertStringContainsString('Never write [[...]]', $prompt);
+        $this->assertArrayHasKey('link_intents', $sent['text']['format']['schema']['properties']);
+    }
+
+    /**
+     * The link syntax is the server's, in Kvalitet exactly as in ingest.
+     *
+     * The model returns prose and an intent naming a page and the words the link belongs on. The
+     * brackets, the pipe and the canonical slug are written by the one class that is allowed to
+     * write them, so a slug the model constructed can never reach a page.
+     */
+    public function test_a_link_intent_becomes_canonical_wikilink_syntax_in_the_draft(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $existing = $this->createWikiPageWithVersion($customer, 'Leverandørregisteret', 'Slik føres registeret.');
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse($this->sectionedDraft([
+            'documentation' => 'Resultatet skrives inn i leverandørregisteret.',
+            'link_intents' => [
+                ['target_page_id' => $existing->id, 'anchor_text' => 'leverandørregisteret'],
+            ],
+        ]));
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        $markdown = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['activity_article_draft']['markdown'];
+
+        $this->assertStringContainsString("[[{$existing->slug}|leverandørregisteret]]", $markdown);
+    }
+
+    /**
+     * Creating the article runs the Wiki's own link materialization.
+     *
+     * THIS IS THE STEP THAT WAS MISSING. Writing the page version is not what gives a Wiki page
+     * its relations: EnterpriseWikiBuildPageLinksService::materializeWikilinksForPage() is, and it
+     * is what every other path that gives a page a current version runs. Without it the page's
+     * text could say [[...]] all it liked and the Wiki graph would still draw it isolated.
+     */
+    public function test_creating_the_article_materializes_ordinary_wiki_relations(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $existing = $this->createWikiPageWithVersion($customer, 'Leverandørregisteret', 'Slik føres registeret.');
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse($this->sectionedDraft([
+            'documentation' => 'Resultatet skrives inn i leverandørregisteret.',
+            'link_intents' => [
+                ['target_page_id' => $existing->id, 'anchor_text' => 'leverandørregisteret'],
+            ],
+        ]));
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller']);
+
+        $drafted = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['activity_article_draft'];
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'kontroller',
+                'title' => $drafted['title'],
+                'markdown' => $drafted['markdown'],
+            ])
+            ->assertSessionHasNoErrors();
+
+        $article = EnterpriseWikiPage::query()
+            ->where('customer_id', $customer->id)
+            ->where('id', '!=', $existing->id)
+            ->sole();
+
+        $link = EnterpriseWikiPageLink::query()
+            ->where('from_page_id', $article->id)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+            ->sole();
+
+        $this->assertSame((int) $existing->id, (int) $link->to_page_id);
+        $this->assertSame((int) $customer->id, (int) $link->customer_id);
+        // The relation is the Wiki's ordinary one, deterministically derived from the page text —
+        // not a Quality-specific edge type invented for this flow.
+        $this->assertSame(EnterpriseWikiPageLink::SOURCE_DETERMINISTIC, $link->source);
+        $this->assertSame('leverandørregisteret', $link->metadata['anchor_text'] ?? null);
+    }
+
+    /**
+     * A link the user removed is not a relation, and one they wrote by hand is.
+     *
+     * The page text is authoritative for the page's relations — the same rule as everywhere else
+     * in the Wiki — so what materializes is what the user settled on, never what was drafted.
+     */
+    public function test_the_relations_follow_the_users_final_text(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $kept = $this->createWikiPageWithVersion($customer, 'Leverandørregisteret', 'Slik føres registeret.');
+        $dropped = $this->createWikiPageWithVersion($customer, 'Innkjøpspolicy', 'Slik kjøper vi inn.');
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/articles", [
+                'activity_key' => 'kontroller',
+                'title' => 'Sikkerhetskrav ved vurdering av leverandører',
+                // The [[innkjopspolicy]] the draft proposed is gone; a link to a page that does
+                // not exist has been typed in its place, and it is simply not a relation.
+                'markdown' => "## Dokumentasjon og resultat\n\nResultatet føres i [[{$kept->slug}|registeret]], ikke i [[finnes-ikke|noe annet]].",
+            ])
+            ->assertSessionHasNoErrors();
+
+        $article = EnterpriseWikiPage::query()
+            ->where('customer_id', $customer->id)
+            ->whereNotIn('id', [$kept->id, $dropped->id])
+            ->sole();
+
+        $this->assertSame(
+            [(int) $kept->id],
+            EnterpriseWikiPageLink::query()
+                ->where('from_page_id', $article->id)
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+                ->pluck('to_page_id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all(),
+        );
+    }
+
+    /** A customer with an empty Wiki gets an article, not an invented cross-reference. */
+    public function test_the_first_article_in_an_empty_wiki_is_drafted_without_a_link_catalog(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        $this->fakeResponse($this->sectionedDraft());
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller'])
+            ->assertSessionHasNoErrors();
+
+        $prompt = json_encode($this->lastRequestPayload()['input'], JSON_UNESCAPED_UNICODE);
+
+        $this->assertStringNotContainsString('ALLOWED LINK TARGETS', $prompt);
+        $this->assertStringNotContainsString('LINKS TO THE REST OF THE WIKI', $prompt);
+    }
+
+    /**
+     * Page identity stays the server's, whoever is asking.
+     *
+     * An intent naming a page outside the catalog the model was handed — another customer's page,
+     * or an id it made up — is refused rather than resolved, exactly as it is in ingest, and
+     * nothing is created.
+     */
+    public function test_a_link_intent_outside_the_catalog_is_refused_and_creates_nothing(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $foreignCustomer = $this->createWikiCustomer('Annen Kunde AS');
+        $foreignPage = $this->createWikiPageWithVersion($foreignCustomer, 'Deres rutine', 'Ikke vår.');
+
+        $process = $this->process($customer, 'Leverandørkontroll');
+        $this->flowWithActivity($customer, $process);
+
+        // A catalog has to exist for links to be offered at all, so the customer gets one page of
+        // their own — and the intent points somewhere else entirely.
+        $this->createWikiPageWithVersion($customer, 'Leverandørregisteret', 'Slik føres registeret.');
+
+        $this->fakeResponse($this->sectionedDraft([
+            'documentation' => 'Resultatet skrives inn i leverandørregisteret.',
+            'link_intents' => [
+                ['target_page_id' => $foreignPage->id, 'anchor_text' => 'leverandørregisteret'],
+            ],
+        ]));
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/activities/article-draft", ['activity_key' => 'kontroller'])
+            ->assertRedirect();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertNull($props['activity_article_draft']);
+        $this->assertSame('kontroller', $props['activity_article_error']['activity_key']);
+        $this->assertSame(0, QualityActivityWikiPage::query()->count());
+    }
+
     /** A provider that cannot answer leaves the activity exactly as it was. */
     public function test_a_failed_draft_creates_nothing_and_says_so(): void
     {
@@ -1945,6 +2175,23 @@ class QualityProcessFlowInterpretationTest extends TestCase
     }
 
     /** @param array<string, mixed> $proposal */
+    /**
+     * The body of the last request that actually went to the provider.
+     *
+     * @return array<string, mixed>
+     */
+    private function lastRequestPayload(): array
+    {
+        $recorded = Http::recorded();
+
+        $this->assertNotEmpty($recorded, 'No provider call was made.');
+
+        /** @var Request $request */
+        $request = $recorded[count($recorded) - 1][0];
+
+        return $request->data();
+    }
+
     private function fakeResponse(array $proposal): void
     {
         $this->fakeResponses([$proposal]);

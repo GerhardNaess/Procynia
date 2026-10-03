@@ -254,6 +254,7 @@ return [
             'articles_review_help' => 'Les gjennom og rett teksten før du oppretter den. Det som opprettes, er det som står her — artikkelen legges i Wiki som utkast og sendes til gjennomgang derfra.',
             'articles_structure_help' => 'Artikkelen følger en fast struktur: Formål, Når aktiviteten utføres, Ansvar, Fremgangsmåte, Viktige vurderinger og kriterier, Dokumentasjon og resultat, Relatert prosesskontekst.',
             'articles_fill_in_help' => 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.',
+            'articles_links_help' => 'Tekst i doble klammer, som [[slug|ordene det står på]], er en lenke til en annen Wiki-side. Den blir en vanlig lenke når artikkelen opprettes. Du kan fjerne den eller flytte den til andre ord.',
             'article_fill_in' => 'Må fylles inn',
             'article_section_missing' => 'Denne delen må fylles inn av den som kjenner aktiviteten.',
             'article_sections' => [

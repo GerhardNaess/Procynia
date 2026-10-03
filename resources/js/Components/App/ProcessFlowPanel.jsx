@@ -1570,6 +1570,15 @@ function ActivityArticlePanel({
                                     ?? 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.'}
                             </p>
 
+                            {/* Only when there is one to explain. The syntax is the Wiki's own, and
+                                an author who never sees a link does not need to be told about it. */}
+                            {markdown.includes('[[') && (
+                                <p className="mt-2 text-sm leading-5 text-slate-500">
+                                    {tb.articles_links_help
+                                        ?? 'Tekst i doble klammer, som [[slug|ordene det står på]], er en lenke til en annen Wiki-side. Den blir en vanlig lenke når artikkelen opprettes. Du kan fjerne den eller flytte den til andre ord.'}
+                                </p>
+                            )}
+
                             <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-title">
                                 {tb.articles_title ?? 'Tittel'}
                             </label>
