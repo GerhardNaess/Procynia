@@ -3380,11 +3380,9 @@ return [
         'show_page_help_item_owner_title' => 'Page owner',
         'show_page_help_item_owner_text' => 'Responsible for the Wiki page, corrects the draft and sends it for review.',
         'show_page_help_item_reviewer_title' => 'Reviewer',
-        'show_page_help_item_reviewer_text' => 'Once a reviewer is assigned, it is the reviewer who approves and publishes the page, or sends it back with a comment. Nobody can skip an assigned reviewer — not even a System Owner.',
-        'show_page_help_item_system_owner_title' => 'System Owner',
-        'show_page_help_item_system_owner_text' => 'Can publish a page straight from draft without sending it for review. If a System Owner does send it to a reviewer, that reviewer decides the version.',
+        'show_page_help_item_reviewer_text' => 'The reviewer carries out the final review: approves and publishes the page, or sends it back with a comment. A page is always published by somebody other than the person who sent it in.',
         'show_page_help_item_submit_title' => 'Send for review',
-        'show_page_help_item_submit_text' => 'The page owner picks a named reviewer, who is notified and gets the task under Follow-up. This is the usual route. For a System Owner it is optional.',
+        'show_page_help_item_submit_text' => 'The page owner picks a named reviewer, who is notified and gets the task under Follow-up. The reviewer cannot be the person who sends it in.',
         'show_page_help_item_publish_title' => 'Approve and publish',
         'show_page_help_item_publish_text' => 'The working version becomes the published knowledge on the page. Nothing else has to be finished first.',
         'show_page_help_item_edit_title' => 'Edit article',
@@ -3409,7 +3407,7 @@ return [
         'show_page_help_item_changes_resubmit_text' => 'The page owner reopens the page, corrects the content and sends it for review again. A reviewer is chosen afresh for each round.',
 
         'show_page_help_submit_hint_label' => 'Show explanation for Send for review',
-        'show_page_help_submit_hint' => 'You pick a reviewer. Document owners must approve content from their sources, and the reviewer publishes at the end.',
+        'show_page_help_submit_hint' => 'You pick a reviewer, who is notified. Document owners can comment on content from their sources, but the reviewer is the one who publishes.',
 
         'show_page_help_section_best_practice' => 'Best-practice suggestion',
         'show_page_help_item_best_practice_what_title' => 'A suggestion, not an error',

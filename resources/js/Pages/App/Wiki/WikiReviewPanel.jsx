@@ -577,7 +577,7 @@ export default function WikiReviewPanel({
                         <InfoHint
                             size="sm"
                             label={tw.show_page_help_submit_hint_label ?? 'Vis forklaring for Send til gjennomgang'}
-                            text={tw.show_page_help_submit_hint ?? 'Du velger en kontrollør. Dokumenteiere må godkjenne innhold fra sine kilder, og kontrolløren publiserer til slutt.'}
+                            text={tw.show_page_help_submit_hint ?? 'Du velger en kontrollør, som blir varslet. Dokumenteiere kan gi innspill på innhold fra sine kilder, men det er kontrolløren som publiserer.'}
                         />
                     </>
                 )}

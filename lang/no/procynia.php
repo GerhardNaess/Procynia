@@ -3381,11 +3381,9 @@ return [
         'show_page_help_item_owner_title' => 'Sideeier',
         'show_page_help_item_owner_text' => 'Har ansvar for Wiki-siden, retter innholdet i utkastet og sender det til gjennomgang.',
         'show_page_help_item_reviewer_title' => 'Kontrollør',
-        'show_page_help_item_reviewer_text' => 'Når en kontrollør er tildelt, er det kontrolløren som godkjenner og publiserer siden, eller sender den tilbake med en kommentar. Ingen kan hoppe over en tildelt kontrollør — heller ikke System Owner.',
-        'show_page_help_item_system_owner_title' => 'System Owner',
-        'show_page_help_item_system_owner_text' => 'Kan publisere en side direkte fra utkast, uten å sende den til gjennomgang. Velger System Owner å sende den til en kontrollør, er det kontrolløren som avgjør den versjonen.',
+        'show_page_help_item_reviewer_text' => 'Kontrolløren tar den endelige avgjørelsen: godkjenner og publiserer siden, eller sender den tilbake med en kommentar. En side publiseres alltid av en annen enn den som sendte den inn.',
         'show_page_help_item_submit_title' => 'Send til gjennomgang',
-        'show_page_help_item_submit_text' => 'Sideeier velger en konkret kontrollør, som får beskjed og oppgaven under Oppfølging. Dette er den vanlige flyten. For System Owner er den valgfri.',
+        'show_page_help_item_submit_text' => 'Sideeier velger en konkret kontrollør, som blir varslet og får oppgaven under Oppfølging. Kontrolløren kan ikke være den som sender inn.',
         'show_page_help_item_publish_title' => 'Godkjenn og publiser',
         'show_page_help_item_publish_text' => 'Arbeidsversjonen blir den publiserte kunnskapen på siden. Ingenting annet må være ferdig først.',
         'show_page_help_item_edit_title' => 'Rediger artikkel',
@@ -3410,7 +3408,7 @@ return [
         'show_page_help_item_changes_resubmit_text' => 'Sideeier gjenåpner siden, retter innholdet og sender det til gjennomgang igjen. Kontrollør velges på nytt for hver runde.',
 
         'show_page_help_submit_hint_label' => 'Vis forklaring for Send til gjennomgang',
-        'show_page_help_submit_hint' => 'Du velger en kontrollør. Dokumenteiere må godkjenne innhold fra sine kilder, og kontrolløren publiserer til slutt.',
+        'show_page_help_submit_hint' => 'Du velger en kontrollør, som blir varslet. Dokumenteiere kan gi innspill på innhold fra sine kilder, men det er kontrolløren som publiserer.',
 
         'show_page_help_section_best_practice' => 'Forslag basert på beste praksis',
         'show_page_help_item_best_practice_what_title' => 'Et forslag, ikke en feil',

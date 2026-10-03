@@ -835,13 +835,14 @@ describe('the page help matches the workflow', () => {
     });
 
     test('an assigned reviewer is described as decisive', () => {
-        assert.match(show, /Ingen kan hoppe over en tildelt kontrollør — heller ikke System Owner/);
+        assert.match(show, /Kontrolløren tar den endelige avgjørelsen/);
     });
 
-    test('the System Owner route from draft is described, and as optional', () => {
-        assert.match(show, /show_page_help_item_system_owner_title/);
-        assert.match(show, /Kan publisere en side direkte fra utkast/);
-        assert.match(show, /For System Owner er den valgfri/);
+    test('publication is described as always going through somebody else', () => {
+        assert.match(show, /En side publiseres alltid av en annen enn den som sendte den inn/);
+        assert.match(show, /Kontrolløren kan ikke være den som sender inn/);
+        assert.ok(! show.includes('show_page_help_item_system_owner_'));
+        assert.ok(! show.includes('direkte fra utkast'));
     });
 
     test('quality assurance is explained, and explicitly not a gate', () => {
@@ -871,7 +872,6 @@ describe('the page help matches the workflow', () => {
 
     test('both languages carry every key the help falls back from', () => {
         for (const key of [
-            'show_page_help_item_system_owner_title', 'show_page_help_item_system_owner_text',
             'show_page_help_item_edit_title', 'show_page_help_item_edit_text',
             'show_page_help_section_quality', 'show_page_help_item_quality_who_text',
             'show_page_help_item_quality_optional_text', 'show_page_help_section_sources',

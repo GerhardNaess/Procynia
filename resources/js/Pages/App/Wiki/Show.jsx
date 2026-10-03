@@ -85,15 +85,11 @@ function getWikiShowHelpSections(tw) {
                 },
                 {
                     title: tw.show_page_help_item_reviewer_title ?? 'Kontrollør',
-                    text: tw.show_page_help_item_reviewer_text ?? 'Når en kontrollør er tildelt, er det kontrolløren som godkjenner og publiserer siden, eller sender den tilbake med en kommentar. Ingen kan hoppe over en tildelt kontrollør — heller ikke System Owner.',
-                },
-                {
-                    title: tw.show_page_help_item_system_owner_title ?? 'System Owner',
-                    text: tw.show_page_help_item_system_owner_text ?? 'Kan publisere en side direkte fra utkast, uten å sende den til gjennomgang. Velger System Owner å sende den til en kontrollør, er det kontrolløren som avgjør den versjonen.',
+                    text: tw.show_page_help_item_reviewer_text ?? 'Kontrolløren tar den endelige avgjørelsen: godkjenner og publiserer siden, eller sender den tilbake med en kommentar. En side publiseres alltid av en annen enn den som sendte den inn.',
                 },
                 {
                     title: tw.show_page_help_item_submit_title ?? 'Send til gjennomgang',
-                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør, som får beskjed og oppgaven under Oppfølging. Dette er den vanlige flyten. For System Owner er den valgfri.',
+                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør, som blir varslet og får oppgaven under Oppfølging. Kontrolløren kan ikke være den som sender inn.',
                 },
                 {
                     title: tw.show_page_help_item_publish_title ?? 'Godkjenn og publiser',
