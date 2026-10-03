@@ -229,6 +229,10 @@ return [
             'change_questions_heading' => 'Dette må avklares før endringen kan foreslås',
             'change_preview_heading' => 'Slik blir flyten med endringene',
             'change_discard' => 'Forkast forslaget',
+            'change_accept' => 'Godta endringer',
+            'change_accepting' => 'Legger inn endringene …',
+            'change_accept_help' => 'Alle endringene i listen legges inn i arbeidsversjonen samlet. Ingenting publiseres — du kan redigere videre før du godkjenner og publiserer.',
+            'change_accept_unsaved' => 'Du har ulagrede endringer i strukturen. Forkast dem før du godtar forslaget — forslaget er laget ut fra den lagrede arbeidsversjonen.',
             'change_unsaved_notice' => 'Forslaget er laget ut fra den lagrede arbeidsversjonen. Ulagrede endringer i strukturen er ikke tatt med.',
             'change_badge_add' => 'Legges til',
             'change_badge_update' => 'Endres',
@@ -505,6 +509,7 @@ return [
             'blueprint_discarded' => 'Arbeidsversjonen er tilbakestilt til gjeldende revisjon.',
             'article_queued' => 'Artikkelen er lagt inn som kilde i Wiki. Wiki bygger kunnskapssidene av den nå, og de dukker opp på aktiviteten når de er klare.',
             'blueprint_adopted' => 'Prosessflyten er tatt i bruk. Den er et utkast til du godkjenner den.',
+            'blueprint_change_accepted' => 'Endringene er lagt inn i arbeidsversjonen. Den er et utkast til du godkjenner og publiserer den.',
         ],
         'errors' => [
             'unknown_type' => 'Ukjent dokumenttype.',
@@ -553,6 +558,8 @@ return [
             'flow_change_instruction_too_short' => 'Instruksen er for kort. Skriv hva som skal endres, og hvor i prosessen.',
             'flow_change_instruction_too_long' => 'Instruksen er for lang. Beskriv én endring om gangen.',
             'flow_change_without_flow' => 'Prosessen har ingen flyt å endre ennå. Beskriv prosessen først.',
+            'flow_change_stale' => 'Prosessen er endret siden forslaget ble laget, så forslaget kan ikke brukes. Lag et nytt forslag ut fra flyten slik den er nå.',
+            'flow_change_empty' => 'Forslaget inneholder ingen endringer å godta.',
         ],
     ],
     'common' => [

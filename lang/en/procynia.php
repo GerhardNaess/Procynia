@@ -229,6 +229,10 @@ return [
             'change_questions_heading' => 'This needs clarifying before a change can be proposed',
             'change_preview_heading' => 'The flow with the changes',
             'change_discard' => 'Discard proposal',
+            'change_accept' => 'Accept changes',
+            'change_accepting' => 'Applying the changes …',
+            'change_accept_help' => 'All changes in the list are applied to the working version together. Nothing is published — you can keep editing before you approve and publish.',
+            'change_accept_unsaved' => 'You have unsaved changes in the structure. Discard them before accepting the proposal — it was made from the saved working version.',
             'change_unsaved_notice' => 'The proposal is based on the saved working version. Unsaved changes to the structure are not included.',
             'change_badge_add' => 'Added',
             'change_badge_update' => 'Changed',
@@ -503,6 +507,7 @@ return [
             'blueprint_discarded' => 'The working version has been reset to the revision in force.',
             'article_queued' => 'The article has gone into Wiki as a source. Wiki is building the knowledge pages from it now, and they appear on the activity once they are ready.',
             'blueprint_adopted' => 'The process flow is now in use. It is a draft until you approve it.',
+            'blueprint_change_accepted' => 'The changes have been applied to the working version. It is a draft until you approve and publish it.',
         ],
         'errors' => [
             'unknown_type' => 'Unknown document type.',
@@ -551,6 +556,8 @@ return [
             'flow_change_instruction_too_short' => 'The instruction is too short. Write what should change, and where in the process.',
             'flow_change_instruction_too_long' => 'The instruction is too long. Describe one change at a time.',
             'flow_change_without_flow' => 'The process has no flow to change yet. Describe the process first.',
+            'flow_change_stale' => 'The process has changed since this proposal was made, so it cannot be used. Ask for a new proposal based on the flow as it is now.',
+            'flow_change_empty' => 'The proposal contains no changes to accept.',
         ],
     ],
     'common' => [

@@ -20,8 +20,11 @@ const BADGE_STYLES = {
  * them compare two pictures to find out. The diagram of the result comes after the list, as a check
  * of what the list says.
  *
- * Nothing on this card writes. Discarding is hiding: the proposal lives in the flash of the visit
- * that produced it and is gone on the next one anyway.
+ * Asking writes nothing, and discarding is hiding: the proposal lives in the flash of the visit
+ * that produced it and is gone on the next one anyway. "Godta endringer" is the one write, and it
+ * takes the whole list — the server re-applies it to the working version it was made against, or
+ * refuses because that version has moved on. Unsaved edits block it rather than being thrown away
+ * by the reload that follows.
  */
 export default function ProcessFlowChangeCard({
     tb,
@@ -30,7 +33,9 @@ export default function ProcessFlowChangeCard({
     setValue,
     onSubmit,
     onDiscard,
+    onAccept,
     busy = false,
+    accepting = false,
     error = null,
     changeError = null,
     proposal = null,
@@ -159,7 +164,29 @@ export default function ProcessFlowChangeCard({
                         </div>
                     )}
 
+                    {changes.length > 0 && (
+                        <p className="text-sm text-slate-600">
+                            {tb.change_accept_help ?? 'Alle endringene i listen legges inn i arbeidsversjonen samlet. Ingenting publiseres.'}
+                        </p>
+                    )}
+
+                    {changes.length > 0 && hasUnsavedChanges && (
+                        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                            {tb.change_accept_unsaved ?? 'Du har ulagrede endringer i strukturen. Forkast dem før du godtar forslaget.'}
+                        </p>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-3">
+                        {changes.length > 0 && (
+                            <button
+                                type="button"
+                                className={PRIMARY_ACTION}
+                                onClick={() => onAccept()}
+                                disabled={busy || hasUnsavedChanges}
+                            >
+                                {accepting ? (tb.change_accepting ?? 'Legger inn endringene …') : (tb.change_accept ?? 'Godta endringer')}
+                            </button>
+                        )}
                         <button type="button" className={SECONDARY_ACTION} onClick={onDiscard} disabled={busy}>
                             {tb.change_discard ?? 'Forkast forslaget'}
                         </button>

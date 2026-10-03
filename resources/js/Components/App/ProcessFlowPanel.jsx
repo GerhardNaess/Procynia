@@ -171,6 +171,7 @@ export default function ProcessFlowPanel({
     // "Forkast forslaget". Hiding is the whole of it: nothing was stored, and the flash the proposal
     // came in is spent on the next visit regardless.
     const [changeDiscarded, setChangeDiscarded] = useState(false);
+    const [acceptingChange, setAcceptingChange] = useState(false);
 
     useEffect(() => {
         setChangeDiscarded(false);
@@ -366,6 +367,29 @@ export default function ProcessFlowPanel({
         });
     }
 
+    // "Godta endringer". The operations and the fingerprint travel, not the previewed flow: the server
+    // re-applies them to the working version they were made for, or refuses because it moved on.
+    // What comes back is the stored flow through props, so the diagram and editor reload from it.
+    function acceptChange() {
+        if (! changeProposal) {
+            return;
+        }
+
+        setSaving(true);
+        setAcceptingChange(true);
+        router.post(`/app/quality/items/${item.id}/blueprint/changes/accept`, {
+            instruction: changeProposal.instruction ?? '',
+            base_hash: changeProposal.base_hash,
+            operations: changeProposal.operations ?? [],
+        }, {
+            preserveScroll: true,
+            onFinish: () => {
+                setSaving(false);
+                setAcceptingChange(false);
+            },
+        });
+    }
+
     // "Avvis". Gone from the screen on the click; the request only makes it stay gone next time.
     // `only` keeps this a partial reload, so the proposal on screen — which lives in the flash of
     // the visit that produced it and cannot be flashed again — survives the round trip.
@@ -508,7 +532,9 @@ export default function ProcessFlowPanel({
                     setValue={setChangeInstruction}
                     onSubmit={proposeChange}
                     onDiscard={() => setChangeDiscarded(true)}
+                    onAccept={acceptChange}
                     busy={saving}
+                    accepting={acceptingChange}
                     error={changeInputError}
                     changeError={changeError}
                     proposal={changeDiscarded ? null : changeProposal}

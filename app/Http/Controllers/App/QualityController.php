@@ -39,6 +39,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -589,7 +590,91 @@ class QualityController extends Controller
             'nodes' => $proposal['payload']['nodes'],
             'edges' => $proposal['payload']['edges'],
             'base_hash' => $proposal['base_hash'],
+            // What "Godta endringer" posts back. Re-applied server-side, never trusted as a flow.
+            'operations' => $proposal['operations'],
         ]);
+    }
+
+    /**
+     * "Godta endringer": put a proposed change into the working version, all of it at once.
+     *
+     * The browser sends the operations and the fingerprint of the version they were proposed
+     * against — not the flow it previewed. QualityProcessFlowChangeProposer::accept() refuses when
+     * the working version has moved on, and otherwise re-applies the operations and validates the
+     * result with the validators the proposal passed. No model is called here.
+     *
+     * What it stores is an ordinary working version, through the same store() every edit goes
+     * through: the approval is cleared, no revision is written, and the description is left alone
+     * (null). Publishing remains "Godkjenn og publiser", by a person, later. `ai` is the source
+     * because that is where this version of the flow came from — the same word adopting a
+     * proposed flow writes.
+     */
+    public function acceptFlowChange(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        $validated = $request->validate([
+            // Only so a refusal can put the instruction back in the field for the next proposal.
+            'instruction' => ['nullable', 'string', 'max:2000'],
+            'base_hash' => ['required', 'string', 'size:40'],
+            'operations' => ['required', 'array', 'min:1', 'max:'.ProcessFlowChangeAiClient::MAX_OPERATIONS],
+            'operations.*.op' => ['required', 'string', Rule::in(ProcessFlowChangeAiClient::OPS)],
+            'operations.*.step' => ['nullable', 'string', 'max:80'],
+            'operations.*.type' => ['nullable', 'string', Rule::in(ProcessFlowChangeAiClient::STEP_TYPES)],
+            'operations.*.role' => ['nullable', 'string', 'max:120'],
+            'operations.*.label' => ['nullable', 'string', 'max:200'],
+            'operations.*.description' => ['nullable', 'string', 'max:2000'],
+            'operations.*.from' => ['nullable', 'string', 'max:80'],
+            'operations.*.to' => ['nullable', 'string', 'max:80'],
+            'operations.*.condition' => ['nullable', 'string', 'max:60'],
+        ]);
+
+        $blueprint = $this->blueprints->forItem((int) $customerId, $item);
+
+        if ($blueprint === null) {
+            throw ValidationException::withMessages([
+                'instruction' => __('procynia.quality.errors.flow_change_without_flow'),
+            ]);
+        }
+
+        // Every field present, as the proposer reads them: the same flat shape the AI client hands it.
+        $operations = array_map(static fn (array $operation): array => [
+            'op' => $operation['op'],
+            'step' => $operation['step'] ?? null,
+            'type' => $operation['type'] ?? null,
+            'role' => $operation['role'] ?? null,
+            'label' => $operation['label'] ?? null,
+            'description' => $operation['description'] ?? null,
+            'from' => $operation['from'] ?? null,
+            'to' => $operation['to'] ?? null,
+            'condition' => $operation['condition'] ?? null,
+        ], $validated['operations']);
+
+        try {
+            $payload = $this->flowChanges->accept((int) $customerId, $item, $blueprint, $operations, $validated['base_hash']);
+        } catch (ProcessFlowInterpretationException $exception) {
+            return back()->with('flow_change_error', [
+                'quality_item_id' => (int) $item->id,
+                'message' => $exception->getMessage(),
+                'problems' => $exception->problems,
+                'instruction' => (string) ($validated['instruction'] ?? ''),
+            ]);
+        }
+
+        $this->blueprints->store(
+            (int) $customerId,
+            $item,
+            $payload,
+            QualityProcessBlueprint::SOURCE_AI,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.blueprint_change_accepted'));
     }
 
     /**

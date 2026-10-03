@@ -8,6 +8,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessFlowChangeAiClient;
 use App\Services\Quality\QualityProcessBlueprintService;
@@ -17,11 +18,12 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Asking for a change to an existing flow in plain language — the proposal half only.
+ * Asking for a change to an existing flow in plain language, and accepting it.
  *
  * What these tests defend:
  *
@@ -33,6 +35,9 @@ use Tests\TestCase;
  *    one repair and then a refusal that says why.
  *  - The user is shown a readable list of what would change, with steps named by label.
  *  - The same gates as every other write to a blueprint.
+ *  - "Godta endringer" re-applies the operations to the version they were proposed against, stores
+ *    an ordinary working version (approval cleared, no revision, description untouched), and
+ *    refuses a proposal the working version has moved on from.
  *
  * No live provider call is made anywhere in this file.
  */
@@ -348,7 +353,199 @@ class QualityProcessFlowChangeTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_accepting_a_change_stores_it_as_an_ordinary_working_version(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer);
+        $blueprint = $this->storedFlow($customer, $process, $owner);
+        app(QualityProcessBlueprintService::class)->approve((int) $customer->id, $process, $owner);
+
+        $this->fakeResponses([$this->securityCheckProposal()]);
+
+        $proposal = $this->propose($owner, $process)['flow_change_proposal'];
+
+        $this->accept($owner, $process, $proposal)
+            ->assertRedirect()
+            ->assertSessionHas('success', __('procynia.quality.flash.blueprint_change_accepted'));
+
+        // Accepting calls no model: the operations are re-applied, not re-asked.
+        Http::assertSentCount(1);
+
+        $after = $blueprint->fresh();
+
+        // The flow the user was shown is the flow that is stored.
+        $this->assertEquals(
+            $this->sortedNodes($proposal['nodes']),
+            $this->sortedNodes($after->payload['nodes']),
+        );
+        $edges = array_map(static fn (array $edge): string => $edge['from'].'->'.$edge['to'], $after->payload['edges']);
+        $this->assertContains('registrer->sikkerhetskontroll', $edges);
+        $this->assertContains('sikkerhetskontroll->godkjenn', $edges);
+        $this->assertNotContains('registrer->godkjenn', $edges);
+        $this->assertContains('Sikkerhetsansvarlig', array_column($after->payload['lanes'], 'label'));
+
+        // An ordinary working version: the approval is gone, as after any edit, and nothing was
+        // published. The description is the user's text and a change does not rewrite it.
+        $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $after->status);
+        $this->assertNull($after->approved_at);
+        $this->assertSame(QualityProcessBlueprint::SOURCE_AI, $after->source);
+        $this->assertSame('Innkjøper registrerer leverandøren, godkjenner den og arkiverer den.', $after->description);
+        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+
+        // The accepted flow is the working version like any other: it can be edited by hand and then
+        // approved, and only that approval writes the next revision.
+        $payload = $after->payload;
+        $payload['nodes'] = array_map(static function (array $node): array {
+            if ($node['key'] === 'sikkerhetskontroll') {
+                $node['label'] = 'Kontroller leverandørens sikkerhet';
+            }
+
+            return $node;
+        }, $payload['nodes']);
+
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$process->id}/blueprint", $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $blueprint->fresh()->source);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/blueprint/approve")
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(2, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_a_proposal_for_a_flow_that_has_since_changed_is_refused(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer);
+        $blueprint = $this->storedFlow($customer, $process, $owner);
+
+        $this->fakeResponses([$this->securityCheckProposal()]);
+
+        $proposal = $this->propose($owner, $process)['flow_change_proposal'];
+
+        // Somebody edits the working version in between.
+        $payload = $blueprint->fresh()->payload;
+        $payload['nodes'][1]['label'] = 'Registrer leverandøren i ERP';
+        $this->actingAs($owner)
+            ->put("/app/quality/items/{$process->id}/blueprint", $payload)
+            ->assertSessionHasNoErrors();
+        $edited = $blueprint->fresh();
+
+        $this->accept($owner, $process, $proposal)->assertRedirect();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertSame(__('procynia.quality.errors.flow_change_stale'), $props['flow_change_error']['message']);
+        $this->assertSame(self::INSTRUCTION, $props['flow_change_error']['instruction']);
+        $this->assertEquals($edited->payload, $blueprint->fresh()->payload);
+        $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $blueprint->fresh()->source);
+    }
+
+    public function test_accepted_operations_are_validated_again_and_never_stored_broken(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer);
+        $blueprint = $this->storedFlow($customer, $process, $owner);
+        $before = $blueprint->fresh();
+
+        // Not what any proposal said: operations posted by hand, on the right version, that would
+        // leave "Arkiver" a dead end. The browser is not trusted to have sent a proposal.
+        $this->accept($owner, $process, [
+            'instruction' => self::INSTRUCTION,
+            'base_hash' => $this->hashOf($before),
+            'operations' => [$this->op('remove_flow', from: 'arkiver', to: 'end')],
+        ])->assertRedirect();
+
+        $error = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['flow_change_error'];
+
+        $this->assertSame(__('procynia.quality.errors.flow_change_not_coherent'), $error['message']);
+        $this->assertNotEmpty($error['problems']);
+        $this->assertEquals($before->payload, $blueprint->fresh()->payload);
+
+        // And a list that changes nothing is nothing to accept.
+        $this->accept($owner, $process, [
+            'base_hash' => $this->hashOf($before),
+            'operations' => [$this->op('update_step', step: 'registrer', label: 'Registrer leverandøren')],
+        ])->assertRedirect();
+
+        $this->assertSame(
+            __('procynia.quality.errors.flow_change_empty'),
+            $this->actingAs($owner)->get("/app/quality/items/{$process->id}?tab=flow")
+                ->viewData('page')['props']['flow_change_error']['message'],
+        );
+        $this->assertEquals($before->payload, $blueprint->fresh()->payload);
+        Http::assertNothingSent();
+    }
+
+    public function test_accepting_a_change_passes_the_same_gates_as_every_other_flow_write(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+        $process = $this->process($customer);
+        $blueprint = $this->storedFlow($customer, $process, $owner);
+        $contributor = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
+
+        ['customer' => $other, 'owner' => $otherOwner] = $this->context();
+        $foreign = $this->process($other);
+        $foreignBlueprint = $this->storedFlow($other, $foreign, $otherOwner);
+
+        $request = [
+            'base_hash' => $this->hashOf($blueprint->fresh()),
+            'operations' => [$this->op('update_step', step: 'registrer', label: 'Registrer i ERP')],
+        ];
+
+        $this->accept($contributor, $process, $request)->assertForbidden();
+        $this->accept($owner, $foreign, ['base_hash' => $this->hashOf($foreignBlueprint->fresh())] + $request)->assertNotFound();
+
+        // An operation the proposal could never have contained is a request error, not a change.
+        $this->accept($owner, $process, [
+            'base_hash' => $request['base_hash'],
+            'operations' => [['op' => 'replace_flow']],
+        ])->assertSessionHasErrors('operations.0.op');
+
+        $this->assertSame('Registrer leverandøren', $blueprint->fresh()->payload['nodes'][1]['label']);
+    }
+
     // ---------------------------------------------------------------------
+
+    /** @param array<string, mixed> $proposal */
+    private function accept(User $user, QualityItem $item, array $proposal): TestResponse
+    {
+        return $this->actingAs($user)->post("/app/quality/items/{$item->id}/blueprint/changes/accept", [
+            'instruction' => $proposal['instruction'] ?? null,
+            'base_hash' => $proposal['base_hash'],
+            'operations' => $proposal['operations'],
+        ]);
+    }
+
+    private function hashOf(QualityProcessBlueprint $blueprint): string
+    {
+        return sha1((string) json_encode([
+            $blueprint->payload['lanes'], $blueprint->payload['nodes'], $blueprint->payload['edges'],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $nodes
+     * @return list<array<string, mixed>>
+     */
+    private function sortedNodes(array $nodes): array
+    {
+        $nodes = array_map(static function (array $node): array {
+            ksort($node);
+
+            return $node;
+        }, $nodes);
+        usort($nodes, static fn (array $a, array $b): int => strcmp($a['key'], $b['key']));
+
+        return $nodes;
+    }
 
     /** @return array<string, mixed> */
     private function propose(User $owner, QualityItem $item, string $instruction = self::INSTRUCTION): array

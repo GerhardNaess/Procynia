@@ -52,6 +52,22 @@ class ProcessFlowInterpretationException extends RuntimeException
     }
 
     /**
+     * "Godta endringer" on a proposal made against a working version that has since changed. The
+     * operations were written for a flow that no longer exists, so the only honest advice is to ask
+     * for a new proposal.
+     */
+    public static function changeStale(): self
+    {
+        return new self(__('procynia.quality.errors.flow_change_stale'));
+    }
+
+    /** Accepting a proposal whose operations change nothing in the working version. */
+    public static function changeEmpty(): self
+    {
+        return new self(__('procynia.quality.errors.flow_change_empty'));
+    }
+
+    /**
      * The third way, and the only one that is about an answer rather than a description.
      *
      * The rewrite came back, and it was not something to put in front of the user — it still

@@ -28,7 +28,9 @@ use Throwable;
  * WHY NOTHING HERE WRITES.
  *
  * The same reason QualityProcessFlowInterpreter gives. A change is shown before it is accepted, and
- * the working version must survive a proposal the user did not want. Accepting is a separate step.
+ * the working version must survive a proposal the user did not want. Accepting is a separate step:
+ * accept() re-applies the operations and hands back a payload, and the controller stores it the way
+ * every other edit is stored.
  *
  * WHY ONLY NEW PROBLEMS COUNT.
  *
@@ -51,7 +53,7 @@ class QualityProcessFlowChangeProposer
     ) {}
 
     /**
-     * @return array{instruction: string, summary: string, changes: list<array<string, mixed>>, questions: list<string>, payload: array<string, mixed>, base_hash: string, model: string, repaired: bool}
+     * @return array{instruction: string, summary: string, changes: list<array<string, mixed>>, questions: list<string>, operations: list<array<string, mixed>>, payload: array<string, mixed>, base_hash: string, model: string, repaired: bool}
      *
      * @throws ProcessFlowInterpretationException
      */
@@ -69,6 +71,51 @@ class QualityProcessFlowChangeProposer
             ),
             fn (): array => $this->run($customerId, $item, $blueprint, $instruction, $languageCode),
         );
+    }
+
+    /**
+     * "Godta endringer": the flow a proposal's operations produce, applied to the working version
+     * as it is stored now.
+     *
+     * WHY THE OPERATIONS ARE APPLIED AGAIN. The browser sends back the operations and the
+     * fingerprint, not the flow it was shown. A flow posted from the browser would be whatever the
+     * browser says; operations re-applied here are the change the user read, on the version it was
+     * written for, judged by the same validators as when it was proposed. No model is called.
+     *
+     * WHY A MOVED-ON FLOW REFUSES. Operations name steps and connections by key. Applied to a flow
+     * somebody edited in between, "fjern forbindelsen A → B" can mean something other than what
+     * the list said, or quietly undo the edit. So a fingerprint that no longer matches is a refusal
+     * with one piece of advice — ask again — never a best-effort merge.
+     *
+     * Only problems the change introduces count, exactly as in propose(): the working version is
+     * the same one, so the same proposal passes the same way.
+     *
+     * @param  list<array<string, mixed>>  $operations
+     * @return array<string, mixed> The lanes/nodes/edges payload to store as the working version.
+     *
+     * @throws ProcessFlowInterpretationException
+     */
+    public function accept(int $customerId, QualityItem $item, QualityProcessBlueprint $blueprint, array $operations, string $baseHash): array
+    {
+        $current = self::current($blueprint);
+
+        if (! hash_equals(self::fingerprint($current), $baseHash)) {
+            throw ProcessFlowInterpretationException::changeStale();
+        }
+
+        $checked = $this->check($customerId, $item, $current, array_values($operations), $this->baselineOf($current));
+
+        if ($checked['problems'] !== []) {
+            throw ProcessFlowInterpretationException::changeUnusable(
+                $this->validator->describe($checked['problems']),
+            );
+        }
+
+        if ($checked['changes'] === []) {
+            throw ProcessFlowInterpretationException::changeEmpty();
+        }
+
+        return $checked['payload'];
     }
 
     /**
@@ -94,18 +141,11 @@ class QualityProcessFlowChangeProposer
      */
     private function run(int $customerId, QualityItem $item, QualityProcessBlueprint $blueprint, string $instruction, string $languageCode): array
     {
-        $current = [
-            'lanes' => $blueprint->lanes(),
-            'nodes' => $blueprint->nodes(),
-            'edges' => $blueprint->edges(),
-        ];
+        $current = self::current($blueprint);
 
         $title = (string) $item->title;
         $view = $this->modelView($current, $blueprint->description);
-        $baseline = $this->problemIdentities(array_merge(
-            $this->validator->referenceProblems($current),
-            $this->validator->graphProblems($current),
-        ));
+        $baseline = $this->baselineOf($current);
 
         $proposal = $this->attempt(fn (): array => $this->client->propose($title, $view, $instruction, $languageCode));
         $checked = $this->check($customerId, $item, $current, $proposal['operations'], $baseline);
@@ -132,6 +172,32 @@ class QualityProcessFlowChangeProposer
         }
 
         return $this->result($current, $recheck, $repaired, $instruction, repaired: true);
+    }
+
+    /**
+     * @return array{lanes: list<array<string, mixed>>, nodes: list<array<string, mixed>>, edges: list<array<string, mixed>>}
+     */
+    private static function current(QualityProcessBlueprint $blueprint): array
+    {
+        return [
+            'lanes' => $blueprint->lanes(),
+            'nodes' => $blueprint->nodes(),
+            'edges' => $blueprint->edges(),
+        ];
+    }
+
+    /**
+     * What the working version already gets wrong, so a change is only held to what it adds.
+     *
+     * @param  array<string, mixed>  $current
+     * @return array<string, bool>
+     */
+    private function baselineOf(array $current): array
+    {
+        return $this->problemIdentities(array_merge(
+            $this->validator->referenceProblems($current),
+            $this->validator->graphProblems($current),
+        ));
     }
 
     /**
@@ -601,8 +667,8 @@ class QualityProcessFlowChangeProposer
     /**
      * @param  array<string, mixed>  $current
      * @param  array{payload: array<string, mixed>, changes: list<array<string, mixed>>}  $checked
-     * @param  array{summary: string, questions: list<string>, model: string}  $proposal
-     * @return array{instruction: string, summary: string, changes: list<array<string, mixed>>, questions: list<string>, payload: array<string, mixed>, base_hash: string, model: string, repaired: bool}
+     * @param  array{summary: string, operations: list<array<string, mixed>>, questions: list<string>, model: string}  $proposal
+     * @return array{instruction: string, summary: string, changes: list<array<string, mixed>>, questions: list<string>, operations: list<array<string, mixed>>, payload: array<string, mixed>, base_hash: string, model: string, repaired: bool}
      */
     private function result(array $current, array $checked, array $proposal, string $instruction, bool $repaired): array
     {
@@ -611,6 +677,9 @@ class QualityProcessFlowChangeProposer
             'summary' => $proposal['summary'],
             'changes' => $checked['changes'],
             'questions' => $proposal['questions'],
+            // The operations behind the list — the repaired ones when there was a repair — so
+            // accepting re-applies exactly what was shown.
+            'operations' => $proposal['operations'],
             'payload' => $checked['payload'],
             'base_hash' => self::fingerprint($current),
             'model' => $proposal['model'],
