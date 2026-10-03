@@ -399,8 +399,6 @@ class HandleInertiaRequests extends Middleware
                     'create_subtitle' => __('procynia.users_form.create_subtitle'),
                     'edit_title' => __('procynia.users_form.edit_title'),
                     'edit_subtitle' => __('procynia.users_form.edit_subtitle'),
-                    'page_heading' => __('procynia.users_form.page_heading'),
-                    'page_subtitle' => __('procynia.users_form.page_subtitle'),
                     'field_name' => __('procynia.users_form.field_name'),
                     'field_email' => __('procynia.users_form.field_email'),
                     'field_role' => __('procynia.users_form.field_role'),

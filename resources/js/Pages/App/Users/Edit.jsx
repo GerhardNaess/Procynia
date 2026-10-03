@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import CustomerEnvironmentHeader from '../CustomerEnvironment/CustomerEnvironmentHeader';
 import AlertBox from '../../../Components/App/AlertBox';
 import DepartmentCheckboxGroup from '../../../Components/App/DepartmentCheckboxGroup';
 import FormButtonRow from '../../../Components/App/FormButtonRow';
@@ -13,6 +14,7 @@ function classNames(...values) {
 
 export default function UsersEdit({
     redirectTo,
+    customerEnvironment,
     user,
     bidRoleOptions,
     bidManagerScopeOptions,
@@ -141,14 +143,11 @@ export default function UsersEdit({
     return (
         <CustomerAppLayout title="Rediger bruker" showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                        {usersFormText.page_heading ?? 'Brukere'}
-                    </h1>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        {usersFormText.page_subtitle ?? 'Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.'}
-                    </p>
-                </section>
+                <CustomerEnvironmentHeader
+                    activeTab="users"
+                    onChangeTab={(tab) => router.get(customerEnvironment.index_url, { tab })}
+                    showPermissions={customerEnvironment.show_permissions}
+                />
 
                 <div className="mx-auto max-w-3xl">
                     <form

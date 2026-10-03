@@ -80,6 +80,10 @@ class UserController extends Controller
 
         return Inertia::render('App/Users/Edit', [
             'redirectTo' => $this->pageRedirectTarget($request),
+            'customerEnvironment' => [
+                'index_url' => route('app.customer-environment.index'),
+                'show_permissions' => $actor->isSystemOwner(),
+            ],
             'user' => $this->editUserPayload($record, $actor, $customerId),
             'bidRoleOptions' => $this->bidRoleOptions($actor, $record),
             'bidManagerScopeOptions' => $this->bidManagerScopeOptions(),

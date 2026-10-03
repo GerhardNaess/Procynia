@@ -15,6 +15,7 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -111,6 +112,10 @@ class CustomerUserManagementTest extends TestCase
         $response = $this->actingAs($context['admin'])->get("/app/users/{$target->id}/edit");
 
         $response->assertOk();
+        $response->assertInertia(fn (Assert $page) => $page
+            ->component('App/Users/Edit')
+            ->where('customerEnvironment.index_url', route('app.customer-environment.index'))
+            ->where('customerEnvironment.show_permissions', true));
     }
 
     public function test_customer_user_cannot_access_users_index(): void
@@ -996,7 +1001,9 @@ class CustomerUserManagementTest extends TestCase
         $indexResponse->assertOk();
         $indexResponse->assertSee('Synlig Bruker');
         $indexResponse->assertDontSee('Skjult Bruker');
-        $this->actingAs($manager)->get("/app/users/{$visibleUser->id}/edit")->assertOk();
+        $this->actingAs($manager)->get("/app/users/{$visibleUser->id}/edit")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('customerEnvironment.show_permissions', false));
         $this->actingAs($manager)->get("/app/users/{$hiddenUser->id}/edit")->assertNotFound();
 
         $this->postWithCsrf($manager, '/app/users', [
