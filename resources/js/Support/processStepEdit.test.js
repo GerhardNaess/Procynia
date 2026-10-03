@@ -4,14 +4,18 @@ import {
     branchProblems,
     branchTargets,
     canInsertStepOn,
+    canMoveStep,
     decisionBranches,
     freshStepKey,
     insertAnchor,
     isEditableStep,
+    moveTargets,
+    stepBefore,
     stepEditIsValid,
     withStepEdited,
     withDecisionBranches,
     withStepInserted,
+    withStepMoved,
 } from './processStepEdit.js';
 
 const lanes = [
@@ -188,5 +192,164 @@ describe('editing the branches of a decision', () => {
         const result = withDecisionBranches([edges[0]], 'critical', [{ label: 'Ja', to: 'check' }, { label: 'Nei', to: 'end' }]);
 
         assert.deepEqual(result.map((edge) => edge.to), ['critical', 'check', 'end']);
+    });
+});
+
+describe('moving an activity', () => {
+    const line = {
+        nodes: [
+            { key: 'start', lane: 'buyer', type: 'start', label: 'Start' },
+            { key: 'a', lane: 'buyer', type: 'step', label: 'A' },
+            { key: 'b', lane: 'buyer', type: 'step', label: 'B' },
+            { key: 'c', lane: 'finance', type: 'step', label: 'C' },
+            { key: 'd', lane: 'finance', type: 'step', label: 'D' },
+            { key: 'end', lane: 'finance', type: 'end', label: 'Slutt' },
+        ],
+        edges: [
+            { from: 'start', to: 'a', label: null },
+            { from: 'a', to: 'b', label: null },
+            { from: 'b', to: 'c', label: null },
+            { from: 'c', to: 'd', label: null },
+            { from: 'd', to: 'end', label: null },
+        ],
+    };
+
+    const order = (flow) => flow.nodes.map((node) => node.key);
+    // Walks the arrows from the start, which is the order the flow actually runs in.
+    const run = (flow) => {
+        const keys = ['start'];
+
+        while (keys.length <= flow.nodes.length) {
+            const next = flow.edges.filter((edge) => edge.from === keys[keys.length - 1]);
+
+            if (next.length !== 1) {
+                break;
+            }
+
+            keys.push(next[0].to);
+        }
+
+        return keys;
+    };
+    const assertSound = (flow) => {
+        const keys = new Set(flow.nodes.map((node) => node.key));
+        const pairs = flow.edges.map((edge) => `${edge.from}>${edge.to}`);
+
+        assert.equal(new Set(pairs).size, pairs.length, 'no duplicate arrows');
+        assert.ok(flow.edges.every((edge) => keys.has(edge.from) && keys.has(edge.to)), 'no dangling arrows');
+        assert.equal(new Set(flow.nodes.map((node) => node.key)).size, flow.nodes.length, 'no duplicate nodes');
+    };
+
+    test('a step on the main line moves forward', () => {
+        const moved = withStepMoved(line, 'b', 'd');
+
+        assert.deepEqual(run(moved), ['start', 'a', 'c', 'd', 'b', 'end']);
+        assert.deepEqual(order(moved), ['start', 'a', 'c', 'd', 'b', 'end']);
+        assert.equal(moved.edges.length, line.edges.length);
+        assertSound(moved);
+    });
+
+    test('a step moves backward, and right after the start', () => {
+        assert.deepEqual(run(withStepMoved(line, 'c', 'a')), ['start', 'a', 'c', 'b', 'd', 'end']);
+        assert.deepEqual(run(withStepMoved(line, 'd', 'start')), ['start', 'd', 'a', 'b', 'c', 'end']);
+        assertSound(withStepMoved(line, 'd', 'start'));
+    });
+
+    test('a step moves one place on, past the step after it', () => {
+        const moved = withStepMoved(line, 'b', 'c');
+
+        assert.deepEqual(run(moved), ['start', 'a', 'c', 'b', 'd', 'end']);
+        assertSound(moved);
+    });
+
+    test('keeps the node itself — text, role and everything else — and does not change the input', () => {
+        const moved = withStepMoved(line, 'b', 'd');
+
+        assert.deepEqual(moved.nodes.find((node) => node.key === 'b'), line.nodes[2]);
+        assert.deepEqual(run(line), ['start', 'a', 'b', 'c', 'd', 'end']);
+    });
+
+    test('a step cannot be put after itself or where it already is', () => {
+        const targets = moveTargets(line, 'b').map((node) => node.key);
+
+        assert.deepEqual(targets, ['start', 'c', 'd']);
+        assert.equal(stepBefore(line, 'b'), 'a');
+        assert.equal(withStepMoved(line, 'b', 'a'), null);
+        assert.equal(withStepMoved(line, 'b', 'b'), null);
+        assert.equal(withStepMoved(line, 'b', 'end'), null);
+    });
+
+    test('start and end are not moved', () => {
+        assert.equal(canMoveStep(line, 'start'), false);
+        assert.equal(canMoveStep(line, 'end'), false);
+    });
+
+    const branching = {
+        nodes: [
+            { key: 'start', lane: 'buyer', type: 'start', label: 'Start' },
+            { key: 'a', lane: 'buyer', type: 'step', label: 'A' },
+            { key: 'q', lane: 'buyer', type: 'decision', label: 'Kritisk?' },
+            { key: 'yes1', lane: 'buyer', type: 'step', label: 'Ja 1' },
+            { key: 'yes2', lane: 'buyer', type: 'step', label: 'Ja 2' },
+            { key: 'no1', lane: 'finance', type: 'step', label: 'Nei 1' },
+            { key: 'merge', lane: 'finance', type: 'step', label: 'Samle' },
+            { key: 'z', lane: 'finance', type: 'step', label: 'Z' },
+            { key: 'end', lane: 'finance', type: 'end', label: 'Slutt' },
+        ],
+        edges: [
+            { from: 'start', to: 'a', label: null },
+            { from: 'a', to: 'q', label: null },
+            { from: 'q', to: 'yes1', label: 'Ja' },
+            { from: 'q', to: 'no1', label: 'Nei' },
+            { from: 'yes1', to: 'yes2', label: null },
+            { from: 'yes2', to: 'merge', label: null },
+            { from: 'no1', to: 'merge', label: null },
+            { from: 'merge', to: 'z', label: null },
+            { from: 'z', to: 'end', label: null },
+        ],
+    };
+
+    test('decisions and steps inside a branch are not moved', () => {
+        assert.deepEqual(
+            branching.nodes.map((node) => canMoveStep(branching, node.key)),
+            [false, true, false, false, false, false, false, true, false],
+        );
+    });
+
+    test('a step is never put after a decision or into a branch', () => {
+        // merge has two arrows in, so it is not movable itself, but it is on the main line.
+        assert.deepEqual(moveTargets(branching, 'a').map((node) => node.key), ['merge', 'z']);
+        assert.deepEqual(moveTargets(branching, 'z').map((node) => node.key), ['start', 'a']);
+    });
+
+    test('moving across a decision leaves its branches as they were', () => {
+        const moved = withStepMoved(branching, 'a', 'merge');
+
+        assertSound(moved);
+        assert.deepEqual(moved.edges.filter((edge) => edge.from === 'q'), branching.edges.filter((edge) => edge.from === 'q'));
+        assert.deepEqual(moved.edges.filter((edge) => edge.to === 'q'), [{ from: 'start', to: 'q', label: null }]);
+        assert.deepEqual(moved.edges.filter((edge) => ['merge', 'a'].includes(edge.from)), [
+            { from: 'merge', to: 'a', label: null },
+            { from: 'a', to: 'z', label: null },
+        ]);
+        assert.equal(moved.edges.length, branching.edges.length);
+    });
+
+    test('a step a loop comes back into is not moved', () => {
+        const looping = {
+            nodes: [...line.nodes.slice(0, 3), { key: 'q', lane: 'buyer', type: 'decision', label: 'OK?' }, line.nodes[5]],
+            edges: [
+                { from: 'start', to: 'a', label: null },
+                { from: 'a', to: 'b', label: null },
+                { from: 'b', to: 'q', label: null },
+                { from: 'q', to: 'end', label: 'Ja' },
+                { from: 'q', to: 'a', label: 'Nei' },
+            ],
+        };
+
+        assert.equal(canMoveStep(looping, 'a'), false);
+        assert.equal(canMoveStep(looping, 'b'), true);
+        assert.deepEqual(moveTargets(looping, 'b').map((node) => node.key), ['start']);
+        assert.deepEqual(run(withStepMoved(looping, 'b', 'start')), ['start', 'b', 'a', 'q']);
     });
 });

@@ -199,3 +199,155 @@ export function withDecisionBranches(edges, key, branches) {
 
     return [...others.slice(0, insertAt), ...replacement, ...others.slice(insertAt)];
 }
+
+/**
+ * Whether every run of the flow passes this node: with it taken out, no end can be reached from a
+ * start any more. That is what "on the main line" means here, and it is the whole of the rule that
+ * keeps a move out of a decision's branches — a step one branch passes and another does not is not
+ * on it, and nor is a step only a loop back reaches.
+ */
+function isOnEveryPath({ nodes, edges }, key) {
+    const starts = nodes.filter((node) => (node.type ?? 'step') === 'start').map((node) => node.key);
+    const ends = new Set(nodes.filter((node) => (node.type ?? 'step') === 'end').map((node) => node.key));
+
+    const reachesEnd = (without) => {
+        const seen = new Set(starts.filter((start) => start !== without));
+        const queue = [...seen];
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+
+            if (ends.has(current)) {
+                return true;
+            }
+
+            edges.forEach((edge) => {
+                if (edge.from === current && edge.to !== without && ! seen.has(edge.to)) {
+                    seen.add(edge.to);
+                    queue.push(edge.to);
+                }
+            });
+        }
+
+        return false;
+    };
+
+    return reachesEnd(null) && ! reachesEnd(key);
+}
+
+/**
+ * The one arrow into and the one arrow out of a step that can be moved from the diagram, or null.
+ *
+ * Only a plain activity on the main line, joined to it by exactly one arrow in and one out, and not
+ * the first step of a branch. Anything else — a step with a loop coming back into it, a step inside
+ * a branch, a start, an end or a decision — is not moved from here: lifting it out could not be
+ * done by joining one arrow to another, and the flow would be left with a gap or a fork.
+ */
+function moveSeam(flow, key) {
+    const node = flow.nodes.find((candidate) => candidate.key === key);
+
+    if (node === undefined || (node.type ?? 'step') !== 'step') {
+        return null;
+    }
+
+    const incoming = flow.edges.filter((edge) => edge.to === key);
+    const outgoing = flow.edges.filter((edge) => edge.from === key);
+
+    if (incoming.length !== 1 || outgoing.length !== 1) {
+        return null;
+    }
+
+    const previous = flow.nodes.find((candidate) => candidate.key === incoming[0].from);
+    const next = flow.nodes.find((candidate) => candidate.key === outgoing[0].to);
+
+    if (previous === undefined || next === undefined || previous.key === next.key
+        || (previous.type ?? 'step') === 'decision' || ! isOnEveryPath(flow, key)) {
+        return null;
+    }
+
+    return { incoming: incoming[0], outgoing: outgoing[0] };
+}
+
+/** Whether this step can be moved from the diagram at all. */
+export function canMoveStep(flow, key) {
+    return moveSeam(flow, key) !== null;
+}
+
+/** The key of the step a movable step stands after now, or null when it cannot be moved. */
+export function stepBefore(flow, key) {
+    return moveSeam(flow, key)?.incoming.from ?? null;
+}
+
+/**
+ * The flow with one step lifted out: the arrow into it now goes where the arrow out of it went.
+ *
+ * Kept where the arrow in stood. If that arrow already exists, it is not added a second time.
+ */
+function withStepLiftedOut({ nodes, edges }, key) {
+    const seam = moveSeam({ nodes, edges }, key);
+    const bridge = { from: seam.incoming.from, to: seam.outgoing.to, label: seam.incoming.label ?? null };
+    const exists = edges.some((edge) => edge.from === bridge.from && edge.to === bridge.to);
+
+    return {
+        nodes: nodes.filter((node) => node.key !== key),
+        edges: edges.flatMap((edge) => {
+            if (edge === seam.incoming) {
+                return exists ? [] : [bridge];
+            }
+
+            return edge === seam.outgoing ? [] : [edge];
+        }),
+    };
+}
+
+/**
+ * The steps a movable step may be put after: a start or a plain activity on the main line with
+ * exactly one arrow out, other than the step itself and the one it already follows.
+ *
+ * Judged on the flow with the step already lifted out, because that is the flow it is put back into.
+ * One arrow out is what makes "after" mean one place: a decision has a branch for every outcome and
+ * putting the step after it would be putting it into one of them.
+ */
+export function moveTargets(flow, key) {
+    const seam = moveSeam(flow, key);
+
+    if (seam === null) {
+        return [];
+    }
+
+    const lifted = withStepLiftedOut(flow, key);
+
+    return lifted.nodes.filter((node) => ['start', 'step'].includes(node.type ?? 'step')
+        && node.key !== seam.incoming.from
+        && lifted.edges.filter((edge) => edge.from === node.key).length === 1
+        && isOnEveryPath(lifted, node.key));
+}
+
+/**
+ * The flow with one step moved to stand right after another: lifted out with the arrows on either
+ * side joined, then put on the arrow out of the step it now follows — the same as a new activity
+ * is put on an arrow. The node moves too, to right after that step, so the payload keeps reading in
+ * the order the flow runs. Returns null for a move this is not offered for, rather than guessing.
+ */
+export function withStepMoved(flow, key, afterKey) {
+    if (! moveTargets(flow, key).some((node) => node.key === afterKey)) {
+        return null;
+    }
+
+    const seam = moveSeam(flow, key);
+    const node = flow.nodes.find((candidate) => candidate.key === key);
+    const lifted = withStepLiftedOut(flow, key);
+    const edgeIndex = lifted.edges.findIndex((edge) => edge.from === afterKey);
+    const edge = lifted.edges[edgeIndex];
+    const at = lifted.nodes.findIndex((candidate) => candidate.key === afterKey) + 1;
+
+    return {
+        nodes: [...lifted.nodes.slice(0, at), node, ...lifted.nodes.slice(at)],
+        edges: [
+            ...lifted.edges.slice(0, edgeIndex),
+            { from: afterKey, to: key, label: edge.label ?? null },
+            { from: key, to: edge.to, label: seam.outgoing.label ?? null },
+            ...lifted.edges.slice(edgeIndex + 1),
+        ],
+    };
+}

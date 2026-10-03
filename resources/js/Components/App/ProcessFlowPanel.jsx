@@ -9,13 +9,17 @@ import {
     branchProblems,
     branchTargets,
     canInsertStepOn,
+    canMoveStep,
     decisionBranches,
     freshStepKey,
     isEditableStep,
+    moveTargets,
+    stepBefore,
     stepEditIsValid,
     withDecisionBranches,
     withStepEdited,
     withStepInserted,
+    withStepMoved,
 } from '../../Support/processStepEdit';
 import {
     DESTRUCTIVE_ACTION,
@@ -132,6 +136,8 @@ export default function ProcessFlowPanel({
     const [editingStepKey, setEditingStepKey] = useState(null);
     // Which arrow a new activity is being put on from the diagram: { from, to, label }.
     const [insertingOn, setInsertingOn] = useState(null);
+    // Which step is being moved from the diagram — by key, as above.
+    const [movingStepKey, setMovingStepKey] = useState(null);
 
     // The description the user typed. Seeded from whichever of the three sources knows it: the
     // proposal being reviewed, the attempt that failed, or the flow that was adopted from it.
@@ -177,6 +183,7 @@ export default function ProcessFlowPanel({
         setActivityKey(null);
         setEditingStepKey(null);
         setInsertingOn(null);
+        setMovingStepKey(null);
         // Cleared rather than carried, so the new reading has the last word. A suggestion answered
         // well is gone because the revised description defines the term and the model stops asking;
         // one the answer did not actually cover comes back, which is the truth about it.
@@ -256,6 +263,27 @@ export default function ProcessFlowPanel({
             lanes,
             ...withStepInserted({ nodes, edges }, edge, step),
         }, {
+            preserveScroll: true,
+            onError,
+            onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Move one activity to stand after another step, from the diagram's "Flytt steg".
+     *
+     * Same terms as saveStep: the working version as the editor holds it, with that one change, by
+     * the same PUT. withStepMoved() refuses a move it does not offer, and then nothing is sent.
+     */
+    function saveMove(key, afterKey, { onError }) {
+        const moved = withStepMoved({ nodes, edges }, key, afterKey);
+
+        if (moved === null) {
+            return;
+        }
+
+        setSaving(true);
+        router.put(`/app/quality/items/${item.id}/blueprint`, { lanes, ...moved }, {
             preserveScroll: true,
             onError,
             onFinish: () => setSaving(false),
@@ -686,7 +714,26 @@ export default function ProcessFlowPanel({
                     setEditingStepKey(null);
                     setActivityKey(key);
                 }}
+                canMove={editingStepKey !== null && canMoveStep({ nodes, edges }, editingStepKey)}
+                onMove={(key) => {
+                    setEditingStepKey(null);
+                    setMovingStepKey(key);
+                }}
                 onClose={() => setEditingStepKey(null)}
+            />
+
+            <MoveStepDialog
+                tb={tb}
+                // Only while it can still be moved: the editor may have changed the flow since.
+                step={movingStepKey !== null && canMoveStep({ nodes, edges }, movingStepKey)
+                    ? nodes.find((node) => node.key === movingStepKey)
+                    : null}
+                after={nodes.find((node) => node.key === stepBefore({ nodes, edges }, movingStepKey)) ?? null}
+                targets={movingStepKey === null ? [] : moveTargets({ nodes, edges }, movingStepKey)}
+                hasUnsavedChanges={isDirty}
+                busy={saving}
+                onSave={(afterKey, options) => saveMove(movingStepKey, afterKey, options)}
+                onClose={() => setMovingStepKey(null)}
             />
 
             <StepEditDialog
@@ -821,6 +868,8 @@ function StepEditDialog({
     busy,
     onSave,
     onOpenActivity = null,
+    canMove = false,
+    onMove = null,
     onClose,
 }) {
     const titleId = inserting ? 'process-step-insert-title' : 'process-step-edit-title';
@@ -995,6 +1044,26 @@ function StepEditDialog({
                         </fieldset>
                     )}
 
+                    {/* Moving is its own dialog: a different question from what the step says, and
+                        answered by picking a place, not by typing. Only offered for an activity on
+                        the main line; a step in a branch says why there is no button. */}
+                    {! inserting && step.type === 'step' && typeof onMove === 'function' && (canMove
+                        ? (
+                            <button
+                                type="button"
+                                className="mt-4 text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                onClick={() => onMove(step.key)}
+                                disabled={busy}
+                            >
+                                {tb.step_move_open ?? 'Flytt steg'} →
+                            </button>
+                        )
+                        : (
+                            <p className="mt-4 text-sm leading-5 text-slate-500">
+                                {tb.step_move_unavailable ?? 'Dette steget kan ikke flyttes herfra. Bare aktiviteter på hovedlinjen, utenfor beslutningsgrener, kan flyttes.'}
+                            </p>
+                        ))}
+
                     <p className="mt-4 text-sm leading-5 text-slate-500">
                         {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
                     </p>
@@ -1032,6 +1101,103 @@ function StepEditDialog({
                         >
                             {tb.step_edit_articles ?? 'Kunnskap fra steget'} →
                         </button>}
+                    </div>
+                </form>
+            )}
+        </ActionDialog>
+    );
+}
+
+/**
+ * "Flytt steg": where one activity stands in the flow, chosen as the step it should come after.
+ *
+ * Only places on the main line that the move can reach by rejoining arrows — moveTargets() decides
+ * which — so there is nothing here to validate beyond having picked one. The diagram moves the step
+ * once the server has stored the flow, not before.
+ */
+function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onSave, onClose }) {
+    const titleId = 'process-step-move-title';
+    const [afterKey, setAfterKey] = useState('');
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        setAfterKey('');
+        setError(null);
+    }, [step?.key]);
+
+    const valid = targets.some((node) => node.key === afterKey);
+
+    function submit(event) {
+        event.preventDefault();
+
+        if (! valid || busy) {
+            return;
+        }
+
+        setError(null);
+        onSave(afterKey, {
+            onError: (errors) => setError(Object.values(errors)[0] ?? tb.step_edit_failed ?? 'Steget kunne ikke lagres.'),
+        });
+    }
+
+    return (
+        <ActionDialog isOpen={step !== null} onClose={onClose} closeDisabled={busy} titleId={titleId}>
+            {step !== null && (
+                <form onSubmit={submit}>
+                    <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
+                        {tb.step_move_heading ?? 'Flytt steg'}
+                    </h2>
+                    <p className="mt-2 text-sm leading-5 text-slate-600">
+                        {(tb.step_move_current ?? '«:label» kommer nå etter «:after».')
+                            .replace(':label', step.label || step.key)
+                            .replace(':after', after?.label || after?.key || '')}
+                    </p>
+
+                    <label className="mt-5 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">{tb.step_move_after ?? 'Plasser etter'}</span>
+                        <select
+                            className={INPUT}
+                            value={afterKey}
+                            onChange={(event) => setAfterKey(event.target.value)}
+                            disabled={busy || targets.length === 0}
+                        >
+                            <option value="" disabled>{tb.branch_target_choose ?? 'Velg steg …'}</option>
+                            {targets.map((node) => (
+                                <option key={node.key} value={node.key}>
+                                    {(node.label || node.key)
+                                        + ((node.type ?? 'step') === 'step' ? '' : ` (${(tb.node_types ?? {})[node.type] ?? node.type})`)}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    {targets.length === 0 && (
+                        <p className="mt-2 text-sm leading-5 text-slate-500">
+                            {tb.step_move_no_targets ?? 'Det finnes ikke noe annet sted på hovedlinjen steget kan flyttes til.'}
+                        </p>
+                    )}
+
+                    <p className="mt-4 text-sm leading-5 text-slate-500">
+                        {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
+                    </p>
+
+                    {hasUnsavedChanges && (
+                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {tb.step_edit_unsaved_help ?? 'Du har ulagrede endringer i strukturen. De lagres sammen med dette steget.'}
+                        </p>
+                    )}
+
+                    {error && (
+                        <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p>
+                    )}
+
+                    <div className="mt-6 flex flex-wrap items-center gap-3">
+                        <button type="submit" className={PRIMARY_ACTION} disabled={! valid || busy}>
+                            {busy ? (tb.step_edit_saving ?? 'Lagrer …') : (tb.step_move_save ?? 'Flytt steget')}
+                        </button>
+                        <button type="button" className={SECONDARY_ACTION} onClick={onClose} disabled={busy}>
+                            {tb.step_edit_cancel ?? 'Avbryt'}
+                        </button>
                     </div>
                 </form>
             )}
