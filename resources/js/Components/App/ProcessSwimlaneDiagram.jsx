@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { METRICS, edgePath, layoutBlueprint, nodeShape } from '../../Support/processBlueprintLayout';
+import { canInsertStepOn, insertAnchor, isEditableStep } from '../../Support/processStepEdit';
 import {
     ZOOM_LIMITS,
     anchoredScroll,
@@ -52,6 +53,11 @@ export default function ProcessSwimlaneDiagram({
     tb = {},
     onOpenSubprocess = null,
     onOpenActivity = null,
+    // Given only where the reader may change the flow. Editing is still editing the blueprint: the
+    // handler is told which node was clicked, and the picture follows from what it saves.
+    onEditStep = null,
+    // Same terms as onEditStep: told which arrow was clicked, the picture follows from what it saves.
+    onInsertStep = null,
 }) {
     const layout = layoutBlueprint(blueprint);
 
@@ -70,6 +76,8 @@ export default function ProcessSwimlaneDiagram({
             tb={tb}
             onOpenSubprocess={onOpenSubprocess}
             onOpenActivity={onOpenActivity}
+            onEditStep={onEditStep}
+            onInsertStep={onInsertStep}
         />
     );
 }
@@ -80,7 +88,7 @@ export default function ProcessSwimlaneDiagram({
  * Split out from the exported component so the hooks below are never conditional on an empty
  * blueprint — an empty flow renders a sentence, not a zoomable surface.
  */
-function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity }) {
+function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, onEditStep, onInsertStep }) {
     const surfaceRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [scale, setScale] = useState(null);
@@ -275,8 +283,22 @@ function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity }
                                 tb={tb}
                                 onOpenSubprocess={onOpenSubprocess}
                                 onOpenActivity={onOpenActivity}
+                                onEditStep={onEditStep}
                             />
                         ))}
+
+                        {/* Last, so a "+" is never under a box it happens to sit beside. */}
+                        {typeof onInsertStep === 'function' && layout.edges
+                            .filter((edge) => canInsertStepOn(edge, layout.nodes))
+                            .map((edge) => (
+                                <InsertHandle
+                                    key={`insert:${edge.from}->${edge.to}#${edge.label ?? ''}`}
+                                    edge={edge}
+                                    nodes={layout.nodes}
+                                    tb={tb}
+                                    onInsert={onInsertStep}
+                                />
+                            ))}
                     </svg>
                 </div>
             </div>
@@ -452,6 +474,63 @@ function Edge({ edge }) {
 }
 
 /**
+ * The "+" on an arrow: put a new activity between the two steps it joins.
+ *
+ * Small and quiet, because a diagram covered in buttons is no longer a diagram — but always there
+ * rather than on hover, so it can be reached by keyboard and touch. Not on an arrow out of a
+ * decision (see canInsertStepOn).
+ */
+function InsertHandle({ edge, nodes, tb, onInsert }) {
+    const anchor = insertAnchor(edge.points, Boolean(edge.label));
+
+    if (anchor === null) {
+        return null;
+    }
+
+    const labelOf = (key) => nodes.find((node) => node.key === key)?.label ?? '';
+    const name = (tb.step_insert_open ?? 'Legg til en aktivitet mellom «:from» og «:to»')
+        .replace(':from', labelOf(edge.from))
+        .replace(':to', labelOf(edge.to));
+    const activate = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onInsert({ from: edge.from, to: edge.to, label: edge.label ?? null });
+    };
+
+    return (
+        <g
+            role="button"
+            tabIndex={0}
+            aria-label={name}
+            className="group cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
+            onClick={activate}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    activate(event);
+                }
+            }}
+        >
+            <title>{name}</title>
+            <circle
+                cx={anchor.x}
+                cy={anchor.y}
+                r="9"
+                fill="#ffffff"
+                stroke="#94a3b8"
+                strokeWidth="1.5"
+                className="transition group-hover:fill-slate-100 group-hover:stroke-slate-600"
+            />
+            <path
+                d={`M ${anchor.x - 4} ${anchor.y} H ${anchor.x + 4} M ${anchor.x} ${anchor.y - 4} V ${anchor.y + 4}`}
+                stroke="#475569"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+            />
+        </g>
+    );
+}
+
+/**
  * One node, and — when it stands for another process, or has produced knowledge in Wiki — the way
  * into it.
  *
@@ -474,8 +553,12 @@ function Edge({ edge }) {
  * process: drilling in is the bigger move, and the reader who went in can still reach the articles
  * from the step list either side of the trail. Two controls on one 64-pixel box would be two
  * targets nobody can tell apart at the zoom these diagrams are actually read at.
+ *
+ * Where the reader may edit the flow, a step or decision that is not a subprocess opens for editing
+ * instead of opening its articles — the edit dialog links on to them, and the step list still has
+ * its own way in. Drilling into a subprocess keeps the box: it remains the bigger move.
  */
-function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null }) {
+function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null, onEditStep = null }) {
     const shape = nodeShape(node);
     const tone = NODE_TONES[node.type] ?? NODE_TONES.step;
     const firstLineY = node.y + (node.height / 2) - (((node.lines.length - 1) * 15) / 2) + 4;
@@ -484,8 +567,9 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
     const articles = node.articles ?? [];
 
     const opensSubprocess = subprocess !== null && typeof onOpenSubprocess === 'function';
-    const opensActivity = ! opensSubprocess && articles.length > 0 && typeof onOpenActivity === 'function';
-    const openable = opensSubprocess || opensActivity;
+    const editsStep = ! opensSubprocess && typeof onEditStep === 'function' && isEditableStep(node);
+    const opensActivity = ! opensSubprocess && ! editsStep && articles.length > 0 && typeof onOpenActivity === 'function';
+    const openable = opensSubprocess || editsStep || opensActivity;
 
     const open = openable
         ? (event) => {
@@ -493,6 +577,12 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
 
             if (opensSubprocess) {
                 onOpenSubprocess(subprocess, node);
+
+                return;
+            }
+
+            if (editsStep) {
+                onEditStep(node);
 
                 return;
             }
@@ -543,6 +633,8 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
 
     const name = opensSubprocess
         ? (tb.subprocess_open ?? 'Åpne underprosessen :title').replace(':title', subprocess.title ?? '')
+        : editsStep
+        ? (tb.step_edit_open ?? 'Rediger steget :label').replace(':label', node.label ?? '')
         : (tb.articles_open ?? 'Åpne kunnskapen bak :label').replace(':label', node.label ?? '');
 
     return (
@@ -550,7 +642,7 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null })
             role="button"
             tabIndex={0}
             aria-label={name}
-            className={`cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${opensSubprocess ? 'focus-visible:outline-violet-600' : 'focus-visible:outline-sky-600'}`}
+            className={`cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${opensSubprocess ? 'focus-visible:outline-violet-600' : editsStep ? 'focus-visible:outline-slate-600' : 'focus-visible:outline-sky-600'}`}
             onClick={open}
             onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {

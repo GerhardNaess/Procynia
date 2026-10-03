@@ -6,6 +6,22 @@ import ActionDialog from './ActionDialog';
 import StatusBadge from './StatusBadge';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
 import {
+    branchProblems,
+    branchTargets,
+    canInsertStepOn,
+    canMoveStep,
+    decisionBranches,
+    freshStepKey,
+    isEditableStep,
+    moveTargets,
+    stepBefore,
+    stepEditIsValid,
+    withDecisionBranches,
+    withStepEdited,
+    withStepInserted,
+    withStepMoved,
+} from '../../Support/processStepEdit';
+import {
     DESTRUCTIVE_ACTION,
     DESTRUCTIVE_COLOURS,
     DESTRUCTIVE_CONFIRM,
@@ -21,9 +37,11 @@ import {
  * finally the approval.
  *
  * The diagram is deliberately downstream of the editor and not beside it. It redraws from local
- * state on every keystroke, so a change to a lane or an arrow is visible before it is saved — but
- * there is nothing on the diagram to click, because the blueprint is the source of truth and giving
- * the picture its own handles would create a second one.
+ * state on every keystroke, so a change to a lane or an arrow is visible before it is saved. The
+ * picture has no handles of its own, because the blueprint is the source of truth and giving it some
+ * would create a second one. Clicking a step opens a small dialog for its text and role — but that
+ * dialog edits the blueprint's node and saves the working version through the same route as the
+ * structure editor; the diagram only redraws from what comes back.
  *
  * Unsaved state lives here, not on the server. `isDirty` is what the approve button reads: you
  * cannot approve a flow that is not the flow that would be saved.
@@ -114,6 +132,12 @@ export default function ProcessFlowPanel({
     // show the activity as it is now, and holding the object would leave it showing a label the
     // user has since corrected.
     const [activityKey, setActivityKey] = useState(null);
+    // Which step is open for editing from the diagram — by key, for the same reason as activityKey.
+    const [editingStepKey, setEditingStepKey] = useState(null);
+    // Which arrow a new activity is being put on from the diagram: { from, to, label }.
+    const [insertingOn, setInsertingOn] = useState(null);
+    // Which step is being moved from the diagram — by key, as above.
+    const [movingStepKey, setMovingStepKey] = useState(null);
 
     // The description the user typed. Seeded from whichever of the three sources knows it: the
     // proposal being reviewed, the attempt that failed, or the flow that was adopted from it.
@@ -135,6 +159,11 @@ export default function ProcessFlowPanel({
 
     const reviewing = proposal !== null && ! dismissed;
 
+    // What the server stored, as a value. generated_at is to the second, so two saves from the
+    // diagram inside one second would otherwise leave the editor holding the flow before the
+    // second — and the next save would write that stale flow back.
+    const storedFlow = JSON.stringify([blueprint?.lanes ?? null, blueprint?.nodes ?? null, blueprint?.edges ?? null]);
+
     // The server is authoritative after every round trip — generate, save and approve all come back
     // through props. Resetting on the blueprint's identity rather than on every render is what lets
     // the editor hold unsaved work in between. A proposal arriving is the same kind of event: new
@@ -152,6 +181,9 @@ export default function ProcessFlowPanel({
         // A new flow arrived from the server, so whatever the editor was open for is settled.
         setEditingStructure(false);
         setActivityKey(null);
+        setEditingStepKey(null);
+        setInsertingOn(null);
+        setMovingStepKey(null);
         // Cleared rather than carried, so the new reading has the last word. A suggestion answered
         // well is gone because the revised description defines the term and the model stops asking;
         // one the answer did not actually cover comes back, which is the truth about it.
@@ -160,7 +192,7 @@ export default function ProcessFlowPanel({
         if (proposal?.description) {
             setDescription(proposal.description);
         }
-    }, [blueprint?.id, blueprint?.generated_at, blueprint?.approved_at, proposal]);
+    }, [blueprint?.id, blueprint?.generated_at, blueprint?.approved_at, storedFlow, proposal]);
 
     // Going back to the stored flow has to put the stored flow back in the editor, or "Endre
     // beskrivelsen" would leave the proposal on screen looking saved.
@@ -193,6 +225,67 @@ export default function ProcessFlowPanel({
         setSaving(true);
         router.put(`/app/quality/items/${item.id}/blueprint`, draft, {
             preserveScroll: true,
+            onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Save one step's text and role from the diagram's dialog — and, for a decision, its branches.
+     *
+     * The working version is saved as the editor holds it, with that one node changed — the same
+     * PUT "Lagre struktur" makes, so it clears an approval the same way and is the same kind of
+     * change. The local nodes are not touched first: what the diagram shows next is what the
+     * server stored, and a refused save leaves the flow exactly as it was. A decision's branches
+     * are its outgoing arrows, so they travel as those arrows replaced, in the same request.
+     */
+    function saveStep(key, { branches = null, ...change }, { onError }) {
+        setSaving(true);
+        router.put(`/app/quality/items/${item.id}/blueprint`, {
+            lanes,
+            nodes: withStepEdited(nodes, key, change),
+            edges: branches === null ? edges : withDecisionBranches(edges, key, branches),
+        }, {
+            preserveScroll: true,
+            onError,
+            onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Put a new activity on one arrow from the diagram's "+": from → new → to.
+     *
+     * Same terms as saveStep — the working version as the editor holds it, with that one change, by
+     * the same PUT — so the new step is in the diagram only once the server has stored it.
+     */
+    function saveInsertion(edge, step, { onError }) {
+        setSaving(true);
+        router.put(`/app/quality/items/${item.id}/blueprint`, {
+            lanes,
+            ...withStepInserted({ nodes, edges }, edge, step),
+        }, {
+            preserveScroll: true,
+            onError,
+            onFinish: () => setSaving(false),
+        });
+    }
+
+    /**
+     * Move one activity to stand after another step, from the diagram's "Flytt steg".
+     *
+     * Same terms as saveStep: the working version as the editor holds it, with that one change, by
+     * the same PUT. withStepMoved() refuses a move it does not offer, and then nothing is sent.
+     */
+    function saveMove(key, afterKey, { onError }) {
+        const moved = withStepMoved({ nodes, edges }, key, afterKey);
+
+        if (moved === null) {
+            return;
+        }
+
+        setSaving(true);
+        router.put(`/app/quality/items/${item.id}/blueprint`, { lanes, ...moved }, {
+            preserveScroll: true,
+            onError,
             onFinish: () => setSaving(false),
         });
     }
@@ -446,6 +539,10 @@ export default function ProcessFlowPanel({
                                 // Unlike a subprocess, the activity panel needs nothing from the
                                 // server to open: it reads the node the editor holds.
                                 onOpenActivity={openActivity}
+                                // Not while a proposal is on screen: saving there would write the
+                                // proposal over the working version without it being adopted.
+                                onEditStep={canEdit && ! reviewing ? (node) => setEditingStepKey(node.key) : null}
+                                onInsertStep={canEdit && ! reviewing ? setInsertingOn : null}
                             />
                         </div>
                     </section>
@@ -603,6 +700,63 @@ export default function ProcessFlowPanel({
                 onClose={() => setActivityKey(null)}
             />
 
+            <StepEditDialog
+                tb={tb}
+                step={editingStepKey === null ? null : nodes.find((node) => node.key === editingStepKey && isEditableStep(node)) ?? null}
+                lanes={lanes}
+                nodes={nodes}
+                edges={edges}
+                problemTexts={tq.flow_problems ?? {}}
+                hasUnsavedChanges={isDirty}
+                busy={saving}
+                onSave={(change, options) => saveStep(editingStepKey, change, options)}
+                onOpenActivity={(key) => {
+                    setEditingStepKey(null);
+                    setActivityKey(key);
+                }}
+                canMove={editingStepKey !== null && canMoveStep({ nodes, edges }, editingStepKey)}
+                onMove={(key) => {
+                    setEditingStepKey(null);
+                    setMovingStepKey(key);
+                }}
+                onClose={() => setEditingStepKey(null)}
+            />
+
+            <MoveStepDialog
+                tb={tb}
+                // Only while it can still be moved: the editor may have changed the flow since.
+                step={movingStepKey !== null && canMoveStep({ nodes, edges }, movingStepKey)
+                    ? nodes.find((node) => node.key === movingStepKey)
+                    : null}
+                after={nodes.find((node) => node.key === stepBefore({ nodes, edges }, movingStepKey)) ?? null}
+                targets={movingStepKey === null ? [] : moveTargets({ nodes, edges }, movingStepKey)}
+                hasUnsavedChanges={isDirty}
+                busy={saving}
+                onSave={(afterKey, options) => saveMove(movingStepKey, afterKey, options)}
+                onClose={() => setMovingStepKey(null)}
+            />
+
+            <StepEditDialog
+                tb={tb}
+                inserting
+                // Only while the arrow is still in the flow: the editor may have moved it since.
+                step={insertingOn !== null && edges.some((edge) => edge.from === insertingOn.from && edge.to === insertingOn.to && canInsertStepOn(edge, nodes))
+                    ? {
+                        key: freshStepKey(nodes),
+                        type: 'step',
+                        label: '',
+                        // The role of the step it follows: the likeliest answer, and one click to change.
+                        lane: nodes.find((node) => node.key === insertingOn.from)?.lane ?? lanes[0]?.key ?? '',
+                        between: [insertingOn.from, insertingOn.to].map((key) => nodes.find((node) => node.key === key)?.label ?? ''),
+                    }
+                    : null}
+                lanes={lanes}
+                hasUnsavedChanges={isDirty}
+                busy={saving}
+                onSave={(change, options) => saveInsertion(insertingOn, { key: freshStepKey(nodes), ...change }, options)}
+                onClose={() => setInsertingOn(null)}
+            />
+
             {/* Deleting the flow is not deleting the process, and the dialog's job is to make that
                 difference impossible to miss — a user who has just written articles off the back of
                 these activities needs to be told, before they press it, that the articles stay. */}
@@ -688,6 +842,367 @@ function activityByKey(blueprint, key) {
     }
 
     return flowReadingOrder(blueprint).find((step) => step.key === key) ?? null;
+}
+
+/**
+ * One step, opened from the diagram: what it says and who does it — and, for a decision, where it
+ * branches.
+ *
+ * Type and subprocess change the shape of the flow and stay in the structure editor; a role is
+ * chosen among the flow's own, not created here. A decision's branches are the one exception to
+ * "arrows stay in the editor", because a decision is its branches: each is a named outcome pointing
+ * at a step that already exists. No step is created from here.
+ *
+ * The fields are seeded once per opening and owned by the dialog until it saves or closes, so a
+ * re-render of the panel does not throw away what the user is typing.
+ */
+function StepEditDialog({
+    tb,
+    step,
+    inserting = false,
+    lanes,
+    nodes = [],
+    edges = [],
+    problemTexts = {},
+    hasUnsavedChanges,
+    busy,
+    onSave,
+    onOpenActivity = null,
+    canMove = false,
+    onMove = null,
+    onClose,
+}) {
+    const titleId = inserting ? 'process-step-insert-title' : 'process-step-edit-title';
+    const [label, setLabel] = useState('');
+    const [lane, setLane] = useState('');
+    // Null for anything that is not a decision being edited, so its save leaves the arrows alone.
+    const [branches, setBranches] = useState(null);
+    const [error, setError] = useState(null);
+
+    const editsBranches = ! inserting && step?.type === 'decision';
+
+    useEffect(() => {
+        setLabel(step?.label ?? '');
+        setLane(step?.lane ?? lanes[0]?.key ?? '');
+        setBranches(editsBranches ? decisionBranches(edges, step.key) : null);
+        setError(null);
+    }, [step?.key, step?.between?.join('\u0000')]);
+
+    // Only while a decision is open. The branches state outlives the closing render — it is reset
+    // by the effect, after it — so it cannot be what decides whether there is a decision to read.
+    const shownBranches = editsBranches ? branches : null;
+    const targets = editsBranches ? branchTargets(nodes, step.key) : [];
+    // The validator's rules, checked before the save rather than at approval: a decision cannot be
+    // saved from here with fewer than two named, distinct branches to steps that exist.
+    const problems = shownBranches === null ? [] : branchProblems(shownBranches, nodes, step.key);
+    const change = shownBranches === null ? { label, lane } : { label, lane, branches: shownBranches };
+    const valid = stepEditIsValid(change, lanes) && problems.length === 0;
+
+    function updateBranch(index, patch) {
+        setBranches((current) => current.map((branch, at) => (at === index ? { ...branch, ...patch } : branch)));
+    }
+
+    function problemText(problem) {
+        if (problem === 'branch_without_target') {
+            return tb.branch_without_target ?? 'Hver gren må gå til et steg som finnes i flyten.';
+        }
+
+        return (problemTexts[problem] ?? problem).replace(':label', label.trim() || step.label);
+    }
+
+    function submit(event) {
+        event.preventDefault();
+
+        if (! valid || busy) {
+            return;
+        }
+
+        setError(null);
+        // Closed by the panel when the saved flow comes back; kept open with the reason when not.
+        onSave(change, {
+            onError: (errors) => setError(Object.values(errors)[0] ?? tb.step_edit_failed ?? 'Steget kunne ikke lagres.'),
+        });
+    }
+
+    return (
+        <ActionDialog isOpen={step !== null} onClose={onClose} closeDisabled={busy} titleId={titleId}>
+            {step !== null && (
+                <form onSubmit={submit}>
+                    <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
+                        {inserting
+                            ? (tb.step_insert_heading ?? 'Legg til aktivitet')
+                            : step.type === 'decision'
+                            ? (tb.step_edit_heading_decision ?? 'Rediger beslutning')
+                            : (tb.step_edit_heading ?? 'Rediger steg')}
+                    </h2>
+
+                    {inserting && (
+                        <p className="mt-2 text-sm leading-5 text-slate-600">
+                            {(tb.step_insert_between ?? 'Mellom «:from» og «:to».')
+                                .replace(':from', step.between?.[0] ?? '')
+                                .replace(':to', step.between?.[1] ?? '')}
+                        </p>
+                    )}
+
+                    <label className="mt-5 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_label ?? 'Aktivitet'}</span>
+                        <input
+                            type="text"
+                            className={INPUT}
+                            value={label}
+                            maxLength={200}
+                            onChange={(event) => setLabel(event.target.value)}
+                            disabled={busy}
+                        />
+                    </label>
+
+                    <label className="mt-4 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_lane ?? 'Ansvarlig rolle'}</span>
+                        <select
+                            className={INPUT}
+                            value={lane}
+                            onChange={(event) => setLane(event.target.value)}
+                            disabled={busy}
+                        >
+                            {lanes.map((candidate) => (
+                                <option key={candidate.key} value={candidate.key}>
+                                    {candidate.label || (tb.default_lane ?? 'Uten angitt rolle')}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    {shownBranches !== null && (
+                        <fieldset className="mt-5">
+                            <legend className="block text-sm font-semibold text-slate-700">{tb.branches_heading ?? 'Grener'}</legend>
+                            <p className="mt-1 text-sm leading-5 text-slate-500">
+                                {tb.branches_help ?? 'Hvert utfall av beslutningen går til et steg som allerede finnes i flyten.'}
+                            </p>
+
+                            <ul className="mt-3 space-y-2">
+                                {shownBranches.map((branch, index) => (
+                                    // By position: a branch has no identity of its own until it is saved as an arrow.
+                                    <li key={index} className="flex flex-wrap items-end gap-2">
+                                        <label className="min-w-[8rem] flex-1 space-y-1">
+                                            <span className="block text-xs font-semibold text-slate-600">{tb.branch_label ?? 'Utfall'}</span>
+                                            <input
+                                                type="text"
+                                                className={INPUT}
+                                                value={branch.label}
+                                                maxLength={60}
+                                                placeholder={tb.branch_label_placeholder ?? 'For eksempel Ja'}
+                                                onChange={(event) => updateBranch(index, { label: event.target.value })}
+                                                disabled={busy}
+                                            />
+                                        </label>
+                                        <label className="min-w-[10rem] flex-[2] space-y-1">
+                                            <span className="block text-xs font-semibold text-slate-600">{tb.branch_target ?? 'Går til'}</span>
+                                            <select
+                                                className={INPUT}
+                                                value={branch.to}
+                                                onChange={(event) => updateBranch(index, { to: event.target.value })}
+                                                disabled={busy}
+                                            >
+                                                {! targets.some((node) => node.key === branch.to) && (
+                                                    <option value={branch.to} disabled>{tb.branch_target_choose ?? 'Velg steg …'}</option>
+                                                )}
+                                                {targets.map((node) => (
+                                                    <option key={node.key} value={node.key}>
+                                                        {(node.label || node.key)
+                                                            + ((node.type ?? 'step') === 'step' ? '' : ` (${(tb.node_types ?? {})[node.type] ?? node.type})`)}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            className="rounded-xl px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                                            onClick={() => setBranches((current) => current.filter((_, at) => at !== index))}
+                                            disabled={busy}
+                                            aria-label={(tb.branch_remove ?? 'Fjern grenen «:label»').replace(':label', branch.label.trim() || String(index + 1))}
+                                        >
+                                            {tb.branch_remove_short ?? 'Fjern'}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+
+                            <button
+                                type="button"
+                                className="mt-3 text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                onClick={() => setBranches((current) => [...current, { label: '', to: targets[0]?.key ?? '' }])}
+                                disabled={busy || targets.length === 0}
+                            >
+                                + {tb.branch_add ?? 'Legg til gren'}
+                            </button>
+
+                            {problems.length > 0 && (
+                                <ul className="mt-3 list-disc space-y-1 rounded-xl border border-amber-200 bg-amber-50 py-2 pl-8 pr-3 text-sm text-amber-900">
+                                    {problems.map((problem) => <li key={problem}>{problemText(problem)}</li>)}
+                                </ul>
+                            )}
+                        </fieldset>
+                    )}
+
+                    {/* Moving is its own dialog: a different question from what the step says, and
+                        answered by picking a place, not by typing. Only offered for an activity on
+                        the main line; a step in a branch says why there is no button. */}
+                    {! inserting && step.type === 'step' && typeof onMove === 'function' && (canMove
+                        ? (
+                            <button
+                                type="button"
+                                className="mt-4 text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                onClick={() => onMove(step.key)}
+                                disabled={busy}
+                            >
+                                {tb.step_move_open ?? 'Flytt steg'} →
+                            </button>
+                        )
+                        : (
+                            <p className="mt-4 text-sm leading-5 text-slate-500">
+                                {tb.step_move_unavailable ?? 'Dette steget kan ikke flyttes herfra. Bare aktiviteter på hovedlinjen, utenfor beslutningsgrener, kan flyttes.'}
+                            </p>
+                        ))}
+
+                    <p className="mt-4 text-sm leading-5 text-slate-500">
+                        {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
+                    </p>
+
+                    {/* Saving writes the working version as the editor holds it, so edits made under
+                        "Rediger struktur manuelt" and not yet saved go with it. Said before the click. */}
+                    {hasUnsavedChanges && (
+                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {tb.step_edit_unsaved_help ?? 'Du har ulagrede endringer i strukturen. De lagres sammen med dette steget.'}
+                        </p>
+                    )}
+
+                    {error && (
+                        <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p>
+                    )}
+
+                    <div className="mt-6 flex flex-wrap items-center gap-3">
+                        <button type="submit" className={PRIMARY_ACTION} disabled={! valid || busy}>
+                            {busy
+                                ? (tb.step_edit_saving ?? 'Lagrer …')
+                                : inserting
+                                ? (tb.step_insert_save ?? 'Legg til aktiviteten')
+                                : (tb.step_edit_save ?? 'Lagre steget')}
+                        </button>
+                        <button type="button" className={SECONDARY_ACTION} onClick={onClose} disabled={busy}>
+                            {tb.step_edit_cancel ?? 'Avbryt'}
+                        </button>
+                        {/* The box used to open the activity's knowledge; it still can, one step on. A
+                            step not yet added has none. */}
+                        {! inserting && typeof onOpenActivity === 'function' && <button
+                            type="button"
+                            className="ml-auto text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                            onClick={() => onOpenActivity(step.key)}
+                            disabled={busy}
+                        >
+                            {tb.step_edit_articles ?? 'Kunnskap fra steget'} →
+                        </button>}
+                    </div>
+                </form>
+            )}
+        </ActionDialog>
+    );
+}
+
+/**
+ * "Flytt steg": where one activity stands in the flow, chosen as the step it should come after.
+ *
+ * Only places on the main line that the move can reach by rejoining arrows — moveTargets() decides
+ * which — so there is nothing here to validate beyond having picked one. The diagram moves the step
+ * once the server has stored the flow, not before.
+ */
+function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onSave, onClose }) {
+    const titleId = 'process-step-move-title';
+    const [afterKey, setAfterKey] = useState('');
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        setAfterKey('');
+        setError(null);
+    }, [step?.key]);
+
+    const valid = targets.some((node) => node.key === afterKey);
+
+    function submit(event) {
+        event.preventDefault();
+
+        if (! valid || busy) {
+            return;
+        }
+
+        setError(null);
+        onSave(afterKey, {
+            onError: (errors) => setError(Object.values(errors)[0] ?? tb.step_edit_failed ?? 'Steget kunne ikke lagres.'),
+        });
+    }
+
+    return (
+        <ActionDialog isOpen={step !== null} onClose={onClose} closeDisabled={busy} titleId={titleId}>
+            {step !== null && (
+                <form onSubmit={submit}>
+                    <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
+                        {tb.step_move_heading ?? 'Flytt steg'}
+                    </h2>
+                    <p className="mt-2 text-sm leading-5 text-slate-600">
+                        {(tb.step_move_current ?? '«:label» kommer nå etter «:after».')
+                            .replace(':label', step.label || step.key)
+                            .replace(':after', after?.label || after?.key || '')}
+                    </p>
+
+                    <label className="mt-5 block space-y-1">
+                        <span className="block text-sm font-semibold text-slate-700">{tb.step_move_after ?? 'Plasser etter'}</span>
+                        <select
+                            className={INPUT}
+                            value={afterKey}
+                            onChange={(event) => setAfterKey(event.target.value)}
+                            disabled={busy || targets.length === 0}
+                        >
+                            <option value="" disabled>{tb.branch_target_choose ?? 'Velg steg …'}</option>
+                            {targets.map((node) => (
+                                <option key={node.key} value={node.key}>
+                                    {(node.label || node.key)
+                                        + ((node.type ?? 'step') === 'step' ? '' : ` (${(tb.node_types ?? {})[node.type] ?? node.type})`)}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    {targets.length === 0 && (
+                        <p className="mt-2 text-sm leading-5 text-slate-500">
+                            {tb.step_move_no_targets ?? 'Det finnes ikke noe annet sted på hovedlinjen steget kan flyttes til.'}
+                        </p>
+                    )}
+
+                    <p className="mt-4 text-sm leading-5 text-slate-500">
+                        {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
+                    </p>
+
+                    {hasUnsavedChanges && (
+                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {tb.step_edit_unsaved_help ?? 'Du har ulagrede endringer i strukturen. De lagres sammen med dette steget.'}
+                        </p>
+                    )}
+
+                    {error && (
+                        <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p>
+                    )}
+
+                    <div className="mt-6 flex flex-wrap items-center gap-3">
+                        <button type="submit" className={PRIMARY_ACTION} disabled={! valid || busy}>
+                            {busy ? (tb.step_edit_saving ?? 'Lagrer …') : (tb.step_move_save ?? 'Flytt steget')}
+                        </button>
+                        <button type="button" className={SECONDARY_ACTION} onClick={onClose} disabled={busy}>
+                            {tb.step_edit_cancel ?? 'Avbryt'}
+                        </button>
+                    </div>
+                </form>
+            )}
+        </ActionDialog>
+    );
 }
 
 /**
