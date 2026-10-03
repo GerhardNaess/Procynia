@@ -8,9 +8,11 @@ use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
+use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
+use App\Http\Controllers\App\QualityController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -154,11 +156,110 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::prefix('app')
-    ->middleware(['auth', 'customer.frontend'])
+    // customer.module gates the routes listed in config/procynia_modules.php -> route_modules
+    // against the customer's package entitlements. It is applied to the whole group rather than
+    // to each route, because the map it reads is keyed by route name.
+    ->middleware(['auth', 'customer.frontend', 'customer.module'])
     ->name('app.')
     ->group(function (): void {
         Route::redirect('/', '/app/notices?mode=saved');
-        Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+        // Hjem: Procynia across its modules. Keeps the /app/dashboard path the rail and the logo
+        // have always pointed at; only what the path renders has changed.
+        Route::get('/dashboard', HomeController::class)->name('dashboard');
+
+        // The bid cockpit, unchanged, now under the module it belongs to. It was the home page
+        // until Hjem became cross-module, which is why its path moved rather than its content.
+        Route::get('/bid-status', [DashboardController::class, 'index'])->name('bid-status');
+
+        // Kvalitet. Every route here is named under `app.quality.`, which config/procynia_modules.php
+        // maps to the `quality` module — so the write actions are entitlement-gated by the group's
+        // customer.module middleware exactly as the page itself is.
+        Route::prefix('/quality')->name('quality.')->group(function (): void {
+            Route::get('/', [QualityController::class, 'index'])->name('index');
+
+            // Quality items are the domain's own objects, so they are bound by their own id — not
+            // by a Wiki page, which is what the retired classification model did.
+            Route::post('/items', [QualityController::class, 'storeItem'])->name('items.store');
+            Route::get('/items/{item}', [QualityController::class, 'show'])->name('items.show');
+            Route::patch('/items/{item}', [QualityController::class, 'updateItem'])->name('items.update');
+            Route::delete('/items/{item}', [QualityController::class, 'destroyItem'])->name('items.destroy');
+
+            // Steps, input/output, checklist lines and control fields all travel as a set — see
+            // QualityItemService for why structure is written wholesale rather than row by row.
+            Route::put('/items/{item}/structure', [QualityController::class, 'updateStructure'])
+                ->name('items.structure.update');
+
+            // Prosessflyt. Only a process has one — the controller refuses the rest through
+            // QualityProcessBlueprintService — and the blueprint is the source of truth: the
+            // swimlane is drawn from it client-side and never stored.
+            //
+            // There is deliberately no "generate" route. A deterministic generator used to seed a
+            // flow — from the process's own steps, or from a worked ITIL example when it had none —
+            // and it wrote straight over whatever the process already had. A flow a person
+            // described and adopted is now only ever replaced by a person: by adopting another
+            // proposal, or by saving the editor. See QualityProcessBlueprintService::store().
+
+            // Describing the process in plain language, and adopting what comes back. Two routes
+            // rather than one because they are two decisions: interpreting writes nothing, and
+            // adopting is the user saying the proposal — as they corrected it — is the flow. Only
+            // the second touches the database, and only it may record `source = ai`.
+            Route::post('/items/{item}/blueprint/interpret', [QualityController::class, 'interpretFlow'])
+                ->name('items.blueprint.interpret');
+            Route::post('/items/{item}/blueprint/adopt', [QualityController::class, 'adoptFlowProposal'])
+                ->name('items.blueprint.adopt');
+
+            // Turning down one of the suggestions beside a proposal. A third decision, and the only
+            // one that is remembered: it writes no flow, and it exists so the same note is not put
+            // in front of the user every time they regenerate.
+            Route::post('/items/{item}/blueprint/clarifications/dismiss', [QualityController::class, 'dismissFlowClarification'])
+                ->name('items.blueprint.clarifications.dismiss');
+
+            // Answering one instead. Separate from interpret because the description is revised
+            // before it is read — the answer is woven into the text rather than appended to it, and
+            // the question itself is never written down. Still writes nothing: what comes back is a
+            // proposal carrying the revised description.
+            Route::post('/items/{item}/blueprint/clarifications/answer', [QualityController::class, 'answerFlowClarification'])
+                ->name('items.blueprint.clarifications.answer');
+            Route::put('/items/{item}/blueprint', [QualityController::class, 'updateBlueprint'])
+                ->name('items.blueprint.update');
+            Route::post('/items/{item}/blueprint/approve', [QualityController::class, 'approveBlueprint'])
+                ->name('items.blueprint.approve');
+
+            // Removing the flow alone. A separate decision from deleting the process, which lives
+            // on the Kvalitet list: this one says the flow is wrong and should be described again,
+            // and leaves the process, its documents and the Wiki knowledge its activities produced
+            // exactly where they were.
+            Route::delete('/items/{item}/blueprint', [QualityController::class, 'destroyBlueprint'])
+                ->name('items.blueprint.destroy');
+
+            // An activity as a SOURCE of knowledge. Two routes for the same reason interpreting and
+            // adopting a flow are two: drafting writes nothing, and creating is the user saying the
+            // article — as they corrected it — is what should go into Wiki. Only the second touches
+            // the database, and what it creates is an ordinary Enterprise Wiki page in draft.
+            Route::post('/items/{item}/activities/article-draft', [QualityController::class, 'draftActivityArticle'])
+                ->name('items.activities.article-draft');
+            Route::post('/items/{item}/activities/articles', [QualityController::class, 'storeActivityArticle'])
+                ->name('items.activities.articles.store');
+
+            // The seam to Wiki. Attaching a page changes nothing about the page.
+            Route::post('/items/{item}/wiki-links', [QualityController::class, 'storeWikiLink'])
+                ->name('items.wiki-links.store');
+            Route::delete('/wiki-links/{link}', [QualityController::class, 'destroyWikiLink'])
+                ->name('wiki-links.destroy');
+
+            // The seam to the document store — a separate thing from the Wiki seam above. These
+            // reach files the document consists of, uses or leaves behind; the store itself is the
+            // existing enterprise_wiki_documents one, and removing a link never removes a file.
+            Route::post('/items/{item}/documents', [QualityController::class, 'storeDocument'])
+                ->name('items.documents.store');
+            Route::post('/items/{item}/document-links', [QualityController::class, 'storeDocumentLink'])
+                ->name('items.document-links.store');
+            Route::delete('/document-links/{link}', [QualityController::class, 'destroyDocumentLink'])
+                ->name('document-links.destroy');
+
+            Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
+            Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
+        });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
@@ -270,6 +371,8 @@ Route::prefix('app')
         Route::post('/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
         Route::post('/billing/resume', [BillingController::class, 'resume'])->name('billing.resume');
         Route::post('/billing/change-plan', [BillingController::class, 'changePlan'])->name('billing.change-plan');
+        Route::post('/billing/packages/{package}/request', [BillingController::class, 'requestPackage'])
+            ->name('billing.packages.request');
 
         // Go/No-go template admin (System Owner only)
         Route::prefix('/go-no-go-templates')->name('go-no-go-templates.')->group(function (): void {
@@ -318,6 +421,10 @@ Route::prefix('app')
             // authorization, and general editing must not inherit that contract.
             Route::patch('/{slug}/working-version', [WikiController::class, 'updateWorkingVersion'])->name('working-version.update');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
+            // Deleting a Wiki page is the page's own action, not a side effect of deleting the
+            // source document behind it. Reached by DELETE, so it cannot collide with the GET
+            // catch-all above.
+            Route::delete('/{slug}', [WikiController::class, 'destroy'])->name('destroy');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             // Asking for quality assurance, which is separate from handing the page to a
             // reviewer: QA contributes, the Wiki approver decides.

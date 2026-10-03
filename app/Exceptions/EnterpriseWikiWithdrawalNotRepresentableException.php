@@ -33,6 +33,21 @@ class EnterpriseWikiWithdrawalNotRepresentableException extends RuntimeException
         );
     }
 
+    /**
+     * The same fail-closed contract, for a page deletion rather than a document deletion: the pages
+     * that linked to a deleted page must have let go of it before the deletion is allowed to commit.
+     *
+     * @param  list<string>  $violations
+     */
+    public static function activeWikiStillReferencesDeletedPages(array $violations): self
+    {
+        return new self(sprintf(
+            'After deleting the requested Wiki pages the active Wiki would still reference them: %s. '
+            .'The deletion has been rolled back.',
+            implode('; ', $violations),
+        ));
+    }
+
     /** @param list<string> $violations */
     public static function activeWikiNotClean(int $documentId, array $violations): self
     {

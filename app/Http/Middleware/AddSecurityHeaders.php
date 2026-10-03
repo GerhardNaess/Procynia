@@ -65,15 +65,14 @@ class AddSecurityHeaders
         }
 
         if ($this->isHtmlResponse($response)) {
-            $csp = (array) ($headers['csp'] ?? []);
-
-            // Enforcing in production. Report-only while Vite's dev server is running, because an
-            // enforcing policy cannot admit an IPv6-literal dev origin — see the config for why.
-            $header = ($this->isViteDevServerActive() && ! ($csp['enforce_in_development'] ?? false))
-                ? 'Content-Security-Policy-Report-Only'
-                : 'Content-Security-Policy';
-
-            $response->headers->set($header, $this->contentSecurityPolicy($request, $csp));
+            // Always enforcing, development included. A report-only policy cannot deliver
+            // frame-ancestors at all and makes the browser ask for a report-to group that Procynia
+            // has no endpoint for, so it costs two console warnings and buys nothing: the dev server
+            // is reachable under the real policy now that its origin is an expressible one.
+            $response->headers->set(
+                'Content-Security-Policy',
+                $this->contentSecurityPolicy($request, (array) ($headers['csp'] ?? [])),
+            );
         }
 
         return $response;
@@ -107,19 +106,20 @@ class AddSecurityHeaders
         // Local development serves modules and HMR over the Vite dev server, and @viteReactRefresh
         // emits an inline preamble. Neither exists in a production build, so none of this widens the
         // policy that ships.
-        if ($this->isViteDevServerActive()) {
-            $scriptOrigins = implode(' ', (array) ($csp['dev_script_origins'] ?? []));
-            $connectOrigins = implode(' ', (array) ($csp['dev_connect_origins'] ?? []));
+        $viteOrigin = $this->viteDevServerOrigin();
 
+        if ($viteOrigin !== null) {
             foreach (['script-src', 'style-src'] as $directive) {
-                if (isset($directives[$directive]) && $scriptOrigins !== '') {
-                    $directives[$directive] = trim($directives[$directive].' '.$scriptOrigins);
+                if (isset($directives[$directive])) {
+                    $directives[$directive] = trim($directives[$directive].' '.$viteOrigin);
                 }
             }
 
-            // Only connect-src has any use for ws:; putting it on script-src was noise.
-            if (isset($directives['connect-src']) && $connectOrigins !== '') {
-                $directives['connect-src'] = trim($directives['connect-src'].' '.$connectOrigins);
+            // Only connect-src has any use for the HMR socket; putting ws: on script-src was noise.
+            if (isset($directives['connect-src'])) {
+                $directives['connect-src'] = trim(
+                    $directives['connect-src'].' '.$viteOrigin.' '.$this->webSocketOrigin($viteOrigin),
+                );
             }
 
             // @viteReactRefresh injects an inline preamble that only exists in dev.
@@ -143,15 +143,55 @@ class AddSecurityHeaders
     }
 
     /**
-     * True only in local development with `npm run dev` running.
+     * The origin a running Vite dev server told the application to load assets from, or null.
      *
-     * Both conditions matter. public/hot is what actually proves the dev server is up, but gating on
-     * the environment as well means a stray hot file in a production image cannot widen the policy,
-     * and the automated tests assert the policy that ships rather than whatever a developer happens
-     * to have running.
+     * public/hot is the ground truth: laravel-vite-plugin writes the resolved dev server URL into it
+     * on start and deletes it on exit, so reading it keeps the policy in step with the port Vite
+     * actually got. Gating on the local environment as well means a stray hot file in a production
+     * image cannot widen the policy, and the automated tests assert the policy that ships rather
+     * than whatever a developer happens to have running.
+     *
+     * An IPv6-literal host is rejected rather than emitted. CSP's host-source grammar cannot express
+     * one, so a browser would discard the entire token and quietly take the surrounding directive
+     * down with it; vite.config.js pins the dev server to an IPv4 host so this does not arise.
      */
-    private function isViteDevServerActive(): bool
+    private function viteDevServerOrigin(): ?string
     {
-        return app()->environment('local') && is_file(public_path('hot'));
+        if (! app()->environment('local')) {
+            return null;
+        }
+
+        $hotFile = public_path('hot');
+
+        if (! is_file($hotFile)) {
+            return null;
+        }
+
+        $url = trim((string) file_get_contents($hotFile));
+        $parts = parse_url($url);
+
+        $scheme = $parts['scheme'] ?? null;
+        $host = $parts['host'] ?? null;
+
+        if (! in_array($scheme, ['http', 'https'], true) || ! is_string($host) || $host === '') {
+            return null;
+        }
+
+        // parse_url() hands back IPv6 literals still wrapped in brackets.
+        if (str_contains($host, ':')) {
+            return null;
+        }
+
+        return $scheme.'://'.$host.(isset($parts['port']) ? ':'.$parts['port'] : '');
+    }
+
+    /**
+     * The same origin as a WebSocket source, for the HMR connection.
+     */
+    private function webSocketOrigin(string $origin): string
+    {
+        return str_starts_with($origin, 'https://')
+            ? 'wss://'.substr($origin, 8)
+            : 'ws://'.substr($origin, 7);
     }
 }

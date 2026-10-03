@@ -24,13 +24,26 @@ class ProjectEnterpriseWikiPageToGraph implements ShouldQueue
 
     public int $backoff = 60;
 
-    public function __construct(public readonly int $pageId)
-    {
+    /**
+     * @param  int|null  $deletedForCustomerId  set only when the page is already gone from SQL. The
+     *                                          projector cannot look the customer up from a row that
+     *                                          no longer exists, so a delete has to carry it.
+     */
+    public function __construct(
+        public readonly int $pageId,
+        public readonly ?int $deletedForCustomerId = null,
+    ) {
         $this->queue = self::QUEUE;
     }
 
     public function handle(EnterpriseWikiGraphProjector $projector): void
     {
+        if ($this->deletedForCustomerId !== null) {
+            $projector->deletePage($this->deletedForCustomerId, $this->pageId);
+
+            return;
+        }
+
         $projector->projectPage($this->pageId);
     }
 

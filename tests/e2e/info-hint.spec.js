@@ -78,8 +78,8 @@ test('Escape closes an open InfoHint and returns focus to the trigger', async ({
     await expect(helpButton).toBeFocused();
 });
 
-test('an already-migrated InfoHint consumer on the dashboard still renders correctly (regression)', async ({ page }) => {
-    const response = await page.goto('/app/dashboard');
+test('an already-migrated InfoHint consumer on Bid Status still renders correctly (regression)', async ({ page }) => {
+    const response = await page.goto('/app/bid-status');
     expect(response?.status()).toBe(200);
 
     // DashboardCockpit's InfoButton is a thin adapter already delegating to InfoHint —
@@ -114,7 +114,7 @@ test('no console errors or failed requests when opening/closing InfoHint across 
     await page.getByRole('button', { name: 'Vis forklaring for Mine oppgaver' }).hover();
     await page.mouse.move(0, 0);
 
-    await page.goto('/app/dashboard');
+    await page.goto('/app/bid-status');
     await page.getByRole('button', { name: /^Vis forklaring for /i }).first().hover();
     await page.mouse.move(0, 0);
 

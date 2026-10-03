@@ -2,7 +2,6 @@
 
 namespace App\Services\EnterpriseWiki;
 
-use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
@@ -65,6 +64,141 @@ class EnterpriseWikiDocumentWikiAnswerStalenessService
         return [
             'stale_wiki_answer_count' => $updated,
         ];
+    }
+
+    /**
+     * Purpose: Mark already-generated Wiki answers as stale because the Wiki pages they were built
+     *          from are being deleted.
+     * Inputs: The pages, read while they still exist — an answer's dependency on a page can only be
+     *         resolved against the page itself, and after the delete there is nothing left to match.
+     * Returns: A compact mutation summary for logging and tests.
+     * Side effects: Updates saved_notice_ai_requirement_wiki_answers rows in place.
+     *
+     * Deliberately NOT markAnswersStaleForWikiPageChange(): that one compares the answer's snapshot
+     * against the page's current content and skips an answer whose snapshot still matches. A page
+     * about to disappear invalidates every answer that cites it, matching snapshot or not, so the
+     * citation alone is the test here.
+     *
+     * @param  Collection<int, EnterpriseWikiPage>  $pages
+     * @return array{stale_wiki_answer_count: int}
+     */
+    public function markAnswersStaleForDeletedWikiPages(Collection $pages): array
+    {
+        if ($pages->isEmpty()) {
+            return ['stale_wiki_answer_count' => 0];
+        }
+
+        $titlesByPageId = [];
+
+        foreach ($pages as $page) {
+            $titlesByPageId[(int) $page->id] = (string) $page->title;
+        }
+
+        $customerIds = $pages
+            ->map(static fn (EnterpriseWikiPage $page): int => (int) $page->customer_id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $answers = SavedNoticeAiRequirementWikiAnswer::query()
+            ->whereNull('stale_at')
+            ->whereHas('requirement.savedNotice', function ($query) use ($customerIds): void {
+                $query->whereIn('customer_id', $customerIds);
+            })
+            ->get(['id', 'sources', 'research_trace', 'stale_at']);
+
+        $now = now();
+        $updated = 0;
+
+        foreach ($answers as $answer) {
+            $matchedPageIds = array_values(array_intersect(
+                $this->pageIdsCitedByAnswer($answer),
+                array_keys($titlesByPageId),
+            ));
+
+            if ($matchedPageIds === []) {
+                continue;
+            }
+
+            $updated += SavedNoticeAiRequirementWikiAnswer::query()
+                ->whereKey($answer->id)
+                ->whereNull('stale_at')
+                ->update([
+                    'stale_at' => $now,
+                    'stale_reason' => SavedNoticeAiRequirementWikiAnswer::STALE_REASON_WIKI_PAGE_DELETED,
+                    'stale_context' => [
+                        'stale_subject_type' => 'wiki_page',
+                        'stale_subject_reason' => 'deleted',
+                        'stale_subject_name' => $titlesByPageId[$matchedPageIds[0]] ?? null,
+                        'deleted_page_ids' => $matchedPageIds,
+                        'deleted_page_titles' => array_values(array_map(
+                            static fn (int $pageId): ?string => $titlesByPageId[$pageId] ?? null,
+                            $matchedPageIds,
+                        )),
+                        'matched_page_ids' => $matchedPageIds,
+                    ],
+                    'updated_at' => $now,
+                ]);
+        }
+
+        return ['stale_wiki_answer_count' => $updated];
+    }
+
+    /**
+     * Every Wiki page id one answer rests on: the cited sources, the pages the research step read,
+     * and the pages each answer section was written from. All three, because an answer can name a
+     * page in any of them and a page it read is a page it depends on.
+     *
+     * @return list<int>
+     */
+    private function pageIdsCitedByAnswer(SavedNoticeAiRequirementWikiAnswer $answer): array
+    {
+        $pageIds = [];
+
+        foreach (is_array($answer->sources) ? $answer->sources : [] as $source) {
+            if (! is_array($source)) {
+                continue;
+            }
+
+            $pageId = (int) ($source['enterprise_wiki_page_id'] ?? $source['page_id'] ?? 0);
+
+            if ($pageId > 0) {
+                $pageIds[$pageId] = true;
+            }
+        }
+
+        foreach ($this->researchPagesForAnswer($answer) as $researchPage) {
+            $pageId = (int) ($researchPage['page_id'] ?? 0);
+
+            if ($pageId > 0) {
+                $pageIds[$pageId] = true;
+            }
+        }
+
+        $researchTrace = is_array($answer->research_trace) ? $answer->research_trace : [];
+        $answerSections = is_array($researchTrace['answer']['answer_sections'] ?? null)
+            ? $researchTrace['answer']['answer_sections']
+            : [];
+
+        foreach ($answerSections as $section) {
+            if (! is_array($section)) {
+                continue;
+            }
+
+            $sectionPageIds = is_array($section['used_page_ids'] ?? null)
+                ? $section['used_page_ids']
+                : (is_array($section['page_ids'] ?? null) ? $section['page_ids'] : []);
+
+            foreach ($sectionPageIds as $pageId) {
+                $pageId = (int) $pageId;
+
+                if ($pageId > 0) {
+                    $pageIds[$pageId] = true;
+                }
+            }
+        }
+
+        return array_map('intval', array_keys($pageIds));
     }
 
     /**

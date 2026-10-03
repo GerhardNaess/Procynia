@@ -113,6 +113,19 @@ class EnterpriseWikiPage extends Model
     }
 
     /**
+     * The quality items this page backs, if any.
+     *
+     * Empty for most pages, and that is the normal case. The relation is deliberately one-way in
+     * meaning: Kvalitet reaches into Wiki for evidence, Wiki learns nothing about itself from being
+     * reached into. Nothing in the Wiki pipeline reads this, and a page is never typed, labelled or
+     * hidden because a quality item points at it.
+     */
+    public function qualityItemLinks(): HasMany
+    {
+        return $this->hasMany(QualityItemWikiLink::class, 'enterprise_wiki_page_id');
+    }
+
+    /**
      * The version the pipeline is working on — what QA, lint, link building, patching and claim
      * extraction operate against. Being current says nothing about whether anyone has approved it.
      */

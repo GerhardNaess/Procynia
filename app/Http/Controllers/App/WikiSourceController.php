@@ -4,19 +4,15 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
-use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
-use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\User;
-use App\Services\DocumentTextExtractor;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
-use App\Services\EnterpriseWiki\EnterpriseWikiUtf8Guard;
 use App\Support\CustomerContext;
-use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,7 +20,6 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -36,11 +31,10 @@ class WikiSourceController extends Controller
 
     public function __construct(
         private readonly CustomerContext $customerContext,
-        private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentDeletionService $deletionService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
-        private readonly EnterpriseWikiUtf8Guard $utf8Guard,
+        private readonly EnterpriseWikiDocumentUploadService $uploadService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -58,71 +52,23 @@ class WikiSourceController extends Controller
             $customerId,
             (int) ($validated['owner_user_id'] ?? $user?->id ?? 0),
         );
-        $fileHash = (string) hash_file('sha256', $file->getRealPath());
 
-        $duplicate = EnterpriseWikiDocument::query()
-            ->where('customer_id', $customerId)
-            ->where('file_hash_sha256', $fileHash)
-            ->exists();
+        // Wiki refuses a file it already holds rather than quietly reusing it: re-uploading a
+        // source that has already been ingested is nearly always a mistake, and the uploader needs
+        // to know the Wiki is already built on this document. Kvalitet takes the other branch of
+        // the same service — see QualityController::storeDocument().
+        $duplicate = $this->uploadService->existingDocument(
+            (int) $customerId,
+            $this->uploadService->hashFor($file),
+        );
 
-        if ($duplicate) {
+        if ($duplicate !== null) {
             throw ValidationException::withMessages([
                 'file' => 'Dette dokumentet er allerede lastet opp for din virksomhet.',
             ]);
         }
 
-        $storedPath = null;
-
-        try {
-            $ext = Str::lower(trim((string) $file->getClientOriginalExtension()));
-            if ($ext === '') {
-                $ext = 'bin';
-            }
-            $storedFilename = Str::ulid().'.'.$ext;
-            $storedPath = Storage::disk('local')->putFileAs(
-                sprintf('customers/%d/wiki-documents', $customerId),
-                $file,
-                $storedFilename,
-            );
-
-            abort_unless(is_string($storedPath) && $storedPath !== '', 500, 'Failed to store the wiki document.');
-
-            $absolutePath = Storage::disk('local')->path($storedPath);
-            $extractedText = trim($this->documentTextExtractor->extractText($absolutePath));
-            $this->utf8Guard->assertValid([
-                'extracted_text' => $extractedText,
-            ], 'enterprise_wiki_document_extraction');
-
-            $document = DB::transaction(function () use ($customerId, $user, $ownerUserId, $file, $storedPath, $fileHash, $extractedText): EnterpriseWikiDocument {
-                return EnterpriseWikiDocument::query()->create([
-                    'customer_id' => $customerId,
-                    'uploaded_by_user_id' => $user?->id,
-                    'owner_user_id' => $ownerUserId,
-                    'original_filename' => $file->getClientOriginalName(),
-                    'file_path' => $storedPath,
-                    'file_hash_sha256' => $fileHash,
-                    'extracted_text' => $extractedText !== '' ? $extractedText : null,
-                    'document_status' => $extractedText !== ''
-                        ? EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED
-                        : EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED,
-                ]);
-            });
-
-            if ($document->document_status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {
-                ReconcileEnterpriseWikiClaimSourcesForDocument::dispatch($document->id);
-            }
-        } catch (\Throwable $e) {
-            if (is_string($storedPath) && $storedPath !== '') {
-                Storage::disk('local')->delete($storedPath);
-            }
-
-            Log::error('[PROCYNIA][WIKI_SOURCE] Failed to store wiki document.', [
-                'customer_id' => $customerId,
-                'error' => $e->getMessage(),
-            ]);
-
-            throw $e;
-        }
+        $this->uploadService->store((int) $customerId, $file, $ownerUserId, $user?->id);
 
         return $this->redirectToWikiTab($request)
             ->with('success', 'Dokumentet er lastet opp og klart for ingest.');
@@ -416,7 +362,7 @@ class WikiSourceController extends Controller
         }
 
         try {
-            $prepared = $this->documentFlowService->prepareRunForDocument($customerId, $document->id);
+            $prepared = $this->documentFlowService->startForDocument($customerId, $document->id);
         } catch (InvalidArgumentException $e) {
             Log::warning('[PROCYNIA][WIKI_SOURCE_INGEST] '.$e->getMessage(), ['document_id' => $document->id]);
 
@@ -425,26 +371,6 @@ class WikiSourceController extends Controller
         }
 
         $run = $prepared['run'];
-
-        if ($prepared['created']) {
-            EnterpriseWikiQueueTrace::log('dispatch_before', [
-                'run_id' => $run->id,
-                'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
-                'job_uuid' => null,
-                'delay_seconds' => null,
-                'available_at' => null,
-            ], true, true);
-
-            RunEnterpriseWikiDocumentFlow::dispatch($run->id);
-
-            EnterpriseWikiQueueTrace::log('dispatch_after', [
-                'run_id' => $run->id,
-                'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
-                'job_uuid' => null,
-                'delay_seconds' => null,
-                'available_at' => null,
-            ], true, true);
-        }
 
         Log::info('[PROCYNIA][WIKI_SOURCE_INGEST] Queued ingest run.', [
             'run_id' => $run->id,

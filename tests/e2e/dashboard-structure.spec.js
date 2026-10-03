@@ -2,7 +2,12 @@ import { test, expect } from '@playwright/test';
 import { loginAs, USER } from './helpers/auth.js';
 
 /**
- * The dashboard answers three questions in order. These check the information architecture
+ * Bid Status answers three questions in order.
+ *
+ * The page used to be the home page; it is Anbud's own overview now, at /app/bid-status, and
+ * Hjem is the cross-module dashboard instead. Only the route moved — the sections below are the
+ * same ones, which is the point of checking them here.
+ * These check the information architecture
  * itself — the section order, and that the old duplicated KPI cards are gone — which needs no
  * seeded cases. The numbers behind each section are covered by dashboardLogic.test.js and
  * DashboardControllerTest.
@@ -10,7 +15,7 @@ import { loginAs, USER } from './helpers/auth.js';
 
 test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);
-    await page.goto('/app/dashboard');
+    await page.goto('/app/bid-status');
 });
 
 test('the three sections render in priority order', async ({ page }) => {

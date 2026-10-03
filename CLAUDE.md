@@ -102,6 +102,7 @@ composer setup
 - If you want to use built assets, `public/hot` should not exist.
 - If `/login` or `/app` is white, check `public/hot` first. If `public/build/manifest.json` exists and Vite dev is not running, it is safe to remove `public/hot`.
 - Do not commit `public/hot`; it is ignored by git and should remain local.
+- `vite.config.js` pins the dev server to `127.0.0.1`. Leaving it unset makes Vite bind to `localhost`, which resolves to `::1` on macOS, and `public/hot` then holds `http://[::1]:5173` — an origin CSP's host-source grammar cannot express, so every Vite asset is blocked. Override with `VITE_DEV_HOST` only with a plain IPv4 host.
 
 ## Architecture
 

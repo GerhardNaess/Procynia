@@ -3,7 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import ActionDialog from '../Components/App/ActionDialog';
 import ControlHint from '../Components/App/ControlHint';
 import NotificationBell from '../Components/App/NotificationBell';
+import ModuleSidebar from '../Components/App/ModuleSidebar';
+import { activeModuleKey } from '../Support/appModules';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
+import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -64,16 +67,85 @@ function emptyNotificationsState() {
  */
 const NOTIFICATION_POLL_MS = 60000;
 
+/**
+ * One row of navigation pills.
+ *
+ * Rendered twice — once as the header's module navigation, once as the page's own level — because
+ * the two are the same control at different depths. Giving the lower one its own markup would have
+ * let the pill, the active state and the disabled state drift apart between them.
+ */
+function NavigationRow({ items, activeKey, disabledHint = '' }) {
+    return (
+        <nav className="flex flex-wrap items-center gap-2">
+            {items.map((item) => {
+                const isActive = activeKey === item.key;
+                const classes = classNames(
+                    'rounded-xl px-3 py-2 text-base font-medium transition',
+                    isActive
+                        ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                );
+
+                if (!item.href) {
+                    return (
+                        <span
+                            key={item.key}
+                            className={classNames('rounded-xl px-3 py-2 text-base font-medium cursor-default text-slate-500 select-none')}
+                            aria-current={isActive ? 'page' : undefined}
+                            aria-disabled="true"
+                            title={disabledHint || undefined}
+                        >
+                            {item.label}
+                        </span>
+                    );
+                }
+
+                if (item.isAnchor) {
+                    return (
+                        <a
+                            key={item.key}
+                            href={item.href}
+                            className={classes}
+                            aria-current={isActive ? 'page' : undefined}
+                        >
+                            {item.label}
+                        </a>
+                    );
+                }
+
+                return (
+                    <Link
+                        key={item.key}
+                        href={item.href}
+                        className={classes}
+                        aria-current={isActive ? 'page' : undefined}
+                    >
+                        {item.label}
+                    </Link>
+                );
+            })}
+        </nav>
+    );
+}
+
 export default function CustomerAppLayout({ children, title, showPageTitle = true }) {
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
     const navigation = translations?.navigation ?? {};
+    const modules = navigation.modules ?? {};
+    // Which technical modules this customer holds, resolved server-side from their package
+    // entitlements. The rail presents it; the routes enforce it.
+    const activeModules = page.props.entitlements?.modules ?? [];
     const tw = translations?.wiki ?? {};
+    const tq = translations?.quality ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
     const [isDeleteUnreadOpen, setIsDeleteUnreadOpen] = useState(false);
     const [notificationState, setNotificationState] = useState(page.props.notifications ?? emptyNotificationsState());
+    // Read once at mount rather than in an effect: the app renders client-side only, so there is
+    // no server pass to disagree with and no frame where the rail opens and then snaps shut.
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(readModuleSidebarCollapsed);
     const userMenuRef = useRef(null);
     const notificationsMenuRef = useRef(null);
     const currentUrl = page.url ?? '';
@@ -87,6 +159,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
     const wikiTab = searchParams.get('tab') ?? 'pages';
+    const qualityTab = searchParams.get('tab') ?? 'overview';
     const currentAiCaseId = page.props.case?.id ?? null;
     const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
         ? String(page.props.analysisCases[0].id)
@@ -121,6 +194,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         if (pathname === '/app/dashboard') {
             return 'overview';
+        }
+
+        // The bid cockpit. It was /app/dashboard until Hjem became cross-module; it is Anbud's
+        // own overview now, so it resolves to a Anbud area rather than to Hjem.
+        if (pathname === '/app/bid-status') {
+            return 'bid-status';
         }
 
         if (pathname === '/app/notices' || pathname.startsWith('/app/notices/')) {
@@ -172,6 +251,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'wiki';
         }
 
+        if (pathname.startsWith('/app/quality')) {
+            return 'quality';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }
@@ -185,25 +268,36 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : '';
 
     /**
-     * The main menu is the bid workflow, in the order the work happens: see where the portfolio
-     * stands, find a notice, take it into the worklist, look things up, check the competition,
-     * write the response.
+     * The work areas inside Anbud.
      *
-     * Three things that used to sit here no longer do, because none of them is a step in that
-     * work. Watch lists is how Kunngjøringer is set up, so it belongs in that area's own tabs.
-     * Kundemiljø and Abonnement are administration, and live in the user menu. Infosenter is
-     * follow-up that cuts across every case, so it sits apart from the workflow rather than
-     * inside it — see followUpNavigation below. All four keep their routes and permissions
-     * exactly as they were; only where they are named has changed.
+     * These four are the stages one bid passes through, plus the competitor view that informs
+     * them. They are the level below the module, not modules themselves — the same relation
+     * Kildedokumenter, Kjøringer, Wiki-sider and Grafvisning have to Wiki. Routes, labels and
+     * permissions are exactly what they were; only the place they are named has moved.
      */
-    const mainNavigation = [
-        { key: 'overview', label: navigation.bid_status, href: '/app/dashboard' },
-        { key: 'procurements', label: navigation.notices, href: '/app/notices' },
-        { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
-        { key: 'wiki', label: translations.wiki?.nav ?? 'Wiki', href: '/app/wiki' },
-        { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
-        { key: 'ai', label: navigation.ai, href: '/app/ai' },
-    ];
+    const activeModule = activeModuleKey(activeMainArea);
+
+    const toggleSidebarCollapsed = () => {
+        setSidebarCollapsed((current) => {
+            const next = ! current;
+
+            writeModuleSidebarCollapsed(next);
+
+            return next;
+        });
+    };
+
+    const moduleSections = activeModule === 'tenders'
+        ? [
+            // Bid Status is the view across the four stages below it, so it comes first. It is
+            // the only item here that is not itself a stage.
+            { key: 'bid-status', label: navigation.bid_status, href: '/app/bid-status' },
+            { key: 'procurements', label: navigation.notices, href: '/app/notices' },
+            { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
+            { key: 'ai', label: navigation.ai, href: '/app/ai' },
+            { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
+        ]
+        : [];
 
     /**
      * Ask Wiki, between the workflow and the follow-up group. The magnifying glass is the whole
@@ -230,6 +324,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             ?? 'Oppgaver, beslutninger og avklaringer som krever oppfølging',
     };
 
+    /**
+     * The tabs inside one area. Where they are rendered depends on the module: inside Anbud they
+     * are a third level and land on the page, while Wiki and Kundemiljø have no area level above
+     * them, so theirs are the module navigation itself. See `hasModuleAreas` below.
+     */
     const secondaryNavigation = (() => {
         if (activeMainArea === 'ai') {
             return [
@@ -276,6 +375,17 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
                 { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
                 { key: 'wiki-graph', label: tw.tab_graph ?? 'Grafvisning', href: '/app/wiki/graph' },
+            ];
+        }
+
+        if (activeMainArea === 'quality') {
+            // Same shape as Wiki's tabs: Kvalitet has no work areas of its own, so these sit in
+            // the header directly under the rail's selection.
+            return [
+                { key: 'quality-overview', label: tq.tab_overview ?? 'Oversikt', href: buildHref('/app/quality', { tab: 'overview' }) },
+                { key: 'quality-processes', label: tq.tab_processes ?? 'Prosesser', href: buildHref('/app/quality', { tab: 'processes' }) },
+                { key: 'quality-controls', label: tq.tab_controls ?? 'Kontroller', href: buildHref('/app/quality', { tab: 'controls' }) },
+                { key: 'quality-checklists', label: tq.tab_checklists ?? 'Sjekklister', href: buildHref('/app/quality', { tab: 'checklists' }) },
             ];
         }
 
@@ -329,6 +439,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'env-settings';
         }
 
+        if (activeMainArea === 'quality') {
+            return `quality-${qualityTab}`;
+        }
+
         if (activeMainArea === 'wiki') {
             if (pathname === '/app/wiki') {
                 return `wiki-${wikiTab}`;
@@ -343,6 +457,26 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         return null;
     })();
+
+    /**
+     * Two levels, decided by one fact: whether the active module has work areas of its own.
+     *
+     * Wiki has none, so its tabs *are* its module navigation — they sit in the header, directly
+     * below the rail's selection. That is the pattern, and Anbud now follows it: the header carries
+     * Kunngjøringer, Saksliste, Besvarelse and Konkurrenter, and the tabs belonging to whichever of
+     * those is open drop one level further down, onto the page. Kunngjøringer is where the
+     * difference is visible — Live søk, Varsler and Watch lists are a level inside it, not a peer
+     * of it, and the page is where that reads correctly.
+     *
+     * Both lists are the ones that already existed. Nothing here adds, removes or re-gates an item.
+     */
+    const hasModuleAreas = moduleSections.length > 0;
+
+    const moduleNavigation = hasModuleAreas ? moduleSections : secondaryNavigation;
+    const activeModuleNavigationKey = hasModuleAreas ? activeMainArea : activeSecondaryKey;
+
+    const pageNavigation = hasModuleAreas ? secondaryNavigation : [];
+    const activePageNavigationKey = hasModuleAreas ? activeSecondaryKey : null;
 
     useEffect(() => {
         if (!flash?.success) {
@@ -555,27 +689,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     />
                                 </Link>
 
-                                <nav className="flex flex-wrap items-center gap-1.5" aria-label={navigation.workflow_aria ?? 'Arbeidsflyt'}>
-                                    {mainNavigation.map((item) => {
-                                        const isActive = activeMainArea === item.key;
-
-                                        return (
-                                            <Link
-                                                key={item.key}
-                                                href={item.href}
-                                                aria-current={isActive ? 'page' : undefined}
-                                                className={classNames(
-                                                    'rounded-xl px-3 py-2 text-base font-medium transition',
-                                                    isActive
-                                                        ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                                )}
-                                            >
-                                                {item.label}
-                                            </Link>
-                                        );
-                                    })}
-                                </nav>
                             </div>
 
                             {/* Search, follow-up, the bell and the user, in that order. Allowed to wrap on a
@@ -758,68 +871,66 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             </div>
                         </div>
 
-                        {secondaryNavigation.length > 0 ? (
-                            <div className="mt-2 border-t border-slate-200/80 pt-2">
-                                <nav className="flex flex-wrap items-center gap-2">
-                                    {secondaryNavigation.map((item) => {
-                                        const isActive = activeSecondaryKey === item.key;
-                                        const classes = classNames(
-                                            'rounded-xl px-3 py-2 text-base font-medium transition',
-                                            isActive
-                                                ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                        );
-
-                                        if (!item.href) {
-                                            return (
-                                                <span
-                                                    key={item.key}
-                                                    className={classNames('rounded-xl px-3 py-2 text-base font-medium cursor-default text-slate-500 select-none')}
-                                                    aria-current={isActive ? 'page' : undefined}
-                                                    aria-disabled="true"
-                                                    title={aiCaseNavigationHint || undefined}
-                                                >
-                                                    {item.label}
-                                                </span>
-                                            );
-                                        }
-
-                                        if (item.isAnchor) {
-                                            return (
-                                                <a
-                                                    key={item.key}
-                                                    href={item.href}
-                                                    className={classes}
-                                                    aria-current={isActive ? 'page' : undefined}
-                                                >
-                                                    {item.label}
-                                                </a>
-                                            );
-                                        }
-
-                                        return (
-                                            <Link
-                                                key={item.key}
-                                                href={item.href}
-                                                className={classes}
-                                                aria-current={isActive ? 'page' : undefined}
-                                            >
-                                                {item.label}
-                                            </Link>
-                                        );
-                                    })}
-                                </nav>
-                                {aiCaseNavigationHint !== '' ? (
-                                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                                        {aiCaseNavigationHint}
-                                    </p>
-                                ) : null}
+                        {/* The module navigation: what the selected module contains. Anbud's work
+                            areas and Wiki's tabs sit in exactly the same place, because they are
+                            the same level — the first step inside a module. */}
+                        {moduleNavigation.length > 0 ? (
+                            <div className="mt-2 border-t border-slate-200/80 pt-2" data-testid="module-navigation">
+                                <NavigationRow
+                                    items={moduleNavigation}
+                                    activeKey={activeModuleNavigationKey}
+                                />
                             </div>
                         ) : null}
                     </div>
                 </header>
 
-                <main className="mx-auto max-w-[1600px] px-4 py-7 sm:px-6 lg:px-8">
+                {/* The rail and the page are one row from lg up, stacked below it. The rail is
+                    sticky under the header on wide screens so the module structure stays visible
+                    while a long page scrolls; on a phone it simply sits above the page, because
+                    the modules are the only navigation left and must not become unreachable. */}
+                <div className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-7 sm:px-6 lg:flex-row lg:px-8">
+                    <aside
+                        data-testid="module-rail"
+                        className={classNames(
+                            'w-full shrink-0 transition-[width] duration-200',
+                            sidebarCollapsed ? 'lg:w-[4.5rem]' : 'lg:w-64',
+                        )}
+                    >
+                        <div className="lg:sticky lg:top-24">
+                            <ModuleSidebar
+                                modules={modules}
+                                activeModules={activeModules}
+                                activeKey={activeModule}
+                                collapsed={sidebarCollapsed}
+                                onToggleCollapsed={toggleSidebarCollapsed}
+                            />
+                        </div>
+                    </aside>
+
+                    <main className="min-w-0 flex-1">
+                    {/* The level inside an area — Live søk, Varsler and Watch lists inside
+                        Kunngjøringer, and the equivalents inside Saksliste and Besvarelse. It sits
+                        on the page rather than in the header because it belongs to one area, not
+                        to the module, and the header already names which area that is. */}
+                    {pageNavigation.length > 0 ? (
+                        <div
+                            data-testid="page-navigation"
+                            className="mb-6 rounded-2xl border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                        >
+                            <NavigationRow
+                                items={pageNavigation}
+                                activeKey={activePageNavigationKey}
+                                disabledHint={aiCaseNavigationHint}
+                            />
+                            {aiCaseNavigationHint !== '' ? (
+                                <p className="mt-2 px-1 pb-1 text-sm leading-6 text-slate-600">
+                                    {aiCaseNavigationHint}
+                                </p>
+                            ) : null}
+                        </div>
+                    ) : null}
+
                     {flash?.success && showSuccess ? (
                         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-base text-emerald-800 shadow-lg">
                             {flash.success}
@@ -847,7 +958,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     ) : null}
 
                     {children}
-                </main>
+                    </main>
+                </div>
 
                 <footer className="bg-transparent">
                     <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-sm text-slate-500 sm:px-6 lg:px-8">

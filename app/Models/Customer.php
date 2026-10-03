@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -138,6 +139,24 @@ class Customer extends Model
     public function billingEvents(): HasMany
     {
         return $this->hasMany(BillingEvent::class);
+    }
+
+    /**
+     * Commercial packages the customer has ordered or holds. Mandatory packages are deliberately
+     * absent here — ModuleEntitlementService adds them, so a missing row never means lost access.
+     */
+    public function packageEntitlements(): HasMany
+    {
+        return $this->hasMany(CustomerPackageEntitlement::class);
+    }
+
+    /**
+     * Whether a technical module is reachable for this customer. The only question code outside
+     * the billing surface should ask; never branch on which package granted it.
+     */
+    public function hasModule(string $moduleKey): bool
+    {
+        return app(ModuleEntitlementService::class)->hasModule($this, $moduleKey);
     }
 
     /**

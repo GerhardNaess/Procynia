@@ -5,6 +5,11 @@ namespace App\Services\EnterpriseWiki\GraphProjection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\QualityItem;
+use App\Models\QualityItemRelation;
+use App\Models\QualityItemWikiLink;
+use App\Models\QualityProcessBlueprint;
+use App\Services\Quality\QualityActivityKnowledgeResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -12,6 +17,7 @@ class EnterpriseWikiGraphProjector
 {
     public function __construct(
         private readonly GraphProjectionService $projection,
+        private readonly QualityActivityKnowledgeResolver $activityKnowledge,
     ) {}
 
     public function projectPage(int $pageId): void
@@ -58,6 +64,13 @@ class EnterpriseWikiGraphProjector
         $this->projection->deleteWikiPage($customerId, $pageId);
     }
 
+    /**
+     * Rebuild everything this customer has in the graph, from SQL.
+     *
+     * Quality travels with the Wiki rebuild rather than in a call of its own because
+     * replaceCustomerWikiGraph deletes the customer's nodes first: quality left out here would be
+     * dropped by a routine Wiki rebuild and never come back.
+     */
     public function rebuildCustomer(int $customerId): void
     {
         $pages = EnterpriseWikiPage::query()
@@ -79,7 +92,152 @@ class EnterpriseWikiGraphProjector
             ->values()
             ->all();
 
-        $this->projection->replaceCustomerWikiGraph($customerId, $pages, $links);
+        $items = QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (QualityItem $item): array => $this->qualityItemPayload($item))
+            ->values()
+            ->all();
+
+        $itemIds = collect($items)->pluck('quality_item_id')->all();
+
+        $qualityRelations = QualityItemRelation::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('from_item_id', $itemIds)
+            ->whereIn('to_item_id', $itemIds)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (QualityItemRelation $relation): array => $this->qualityRelationPayload($relation))
+            ->values()
+            ->all();
+
+        // Both ends must be in the rebuild, or the MERGE would silently match nothing. A link to a
+        // page outside this customer cannot exist in SQL, but a page the Wiki query skipped can.
+        $qualityWikiLinks = QualityItemWikiLink::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $itemIds)
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (QualityItemWikiLink $link): array => $this->qualityWikiLinkPayload($link))
+            ->values()
+            ->all();
+
+        // The flow's activities and the articles they produced, for the same reason the rest of
+        // Kvalitet travels here: the rebuild deletes the customer's QualityActivity nodes first, so
+        // activities left out would be dropped by a routine Wiki rebuild and never come back.
+        [$activities, $articleLinks] = $this->processActivityPayloads($customerId, $itemIds, $pageIds);
+
+        $this->projection->replaceCustomerWikiGraph(
+            $customerId,
+            $pages,
+            $links,
+            $items,
+            $qualityRelations,
+            $qualityWikiLinks,
+            $activities,
+            $articleLinks,
+        );
+    }
+
+    /**
+     * Every activity of every process this customer has, and every article edge leaving one.
+     *
+     * Two sources, each for its own half. The blueprint payload says what the activities are — an
+     * activity is a node on a flow and nowhere else. The provenance rows say which article came out
+     * of which activity.
+     *
+     * Both ends of an article edge must be part of this rebuild or the MERGE would silently match
+     * nothing, so a page the Wiki query skipped drops the edge rather than the activity, and an
+     * article whose activity is no longer on the flow drops out the same way.
+     *
+     * @param  list<int>  $itemIds
+     * @param  list<int>  $pageIds
+     * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
+     */
+    private function processActivityPayloads(int $customerId, array $itemIds, array $pageIds): array
+    {
+        $projectablePages = array_fill_keys(array_map('intval', $pageIds), true);
+
+        $activities = [];
+        $activityKeys = [];
+        $updatedAtByItem = [];
+
+        QualityProcessBlueprint::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $itemIds)
+            ->orderBy('quality_item_id')
+            ->get()
+            ->each(function (QualityProcessBlueprint $blueprint) use (
+                $customerId,
+                &$activities,
+                &$activityKeys,
+                &$updatedAtByItem,
+            ): void {
+                $itemId = (int) $blueprint->quality_item_id;
+                $updatedAt = $blueprint->updated_at?->toIso8601String();
+                $updatedAtByItem[$itemId] = $updatedAt;
+
+                $laneLabels = [];
+
+                foreach ($blueprint->lanes() as $lane) {
+                    $laneLabels[(string) ($lane['key'] ?? '')] = (string) ($lane['label'] ?? '');
+                }
+
+                foreach (array_values($blueprint->nodes()) as $position => $node) {
+                    $key = (string) ($node['key'] ?? '');
+
+                    if ($key === '') {
+                        continue;
+                    }
+
+                    $activityKeys[$itemId.'#'.$key] = true;
+
+                    $activities[] = [
+                        'customer_id' => $customerId,
+                        'quality_item_id' => $itemId,
+                        'activity_key' => $key,
+                        'label' => (string) ($node['label'] ?? ''),
+                        'activity_type' => (string) ($node['type'] ?? QualityProcessBlueprint::NODE_STEP),
+                        'role' => $laneLabels[(string) ($node['lane'] ?? '')] ?? null,
+                        'position' => $position,
+                        'updated_at' => $updatedAt,
+                    ];
+                }
+            });
+
+        // Which pages an activity is behind is QualityActivityKnowledgeResolver's answer, here as in
+        // the per-item projection and on the flow screen — an activity is behind every page the
+        // run made of the source it produced, not one page it wrote itself. One resolution, so a
+        // full rebuild and an incremental projection cannot disagree about the same step.
+        $articleLinks = [];
+
+        foreach ($itemIds as $itemId) {
+            $itemId = (int) $itemId;
+
+            foreach ($this->activityKnowledge->pageIdsByActivity($customerId, $itemId) as $key => $pageIds) {
+                if (! isset($activityKeys[$itemId.'#'.$key])) {
+                    continue;
+                }
+
+                foreach ($pageIds as $pageId) {
+                    if (! isset($projectablePages[(int) $pageId])) {
+                        continue;
+                    }
+
+                    $articleLinks[] = [
+                        'customer_id' => $customerId,
+                        'quality_item_id' => $itemId,
+                        'activity_key' => (string) $key,
+                        'page_id' => (int) $pageId,
+                        'updated_at' => $updatedAtByItem[$itemId] ?? null,
+                    ];
+                }
+            }
+        }
+
+        return [$activities, $articleLinks];
     }
 
     private function pagePayload(EnterpriseWikiPage $page): array
@@ -98,6 +256,60 @@ class EnterpriseWikiGraphProjector
             'status' => $page->status,
             'current_version_id' => $currentVersionId !== null ? (int) $currentVersionId : null,
             'updated_at' => $page->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * A quality item projects as its own node. It carries only what the graph is asked questions
+     * about — type, title, number, state, ownership, when it is next due. The purpose text and the
+     * authored structure stay in SQL, which is where they are read from.
+     *
+     * @return array<string, mixed>
+     */
+    private function qualityItemPayload(QualityItem $item): array
+    {
+        return [
+            'customer_id' => (int) $item->customer_id,
+            'quality_item_id' => (int) $item->id,
+            'quality_type' => $item->quality_type,
+            'title' => $item->title,
+            'code' => $item->code,
+            'status' => $item->status,
+            'owner_user_id' => $item->owner_user_id !== null ? (int) $item->owner_user_id : null,
+            'next_review_at' => $item->next_review_at?->toDateString(),
+            'updated_at' => $item->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function qualityRelationPayload(QualityItemRelation $relation): array
+    {
+        return [
+            'relation_id' => (int) $relation->id,
+            'customer_id' => (int) $relation->customer_id,
+            'from_item_id' => (int) $relation->from_item_id,
+            'to_item_id' => (int) $relation->to_item_id,
+            'relation_type' => $relation->relation_type,
+            'source' => $relation->source,
+            'updated_at' => $relation->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function qualityWikiLinkPayload(QualityItemWikiLink $link): array
+    {
+        return [
+            'link_id' => (int) $link->id,
+            'customer_id' => (int) $link->customer_id,
+            'quality_item_id' => (int) $link->quality_item_id,
+            'page_id' => (int) $link->enterprise_wiki_page_id,
+            'link_type' => $link->link_type,
+            'source' => $link->source,
+            'updated_at' => $link->updated_at?->toIso8601String(),
         ];
     }
 

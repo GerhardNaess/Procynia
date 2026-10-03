@@ -1,8 +1,14 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
-import { useEffect, useState } from 'react';
+import {
+    DESTRUCTIVE_CONFIRM,
+    DISCLOSURE_INLINE,
+    PRIMARY_COLOURS,
+    SECONDARY_ACTION,
+} from '../../../Support/actionStyles';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ActionDialog from '../../../Components/App/ActionDialog';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import WikiReviewPanel, { articleEditUnavailableText } from './WikiReviewPanel';
 import {
@@ -825,6 +831,164 @@ function WikiImageBlock({ block, tw, sourceDocuments }) {
     );
 }
 
+/**
+ * The page's own handlingsmeny, in the header beside the title.
+ *
+ * Deleting a Wiki page is the page's action, not one of the review panel's: the panel below says
+ * where this version stands and whose turn it is, and a destructive action placed among those
+ * buttons would read as another step in the same workflow. The header belongs to the page itself.
+ *
+ * The confirmation is a dialog rather than window.confirm because what the delete keeps matters as
+ * much as what it removes: the source documents behind the page, the concepts and entities it
+ * linked to, and any Kvalitet-prosess that produced it are all knowledge in their own right and
+ * stay. A one-line browser prompt has no room to say so, and a user who cannot tell will not press
+ * the button. See EnterpriseWikiPageDeletionService.
+ */
+function PageActionsMenu({ tw, page }) {
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const menuRef = useRef(null);
+    const triggerRef = useRef(null);
+    const cancelRef = useRef(null);
+
+    useEffect(() => {
+        if (! isMenuOpen) {
+            return undefined;
+        }
+
+        const handlePointerDown = (event) => {
+            if (! menuRef.current?.contains(event.target)) {
+                setIsMenuOpen(false);
+            }
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setIsMenuOpen(false);
+                triggerRef.current?.focus();
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isMenuOpen]);
+
+    return (
+        <>
+            <div ref={menuRef} className="relative">
+                <button
+                    ref={triggerRef}
+                    type="button"
+                    className={DISCLOSURE_INLINE}
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
+                    data-testid="wiki-page-actions"
+                    onClick={() => setIsMenuOpen((open) => ! open)}
+                >
+                    {tw.page_actions_menu ?? 'Handlinger'}
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                    </svg>
+                </button>
+
+                {isMenuOpen && (
+                    <div
+                        role="menu"
+                        className="absolute right-0 z-20 mt-2 w-60 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg"
+                    >
+                        <button
+                            type="button"
+                            role="menuitem"
+                            data-testid="wiki-page-delete"
+                            className="block w-full rounded-xl px-3 py-2 text-left text-base font-semibold text-rose-700 transition hover:bg-rose-50"
+                            onClick={() => {
+                                setIsMenuOpen(false);
+                                setIsConfirmOpen(true);
+                            }}
+                        >
+                            {tw.page_delete ?? 'Slett side'}
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <ActionDialog
+                isOpen={isConfirmOpen}
+                onClose={() => setIsConfirmOpen(false)}
+                closeDisabled={deleting}
+                titleId="wiki-page-delete-title"
+                initialFocusRef={cancelRef}
+                returnFocusRef={triggerRef}
+            >
+                <h2 id="wiki-page-delete-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                    {tw.page_delete_dialog_title ?? 'Slett Wiki-siden?'}
+                </h2>
+                <p className="mt-2 text-base leading-6 text-slate-600">{page.title}</p>
+
+                <dl className="mt-5 space-y-4">
+                    <div>
+                        <dt className="text-sm font-semibold uppercase tracking-wide text-rose-700">
+                            {tw.page_delete_dialog_removed_heading ?? 'Dette slettes'}
+                        </dt>
+                        <dd className="mt-1 text-base leading-6 text-slate-700">
+                            {tw.page_delete_dialog_removed_body ?? 'Selve Wiki-siden med alle versjoner, påstander og kildereferanser, kvalitetsfunnene på siden, koblingene til og fra andre Wiki-sider, og siden med kantene sine i kunnskapsgrafen. Andre sider som lenker hit beholder teksten, men lenken blir vanlig tekst.'}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                            {tw.page_delete_dialog_kept_heading ?? 'Dette beholdes'}
+                        </dt>
+                        <dd className="mt-1 text-base leading-6 text-slate-700">
+                            {tw.page_delete_dialog_kept_body ?? 'Kildedokumentene siden bygger på, de andre Wiki-sidene siden var koblet til, og eventuell kvalitetsprosess som var kilde til siden. Tilbudssvar som bruker siden blir merket som utdaterte, ikke slettet.'}
+                        </dd>
+                    </div>
+                </dl>
+
+                <p className="mt-4 text-base font-semibold text-slate-700">
+                    {tw.page_delete_dialog_irreversible ?? 'Handlingen kan ikke angres.'}
+                </p>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                        type="button"
+                        className={DESTRUCTIVE_CONFIRM}
+                        disabled={deleting}
+                        data-testid="wiki-page-delete-confirm"
+                        onClick={() => {
+                            setDeleting(true);
+                            // The controller redirects to the Wiki list, so there is nothing to
+                            // navigate to here — only a reason to keep the dialog from being used
+                            // twice while the request is in flight.
+                            router.delete(`/app/wiki/${page.slug}`, {
+                                onFinish: () => setDeleting(false),
+                            });
+                        }}
+                    >
+                        {deleting
+                            ? (tw.page_delete_dialog_deleting ?? 'Sletter …')
+                            : (tw.page_delete_dialog_confirm ?? 'Slett side')}
+                    </button>
+                    <button
+                        ref={cancelRef}
+                        type="button"
+                        className={SECONDARY_ACTION}
+                        disabled={deleting}
+                        onClick={() => setIsConfirmOpen(false)}
+                    >
+                        {tw.page_delete_dialog_cancel ?? 'Avbryt'}
+                    </button>
+                </div>
+            </ActionDialog>
+        </>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
@@ -834,6 +998,7 @@ export default function WikiShow({
     claims,
     claim_summary: claimSummary = null,
     can_handle_wiki_claims: canHandleWikiClaims = false,
+    can_delete_page: canDeletePage = false,
     source_documents: sourceDocuments = [],
     document_owner_summary: documentOwnerSummary = null,
     lint_findings: lintFindings = [],
@@ -2401,6 +2566,11 @@ export default function WikiShow({
                                 cls={PAGE_STATUS_STYLES[page.status] ?? 'bg-slate-200 text-slate-600'}
                             />
                         </div>
+                        {canDeletePage && (
+                            <div className="ml-auto mt-1">
+                                <PageActionsMenu tw={tw} page={page} />
+                            </div>
+                        )}
                     </div>
                     {current_version && (
                         <p className="text-sm text-slate-400">

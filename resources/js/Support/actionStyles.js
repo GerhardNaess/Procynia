@@ -21,7 +21,20 @@
  */
 
 const BASE = 'inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition';
-const DISABLED = 'disabled:cursor-not-allowed disabled:opacity-60';
+
+/**
+ * Disabled is a colour, not a dimmer.
+ *
+ * It used to be `opacity-60` over whatever the role's colours were. On a filled button that reads
+ * as off, but Procynia's primary is a tint — violet-50 behind violet-700 — and six tenths of a tint
+ * on a white card is still a tint. The two states came out a shade apart: "Generer prosessflyt"
+ * woke up the moment the process description had text in it and looked exactly as it had when it
+ * was dead, so the user went on waiting for a button that was already theirs to press.
+ *
+ * The role's colour is therefore dropped entirely while the button is off, and the hover variants
+ * with it — a disabled button must not light up under the cursor either.
+ */
+const DISABLED = 'disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:border-slate-200 disabled:hover:bg-slate-100 disabled:hover:text-slate-400';
 
 /**
  * The primary colours on their own, for a button whose geometry is driven by its own state machine

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Exceptions\EnterpriseWikiWithdrawalNotRepresentableException;
 use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
 use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
@@ -24,6 +25,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionFailureRecoveryService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
@@ -76,6 +78,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
         private readonly EnterpriseWikiMaintainerDecisionFailureRecoveryService $maintainerDecisionRecoveryService,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
+        private readonly EnterpriseWikiPageDeletionService $pageDeletionService,
     ) {}
 
     public function index(Request $request): Response
@@ -1716,6 +1719,7 @@ class WikiController extends Controller
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
             'backlinks' => $backlinks,
             'can_handle_wiki_claims' => $canHandleWikiClaims,
+            'can_delete_page' => $user->canDeleteEnterpriseWikiPage($page),
             'can_edit_wiki_claims' => (bool) $canApproveWikiClaims,
             'manual_block_edit' => $manualBlockEdit,
             'working_version_edit' => $this->workingVersionEditContext($page, $currentVersion, $customerId, $user),
@@ -2686,6 +2690,62 @@ class WikiController extends Controller
         $page->refresh();
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
+    }
+
+    /**
+     * Delete one Wiki page — the canonical way knowledge leaves the Wiki.
+     *
+     * Deleting used to be reachable only by deleting the source document behind a page, which takes
+     * every page that document alone produced and is a document decision, not a page one. This is
+     * the page's own action, for a page somebody is reading and has decided does not belong.
+     *
+     * Authorised by canDeleteEnterpriseWikiPage(): System Owner anywhere in their customer, or the
+     * page's registered owner. Not the review capability — see that method.
+     *
+     * The work is EnterpriseWikiPageDeletionService's, the single place a Wiki page is deleted, so
+     * a later caller (a Quality process handing Wiki the pages its activities produced) asks for
+     * the same deletion rather than writing another one.
+     */
+    public function destroy(Request $request, string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend(), 404);
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        abort_unless($user->canDeleteEnterpriseWikiPage($page), 403);
+
+        $title = (string) $page->title;
+
+        try {
+            $result = $this->pageDeletionService->deletePage($page, $user);
+        } catch (EnterpriseWikiWithdrawalNotRepresentableException $e) {
+            // Fail-closed by design: nothing was deleted. The page is still there and still
+            // readable, which is the only state worth offering after a refusal.
+            Log::warning('[PROCYNIA][WIKI_PAGE] Page deletion refused — the active Wiki could not let go of it.', [
+                'page_id' => $page->id,
+                'customer_id' => $customerId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('app.wiki.show', $page->slug)
+                ->with('error', __('procynia.wiki.page_delete_failed'));
+        }
+
+        return $this->redirectToWikiTab($request)
+            ->with('success', __('procynia.wiki.page_delete_success', [
+                'title' => $title,
+            ]).($result['pages_rewritten'] > 0
+                ? ' '.trans_choice('procynia.wiki.page_delete_links_removed', $result['pages_rewritten'], [
+                    'count' => $result['pages_rewritten'],
+                ])
+                : ''));
     }
 
     /**

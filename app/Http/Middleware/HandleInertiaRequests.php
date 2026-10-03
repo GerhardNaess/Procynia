@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\UserNotificationService;
 use App\Support\CustomerContext;
 use Illuminate\Http\Request;
@@ -15,6 +16,7 @@ class HandleInertiaRequests extends Middleware
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly UserNotificationService $notificationService,
+        private readonly ModuleEntitlementService $moduleEntitlements,
     ) {}
 
     public function version(Request $request): ?string
@@ -67,6 +69,15 @@ class HandleInertiaRequests extends Middleware
                     ] : null,
                 ] : null,
             ],
+            // What this customer is entitled to, as technical module keys. The left rail renders
+            // this instead of a hardcoded availability list, and EnsureModuleIsEnabled enforces
+            // the same resolution on every gated route — one source, so the menu and the guard
+            // cannot disagree.
+            'entitlements' => [
+                'modules' => $customer !== null
+                    ? $this->moduleEntitlements->modulesFor($customer)
+                    : [],
+            ],
             'notifications' => $user instanceof User
                 ? $this->notificationService->panelPayload($user)
                 : null,
@@ -81,6 +92,9 @@ class HandleInertiaRequests extends Middleware
             ],
             'translations' => [
                 'navigation' => [
+                    // The left module rail. Shared as a block because the rail renders the whole
+                    // planned product structure, available modules and not-yet-built ones alike.
+                    'modules' => __('procynia.navigation.modules'),
                     'bid_status' => __('procynia.navigation.bid_status'),
                     'notices' => __('procynia.navigation.notices'),
                     'ai' => __('procynia.navigation.ai'),
@@ -94,6 +108,7 @@ class HandleInertiaRequests extends Middleware
                     'registered_notices' => __('procynia.navigation.registered_notices'),
                     'history' => __('procynia.navigation.history'),
                 ],
+                'home' => __('procynia.home'),
                 'dashboard' => __('procynia.dashboard'),
                 'notices' => __('procynia.notices'),
                 'ai' => __('procynia.ai'),
@@ -101,6 +116,10 @@ class HandleInertiaRequests extends Middleware
                 'billing' => __('procynia.billing'),
                 'ai_quota' => __('procynia.ai_quota'),
                 'wiki' => __('procynia.wiki'),
+                // The Kvalitet module's own namespace. Shared as a block: the module is one page
+                // whose every string belongs to it, so naming them individually would only
+                // repeat the lang file.
+                'quality' => __('procynia.quality'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
                 'customer_env' => __('procynia.customer_env'),

@@ -1,0 +1,119 @@
+/**
+ * The product structure, as a left-hand module rail.
+ *
+ * Procynia is being built out module by module, and the rail shows the whole planned structure —
+ * not only the parts that exist. A module that is not built yet is still listed, dimmed and
+ * inert, so people can see where the system is going instead of being surprised by it later.
+ *
+ * TWO INDEPENDENT GATES, AND NEITHER IS ENOUGH ON ITS OWN.
+ *
+ * `built` says the pages exist. It is a fact about this repository, so it lives here in code.
+ * `module` names the technical module the entry needs, and whether the customer has that module
+ * is a fact about the customer — it comes from the backend (`entitlements.modules`) and is never
+ * decided here. A module is reachable only when it is both built and entitled.
+ *
+ * Keeping them apart is what makes the GRC case behave. GRC grants `quality`, `risk` and
+ * `audit_compliance`; only `quality` has pages, so buying GRC lights up Kvalitet and leaves Risiko
+ * and Revisjon & Compliance exactly as planned as they were. An entitlement can never conjure a
+ * destination that does not exist.
+ *
+ * `module: null` means the entry is not something a customer buys — Hjem is the app itself, and
+ * the unbuilt entries have no technical module assigned yet.
+ */
+export const APP_MODULES = [
+    {
+        key: 'home',
+        href: '/app/dashboard',
+        built: true,
+        module: null,
+        label: (m) => m.home ?? 'Hjem',
+        areas: ['overview'],
+    },
+    {
+        key: 'wiki',
+        href: '/app/wiki',
+        built: true,
+        // Wiki/Core is the mandatory module every customer holds, so this entry can never be
+        // dimmed — but it is still resolved through entitlements rather than asserted here.
+        module: 'wiki_core',
+        label: (m) => m.wiki ?? 'Wiki',
+        areas: ['wiki', 'wiki-ask'],
+    },
+    {
+        key: 'tenders',
+        href: '/app/notices',
+        built: true,
+        module: 'tender',
+        label: (m) => m.tenders ?? 'Anbud',
+        areas: ['bid-status', 'procurements', 'worklist', 'ai', 'suppliers'],
+    },
+    {
+        key: 'quality',
+        href: '/app/quality',
+        built: true,
+        module: 'quality',
+        label: (m) => m.quality ?? 'Kvalitet',
+        areas: ['quality'],
+    },
+    { key: 'risk', built: false, module: 'risk', label: (m) => m.risk ?? 'Risiko' },
+    { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
+    { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
+    { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
+    { key: 'compliance', built: false, module: 'audit_compliance', label: (m) => m.compliance ?? 'Revisjon & Compliance' },
+    { key: 'services', built: false, module: null, label: (m) => m.services ?? 'Tjenester & SLA' },
+    { key: 'projects', built: false, module: null, label: (m) => m.projects ?? 'Prosjekter' },
+    { key: 'competence', built: false, module: null, label: (m) => m.competence ?? 'Kompetanse' },
+    { key: 'assets', built: false, module: null, label: (m) => m.assets ?? 'Utstyr & Eiendeler' },
+    { key: 'reports', built: false, module: null, label: (m) => m.reports ?? 'Rapporter' },
+    { key: 'settings', built: false, module: null, label: (m) => m.settings ?? 'Innstillinger' },
+];
+
+/**
+ * What the rail should do with one entry, given the modules the backend says are active.
+ *
+ * - `active`    — built and entitled. A link.
+ * - `not_ordered` — built, but this customer has not bought it. Dimmed, and says so: the module
+ *                 is finished, the customer simply does not have it, which is a different message
+ *                 from "not built yet" and leads somewhere different (Abonnement).
+ * - `planned`   — not built. Dimmed, whether or not an entitlement happens to cover it.
+ *
+ * `planned` is checked first on purpose. That single ordering is what stops a package from
+ * advertising a destination that does not exist.
+ */
+export function moduleAvailability(module, activeModules = []) {
+    if (! module.built) {
+        return 'planned';
+    }
+
+    if (module.module === null) {
+        return 'active';
+    }
+
+    return activeModules.includes(module.module) ? 'active' : 'not_ordered';
+}
+
+/**
+ * The rail's three groups, in render order, from one pass over the catalog.
+ */
+export function partitionModules(activeModules = []) {
+    const groups = { active: [], not_ordered: [], planned: [] };
+
+    for (const module of APP_MODULES) {
+        groups[moduleAvailability(module, activeModules)].push(module);
+    }
+
+    return groups;
+}
+
+/**
+ * Which module the current area belongs to.
+ *
+ * Administration (Kundemiljø, Abonnement) and Oppfølging are reached from the top bar and are not
+ * modules, so being in one leaves the rail with nothing selected rather than lighting up a module
+ * the person is not in.
+ */
+export function activeModuleKey(activeMainArea) {
+    const match = APP_MODULES.find((module) => (module.areas ?? []).includes(activeMainArea));
+
+    return match ? match.key : null;
+}

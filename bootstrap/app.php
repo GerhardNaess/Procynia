@@ -3,6 +3,7 @@
 use App\Http\Middleware\AddSecurityHeaders;
 use App\Http\Middleware\EnsureCustomerFrontendAccess;
 use App\Http\Middleware\EnsureHealthToken;
+use App\Http\Middleware\EnsureModuleIsEnabled;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SetCustomerLocale;
 use Illuminate\Foundation\Application;
@@ -30,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'health.token' => EnsureHealthToken::class,
             'customer.frontend' => EnsureCustomerFrontendAccess::class,
+            'customer.module' => EnsureModuleIsEnabled::class,
         ]);
 
         $middleware->web(append: [

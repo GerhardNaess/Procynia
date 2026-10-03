@@ -3,11 +3,18 @@
 namespace Database\Seeders;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityActivityWikiPage;
+use App\Models\QualityItem;
+use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 /**
  * Seeds stable test users for Playwright E2E tests.
@@ -24,11 +31,59 @@ use Illuminate\Support\Facades\Hash;
 class E2ETestSeeder extends Seeder
 {
     private const SUPER_ADMIN_EMAIL = 'e2e.superadmin@procynia.test';
+
     private const SUPER_ADMIN_PASSWORD = 'E2eAdmin123!';
+
     private const SYSTEM_OWNER_EMAIL = 'e2e.systemowner@procynia.test';
+
     private const USER_EMAIL = 'e2e.user@procynia.test';
+
     private const E2E_PASSWORD = 'E2eUser123!';
+
     private const CUSTOMER_SLUG = 'e2e-test-customer';
+
+    /**
+     * Two process flows whose only job is to be different sizes.
+     *
+     * The Flyt tab's zoom controls only mean anything relative to the surface the diagram is given,
+     * so the one case that has to exist is a flow that cannot fit: a two-node process and a
+     * fourteen-step one across six lanes put fit-to-view on both sides of the line. See
+     * tests/e2e/quality-flow-zoom.spec.js.
+     */
+    private const SMALL_FLOW_CODE = 'E2E-FLOW-S';
+
+    private const LARGE_FLOW_CODE = 'E2E-FLOW-L';
+
+    /**
+     * A process that has no flow at all, which is a case of its own: it is the only state in which
+     * the tab has nothing to show but the invitation to describe the process, and the state that
+     * once told the user to press a button that had been removed. See
+     * tests/e2e/quality-flow-describe-without-flow.spec.js.
+     */
+    private const NO_FLOW_CODE = 'E2E-FLOW-0';
+
+    /**
+     * A process whose middle step stands for another process — the small flow above.
+     *
+     * Drill-down cannot be tested on one process: it needs a real reference between two of them,
+     * because what is being checked is that the parent reads the child's own stored blueprint
+     * rather than a copy of it. See tests/e2e/quality-flow-subprocess.spec.js.
+     */
+    private const PARENT_FLOW_CODE = 'E2E-FLOW-P';
+
+    /**
+     * A process one of whose activities has already been the source of knowledge articles in Wiki.
+     *
+     * Two articles rather than one, deliberately: the indicator is a count, and a count is only
+     * checkable when it is not 1. See tests/e2e/quality-flow-activity-articles.spec.js.
+     */
+    private const KNOWLEDGE_FLOW_CODE = 'E2E-FLOW-K';
+
+    /** @var list<string> */
+    private const KNOWLEDGE_PAGE_TITLES = [
+        'E2E Anskaffelsesrutine',
+        'E2E Terskelverdier',
+    ];
 
     public function run(): void
     {
@@ -62,11 +117,20 @@ class E2ETestSeeder extends Seeder
                 'language_id' => $language->id,
                 'nationality_id' => $nationality->id,
                 'is_active' => true,
+                // A plan with AI credits on it, because AiCostControlService refuses a customer
+                // whose quota policy resolves to NONE before any request is built — which it does
+                // for a customer with no plan at all. Without this, every spec that exercises a
+                // real AI feature gets "Abonnementet inkluderer ikke denne AI-funksjonen" instead
+                // of the feature, and the only ones that can run are the ones that stub the
+                // provider out. Nothing here charges anything: Stripe is not in this environment.
+                'subscription_plan' => Customer::PLAN_PRO,
+                'billing_interval' => Customer::BILLING_MONTHLY,
+                'included_ai_credits' => 20,
             ],
         );
 
         // System owner — bid_role=system_owner gives access to /app/billing
-        User::query()->updateOrCreate(
+        $systemOwner = User::query()->updateOrCreate(
             ['email' => self::SYSTEM_OWNER_EMAIL],
             [
                 'name' => 'E2E System Owner',
@@ -90,5 +154,240 @@ class E2ETestSeeder extends Seeder
                 'is_active' => true,
             ],
         );
+
+        $this->seedQualityProcessFlows($customer, $systemOwner);
+    }
+
+    /**
+     * A small and a large process, each with a saved flow, and one with none.
+     *
+     * Entitlement comes first: Kvalitet is an orderable module, so without the package the routes
+     * redirect to Hjem and every quality spec would skip rather than fail — which is the worst of
+     * both, a green run that tested nothing.
+     */
+    private function seedQualityProcessFlows(Customer $customer, User $owner): void
+    {
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'quality', $owner);
+
+        $flows = [
+            [self::SMALL_FLOW_CODE, 'E2E liten prosess', $this->smallFlowPayload()],
+            [self::LARGE_FLOW_CODE, 'E2E stor prosess', $this->largeFlowPayload()],
+        ];
+
+        QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::NO_FLOW_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                // Deliberately without the word "flyt" in it: the specs reach the tab with
+                // getByRole('link', { name: 'Flyt' }), which matches on a substring, and a row in
+                // the Kvalitet list carrying that word is picked up as the tab.
+                'title' => 'E2E prosess uten struktur',
+                'purpose' => 'Fast testprosess for E2E, uten lagret flyt.',
+                'status' => QualityItem::STATUS_DRAFT,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
+
+        foreach ($flows as [$code, $title, $payload]) {
+            $item = QualityItem::query()->updateOrCreate(
+                ['customer_id' => $customer->id, 'code' => $code],
+                [
+                    'quality_type' => QualityItem::TYPE_PROCESS,
+                    'title' => $title,
+                    'purpose' => 'Fast testprosess for E2E.',
+                    'status' => QualityItem::STATUS_DRAFT,
+                    'created_by_user_id' => $owner->id,
+                ],
+            );
+
+            QualityProcessBlueprint::query()->updateOrCreate(
+                ['quality_item_id' => $item->id],
+                [
+                    'customer_id' => $customer->id,
+                    'payload' => $payload,
+                    'status' => QualityProcessBlueprint::STATUS_DRAFT,
+                    'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                    'generated_at' => now(),
+                    'generated_by_user_id' => $owner->id,
+                ],
+            );
+        }
+
+        $this->seedParentProcess($customer, $owner);
+        $this->seedKnowledgeProcess($customer, $owner);
+    }
+
+    /**
+     * The knowledge case: one activity that has produced two Wiki articles.
+     *
+     * The flow holds nothing about them — Wiki owns what they say, and a provenance row is what
+     * records that the activity is why they exist. Both pages are drafts, which is the honest state
+     * of an article nobody has taken through approval yet.
+     */
+    private function seedKnowledgeProcess(Customer $customer, User $owner): void
+    {
+        $pageIds = [];
+
+        foreach (self::KNOWLEDGE_PAGE_TITLES as $title) {
+            $page = EnterpriseWikiPage::query()->updateOrCreate(
+                ['customer_id' => $customer->id, 'slug' => Str::slug($title)],
+                [
+                    'title' => $title,
+                    'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+                    'status' => EnterpriseWikiPage::STATUS_DRAFT,
+                    'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+                    'last_source_hash' => str_pad('e2e', 64, '0'),
+                ],
+            );
+
+            EnterpriseWikiPageVersion::query()->updateOrCreate(
+                ['enterprise_wiki_page_id' => $page->id, 'version_number' => 1],
+                ['is_current' => true, 'content_markdown' => 'Fast E2E-innhold.'],
+            );
+
+            $pageIds[] = (int) $page->id;
+        }
+
+        $item = QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::KNOWLEDGE_FLOW_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => 'E2E prosess med kunnskap',
+                'purpose' => 'Fast testprosess for E2E, med en aktivitet koblet til Wiki-artikler.',
+                'status' => QualityItem::STATUS_DRAFT,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
+
+        QualityProcessBlueprint::query()->updateOrCreate(
+            ['quality_item_id' => $item->id],
+            [
+                'customer_id' => $customer->id,
+                'payload' => [
+                    'lanes' => [['key' => 'innkjoper', 'label' => 'Innkjøper']],
+                    'nodes' => [
+                        ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldes', 'description' => null, 'subprocess_quality_item_id' => null],
+                        ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder anskaffelsen', 'description' => null, 'subprocess_quality_item_id' => null],
+                        ['key' => 'slutt', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Anskaffelsen er besluttet', 'description' => null, 'subprocess_quality_item_id' => null],
+                    ],
+                    'edges' => [
+                        ['from' => 'start', 'to' => 'vurder', 'label' => null],
+                        ['from' => 'vurder', 'to' => 'slutt', 'label' => null],
+                    ],
+                ],
+                'status' => QualityProcessBlueprint::STATUS_DRAFT,
+                'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                'generated_at' => now(),
+                'generated_by_user_id' => $owner->id,
+            ],
+        );
+
+        // The provenance: the "Vurder anskaffelsen" activity is why both articles exist.
+        foreach ($pageIds as $pageId) {
+            QualityActivityWikiPage::query()->updateOrCreate(
+                [
+                    'quality_item_id' => $item->id,
+                    'activity_key' => 'vurder',
+                    'enterprise_wiki_page_id' => $pageId,
+                ],
+                [
+                    'customer_id' => $customer->id,
+                    'created_by_user_id' => $owner->id,
+                ],
+            );
+        }
+    }
+
+    /**
+     * The drill-down case: a process with a step that is itself a process.
+     *
+     * Written after the loop because the reference is the small process's id, which only exists
+     * once it has been created — which is the point of the whole feature: the parent holds an id,
+     * not a copy, so there is nothing here that has to be kept in step with the small flow.
+     */
+    private function seedParentProcess(Customer $customer, User $owner): void
+    {
+        $child = QualityItem::query()
+            ->where('customer_id', $customer->id)
+            ->where('code', self::SMALL_FLOW_CODE)
+            ->sole();
+
+        $parent = QualityItem::query()->updateOrCreate(
+            ['customer_id' => $customer->id, 'code' => self::PARENT_FLOW_CODE],
+            [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => 'E2E hovedprosess',
+                'purpose' => 'Fast testprosess for E2E, med et steg som peker på en annen prosess.',
+                'status' => QualityItem::STATUS_DRAFT,
+                'created_by_user_id' => $owner->id,
+            ],
+        );
+
+        QualityProcessBlueprint::query()->updateOrCreate(
+            ['quality_item_id' => $parent->id],
+            [
+                'customer_id' => $customer->id,
+                'payload' => [
+                    'lanes' => [['key' => 'innkjoper', 'label' => 'Innkjøper']],
+                    'nodes' => [
+                        ['key' => 'start', 'lane' => 'innkjoper', 'type' => 'start', 'label' => 'Behov meldes', 'description' => null, 'subprocess_quality_item_id' => null],
+                        ['key' => 'vurder', 'lane' => 'innkjoper', 'type' => 'step', 'label' => 'Vurder leverandøren', 'description' => null, 'subprocess_quality_item_id' => (int) $child->id],
+                        ['key' => 'slutt', 'lane' => 'innkjoper', 'type' => 'end', 'label' => 'Bestillingen er sendt', 'description' => null, 'subprocess_quality_item_id' => null],
+                    ],
+                    'edges' => [
+                        ['from' => 'start', 'to' => 'vurder', 'label' => null],
+                        ['from' => 'vurder', 'to' => 'slutt', 'label' => null],
+                    ],
+                ],
+                'status' => QualityProcessBlueprint::STATUS_DRAFT,
+                'source' => QualityProcessBlueprint::SOURCE_MANUAL,
+                'generated_at' => now(),
+                'generated_by_user_id' => $owner->id,
+            ],
+        );
+    }
+
+    /** Two nodes in one lane: smaller than the diagram surface on any screen. */
+    private function smallFlowPayload(): array
+    {
+        return [
+            'lanes' => [['key' => 'saksbehandler', 'label' => 'Saksbehandler']],
+            'nodes' => [
+                ['key' => 'start', 'lane' => 'saksbehandler', 'type' => 'start', 'label' => 'Avvik meldes'],
+                ['key' => 'slutt', 'lane' => 'saksbehandler', 'type' => 'end', 'label' => 'Avviket er lukket'],
+            ],
+            'edges' => [['from' => 'start', 'to' => 'slutt', 'label' => null]],
+        ];
+    }
+
+    /** Fourteen steps across six lanes: several times wider than the surface. */
+    private function largeFlowPayload(): array
+    {
+        $lanes = [];
+        $nodes = [];
+        $edges = [];
+
+        for ($index = 0; $index < 6; $index++) {
+            $lanes[] = ['key' => "lane-{$index}", 'label' => 'Rolle nummer '.($index + 1)];
+        }
+
+        for ($index = 0; $index < 14; $index++) {
+            $nodes[] = [
+                'key' => "node-{$index}",
+                'lane' => 'lane-'.($index % 6),
+                'type' => match ($index) {
+                    0 => 'start',
+                    13 => 'end',
+                    default => 'step',
+                },
+                'label' => 'Steg '.($index + 1).' i en lang prosess',
+            ];
+
+            if ($index > 0) {
+                $edges[] = ['from' => 'node-'.($index - 1), 'to' => "node-{$index}", 'label' => null];
+            }
+        }
+
+        return ['lanes' => $lanes, 'nodes' => $nodes, 'edges' => $edges];
     }
 }

@@ -102,6 +102,9 @@ export default function BillingIndex() {
         invoices = [],
         billing_lines: billingLines = [],
         ai_quota: aiQuota = null,
+        // Resolved by ModuleEntitlementService. The page renders this verdict; it never decides
+        // on its own which packages or modules are active.
+        module_packages: modulePackages = [],
         translations = {},
         errors = {},
         flash,
@@ -114,6 +117,11 @@ export default function BillingIndex() {
     const summaryText = tb.summary ?? {};
     const alertText = tb.alerts ?? {};
     const subscriptionText = tb.stripe_subscription ?? {};
+    const modulesText = tb.modules ?? {};
+    const modulesTableText = modulesText.table ?? {};
+    const packageLabels = modulesText.package_labels ?? {};
+    const packageDescriptions = modulesText.package_descriptions ?? {};
+    const moduleLabels = modulesText.module_labels ?? {};
     const servicesText = tb.procynia_services ?? {};
     const servicesTableText = servicesText.table ?? {};
     const invoicesText = tb.invoices ?? {};
@@ -125,6 +133,7 @@ export default function BillingIndex() {
 
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmResume, setConfirmResume] = useState(false);
+    const [confirmPackageKey, setConfirmPackageKey] = useState(null);
     const [planChangeOpen, setPlanChangeOpen] = useState(false);
     const [planChangeStep, setPlanChangeStep] = useState('selection');
     const [selectedPlanKey, setSelectedPlanKey] = useState('');
@@ -291,6 +300,29 @@ export default function BillingIndex() {
         });
     };
 
+    const PACKAGE_STATUS_PRESENTATION = {
+        included: { tone: 'blue', label: modulesText.status_included ?? 'Inkludert, alltid aktiv' },
+        active: { tone: 'green', label: modulesText.status_active ?? 'Aktiv' },
+        requested: { tone: 'amber', label: modulesText.status_requested ?? 'Bestilt' },
+        declined: { tone: 'slate', label: modulesText.status_declined ?? 'Ikke innvilget' },
+        available: { tone: 'slate', label: modulesText.status_available ?? 'Ikke bestilt' },
+    };
+
+    const resolvePackageName = (key) => packageLabels[key] ?? key;
+    const resolveModuleLabel = (key) => moduleLabels[key] ?? key;
+    const confirmPackage = modulePackages.find((entry) => entry.key === confirmPackageKey) ?? null;
+
+    const handlePackageOrder = () => {
+        if (!confirmPackageKey) {
+            return;
+        }
+
+        router.post(`/app/billing/packages/${confirmPackageKey}/request`, {}, {
+            preserveScroll: true,
+            onFinish: () => setConfirmPackageKey(null),
+        });
+    };
+
     const handleResume = () => {
         router.post('/app/billing/resume', {}, {
             preserveScroll: true,
@@ -386,6 +418,10 @@ export default function BillingIndex() {
                                         {
                                             title: tb.page_help_item_subscription_title ?? 'Abonnement',
                                             text: tb.page_help_item_subscription_text ?? 'Viser plan, periode, inkluderte brukere og AI-kapasitet.',
+                                        },
+                                        {
+                                            title: tb.page_help_item_modules_title ?? 'Moduler og pakker',
+                                            text: tb.page_help_item_modules_text ?? 'Viser hvilke pakker kundemiljøet har, og hvilke moduler hver pakke aktiverer.',
                                         },
                                         {
                                             title: tb.page_help_item_services_title ?? 'Tilleggstjenester',
@@ -496,6 +532,93 @@ export default function BillingIndex() {
                             )}
                         </div>
                     </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-slate-900">
+                            {modulesText.heading ?? 'Moduler og pakker'}
+                        </h2>
+                        <InfoHint size="sm" label="Vis forklaring for moduler og pakker" text={modulesText.hint} />
+                    </div>
+                    <p className="mt-2 text-base leading-6 text-slate-600">
+                        {modulesText.help ?? 'Pakkene bestemmer hvilke deler av Procynia kundemiljøet har tilgang til. Wiki/Core er grunnlaget og følger alltid med.'}
+                    </p>
+
+                    <div className="mt-4 overflow-x-auto">
+                        <table className="w-full text-base">
+                            <thead>
+                                <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
+                                    <th className="pb-2 pr-4">{modulesTableText.package ?? 'Pakke'}</th>
+                                    <th className="pb-2 pr-4">{modulesTableText.contents ?? 'Innhold'}</th>
+                                    <th className="pb-2 pr-4">{modulesTableText.status ?? 'Status'}</th>
+                                    <th className="pb-2">{modulesTableText.action ?? 'Handling'}</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {modulePackages.map((entry) => {
+                                    const presentation = PACKAGE_STATUS_PRESENTATION[entry.status]
+                                        ?? PACKAGE_STATUS_PRESENTATION.available;
+
+                                    return (
+                                        <tr key={entry.key}>
+                                            <td className="py-3 pr-4 align-top">
+                                                <div className="font-medium text-slate-900">{resolvePackageName(entry.key)}</div>
+                                                {packageDescriptions[entry.key] && (
+                                                    <p className="mt-1 text-base leading-6 text-slate-600">
+                                                        {packageDescriptions[entry.key]}
+                                                    </p>
+                                                )}
+                                            </td>
+                                            <td className="py-3 pr-4 align-top">
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {entry.modules.map((moduleKey) => (
+                                                        <span
+                                                            key={moduleKey}
+                                                            className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-base font-medium leading-6 text-slate-700"
+                                                        >
+                                                            {resolveModuleLabel(moduleKey)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                            <td className="py-3 pr-4 align-top">
+                                                <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>
+                                                {entry.status === 'requested' && entry.requested_at && (
+                                                    <div className="mt-1 text-base leading-6 text-slate-600">
+                                                        {(modulesText.requested_at ?? 'Bestilt :date').replace(':date', formatDate(entry.requested_at))}
+                                                    </div>
+                                                )}
+                                                {entry.status === 'active' && entry.activated_at && (
+                                                    <div className="mt-1 text-base leading-6 text-slate-600">
+                                                        {(modulesText.activated_at ?? 'Aktivert :date').replace(':date', formatDate(entry.activated_at))}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="py-3 align-top">
+                                                {entry.can_order ? (
+                                                    <button
+                                                        onClick={() => setConfirmPackageKey(entry.key)}
+                                                        className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
+                                                    >
+                                                        {entry.status === 'declined'
+                                                            ? (modulesText.order_again ?? 'Bestill på nytt')
+                                                            : (modulesText.order ?? 'Bestill')}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-base leading-6 text-slate-500">—</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <p className="mt-4 text-base leading-6 text-slate-600">
+                        {modulesText.core_locked ?? 'Wiki/Core kan ikke bestilles eller slås av. Den er grunnlaget alle andre pakker bygger på.'}
+                    </p>
                 </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -861,6 +984,16 @@ export default function BillingIndex() {
                 onConfirm={handleResume}
                 onCancel={() => setConfirmResume(false)}
                 confirmLabel={tb.resume ?? 'Gjenoppta abonnement'}
+                cancelLabel={tb.cancel_button ?? 'Avbryt'}
+            />
+
+            <ConfirmDialog
+                isOpen={Boolean(confirmPackage)}
+                title={`${modulesText.order_confirm_title ?? 'Bestill pakke'}: ${resolvePackageName(confirmPackage?.key)}`}
+                message={modulesText.order_confirm_message ?? 'Bestillingen registreres og Procynia tar kontakt. Ingen betaling starter nå, og ingen moduler aktiveres før bestillingen er behandlet.'}
+                onConfirm={handlePackageOrder}
+                onCancel={() => setConfirmPackageKey(null)}
+                confirmLabel={modulesText.order ?? 'Bestill'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
             />
         </CustomerAppLayout>
