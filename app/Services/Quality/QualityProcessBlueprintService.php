@@ -5,7 +5,9 @@ namespace App\Services\Quality;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityProcessRevision;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -40,6 +42,7 @@ class QualityProcessBlueprintService
 {
     public function __construct(
         private readonly QualityProcessSubprocessService $subprocesses,
+        private readonly QualityProcessFlowValidator $validator,
     ) {}
 
     /**
@@ -47,7 +50,9 @@ class QualityProcessBlueprintService
      *
      * Saving always clears an approval. An approval is a statement about one specific flow, so it
      * cannot outlive an edit to that flow — keeping it would let an approved diagram show work
-     * nobody approved. Re-approving an edited blueprint is one click, and an honest one.
+     * nobody approved. Re-approving an edited blueprint is one click, and an honest one. What was
+     * approved before is not lost: it lives on as a QualityProcessRevision, which a save never
+     * touches.
      *
      * @param  array<string, mixed>  $payload
      * @param  ?string  $description  The plain-language text a flow was interpreted from. Null
@@ -112,29 +117,123 @@ class QualityProcessBlueprintService
     }
 
     /**
-     * Vouch for the flow as it stands.
+     * Vouch for the flow as it stands, and record exactly what was vouched for.
      *
-     * Nothing about the payload changes — approval is a statement about it, not an edit of it.
+     * The working version is held to the strict standard before it can be approved: normalise()
+     * only guarantees a stored flow is drawable, and a drawable flow can still have no start, a dead
+     * end or a decision with one outcome. The same validator an interpreted proposal must pass is
+     * run on the stored payload — there is one definition of a coherent flow, not two.
+     *
+     * A valid approval writes an immutable revision with the next number for the process. The
+     * blueprint row stays the working version and only learns that it currently matches what was
+     * approved; the next edit sets it back to draft, and the revision stays where it is.
+     *
+     * Approving a flow that is already approved, and already recorded, is a no-op rather than a
+     * second identical revision — a double click is not a second approval.
      */
     public function approve(int $customerId, QualityItem $item, ?User $actor = null): QualityProcessBlueprint
     {
         $this->assertProcess($customerId, $item);
 
-        $blueprint = $this->forItem($customerId, $item);
+        return DB::transaction(function () use ($customerId, $item, $actor): QualityProcessBlueprint {
+            // Locked so two approvals of the same process serialise: the second sees the first's
+            // revision and either no-ops or takes the next number.
+            $blueprint = QualityProcessBlueprint::query()
+                ->where('customer_id', $customerId)
+                ->where('quality_item_id', $item->id)
+                ->lockForUpdate()
+                ->first();
 
-        if ($blueprint === null) {
-            throw ValidationException::withMessages([
-                'blueprint' => __('procynia.quality.errors.blueprint_not_found'),
+            if ($blueprint === null) {
+                throw ValidationException::withMessages([
+                    'blueprint' => __('procynia.quality.errors.blueprint_not_found'),
+                ]);
+            }
+
+            $problems = $this->validator->graphProblems($blueprint->payload ?? []);
+
+            if ($problems !== []) {
+                // One key per problem: the shared error bag carries only the first message of
+                // each key to the page, and the user needs every concrete problem, not just one.
+                $messages = ['blueprint' => __('procynia.quality.errors.blueprint_invalid')];
+
+                foreach ($this->validator->describe($problems) as $index => $message) {
+                    $messages['blueprint_problems.'.$index] = $message;
+                }
+
+                throw ValidationException::withMessages($messages);
+            }
+
+            $latest = $this->latestRevision($customerId, $item);
+
+            if ($blueprint->isApproved() && $latest !== null && $latest->payload == $blueprint->payload) {
+                return $blueprint;
+            }
+
+            $approvedAt = now();
+
+            QualityProcessRevision::query()->create([
+                'customer_id' => $customerId,
+                'quality_item_id' => $item->id,
+                'revision_number' => ($latest?->revision_number ?? 0) + 1,
+                'payload' => $blueprint->payload,
+                'description' => $blueprint->description,
+                'source' => $blueprint->source,
+                'approved_by_user_id' => $actor?->id,
+                'approved_by_name' => $actor?->name,
+                'approved_at' => $approvedAt,
             ]);
-        }
 
-        $blueprint->forceFill([
-            'status' => QualityProcessBlueprint::STATUS_APPROVED,
-            'approved_at' => now(),
-            'approved_by_user_id' => $actor?->id,
-        ])->save();
+            $blueprint->forceFill([
+                'status' => QualityProcessBlueprint::STATUS_APPROVED,
+                'approved_at' => $approvedAt,
+                'approved_by_user_id' => $actor?->id,
+            ])->save();
 
-        return $blueprint;
+            return $blueprint;
+        });
+    }
+
+    /**
+     * The approved revision currently in force: the highest number, whatever the working version
+     * looks like now.
+     */
+    public function latestRevision(int $customerId, QualityItem $item): ?QualityProcessRevision
+    {
+        return QualityProcessRevision::query()
+            ->where('customer_id', $customerId)
+            ->where('quality_item_id', $item->id)
+            ->orderByDesc('revision_number')
+            ->first();
+    }
+
+    /**
+     * Every approved revision of the process, newest first. A plain read model — no diff, no
+     * rollback.
+     *
+     * @return list<array{revision_number: int, approved_by_name: ?string, approved_at: ?string, snapshot: array<string, mixed>}>
+     */
+    public function history(int $customerId, QualityItem $item): array
+    {
+        return QualityProcessRevision::query()
+            ->with('approvedBy:id,name')
+            ->where('customer_id', $customerId)
+            ->where('quality_item_id', $item->id)
+            ->orderByDesc('revision_number')
+            ->get()
+            ->map(static fn (QualityProcessRevision $revision): array => [
+                'revision_number' => $revision->revision_number,
+                'approved_by_name' => $revision->approvedBy?->name ?? $revision->approved_by_name,
+                'approved_at' => $revision->approved_at?->toDateTimeString(),
+                'snapshot' => [
+                    'lanes' => array_values($revision->payload['lanes'] ?? []),
+                    'nodes' => array_values($revision->payload['nodes'] ?? []),
+                    'edges' => array_values($revision->payload['edges'] ?? []),
+                    'description' => $revision->description,
+                    'source' => $revision->source,
+                ],
+            ])
+            ->all();
     }
 
     /**
@@ -154,7 +253,8 @@ class QualityProcessBlueprintService
      * the process and an activity key, not at the blueprint, and the knowledge in Wiki is the
      * virksomhet's rather than the flow's. The projection drops their edges because there is no
      * longer an activity node for one to leave — see QualityGraphProjector::projectActivities — and
-     * the rows and the pages are left standing.
+     * the rows and the pages are left standing. So do the approved revisions: they point at the
+     * process, and they are the record of what was approved, not part of the working version.
      */
     public function delete(int $customerId, QualityItem $item): void
     {

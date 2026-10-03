@@ -147,6 +147,12 @@ class QualityController extends Controller
             // strip exists at all — a policy's page is unchanged by any of this.
             'has_flow' => $item->quality_type === QualityItem::TYPE_PROCESS,
             'blueprint' => $this->blueprintPayload($customerId, $item),
+            // Approved revisions, newest first. Separate from `blueprint` because they outlive it:
+            // the working version can be edited back to draft, or deleted, and what was approved
+            // before is still here.
+            'blueprint_revisions' => $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
+                ? $this->blueprints->history((int) $customerId, $item)
+                : [],
             // Drill-down. The trail is in the URL, so the diagram area is server-driven exactly as
             // the tab is: a subprocess view survives a reload, a back button and a shared link, and
             // it is read from the subprocess's own blueprint every time it is opened.
@@ -734,7 +740,8 @@ class QualityController extends Controller
      * Vouch for the flow as it stands.
      *
      * Same authority as every other statement about the kvalitetssystem — no new permission. The
-     * approval covers the payload it was given, so any later edit clears it; see the service.
+     * stored flow must pass the flow validator first; a valid approval is recorded as an immutable
+     * revision, and a later edit clears the working version's approval but never the revision.
      */
     public function approveBlueprint(QualityItem $item): RedirectResponse
     {

@@ -76,6 +76,7 @@ export default function QualityItem() {
         active_tab: activeTab = 'document',
         has_flow: hasFlow = false,
         blueprint = null,
+        blueprint_revisions: blueprintRevisions = [],
         flow_proposal: flowProposal = null,
         flow_error: flowError = null,
         flow_ai_available: flowAiAvailable = false,
@@ -138,6 +139,7 @@ export default function QualityItem() {
                         tq={tq}
                         item={item}
                         blueprint={blueprint}
+                        revisions={blueprintRevisions}
                         canCreate={canCreate}
                         canEdit={canEdit}
                         canApprove={canApprove}

@@ -69,6 +69,9 @@ export default function ProcessFlowPanel({
     tq,
     item,
     blueprint,
+    // Approved revisions, newest first. They outlive the working version, so they are shown even
+    // when the process has no flow at the moment.
+    revisions = [],
     // One prop per permission the controller gates on, rather than a single "may manage". Saving
     // the flow, vouching for it and starting it over are three decisions the customer may hand to
     // three different roles, so the tab has to be able to offer them one at a time.
@@ -96,6 +99,9 @@ export default function ProcessFlowPanel({
     const [isDirty, setIsDirty] = useState(false);
     const [saving, setSaving] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
+    // Why the last "Godkjenn struktur" was refused: a heading and one line per problem the flow
+    // validator found in the stored flow.
+    const [approvalErrors, setApprovalErrors] = useState(null);
     // The row-by-row editor is folded away by default. It is the fallback for a correction the
     // description could not express, not the way a flow is normally built — and left open it is
     // the loudest thing on the tab, so the diagram and the steps, which are what the user came to
@@ -137,6 +143,7 @@ export default function ProcessFlowPanel({
         setNodes(source?.nodes ?? []);
         setEdges(source?.edges ?? []);
         setIsDirty(false);
+        setApprovalErrors(null);
         setDismissed(false);
         setDeclined([]);
         // A new flow arrived from the server, so whatever the editor was open for is settled.
@@ -185,8 +192,16 @@ export default function ProcessFlowPanel({
 
     function approve() {
         setSaving(true);
+        setApprovalErrors(null);
         router.post(`/app/quality/items/${item.id}/blueprint/approve`, {}, {
             preserveScroll: true,
+            onError: (errors) => setApprovalErrors({
+                heading: errors.blueprint ?? null,
+                problems: Object.keys(errors)
+                    .filter((key) => key.startsWith('blueprint_problems.'))
+                    .sort((a, b) => Number(a.split('.')[1]) - Number(b.split('.')[1]))
+                    .map((key) => errors[key]),
+            }),
             onFinish: () => setSaving(false),
         });
     }
@@ -380,7 +395,9 @@ export default function ProcessFlowPanel({
                             canEdit={canEdit}
                         />
                     )
-                    : blueprint && <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} />}
+                    : blueprint && (
+                        <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} current={revisions[0] ?? null} />
+                    )}
 
                 {! hasFlow && (
                     <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-base text-slate-600">
@@ -531,9 +548,22 @@ export default function ProcessFlowPanel({
                                 )}
                             </div>
                         )}
+
+                        {approvalErrors && ! reviewing && (
+                            <div role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-base text-rose-800">
+                                {approvalErrors.heading && <p className="font-semibold">{approvalErrors.heading}</p>}
+                                {approvalErrors.problems.length > 0 && (
+                                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                                        {approvalErrors.problems.map((problem) => <li key={problem}>{problem}</li>)}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
                     </section>
                 </>
             )}
+
+            {revisions.length > 0 && <RevisionHistory tb={tb} revisions={revisions} />}
 
             <ActivityArticlePanel
                 tb={tb}
@@ -1072,7 +1102,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
     );
 }
 
-function StatusLine({ tb, blueprint, isDirty }) {
+function StatusLine({ tb, blueprint, isDirty, current }) {
     const statusLabels = tb.statuses ?? {};
     const sourceLabels = tb.sources ?? {};
     const approved = blueprint.status === 'approved' && ! isDirty;
@@ -1092,12 +1122,48 @@ function StatusLine({ tb, blueprint, isDirty }) {
                     : (tb.draft_notice ?? 'Strukturen er et utkast og er ikke godkjent.')}
             </span>
 
+            {/* The working version being a draft does not mean nothing is approved: the last
+                approved revision is still in force until the next approval replaces it. */}
+            {! approved && current && (
+                <span className="text-sm text-slate-500">
+                    {(tb.current_revision_notice ?? 'Gjeldende godkjente versjon er revisjon :number, godkjent av :name :date.')
+                        .replace(':number', String(current.revision_number))
+                        .replace(':name', current.approved_by_name ?? '—')
+                        .replace(':date', current.approved_at ?? '—')}
+                </span>
+            )}
+
             {blueprint.generated_at && (
                 <span className="text-sm text-slate-400">
                     {(tb.generated_notice ?? 'Sist generert :date.').replace(':date', blueprint.generated_at)}
                 </span>
             )}
         </div>
+    );
+}
+
+/**
+ * What has been approved, newest first. A record, not an editor: no diff and no rollback yet.
+ */
+function RevisionHistory({ tb, revisions }) {
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tb.history_heading ?? 'Godkjente revisjoner'}</h2>
+            <ul className="mt-4 divide-y divide-slate-100">
+                {revisions.map((revision) => (
+                    <li key={revision.revision_number} className="flex flex-wrap items-baseline gap-x-3 py-2">
+                        <span className="text-base font-semibold text-slate-900">
+                            {(tb.history_row ?? 'Revisjon :number').replace(':number', String(revision.revision_number))}
+                        </span>
+                        <span className="text-sm text-slate-500">
+                            {(tb.history_meta ?? 'Godkjent av :name :date')
+                                .replace(':name', revision.approved_by_name ?? '—')
+                                .replace(':date', revision.approved_at ?? '—')}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </section>
     );
 }
 

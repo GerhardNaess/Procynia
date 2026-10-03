@@ -16,6 +16,7 @@ use App\Models\Nationality;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
@@ -499,6 +500,156 @@ class QualityProcessBlueprintTest extends TestCase
 
         $this->assertSame(QualityProcessBlueprint::STATUS_DRAFT, $blueprint->status);
         $this->assertNull($blueprint->approved_at);
+    }
+
+    // ---------------------------------------------------------------------
+    // Approved revisions
+    // ---------------------------------------------------------------------
+
+    /**
+     * normalise() keeps a flow drawable; approval asks the stronger question. A flow with no end is
+     * drawable and still not something anybody can vouch for.
+     */
+    public function test_an_incoherent_flow_cannot_be_approved_and_says_why(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $flow = $this->simpleFlow();
+        array_pop($flow['nodes']);
+        array_pop($flow['edges']);
+
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $flow)->assertSessionHasNoErrors();
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/blueprint/approve")
+            ->assertSessionHasErrors([
+                'blueprint' => __('procynia.quality.errors.blueprint_invalid'),
+                'blueprint_problems.0',
+            ]);
+
+        $problems = collect(session('errors')->getBag('default')->messages())
+            ->filter(fn ($messages, $key) => str_starts_with($key, 'blueprint_problems.'))
+            ->flatten()
+            ->all();
+
+        $this->assertContains(__('procynia.quality.flow_problems.no_end'), $problems);
+        $this->assertSame(
+            QualityProcessBlueprint::STATUS_DRAFT,
+            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->status,
+        );
+        $this->assertSame(0, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_approving_records_an_immutable_revision_of_exactly_what_was_approved(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
+        $revision = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
+
+        $this->assertSame(1, $revision->revision_number);
+        $this->assertEquals($blueprint->payload, $revision->payload);
+        $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $revision->source);
+        $this->assertSame((int) $owner->id, (int) $revision->approved_by_user_id);
+        $this->assertSame($owner->name, $revision->approved_by_name);
+        $this->assertNotNull($revision->approved_at);
+
+        $this->expectException(\LogicException::class);
+        $revision->update(['revision_number' => 9]);
+    }
+
+    /**
+     * The point of the revision: editing the working version sends it back to draft, and what was
+     * approved before is still there, untouched, until the next approval adds to it.
+     */
+    public function test_editing_after_approval_keeps_the_approved_revision_and_the_next_approval_adds_one(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $first = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
+        $approvedPayload = $first->payload;
+
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+
+        $this->assertSame(
+            QualityProcessBlueprint::STATUS_DRAFT,
+            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->status,
+        );
+        $this->assertEquals($approvedPayload, $first->fresh()->payload);
+        $this->assertSame('Vurder saken', $first->fresh()->payload['nodes'][1]['label']);
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $revisions = QualityProcessRevision::query()
+            ->where('quality_item_id', $process->id)
+            ->orderBy('revision_number')
+            ->get();
+
+        $this->assertSame([1, 2], $revisions->pluck('revision_number')->all());
+        $this->assertSame('Vurder saken', $revisions[0]->payload['nodes'][1]['label']);
+        $this->assertSame('Vurder saken grundig', $revisions[1]->payload['nodes'][1]['label']);
+    }
+
+    public function test_approving_an_already_approved_flow_again_does_not_write_a_second_revision(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_deleting_the_working_flow_keeps_the_approved_history(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")->assertSessionHasNoErrors();
+
+        $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
+        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_the_page_carries_the_revision_history_newest_first(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $history = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['blueprint_revisions'];
+
+        $this->assertSame([2, 1], array_column($history, 'revision_number'));
+        $this->assertSame($owner->name, $history[0]['approved_by_name']);
+        $this->assertNotNull($history[0]['approved_at']);
+        $this->assertSame('Vurder saken grundig', $history[0]['snapshot']['nodes'][1]['label']);
+        $this->assertSame('Vurder saken', $history[1]['snapshot']['nodes'][1]['label']);
+        $this->assertCount(2, $history[1]['snapshot']['edges']);
     }
 
     public function test_a_process_with_no_flow_has_nothing_to_approve(): void
