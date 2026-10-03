@@ -28,6 +28,7 @@ class QualityGraphProjector
 {
     public function __construct(
         private readonly GraphProjectionService $projection,
+        private readonly QualityActivityKnowledgeResolver $activityKnowledge,
     ) {}
 
     public function projectItem(int $itemId): void
@@ -183,25 +184,43 @@ class QualityGraphProjector
             ];
         }
 
+        // Which pages an activity is behind is resolved by the one resolver that answers that
+        // question — the same one the flow screen reads — so the diagram and the graph can never
+        // disagree. An activity is behind every page the run made of the source it produced, which
+        // is normally several: the article, its summary, and the concepts and entities the
+        // maintainer decision judged the source to contain.
+        //
         // An article whose activity is no longer on the flow is dropped from the graph rather than
         // from the database: the page is untouched and the provenance row stands, but there is no
         // activity node for the edge to leave, and inventing one would put a step on the diagram
         // that the process does not have.
-        $links = QualityActivityWikiPage::query()
+        $updatedAtByKey = [];
+
+        foreach (QualityActivityWikiPage::query()
             ->where('customer_id', $customerId)
             ->where('quality_item_id', $itemId)
             ->orderBy('id')
-            ->get()
-            ->filter(fn (QualityActivityWikiPage $row): bool => isset($activityKeys[(string) $row->activity_key]))
-            ->map(fn (QualityActivityWikiPage $row): array => [
-                'customer_id' => $customerId,
-                'quality_item_id' => $itemId,
-                'activity_key' => (string) $row->activity_key,
-                'page_id' => (int) $row->enterprise_wiki_page_id,
-                'updated_at' => $row->updated_at?->toIso8601String(),
-            ])
-            ->values()
-            ->all();
+            ->get() as $row) {
+            $updatedAtByKey[(string) $row->activity_key] = $row->updated_at?->toIso8601String();
+        }
+
+        $links = [];
+
+        foreach ($this->activityKnowledge->pageIdsByActivity($customerId, $itemId) as $activityKey => $pageIds) {
+            if (! isset($activityKeys[$activityKey])) {
+                continue;
+            }
+
+            foreach ($pageIds as $pageId) {
+                $links[] = [
+                    'customer_id' => $customerId,
+                    'quality_item_id' => $itemId,
+                    'activity_key' => $activityKey,
+                    'page_id' => (int) $pageId,
+                    'updated_at' => $updatedAtByKey[$activityKey] ?? null,
+                ];
+            }
+        }
 
         // Same reason as the item-level Wiki links: the page at the other end has to be a node
         // already, and it may legitimately not be projected yet because the Wiki projection runs on

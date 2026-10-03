@@ -1336,6 +1336,15 @@ function NodeSelect({ nodes, value, onChange, disabled }) {
  * Headings come from the customer's own translations, so the skeleton is in the language the article
  * will be written in.
  */
+/**
+ * Ingest-kjøringer som har stanset uten å produsere sider. Alt annet er underveis.
+ *
+ * Statusene er Wikis egne (EnterpriseWikiIngestRun). Vi speiler bare de tre som betyr «dette
+ * kommer ikke til å bli en side uten at noen gjør noe» — resten er mellomstadier brukeren ikke
+ * trenger å kjenne til.
+ */
+const STALLED_RUN_STATUSES = ['failed', 'escalated', 'cancelled'];
+
 const ARTICLE_SECTIONS = [
     'purpose',
     'timing',
@@ -1490,35 +1499,52 @@ function ActivityArticlePanel({
                     )}
 
                     <h3 className="mt-6 text-base font-semibold text-slate-900">
-                        {tb.articles_heading ?? 'Kunnskapsartikler fra denne aktiviteten'}
+                        {tb.articles_heading ?? 'Kunnskap fra denne aktiviteten'}
                     </h3>
 
                     {articles.length === 0 ? (
                         <p className="mt-2 text-sm text-slate-500">
-                            {tb.articles_empty ?? 'Denne aktiviteten har ikke gitt noen kunnskapsartikkel ennå.'}
+                            {tb.articles_empty ?? 'Denne aktiviteten har ikke gitt noen kunnskap ennå.'}
                         </p>
                     ) : (
                         <ul className="mt-3 space-y-2">
-                            {articles.map((page) => (
+                            {articles.map((entry, index) => (
                                 <li
-                                    key={page.page_id}
+                                    key={entry.page_id ?? `source-${index}`}
                                     className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3"
                                 >
-                                    <div className="min-w-0">
-                                        <a
-                                            href={page.url}
-                                            className="text-base font-semibold text-slate-900 underline-offset-2 hover:underline"
-                                        >
-                                            {page.title}
-                                        </a>
-                                        {page.publication?.state_label && (
-                                            <p className="mt-0.5 text-xs text-slate-500">{page.publication.state_label}</p>
-                                        )}
-                                    </div>
+                                    {/* A source that Wiki has not yet turned into pages has nothing
+                                        to open, so it is shown as text rather than as a dead link. */}
+                                    {entry.url ? (
+                                        <>
+                                            <div className="min-w-0">
+                                                <a
+                                                    href={entry.url}
+                                                    className="text-base font-semibold text-slate-900 underline-offset-2 hover:underline"
+                                                >
+                                                    {entry.title}
+                                                </a>
+                                                {entry.publication?.state_label && (
+                                                    <p className="mt-0.5 text-xs text-slate-500">{entry.publication.state_label}</p>
+                                                )}
+                                            </div>
 
-                                    <a href={page.url} className="text-sm font-semibold text-slate-600 hover:text-slate-950">
-                                        {tb.articles_open_page ?? 'Åpne i Wiki'} →
-                                    </a>
+                                            <a href={entry.url} className="text-sm font-semibold text-slate-600 hover:text-slate-950">
+                                                {tb.articles_open_page ?? 'Åpne i Wiki'} →
+                                            </a>
+                                        </>
+                                    ) : (
+                                        <div className="min-w-0">
+                                            <p className="text-base font-semibold text-slate-900">{entry.title}</p>
+                                            <p className="mt-0.5 text-xs text-slate-500">
+                                                {STALLED_RUN_STATUSES.includes(entry.status)
+                                                    ? (tb.articles_pending_failed
+                                                        ?? 'Wiki kom ikke i mål med denne artikkelen. Se Wiki → Kildedokumenter.')
+                                                    : (tb.articles_pending
+                                                        ?? 'Wiki bygger kunnskapssidene av denne artikkelen nå.')}
+                                            </p>
+                                        </div>
+                                    )}
                                 </li>
                             ))}
                         </ul>
@@ -1534,7 +1560,7 @@ function ActivityArticlePanel({
                         <div className="mt-6 border-t border-slate-100 pt-5">
                             <p className="text-sm leading-5 text-slate-600">
                                 {tb.articles_help
-                                    ?? 'Skriv ned kunnskapen bak dette steget. Procynia lager et utkast du kan rette, og artikkelen opprettes som utkast i Enterprise Wiki — der den følger vanlig gjennomgang og godkjenning.'}
+                                    ?? 'Skriv ned kunnskapen bak dette steget. Procynia lager et utkast du kan rette, og artikkelen legges inn som kilde i Enterprise Wiki — som bygger kunnskapssidene av den på vanlig måte.'}
                             </p>
 
                             <p className="mt-2 text-sm leading-5 text-slate-500">
@@ -1562,22 +1588,13 @@ function ActivityArticlePanel({
                         <div className="mt-6 border-t border-slate-100 pt-5">
                             <p className="text-sm leading-5 text-slate-600">
                                 {tb.articles_review_help
-                                    ?? 'Les gjennom og rett teksten før du oppretter den. Det som opprettes, er det som står her — artikkelen legges i Wiki som utkast og sendes til gjennomgang derfra.'}
+                                    ?? 'Les gjennom og rett teksten før du legger den inn. Det som legges inn, er det som står her — Wiki bygger kunnskapssidene av teksten og sender dem til vanlig gjennomgang.'}
                             </p>
 
                             <p className="mt-2 text-sm leading-5 text-slate-500">
                                 {tb.articles_fill_in_help
                                     ?? 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.'}
                             </p>
-
-                            {/* Only when there is one to explain. The syntax is the Wiki's own, and
-                                an author who never sees a link does not need to be told about it. */}
-                            {markdown.includes('[[') && (
-                                <p className="mt-2 text-sm leading-5 text-slate-500">
-                                    {tb.articles_links_help
-                                        ?? 'Tekst i doble klammer, som [[slug|ordene det står på]], er en lenke til en annen Wiki-side. Den blir en vanlig lenke når artikkelen opprettes. Du kan fjerne den eller flytte den til andre ord.'}
-                                </p>
-                            )}
 
                             <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-title">
                                 {tb.articles_title ?? 'Tittel'}
@@ -1607,7 +1624,7 @@ function ActivityArticlePanel({
                                     {tb.articles_cancel ?? 'Avbryt'}
                                 </button>
                                 <button type="button" className={PRIMARY_ACTION} onClick={create} disabled={! canCreate}>
-                                    {tb.articles_create ?? 'Opprett utkast i Wiki'}
+                                    {tb.articles_create ?? 'Legg artikkelen inn i Wiki'}
                                 </button>
                             </div>
                         </div>

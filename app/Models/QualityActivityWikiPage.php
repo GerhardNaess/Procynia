@@ -6,12 +6,18 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One activity on a prosessflyt was the source of one Enterprise Wiki article.
+ * One activity on a prosessflyt was the source of one piece of Enterprise Wiki knowledge.
  *
  * Provenance, not knowledge. The row records that someone stood on a step of a process, asked for
- * the knowledge behind it to be written down, and that an ordinary Wiki page was created from it.
- * What the page says — and what it says next week — is Wiki's business: there is no title, no text
- * and no status here, because all three would be a second copy that goes stale.
+ * the knowledge behind it to be written down, and that it entered the Wiki. What the Wiki then
+ * says — and what it says next week — is Wiki's business: there is no title, no text and no
+ * status here, because all three would be a second copy that goes stale.
+ *
+ * WHICH END IT POINTS AT. A row written by the current direction names the SOURCE DOCUMENT the
+ * article was stored as, because that is what the activity actually produced: the pages are
+ * whatever the ordinary ingest run made of it, and there may be several of several types. Rows
+ * written before that direction existed name a single page they created by hand, and keep it.
+ * Exactly one of the two is set — the database enforces it; see the migration.
  *
  * This is the opposite direction from QualityItemWikiLink, and deliberately a different table. That
  * one is "this document draws on that page", chosen by a person out of pages that already exist.
@@ -28,6 +34,7 @@ class QualityActivityWikiPage extends Model
         'quality_item_id',
         'activity_key',
         'enterprise_wiki_page_id',
+        'enterprise_wiki_document_id',
         'created_by_user_id',
     ];
 
@@ -44,6 +51,11 @@ class QualityActivityWikiPage extends Model
     public function page(): BelongsTo
     {
         return $this->belongsTo(EnterpriseWikiPage::class, 'enterprise_wiki_page_id');
+    }
+
+    public function document(): BelongsTo
+    {
+        return $this->belongsTo(EnterpriseWikiDocument::class, 'enterprise_wiki_document_id');
     }
 
     public function createdBy(): BelongsTo

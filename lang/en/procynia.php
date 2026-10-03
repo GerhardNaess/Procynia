@@ -249,12 +249,11 @@ return [
             // An activity is a SOURCE of knowledge articles. The article is created as a draft in
             // Enterprise Wiki and follows Wiki's own review and approval from there. The content
             // lives in Wiki and is never copied here — only the trail back to the activity is.
-            'articles_heading' => 'Knowledge articles from this activity',
-            'articles_help' => 'Write down the knowledge behind this step. Procynia drafts it for you to correct, and the article is created as a draft in Enterprise Wiki — where it follows the ordinary review and approval.',
-            'articles_review_help' => 'Read through and correct the text before creating it. What is created is what stands here — the article goes into Wiki as a draft and is sent for review from there.',
+            'articles_heading' => 'Knowledge from this activity',
+            'articles_help' => 'Write down the knowledge behind this step. Procynia drafts it for you to correct, and the article goes into Enterprise Wiki as a source — which builds the knowledge pages from it the ordinary way.',
+            'articles_review_help' => 'Read through and correct the text before adding it. What is added is what stands here — Wiki builds the knowledge pages from the text and sends them for the ordinary review.',
             'articles_structure_help' => 'The article follows a fixed structure: Purpose, When the activity is carried out, Responsibility, Procedure, Key assessments and criteria, Documentation and result, Related process context.',
             'articles_fill_in_help' => 'Where it says “To be filled in”, that is knowledge Procynia did not find in the process. Fill it in yourself — do not leave it standing.',
-            'articles_links_help' => 'Text in double brackets, like [[slug|the words it sits on]], is a link to another Wiki page. It becomes an ordinary link when the article is created. You can remove it or move it onto different words.',
             'article_fill_in' => 'To be filled in',
             'article_section_missing' => 'This section has to be filled in by whoever knows the activity.',
             'article_sections' => [
@@ -266,10 +265,12 @@ return [
                 'documentation' => 'Documentation and result',
                 'process_context' => 'Related process context',
             ],
-            'articles_count' => ':count knowledge articles',
-            'articles_count_one' => ':count knowledge article',
-            'articles_none' => 'No knowledge article',
-            'articles_empty' => 'This activity has not produced a knowledge article yet.',
+            'articles_count' => ':count knowledge pages',
+            'articles_count_one' => ':count knowledge page',
+            'articles_none' => 'No knowledge',
+            'articles_empty' => 'This activity has not produced any knowledge yet.',
+            'articles_pending' => 'Wiki is building the knowledge pages from this article now.',
+            'articles_pending_failed' => 'Wiki did not finish this article. See Wiki → Source documents.',
             'articles_open' => 'Open the knowledge behind :label',
             'articles_open_page' => 'Open in Wiki',
             'articles_draft' => 'Create knowledge article',
@@ -277,7 +278,7 @@ return [
             'articles_write' => 'Write the article yourself',
             'articles_title' => 'Title',
             'articles_body' => 'Article',
-            'articles_create' => 'Create draft in Wiki',
+            'articles_create' => 'Add the article to Wiki',
             'articles_cancel' => 'Cancel',
             'articles_close' => 'Close',
             'node_types' => [
@@ -369,7 +370,7 @@ return [
             'document_unlinked' => 'The document link has been removed.',
             'blueprint_saved' => 'The structure has been saved.',
             'blueprint_approved' => 'The structure has been approved.',
-            'article_created' => 'The knowledge article has been created as a draft in Wiki. From here it follows the ordinary review and approval.',
+            'article_queued' => 'The article has gone into Wiki as a source. Wiki is building the knowledge pages from it now, and they appear on the activity once they are ready.',
             'blueprint_adopted' => 'The process flow is now in use. It is a draft until you approve it.',
         ],
         'errors' => [

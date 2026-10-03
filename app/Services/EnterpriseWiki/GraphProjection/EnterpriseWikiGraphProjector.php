@@ -5,11 +5,11 @@ namespace App\Services\EnterpriseWiki\GraphProjection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
-use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessBlueprint;
+use App\Services\Quality\QualityActivityKnowledgeResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -17,6 +17,7 @@ class EnterpriseWikiGraphProjector
 {
     public function __construct(
         private readonly GraphProjectionService $projection,
+        private readonly QualityActivityKnowledgeResolver $activityKnowledge,
     ) {}
 
     public function projectPage(int $pageId): void
@@ -206,37 +207,34 @@ class EnterpriseWikiGraphProjector
                 }
             });
 
+        // Which pages an activity is behind is QualityActivityKnowledgeResolver's answer, here as in
+        // the per-item projection and on the flow screen — an activity is behind every page the
+        // run made of the source it produced, not one page it wrote itself. One resolution, so a
+        // full rebuild and an incremental projection cannot disagree about the same step.
         $articleLinks = [];
 
-        if ($itemIds !== []) {
-            QualityActivityWikiPage::query()
-                ->where('customer_id', $customerId)
-                ->whereIn('quality_item_id', $itemIds)
-                ->orderBy('id')
-                ->get()
-                ->each(function (QualityActivityWikiPage $row) use (
-                    $customerId,
-                    $projectablePages,
-                    $activityKeys,
-                    $updatedAtByItem,
-                    &$articleLinks,
-                ): void {
-                    $itemId = (int) $row->quality_item_id;
-                    $key = (string) $row->activity_key;
-                    $pageId = (int) $row->enterprise_wiki_page_id;
+        foreach ($itemIds as $itemId) {
+            $itemId = (int) $itemId;
 
-                    if (! isset($activityKeys[$itemId.'#'.$key]) || ! isset($projectablePages[$pageId])) {
-                        return;
+            foreach ($this->activityKnowledge->pageIdsByActivity($customerId, $itemId) as $key => $pageIds) {
+                if (! isset($activityKeys[$itemId.'#'.$key])) {
+                    continue;
+                }
+
+                foreach ($pageIds as $pageId) {
+                    if (! isset($projectablePages[(int) $pageId])) {
+                        continue;
                     }
 
                     $articleLinks[] = [
                         'customer_id' => $customerId,
                         'quality_item_id' => $itemId,
-                        'activity_key' => $key,
-                        'page_id' => $pageId,
+                        'activity_key' => (string) $key,
+                        'page_id' => (int) $pageId,
                         'updated_at' => $updatedAtByItem[$itemId] ?? null,
                     ];
-                });
+                }
+            }
         }
 
         return [$activities, $articleLinks];

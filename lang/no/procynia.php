@@ -246,15 +246,14 @@ return [
             'subprocess_without_flow' => 'Denne underprosessen har ingen flyt ennå. Åpne den som egen prosess for å beskrive hvordan den gjennomføres.',
             'trail_label' => 'Hvor du er i prosessen',
             'trail_back' => 'Tilbake til :title',
-            // En aktivitet er en KILDE til kunnskapsartikler. Artikkelen opprettes som utkast i
-            // Enterprise Wiki og følger Wikis egen gjennomgang og godkjenning derfra. Innholdet
+            // En aktivitet er en KILDE til kunnskap. Artikkelen legges inn som kildedokument i
+            // Enterprise Wiki, og Wiki bygger kunnskapssidene av den på vanlig måte. Innholdet
             // ligger i Wiki og kopieres aldri hit — her ligger bare sporet tilbake til aktiviteten.
-            'articles_heading' => 'Kunnskapsartikler fra denne aktiviteten',
-            'articles_help' => 'Skriv ned kunnskapen bak dette steget. Procynia lager et utkast du kan rette, og artikkelen opprettes som utkast i Enterprise Wiki — der den følger vanlig gjennomgang og godkjenning.',
-            'articles_review_help' => 'Les gjennom og rett teksten før du oppretter den. Det som opprettes, er det som står her — artikkelen legges i Wiki som utkast og sendes til gjennomgang derfra.',
+            'articles_heading' => 'Kunnskap fra denne aktiviteten',
+            'articles_help' => 'Skriv ned kunnskapen bak dette steget. Procynia lager et utkast du kan rette, og artikkelen legges inn som kilde i Enterprise Wiki — som bygger kunnskapssidene av den på vanlig måte.',
+            'articles_review_help' => 'Les gjennom og rett teksten før du legger den inn. Det som legges inn, er det som står her — Wiki bygger kunnskapssidene av teksten og sender dem til vanlig gjennomgang.',
             'articles_structure_help' => 'Artikkelen følger en fast struktur: Formål, Når aktiviteten utføres, Ansvar, Fremgangsmåte, Viktige vurderinger og kriterier, Dokumentasjon og resultat, Relatert prosesskontekst.',
             'articles_fill_in_help' => 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.',
-            'articles_links_help' => 'Tekst i doble klammer, som [[slug|ordene det står på]], er en lenke til en annen Wiki-side. Den blir en vanlig lenke når artikkelen opprettes. Du kan fjerne den eller flytte den til andre ord.',
             'article_fill_in' => 'Må fylles inn',
             'article_section_missing' => 'Denne delen må fylles inn av den som kjenner aktiviteten.',
             'article_sections' => [
@@ -266,10 +265,14 @@ return [
                 'documentation' => 'Dokumentasjon og resultat',
                 'process_context' => 'Relatert prosesskontekst',
             ],
-            'articles_count' => ':count kunnskapsartikler',
-            'articles_count_one' => ':count kunnskapsartikkel',
-            'articles_none' => 'Ingen kunnskapsartikkel',
-            'articles_empty' => 'Denne aktiviteten har ikke gitt noen kunnskapsartikkel ennå.',
+            'articles_count' => ':count kunnskapssider',
+            'articles_count_one' => ':count kunnskapsside',
+            'articles_none' => 'Ingen kunnskap',
+            'articles_empty' => 'Denne aktiviteten har ikke gitt noen kunnskap ennå.',
+            // Kilden er lagt inn, men Wiki har ennå ikke bygd sidene av den. Ingen lenke: det
+            // finnes ingen side å åpne.
+            'articles_pending' => 'Wiki bygger kunnskapssidene av denne artikkelen nå.',
+            'articles_pending_failed' => 'Wiki kom ikke i mål med denne artikkelen. Se Wiki → Kildedokumenter.',
             'articles_open' => 'Åpne kunnskapen bak :label',
             'articles_open_page' => 'Åpne i Wiki',
             'articles_draft' => 'Opprett kunnskapsartikkel',
@@ -277,7 +280,7 @@ return [
             'articles_write' => 'Skriv artikkelen selv',
             'articles_title' => 'Tittel',
             'articles_body' => 'Artikkel',
-            'articles_create' => 'Opprett utkast i Wiki',
+            'articles_create' => 'Legg artikkelen inn i Wiki',
             'articles_cancel' => 'Avbryt',
             'articles_close' => 'Lukk',
             'node_types' => [
@@ -369,7 +372,7 @@ return [
             'document_unlinked' => 'Dokumentkoblingen er fjernet.',
             'blueprint_saved' => 'Strukturen er lagret.',
             'blueprint_approved' => 'Strukturen er godkjent.',
-            'article_created' => 'Kunnskapsartikkelen er opprettet som utkast i Wiki. Herfra følger den vanlig gjennomgang og godkjenning.',
+            'article_queued' => 'Artikkelen er lagt inn som kilde i Wiki. Wiki bygger kunnskapssidene av den nå, og de dukker opp på aktiviteten når de er klare.',
             'blueprint_adopted' => 'Prosessflyten er tatt i bruk. Den er et utkast til du godkjenner den.',
         ],
         'errors' => [

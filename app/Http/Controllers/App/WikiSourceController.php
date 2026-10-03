@@ -4,7 +4,6 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
-use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\User;
@@ -14,7 +13,6 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
-use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -364,7 +362,7 @@ class WikiSourceController extends Controller
         }
 
         try {
-            $prepared = $this->documentFlowService->prepareRunForDocument($customerId, $document->id);
+            $prepared = $this->documentFlowService->startForDocument($customerId, $document->id);
         } catch (InvalidArgumentException $e) {
             Log::warning('[PROCYNIA][WIKI_SOURCE_INGEST] '.$e->getMessage(), ['document_id' => $document->id]);
 
@@ -373,26 +371,6 @@ class WikiSourceController extends Controller
         }
 
         $run = $prepared['run'];
-
-        if ($prepared['created']) {
-            EnterpriseWikiQueueTrace::log('dispatch_before', [
-                'run_id' => $run->id,
-                'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
-                'job_uuid' => null,
-                'delay_seconds' => null,
-                'available_at' => null,
-            ], true, true);
-
-            RunEnterpriseWikiDocumentFlow::dispatch($run->id);
-
-            EnterpriseWikiQueueTrace::log('dispatch_after', [
-                'run_id' => $run->id,
-                'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
-                'job_uuid' => null,
-                'delay_seconds' => null,
-                'available_at' => null,
-            ], true, true);
-        }
 
         Log::info('[PROCYNIA][WIKI_SOURCE_INGEST] Queued ingest run.', [
             'run_id' => $run->id,

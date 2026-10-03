@@ -2,8 +2,12 @@
 
 namespace Tests\Feature\App;
 
+use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
+use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -15,7 +19,9 @@ use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\Concerns\UsesProjectPostgresConnection;
@@ -1011,24 +1017,29 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
-    // En aktivitet som kilde til kunnskapsartikler
+    // En aktivitet som kilde til kunnskap i Wiki
     // ---------------------------------------------------------------------
 
     /**
      * What these tests defend.
      *
-     * A prosessaktivitet is a SOURCE of knowledge articles, not a place to hang existing ones. The
-     * user asks for one from a step, corrects the draft, and what is created is an ordinary
-     * Enterprise Wiki page in draft that then follows Wiki's own review and approval. Wiki owns the
-     * article from that moment: the flow holds none of its content, and the only thing Kvalitet
-     * keeps is the record of which activity it came out of.
+     * A prosessaktivitet is a SOURCE of knowledge, not a place to hang existing pages. The user
+     * asks for an article from a step, corrects the draft, and what is created is an ordinary
+     * Enterprise Wiki SOURCE DOCUMENT, handed to the ordinary ingest run.
      *
-     * The invariant that cost this feature its first design: that record survives the flow being
-     * rewritten. A blueprint payload is replaced wholesale on every save and on every adopted
-     * proposal, so provenance kept inside it would be destroyed by an ordinary edit.
+     * Why a source and not a page: concept pages, entity pages and summaries are planned by the
+     * maintainer decision, and a maintainer decision only ever exists for an EnterpriseWikiDocument.
+     * An activity that wrote its own page produced one page and nothing else — it skipped the whole
+     * pipeline. Kvalitet owns no enrichment of its own and must never grow any.
+     *
+     * The invariant that cost this feature its first design: the provenance record survives the
+     * flow being rewritten. A blueprint payload is replaced wholesale on every save and on every
+     * adopted proposal, so provenance kept inside it would be destroyed by an ordinary edit.
      */
-    public function test_an_activity_creates_an_ordinary_wiki_page_in_draft(): void
+    public function test_an_activity_creates_an_ordinary_wiki_source_and_starts_the_ordinary_run(): void
     {
+        Queue::fake();
+
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
@@ -1042,82 +1053,160 @@ class QualityProcessBlueprintTest extends TestCase
             ])
             ->assertSessionHasNoErrors();
 
-        $page = EnterpriseWikiPage::query()->where('customer_id', $customer->id)->sole();
+        // No page is written here. Which pages this source becomes is the maintainer decision's to
+        // make, and it has not run yet.
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
 
-        $this->assertSame('Sikkerhetskrav ved vurdering av leverandører', $page->title);
-        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status);
-        $this->assertSame(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $page->page_type);
-        // Manual, and owned by whoever asked for it — Wiki's submit-for-review gate is
-        // owner-or-System-Owner, so an unowned article would be one nobody could hand on.
-        $this->assertSame(EnterpriseWikiPage::GENERATED_BY_MANUAL, $page->generated_by);
-        $this->assertSame((int) $owner->id, (int) $page->owner_user_id);
-        $this->assertNull($page->published_version_id);
+        $document = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->sole();
 
-        $version = $page->currentVersion()->first();
+        $this->assertSame('Sikkerhetskrav ved vurdering av leverandører.md', $document->original_filename);
+        $this->assertSame(EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED, $document->document_status);
+        $this->assertSame((int) $owner->id, (int) $document->uploaded_by_user_id);
+        // The title is written into the text as the document's own H1: the planner reads the text,
+        // and a source whose subject is only in its filename is one it has to guess at.
+        $this->assertStringContainsString('# Sikkerhetskrav ved vurdering av leverandører', (string) $document->extracted_text);
+        $this->assertStringContainsString('## Hva du ser etter', (string) $document->extracted_text);
 
-        $this->assertNotNull($version);
-        $this->assertSame(1, (int) $version->version_number);
-        $this->assertStringContainsString('## Hva du ser etter', (string) $version->content_markdown);
+        // The bytes are on disk, because the document IS the file — re-ingest, download and the
+        // source list all read it.
+        $this->assertTrue(Storage::disk('local')->exists((string) $document->file_path));
 
-        // Human-authored throughout, with no document provenance at all. Claiming a source would be
-        // claiming a document backs text that no document backs.
-        $this->assertSame(
-            ['human_authored', 'human_authored', 'human_authored'],
-            array_column((array) $version->content_blocks_json, 'content_origin'),
+        // And the ordinary run is queued on the ordinary queue. This is the step the old design
+        // skipped, and the only thing that ever plans a concept, an entity or a summary.
+        $run = EnterpriseWikiIngestRun::query()->sole();
+
+        $this->assertSame(EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, $run->source_type);
+        $this->assertSame((int) $document->id, (int) $run->source_id);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_QUEUED, $run->status);
+
+        Queue::assertPushed(
+            RunEnterpriseWikiDocumentFlow::class,
+            fn (RunEnterpriseWikiDocumentFlow $job): bool => $job->runId === (int) $run->id,
         );
-
-        foreach ((array) $version->content_blocks_json as $block) {
-            $this->assertNull($block['source_id']);
-            $this->assertSame([], $block['source_elements']);
-        }
     }
 
-    /** The user is taken to the article, because everything after this happens in Wiki. */
-    public function test_creating_an_article_lands_the_user_in_wiki(): void
+    /**
+     * The user stays where they are, because there is nothing to open yet.
+     *
+     * The old flow redirected to the created page. There is no page now — the run builds them —
+     * and sending somebody to a page that does not exist is worse than telling them what is
+     * happening.
+     */
+    public function test_creating_an_article_keeps_the_user_on_the_flow_and_says_what_happens_next(): void
     {
+        Queue::fake();
+
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
         $this->blueprintFor($customer, $process, $this->simpleFlow());
 
         $this->actingAs($owner)
+            ->from("/app/quality/items/{$process->id}?tab=flow")
             ->post("/app/quality/items/{$process->id}/activities/articles", [
                 'activity_key' => 'vurder',
                 'title' => 'Terskelverdier',
                 'markdown' => 'Hva som gjelder.',
             ])
-            ->assertRedirect('/app/wiki/terskelverdier')
+            ->assertRedirect("/app/quality/items/{$process->id}?tab=flow")
             ->assertSessionHas('success');
     }
 
-    public function test_the_activity_shows_the_articles_it_produced_as_wiki_has_them_now(): void
+    /**
+     * The activity shows every page the run made of its source — not one.
+     *
+     * This is the whole point of the change. One source becomes an article, a summary, and the
+     * concepts and entities the maintainer decision found in it, and all of them came out of this
+     * step.
+     */
+    public function test_the_activity_shows_every_page_the_run_produced_from_its_source(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
         $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $page = $this->createArticle($owner, $process, 'Sikkerhetskrav');
+        $document = $this->createArticleSource($owner, $process, 'Sikkerhetskrav');
+
+        $article = $this->runProducedPage($customer, $document, 'Sikkerhetskrav', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $concept = $this->runProducedPage($customer, $document, 'Leverandørrisiko', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
 
         $node = $this->activityNode($owner, $process);
 
-        $this->assertSame(['Sikkerhetskrav'], array_column($node['articles'], 'title'));
-        $this->assertStringEndsWith("/app/wiki/{$page->slug}", $node['articles'][0]['url']);
+        $this->assertSame(['Sikkerhetskrav', 'Leverandørrisiko'], array_column($node['articles'], 'title'));
+        $this->assertSame(['page', 'page'], array_column($node['articles'], 'kind'));
+        $this->assertSame(
+            [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_CONCEPT],
+            array_column($node['articles'], 'page_type'),
+        );
+        $this->assertStringEndsWith("/app/wiki/{$article->slug}", $node['articles'][0]['url']);
         $this->assertNotNull($node['articles'][0]['publication']);
 
         // Renamed in Wiki, which owns it. Nothing in Kvalitet is touched, and the activity shows
         // the new name — the whole reason nothing of the article is stored on the flow.
-        $page->update(['title' => 'Sikkerhetskrav ved leverandørvurdering']);
+        $concept->update(['title' => 'Leverandørrisiko (konsept)']);
 
         $this->assertSame(
-            ['Sikkerhetskrav ved leverandørvurdering'],
+            ['Sikkerhetskrav', 'Leverandørrisiko (konsept)'],
             array_column($this->activityNode($owner, $process)['articles'], 'title'),
         );
     }
 
     /**
-     * The invariant the provenance table exists for.
+     * A page the run reused rather than created is not something this activity produced.
      *
+     * Patching or regenerating a page the Wiki already had is the pipeline doing its job; claiming
+     * the activity is its origin would be a provenance claim nobody made.
+     */
+    public function test_a_page_the_run_only_updated_is_not_claimed_by_the_activity(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Innkjøp');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
+
+        $document = $this->createArticleSource($owner, $process, 'Sikkerhetskrav');
+
+        $created = $this->runProducedPage($customer, $document, 'Sikkerhetskrav', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->runProducedPage(
+            $customer,
+            $document,
+            'Innkjøpspolicy',
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            EnterpriseWikiIngestRunPage::ACTION_PATCHED,
+        );
+
+        $node = $this->activityNode($owner, $process);
+
+        $this->assertSame([(int) $created->id], array_column($node['articles'], 'page_id'));
+    }
+
+    /**
+     * While the run is working, the step says so rather than looking empty.
+     *
+     * An ingest takes minutes. A step that showed nothing for those minutes would read as "the
+     * article was lost", which is the one thing it must not read as.
+     */
+    public function test_an_activity_whose_run_has_produced_nothing_yet_shows_the_source(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Innkjøp');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
+
+        $this->createArticleSource($owner, $process, 'Terskelverdier');
+
+        $entry = $this->activityNode($owner, $process)['articles'][0];
+
+        $this->assertSame('source', $entry['kind']);
+        $this->assertSame('Terskelverdier', $entry['title']);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_QUEUED, $entry['status']);
+        // Nothing to open: a link to a page that does not exist is worse than no link.
+        $this->assertNull($entry['url']);
+        $this->assertNull($entry['page_id']);
+    }
+
+    /**
      * The payload is rewritten wholesale on every save. An article's origin stored inside it would
      * be gone the first time somebody fixed a typo in a step's label.
      */
@@ -1128,7 +1217,8 @@ class QualityProcessBlueprintTest extends TestCase
         $process = $this->process($customer, 'Innkjøp');
         $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $this->createArticle($owner, $process, 'Sikkerhetskrav');
+        $document = $this->createArticleSource($owner, $process, 'Sikkerhetskrav');
+        $this->runProducedPage($customer, $document, 'Sikkerhetskrav', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
 
         $edited = $this->simpleFlow();
         $edited['nodes'][1]['label'] = 'Vurder anskaffelsen grundig';
@@ -1144,18 +1234,20 @@ class QualityProcessBlueprintTest extends TestCase
     }
 
     /**
-     * Wiki is the source of truth, including about whether the article still exists. Deleting the
-     * page leaves the activity standing with one article fewer rather than a broken reference.
+     * Wiki is the source of truth, including about whether a page still exists. Deleting one
+     * leaves the activity standing with one page fewer rather than a broken reference.
      */
-    public function test_deleting_the_wiki_page_leaves_the_activity_standing(): void
+    public function test_deleting_a_wiki_page_leaves_the_activity_standing(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
         $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $kept = $this->createArticle($owner, $process, 'Anskaffelsesrutine');
-        $removed = $this->createArticle($owner, $process, 'Terskelverdier');
+        $document = $this->createArticleSource($owner, $process, 'Anskaffelsesrutine');
+
+        $kept = $this->runProducedPage($customer, $document, 'Anskaffelsesrutine', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $removed = $this->runProducedPage($customer, $document, 'Terskelverdier', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
 
         $removed->versions()->delete();
         $removed->delete();
@@ -1166,8 +1258,25 @@ class QualityProcessBlueprintTest extends TestCase
         $this->assertSame(['Anskaffelsesrutine'], array_column($node['articles'], 'title'));
         $this->assertSame((int) $kept->id, (int) $node['articles'][0]['page_id']);
 
-        // And the provenance row went with the page rather than being left pointing at nothing.
+        // The provenance is unharmed: it is anchored to the source, which is still there.
         $this->assertSame(1, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    /** Deleting the source deletes the record that an activity produced it. */
+    public function test_deleting_the_source_takes_the_provenance_with_it(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Innkjøp');
+        $this->blueprintFor($customer, $process, $this->simpleFlow());
+
+        $document = $this->createArticleSource($owner, $process, 'Terskelverdier');
+
+        EnterpriseWikiIngestRun::query()->where('source_id', $document->id)->delete();
+        $document->delete();
+
+        $this->assertSame(0, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
+        $this->assertSame([], $this->activityNode($owner, $process)['articles']);
     }
 
     public function test_an_activity_that_has_produced_nothing_carries_an_empty_list(): void
@@ -1204,7 +1313,7 @@ class QualityProcessBlueprintTest extends TestCase
             ])
             ->assertNotFound();
 
-        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
     }
 
     public function test_a_reader_cannot_create_an_article_from_an_activity(): void
@@ -1224,7 +1333,7 @@ class QualityProcessBlueprintTest extends TestCase
             ])
             ->assertForbidden();
 
-        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
     }
 
     public function test_an_article_cannot_be_created_on_another_customers_process(): void
@@ -1243,26 +1352,28 @@ class QualityProcessBlueprintTest extends TestCase
             ])
             ->assertNotFound();
 
-        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $other->id)->count());
+        $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $other->id)->count());
     }
 
     /**
-     * Two activities may legitimately want the same name. The second one gets a slug of its own
-     * rather than losing the article it has just been written.
+     * Two activities may legitimately want the same name, and they get two sources.
+     *
+     * Identity is the text, not the title — the same answer the uploaded path gives a file. Two
+     * articles called the same thing but saying different things are two sources.
      */
-    public function test_two_articles_with_the_same_name_both_survive(): void
+    public function test_two_articles_with_the_same_name_both_become_sources(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Innkjøp');
         $this->blueprintFor($customer, $process, $this->simpleFlow());
 
-        $first = $this->createArticle($owner, $process, 'Sikkerhetskrav');
-        $second = $this->createArticle($owner, $process, 'Sikkerhetskrav');
+        $first = $this->createArticleSource($owner, $process, 'Sikkerhetskrav', 'Første tekst.');
+        $second = $this->createArticleSource($owner, $process, 'Sikkerhetskrav', 'Andre tekst.');
 
-        $this->assertNotSame($first->slug, $second->slug);
-        $this->assertSame('sikkerhetskrav', $first->slug);
-        $this->assertSame('sikkerhetskrav-2', $second->slug);
+        $this->assertNotSame((int) $first->id, (int) $second->id);
+        $this->assertSame(2, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(2, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
     }
 
     // ---------------------------------------------------------------------
@@ -1308,23 +1419,72 @@ class QualityProcessBlueprintTest extends TestCase
      * One article created from the middle activity, the way a user creates one.
      *
      * Through the endpoint rather than the service, so every test that needs an article also
-     * exercises the authorisation and the Wiki write that produce it.
+     * exercises the authorisation and the Wiki write that produce it. What comes back is the
+     * SOURCE, because that is what an activity produces — the pages are the run's.
      */
-    private function createArticle(User $actor, QualityItem $process, string $title): EnterpriseWikiPage
-    {
+    private function createArticleSource(
+        User $actor,
+        QualityItem $process,
+        string $title,
+        string $body = "Innledning.\n\n## Avsnitt\n\nInnhold.",
+    ): EnterpriseWikiDocument {
+        // The run is Wiki's, and these tests are about what Kvalitet hands it. Left real, the
+        // job would run inline on the sync queue and make a chain of AI calls none of this file
+        // is asking about.
+        Queue::fake();
+
         $this->actingAs($actor)
             ->post("/app/quality/items/{$process->id}/activities/articles", [
                 'activity_key' => 'vurder',
                 'title' => $title,
-                'markdown' => "Innledning.\n\n## Avsnitt\n\nInnhold.",
+                'markdown' => $body,
             ])
             ->assertSessionHasNoErrors();
 
-        return EnterpriseWikiPage::query()
+        return EnterpriseWikiDocument::query()
             ->where('customer_id', $process->customer_id)
-            ->where('title', $title)
+            ->where('original_filename', $title.'.md')
             ->orderByDesc('id')
             ->firstOrFail();
+    }
+
+    /**
+     * A page the ingest run produced from that source, as the pipeline records it.
+     *
+     * Stands in for the run itself, which is a long chain of AI calls no unit of this file should
+     * be making. What matters to Kvalitet is only the shape the run leaves behind: a page, and an
+     * EnterpriseWikiIngestRunPage row saying this run created it.
+     */
+    private function runProducedPage(
+        Customer $customer,
+        EnterpriseWikiDocument $document,
+        string $title,
+        string $pageType,
+        string $action = EnterpriseWikiIngestRunPage::ACTION_CREATED,
+    ): EnterpriseWikiPage {
+        $run = EnterpriseWikiIngestRun::query()
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->where('source_id', $document->id)
+            ->orderByDesc('id')
+            ->firstOrFail();
+
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => (int) $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(6)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+        ]);
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => (int) $run->id,
+            'enterprise_wiki_page_id' => (int) $page->id,
+            'action' => $action,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
+
+        return $page;
     }
 
     /**

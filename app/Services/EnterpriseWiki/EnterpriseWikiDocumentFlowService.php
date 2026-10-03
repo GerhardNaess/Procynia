@@ -153,6 +153,49 @@ class EnterpriseWikiDocumentFlowService
     }
 
     /**
+     * Prepare a run for this document and put it on the queue.
+     *
+     * The one way a source enters the pipeline. prepareRunForDocument() alone is not that — it
+     * decides whether a run is needed, and a prepared run that nobody dispatched is a document
+     * that silently never becomes Wiki pages. Every caller wants both halves, so both halves live
+     * together here rather than being re-paired (and eventually mis-paired) at each call site.
+     *
+     * `created` is false when the document already had a live run; nothing is dispatched then,
+     * because the work is already queued or running.
+     *
+     * @return array{run: EnterpriseWikiIngestRun, created: bool}
+     */
+    public function startForDocument(int $customerId, int $documentId): array
+    {
+        $prepared = $this->prepareRunForDocument($customerId, $documentId);
+        $run = $prepared['run'];
+
+        if (! $prepared['created']) {
+            return $prepared;
+        }
+
+        EnterpriseWikiQueueTrace::log('dispatch_before', [
+            'run_id' => $run->id,
+            'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
+            'job_uuid' => null,
+            'delay_seconds' => null,
+            'available_at' => null,
+        ], true, true);
+
+        RunEnterpriseWikiDocumentFlow::dispatch($run->id);
+
+        EnterpriseWikiQueueTrace::log('dispatch_after', [
+            'run_id' => $run->id,
+            'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
+            'job_uuid' => null,
+            'delay_seconds' => null,
+            'available_at' => null,
+        ], true, true);
+
+        return $prepared;
+    }
+
+    /**
      * Re-sync document-owner approvals after a source document owner changes.
      *
      * The service only touches current active page versions that actually reference the

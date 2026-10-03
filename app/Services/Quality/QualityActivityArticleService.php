@@ -4,80 +4,81 @@ namespace App\Services\Quality;
 
 use App\Data\Ai\AiCallContext;
 use App\Exceptions\Ai\AiCostControlException;
-use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
-use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
-use App\Services\EnterpriseWiki\EnterpriseWikiLinkCatalogService;
-use App\Services\EnterpriseWiki\EnterpriseWikiLinkIntentMaterializer;
-use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionWriter;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Support\Ai\AiCallContextScope;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
 /**
- * An activity is a source of knowledge articles.
+ * An activity is a source of knowledge.
  *
  * THE DIRECTION THIS RUNS IN.
  *
- *   prosess -> aktivitet -> "Opprett kunnskapsartikkel" -> utkast -> Enterprise Wiki draft
+ *   prosess -> aktivitet -> "Opprett kunnskapsartikkel" -> utkast -> Wiki-kilde -> ingest-kjøring
  *
  * Not the other way round. A prosessaktivitet is where the virksomhet knows something that is not
- * written down anywhere, and Kvalitet's job at that point is to get it into Enterprise Wiki — not to
- * hunt through Wiki for a page that might already cover it. Procynia drafts the article from the
- * activity's place in the process — the step before it, the branch condition that sends the work
- * there, what judges the result afterwards, and what the user has already settled about the process
- * (see QualityActivityArticleContextBuilder) — in the one fixed structure every activity article
- * has. The user corrects it; what is created is an ordinary Wiki page in draft, which then goes
- * through Wiki's own review, approval and publication exactly like a page that arrived from a
- * document ingest.
+ * written down anywhere, and Kvalitet's job at that point is to get it into Enterprise Wiki — not
+ * to hunt through Wiki for a page that might already cover it. Procynia drafts the article from
+ * the activity's place in the process — the step before it, the branch condition that sends the
+ * work there, what judges the result afterwards, and what the user has already settled about the
+ * process (see QualityActivityArticleContextBuilder) — in the one fixed structure every activity
+ * article has. The user corrects it, and what the user approves becomes a Wiki SOURCE.
  *
- * AN ORDINARY WIKI PAGE MEANS ORDINARY WIKI RELATIONS. The draft is written against the customer's
- * existing Wiki index (EnterpriseWikiLinkCatalogService), the model names the pages it is genuinely
- * talking about rather than writing link syntax itself (EnterpriseWikiLinkIntentMaterializer), and
- * creating the page runs the same link materialization every other Wiki page runs
- * (EnterpriseWikiBuildPageLinksService::materializeWikilinksForPage), which is also what projects
- * the page and its edges to Neo4j. Kvalitet owns none of that and reimplements none of it; the only
- * relation Kvalitet has of its own is the SOURCE_OF_ARTICLE provenance below.
+ * WHY A SOURCE AND NOT A PAGE. This service used to write an EnterpriseWikiPage itself. It
+ * produced a page, and nothing else: no concept pages, no entity pages, no summary, none of the
+ * relations between them. Every one of those is planned by the maintainer decision, and a
+ * maintainer decision only ever exists for an EnterpriseWikiDocument — so an activity that wrote
+ * its own page was an activity that skipped the entire ingest run. The article is therefore
+ * stored as an ordinary Wiki source document (EnterpriseWikiDocumentUploadService::storeAuthoredText)
+ * and handed to the ordinary document flow (EnterpriseWikiDocumentFlowService::startForDocument),
+ * which is the same call the Kildedokumenter list makes. From there the article is treated exactly
+ * like a policy somebody uploaded: planned, generated, claim-extracted, verified, linked, QA'd,
+ * and projected to Neo4j by Wiki's own code.
  *
- * WIKI OWNS THE ARTICLE. Nothing of the page's content is stored anywhere in Kvalitet — not the
- * title, not the text, not the status. The flow holds no article content at all, and this service
- * never writes to a page again after creating it. Editing happens in Wiki, because that is where
- * the page lives.
+ * KVALITET OWNS NO ENRICHMENT. There is no concept logic, no entity logic and no linking here, and
+ * there must never be: a second answer to "what concepts does this text have" is a second Wiki.
+ * The draft is plain prose for the same reason — a source document does not contain [[wikilinks]],
+ * and the pages the run generates get their links from EnterpriseWikiBuildPageLinksService like
+ * every other page.
  *
- * WHAT KVALITET KEEPS. One row per created article, saying which activity it came out of — see
+ * WHAT KVALITET KEEPS. One row per created source, saying which activity it came out of — see
  * QualityActivityWikiPage. That is provenance and nothing else, and it is what lets the flow show
- * "this step has produced two articles" and the graph record
- * `(:QualityActivity)-[:SOURCE_OF_ARTICLE]->(:EnterpriseWikiPage)`.
- *
- * WHY THE CONTENT IS HUMAN-AUTHORED. The draft was written by a model, but what is created is what
- * the person approved after reading and editing it, and it is grounded in no document. Recording it
- * as source-based would claim a document backs it, which is exactly the thing Procynia must never
- * do; recording it as best-practice would put it into Wiki's own review queue for a recommendation
- * Procynia did not make. `human_authored` is the honest answer, and it is the one Wiki's manual
- * editing already uses — so the page is editable in Wiki from the moment it exists.
+ * what a step has produced and the graph record
+ * `(:QualityActivity)-[:SOURCE_OF_ARTICLE]->(:EnterpriseWikiPage)` for each page the run made.
  */
 class QualityActivityArticleService
 {
     /** How many articles one activity may be the source of. A ceiling on a payload, not a rule. */
     public const MAX_PER_ACTIVITY = 20;
 
+    /** A page the run created from this activity's source. */
+    public const ENTRY_KIND_PAGE = 'page';
+
+    /**
+     * The source itself, shown while the run has produced no page yet — or has stopped without
+     * producing one. Never a link: there is nothing to open.
+     */
+    public const ENTRY_KIND_SOURCE = 'source';
+
     public function __construct(
         private readonly ProcessActivityArticleAiClient $client,
         private readonly QualityActivityArticleContextBuilder $contextBuilder,
-        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
-        private readonly EnterpriseWikiLinkCatalogService $linkCatalog,
-        private readonly EnterpriseWikiLinkIntentMaterializer $linkIntentMaterializer,
-        private readonly EnterpriseWikiBuildPageLinksService $buildPageLinks,
+        private readonly EnterpriseWikiDocumentUploadService $documentUploads,
+        private readonly EnterpriseWikiDocumentFlowService $documentFlow,
+        private readonly QualityActivityKnowledgeResolver $knowledge,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly AiCallContextScope $contextScope,
     ) {}
@@ -106,35 +107,20 @@ class QualityActivityArticleService
         $context = $this->contextBuilder->build($item, $blueprint, $activityKey)
             ?? throw new RuntimeException("QualityActivityArticleService: no activity [{$activityKey}] on this flow.");
 
-        // The wiki the article is joining, bounded exactly as the ingest pipeline bounds it. Built
-        // here rather than in the client for the same reason the ingest pipeline builds it in the
-        // service: which pages exist is a read of the customer's Wiki, not part of talking to a
-        // model. There is no page to exclude yet — the article does not exist until the user
-        // creates it.
-        $catalog = $this->linkCatalog->buildForCustomer((int) $item->customer_id)['catalog'];
-        $customerId = (int) $item->customer_id;
-
         return $this->contextScope->within(
             new AiCallContext(
-                customerId: $customerId,
+                customerId: (int) $item->customer_id,
                 feature: 'quality',
                 operation: 'process_activity_article_draft',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),
-            function () use ($context, $languageCode, $catalog, $customerId): array {
+            function () use ($context, $languageCode): array {
                 try {
-                    $drafted = $this->client->draft($context, $languageCode, $catalog);
-
-                    // The one place [[slug|anchor]] is ever written, shared with the ingest
-                    // pipeline. The model returned prose and a list of pages; the brackets, the
-                    // pipe and the canonical slug are the server's, and a target outside the
-                    // catalog or outside this customer is refused rather than rendered broken.
-                    $markdown = $this->linkIntentMaterializer->materializeBlocksForNewPage(
-                        $customerId,
-                        [['markdown' => $drafted['markdown'], 'link_intents' => $drafted['link_intents']]],
-                        $catalog,
-                    )[0]['markdown'];
+                    // No link catalog, deliberately. What is drafted here is the text of a source
+                    // document, and a source document is prose — the Wiki pages generated from it
+                    // are linked by the run, by the same service that links every other page.
+                    $drafted = $this->client->draft($context, $languageCode);
                 } catch (AiCostControlException $exception) {
                     throw $exception;
                 } catch (Throwable $exception) {
@@ -143,7 +129,7 @@ class QualityActivityArticleService
 
                 return [
                     'title' => Str::limit($drafted['title'], ProcessActivityArticleAiClient::MAX_TITLE_LENGTH, ''),
-                    'markdown' => Str::limit($markdown, ProcessActivityArticleAiClient::MAX_MARKDOWN_LENGTH, ''),
+                    'markdown' => Str::limit($drafted['markdown'], ProcessActivityArticleAiClient::MAX_MARKDOWN_LENGTH, ''),
                     'model' => ProcessActivityArticleAiClient::model(),
                 ];
             },
@@ -151,12 +137,18 @@ class QualityActivityArticleService
     }
 
     /**
-     * The article, as an ordinary Enterprise Wiki page in draft.
+     * The article, as an ordinary Enterprise Wiki source, with the ordinary ingest run started.
      *
-     * The page is owned by whoever created it, so they are the one who can send it for review —
-     * which is the next step of Wiki's own flow, taken in Wiki and not here.
+     * Two steps and no more. The text becomes a document in the customer's Wiki document store,
+     * and that document is given to the document flow. Everything the Wiki does with a source —
+     * deciding which pages it should become, writing them, extracting and verifying their claims,
+     * linking them, projecting them — happens in Wiki's own code, on Wiki's own queues, and
+     * nothing of it is reimplemented, triggered piecemeal or second-guessed here.
      *
-     * @return array{page: EnterpriseWikiPage, provenance: QualityActivityWikiPage}
+     * The run is started after the transaction commits, for the reason every queued read does:
+     * the job reads SQL that must already be there.
+     *
+     * @return array{document: EnterpriseWikiDocument, run: EnterpriseWikiIngestRun, run_started: bool, provenance: QualityActivityWikiPage}
      */
     public function create(
         QualityItem $item,
@@ -167,52 +159,58 @@ class QualityActivityArticleService
         User $actor,
     ): array {
         // Resolved before anything is written: an activity key that is not on this flow is not an
-        // activity, and a page created from one would have provenance pointing at nothing.
+        // activity, and a source created from one would have provenance pointing at nothing.
         $this->activityOrFail($blueprint, $activityKey);
 
+        $customerId = (int) $item->customer_id;
         $title = trim($title);
         $markdown = trim($markdown);
 
-        return DB::transaction(function () use ($item, $activityKey, $title, $markdown, $actor): array {
-            $page = $this->createPage((int) $item->customer_id, $title, $actor);
+        // The same store, the same identity, the same reconciliation every uploaded source gets.
+        // `reused` is the honest answer when the identical text is already a source: the activity
+        // is recorded as one of its origins rather than a second copy being written.
+        $stored = $this->documentUploads->storeAuthoredText(
+            customerId: $customerId,
+            filename: $this->sourceFilename($title),
+            text: $this->sourceText($title, $markdown),
+            // Owner where the person qualifies for it, null where they do not. The document-owner
+            // sign-off is Wiki's, and Wiki already handles an unowned source; naming an owner who
+            // may not hold that responsibility would be worse than naming none.
+            ownerUserId: $actor->canBeEnterpriseWikiDocumentOwner() ? (int) $actor->id : null,
+            uploadedByUserId: (int) $actor->id,
+        );
 
-            $this->versionWriter->writeNewCurrentVersion($page, [
-                'content_markdown' => $markdown,
-                'content_blocks_json' => $this->blocks($markdown),
-                'generated_by_model' => null,
-                'created_by_user_id' => (int) $actor->id,
-            ]);
+        $document = $stored['document'];
 
-            // The step that makes it a page in the Wiki rather than a page stored next to it.
-            // Every other path that gives an Enterprise Wiki page a current version runs this, and
-            // it is the only thing that both turns the text's [[wikilinks]] into
-            // EnterpriseWikiPageLink rows and dispatches the Neo4j projection. Skipping it is why
-            // articles created from an activity arrived isolated: the relations were never
-            // materialized, so the Wiki graph had nothing to draw and the projection never ran.
-            //
-            // Runs on the final text, which is the user's — they may have added, moved or removed
-            // a link after reading the draft, and the text is authoritative for the page's
-            // relations either way. A link whose slug no longer resolves is simply not a relation;
-            // it renders as plain text, exactly as on any other page.
-            $this->buildPageLinks->materializeWikilinksForPage($page->fresh() ?? $page);
-
-            $provenance = QualityActivityWikiPage::query()->create([
-                'customer_id' => (int) $item->customer_id,
+        $provenance = DB::transaction(fn (): QualityActivityWikiPage => QualityActivityWikiPage::query()->firstOrCreate(
+            [
                 'quality_item_id' => (int) $item->id,
                 'activity_key' => $activityKey,
-                'enterprise_wiki_page_id' => (int) $page->id,
+                'enterprise_wiki_document_id' => (int) $document->id,
+            ],
+            [
+                'customer_id' => $customerId,
                 'created_by_user_id' => (int) $actor->id,
-            ]);
+            ],
+        ));
 
-            return ['page' => $page, 'provenance' => $provenance];
-        });
+        $prepared = $this->documentFlow->startForDocument($customerId, (int) $document->id);
+
+        return [
+            'document' => $document,
+            'run' => $prepared['run'],
+            'run_started' => (bool) $prepared['created'],
+            'provenance' => $provenance,
+        ];
     }
 
     /**
      * How many articles this activity has already produced.
      *
      * Read before creating another, so the ceiling is enforced where it means something rather than
-     * discovered by a payload that got too big to render.
+     * discovered by a payload that got too big to render. Counted on the provenance rows — one per
+     * source the activity produced — and not on the pages, because one source legitimately becomes
+     * several pages and that is the pipeline working, not the user asking twice.
      */
     public function countForActivity(int $customerId, int $itemId, string $activityKey): int
     {
@@ -224,48 +222,68 @@ class QualityActivityArticleService
     }
 
     /**
-     * The articles each activity of one process has produced, as the flow needs to show them.
+     * What each activity of one process has produced, as the flow needs to show it.
      *
      * Resolved fresh on every page load, which is the whole point of holding nothing but the
-     * reference: the activity shows what the article is called and how far it has got through
-     * publication *now*. One query for the whole flow — a flow with eighty nodes must not be eighty
-     * queries — and a page that has been deleted simply is not there to resolve, because the
-     * provenance row went with it.
+     * reference: the activity shows what the knowledge is called and how far it has got through
+     * publication *now*. A page that has been deleted simply is not there to resolve.
      *
-     * @return array<string, list<array<string, mixed>>> activity key to its articles
+     * An entry is either a page the run created, or — while the run has produced none — the source
+     * itself, so a step never looks empty for the minutes its ingest takes.
+     *
+     * @return array<string, list<array<string, mixed>>> activity key to its entries
      */
     public function describeForItem(int $customerId, int $itemId): array
     {
-        $rows = QualityActivityWikiPage::query()
-            ->where('customer_id', $customerId)
-            ->where('quality_item_id', $itemId)
-            // Read access to a Wiki page is not gated on its approval status — status gates
-            // actions, never reading — so the only filter is the tenant, and an article still in
-            // draft is shown as a draft rather than hidden.
-            ->whereHas('page', fn ($query) => $query->where('customer_id', $customerId))
-            ->with(['page.currentVersion', 'page.publishedVersion'])
-            ->orderBy('id')
-            ->get();
-
+        $resolved = $this->knowledge->resolve($customerId, $itemId);
         $described = [];
 
-        foreach ($rows as $row) {
-            $page = $row->page;
+        foreach ($resolved['rows'] as $row) {
+            $key = (string) $row->activity_key;
+            $pages = $resolved['pages_by_row'][(int) $row->id] ?? [];
 
-            if (! $page instanceof EnterpriseWikiPage) {
+            foreach ($pages as $page) {
+                $described[$key][] = [
+                    'kind' => self::ENTRY_KIND_PAGE,
+                    'page_id' => (int) $page->id,
+                    'title' => (string) $page->title,
+                    'slug' => (string) $page->slug,
+                    'page_type' => (string) $page->page_type,
+                    'status' => $page->status,
+                    'url' => route('app.wiki.show', ['slug' => $page->slug]),
+                    'created_at' => $row->created_at?->toDateTimeString(),
+                    // The same presenter the Wiki list and the Wiki page use, so one page cannot
+                    // read as approved in Kvalitet and in review in Wiki.
+                    'publication' => $this->publicationStatus->forPage($page, $page->currentVersion),
+                ];
+            }
+
+            if ($pages !== []) {
                 continue;
             }
 
-            $described[(string) $row->activity_key][] = [
-                'page_id' => (int) $page->id,
-                'title' => (string) $page->title,
-                'slug' => (string) $page->slug,
-                'status' => $page->status,
-                'url' => route('app.wiki.show', ['slug' => $page->slug]),
+            $document = $row->document;
+
+            if (! $document instanceof EnterpriseWikiDocument) {
+                // A legacy row whose hand-made page is gone. Nothing to show and nothing to
+                // explain — the page took the provenance with it.
+                continue;
+            }
+
+            $run = $resolved['run_by_row'][(int) $row->id] ?? null;
+
+            $described[$key][] = [
+                'kind' => self::ENTRY_KIND_SOURCE,
+                'page_id' => null,
+                'title' => $this->knowledge->sourceTitle($document),
+                'slug' => null,
+                'page_type' => null,
+                // The run's status, not the page's: there is no page. Null when no run exists yet,
+                // which the screen reads the same way as queued.
+                'status' => $run?->status,
+                'url' => null,
                 'created_at' => $row->created_at?->toDateTimeString(),
-                // The same presenter the Wiki list and the Wiki page use, so one page cannot read
-                // as approved in Kvalitet and in review in Wiki.
-                'publication' => $this->publicationStatus->forPage($page, $page->currentVersion),
+                'publication' => null,
             ];
         }
 
@@ -317,99 +335,32 @@ class QualityActivityArticleService
     }
 
     /**
-     * The page row itself.
+     * The source document's text.
      *
-     * `generated_by` is `manual`, because a person decided what it says and a person created it.
-     * `owner_user_id` is that person: Wiki's submit-for-review gate is owner-or-System-Owner, so an
-     * article nobody owns would be an article nobody could hand on.
+     * The title is written in as the document's own H1 rather than left on the filename alone:
+     * the planner reads the text, and a source whose subject is only in its filename is a source
+     * whose subject the planner has to guess at.
      */
-    private function createPage(int $customerId, string $title, User $actor): EnterpriseWikiPage
+    private function sourceText(string $title, string $markdown): string
     {
-        $base = $this->slugBase($title);
-
-        // A slug collides with a page that already exists under the same name, which is ordinary —
-        // two activities may both produce "Sikkerhetskrav". Suffix rather than refuse: the user has
-        // already written the article, and losing it to a name clash would be absurd. The unique
-        // constraint on (customer_id, slug) is what decides, so a concurrent create is caught and
-        // retried rather than assumed away.
-        for ($attempt = 0; $attempt < 50; $attempt++) {
-            $slug = $attempt === 0 ? $base : $base.'-'.($attempt + 1);
-
-            if (EnterpriseWikiPage::query()->where('customer_id', $customerId)->where('slug', $slug)->exists()) {
-                continue;
-            }
-
-            try {
-                return EnterpriseWikiPage::query()->create([
-                    'customer_id' => $customerId,
-                    'owner_user_id' => (int) $actor->id,
-                    'slug' => $slug,
-                    'title' => $title,
-                    'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-                    'status' => EnterpriseWikiPage::STATUS_DRAFT,
-                    'generated_by' => EnterpriseWikiPage::GENERATED_BY_MANUAL,
-                ]);
-            } catch (UniqueConstraintViolationException) {
-                // Somebody took this slug between the check and the insert. Try the next one.
-                continue;
-            }
-        }
-
-        throw new RuntimeException("QualityActivityArticleService: could not allocate a slug for [{$base}].");
-    }
-
-    private function slugBase(string $title): string
-    {
-        $slug = Str::limit(Str::slug($title), 180, '');
-
-        return $slug !== '' ? $slug : 'kunnskapsartikkel-'.Str::lower(Str::random(8));
+        return Str::startsWith($markdown, '# ') ? $markdown : "# {$title}\n\n{$markdown}";
     }
 
     /**
-     * The article's paragraphs, as content blocks.
+     * What the source is called in Wiki → Kildedokumenter.
      *
-     * Blocks and not just Markdown, because blocks are what Wiki edits, lints, renders and anchors
-     * review against — a page stored as a single string of Markdown is a page the owner cannot edit
-     * one paragraph of afterwards. Split on blank lines, the same split
-     * EnterpriseWikiPageContentBlockService uses, so the keys and positions read the same as every
-     * other page's.
-     *
-     * Every block is `human_authored` with no source provenance at all. See the class note.
-     *
-     * @return list<array<string, mixed>>
+     * The article's own title, so somebody looking at the customer's sources recognises what it is
+     * without having to open it. `.md` because that is what the stored bytes are.
      */
-    private function blocks(string $markdown): array
+    private function sourceFilename(string $title): string
     {
-        $blocks = [];
+        $name = trim(preg_replace('/[\/\\\\:*?"<>|\x00-\x1F]+/u', ' ', $title) ?? '');
+        $name = trim((string) preg_replace('/\s+/u', ' ', $name));
 
-        foreach (preg_split("/\n{2,}/", trim($markdown)) ?: [] as $part) {
-            $text = trim($part);
-
-            if ($text === '') {
-                continue;
-            }
-
-            $blocks[] = [
-                'block_key' => 'block-'.str_pad((string) (count($blocks) + 1), 4, '0', STR_PAD_LEFT),
-                'position' => count($blocks),
-                'markdown' => $text,
-                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_HUMAN_AUTHORED,
-                'source_type' => null,
-                'source_id' => null,
-                'source_label' => null,
-                'source_hash' => null,
-                'document_version_hash' => null,
-                'source_element_key' => null,
-                'source_element_type' => null,
-                'source_row_key' => null,
-                'source_excerpt' => null,
-                'page_reference' => null,
-                'source_elements' => [],
-                'best_practice_reason' => null,
-                'link_intents' => [],
-            ];
+        if ($name === '') {
+            $name = 'Kunnskapsartikkel';
         }
 
-        return $blocks;
+        return Str::limit($name, 180, '').'.md';
     }
 }

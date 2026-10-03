@@ -624,11 +624,11 @@ function SubprocessMarker({ node, subprocess, tb }) {
  * characters: measuring needs a DOM, and this has to draw identically everywhere.
  */
 function ArticleMarker({ node, count, tb }) {
-    // One article is a case a reader meets routinely, and ":count kunnskapsartikler" reads as a bug
+    // One page is a case a reader meets routinely, and ":count kunnskapssider" reads as a bug
     // when the count is 1. The grammatical number is part of the string, so it is a key of its own.
     const template = count === 1
-        ? (tb.articles_count_one ?? ':count kunnskapsartikkel')
-        : (tb.articles_count ?? ':count kunnskapsartikler');
+        ? (tb.articles_count_one ?? ':count kunnskapsside')
+        : (tb.articles_count ?? ':count kunnskapssider');
     const text = template.replace(':count', String(count));
 
     // 16 for the glyph, 6.4 per character, 10 of padding.

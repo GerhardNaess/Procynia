@@ -2,17 +2,20 @@
 
 namespace Tests\Unit\Services\Quality;
 
+use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessBlueprint;
-use App\Models\User;
 use App\Services\EnterpriseWiki\GraphProjection\EnterpriseWikiGraphProjector;
-use App\Services\Quality\QualityActivityArticleService;
+use App\Services\Quality\QualityActivityKnowledgeResolver;
 use App\Services\Quality\QualityGraphProjector;
 use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Support\RecordingGraphProjectionService;
 use Tests\TestCase;
@@ -36,7 +39,7 @@ class QualityGraphProjectionTest extends TestCase
         $customer = $this->createWikiCustomer();
         $policy = $this->item($customer->id, QualityItem::TYPE_POLICY, 'Innkjopspolicy', 'POL-01');
 
-        (new QualityGraphProjector($writer))->projectItem($policy->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($policy->id);
 
         $this->assertCount(1, $writer->upsertedQualityItems);
         $this->assertSame($policy->id, $writer->upsertedQualityItems[0]['quality_item_id']);
@@ -60,7 +63,7 @@ class QualityGraphProjectionTest extends TestCase
         $this->link($customer->id, $policy->id, $page->id);
         $this->link($customer->id, $process->id, $page->id);
 
-        (new EnterpriseWikiGraphProjector($writer))->projectPage($page->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectPage($page->id);
 
         // The retired model could not express this at all: one page, two quality objects, and the
         // page itself unchanged by either.
@@ -77,7 +80,7 @@ class QualityGraphProjectionTest extends TestCase
 
         $this->relate($customer->id, $policy->id, $process->id, QualityItemRelation::TYPE_GOVERNS);
 
-        (new QualityGraphProjector($writer))->projectItem($policy->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($policy->id);
 
         $replaced = $writer->replacedQualityItemRelations[0];
 
@@ -97,7 +100,7 @@ class QualityGraphProjectionTest extends TestCase
 
         $this->relate($customer->id, $policy->id, $process->id, QualityItemRelation::TYPE_GOVERNS);
 
-        (new QualityGraphProjector($writer))->projectItem($policy->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($policy->id);
 
         $methods = array_column($writer->calls, 'method');
         $targetUpsert = null;
@@ -130,7 +133,7 @@ class QualityGraphProjectionTest extends TestCase
         // the projector does not depend on that having happened.
         $this->relate($customer->id, $policy->id, $foreignProcess->id, QualityItemRelation::TYPE_GOVERNS);
 
-        (new QualityGraphProjector($writer))->projectItem($policy->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($policy->id);
 
         $this->assertSame([], $writer->replacedQualityItemRelations[0]['relations']);
     }
@@ -145,7 +148,7 @@ class QualityGraphProjectionTest extends TestCase
 
         $this->link($customer->id, $process->id, $page->id, QualityItemWikiLink::LINK_TYPE_DOCUMENTS);
 
-        (new QualityGraphProjector($writer))->projectItem($process->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($process->id);
 
         $replaced = $writer->replacedQualityWikiLinks[0];
 
@@ -164,7 +167,7 @@ class QualityGraphProjectionTest extends TestCase
         $customer = $this->createWikiCustomer();
         $policy = $this->item($customer->id, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
 
-        (new QualityGraphProjector($writer))->projectItem($policy->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($policy->id);
 
         // Always called, including with an empty list: a relation or link removed in SQL leaves no
         // payload behind to carry its own removal.
@@ -184,7 +187,7 @@ class QualityGraphProjectionTest extends TestCase
         $this->relate($customer->id, $policy->id, $process->id, QualityItemRelation::TYPE_GOVERNS);
         $this->link($customer->id, $process->id, $page->id);
 
-        (new EnterpriseWikiGraphProjector($writer))->rebuildCustomer($customer->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->rebuildCustomer($customer->id);
 
         $rebuild = $writer->rebuilds[0];
 
@@ -219,7 +222,7 @@ class QualityGraphProjectionTest extends TestCase
         $this->articleFrom($customer->id, $process->id, 'vurder', $rutine->id);
         $this->articleFrom($customer->id, $process->id, 'vurder', $terskler->id);
 
-        (new QualityGraphProjector($writer))->projectItem($process->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($process->id);
 
         $replaced = $writer->replacedProcessActivities[0];
 
@@ -263,7 +266,7 @@ class QualityGraphProjectionTest extends TestCase
         $this->flowFor($customer->id, $process->id);
         $this->articleFrom($customer->id, $process->id, 'kontroller', $page->id);
 
-        (new QualityGraphProjector($writer))->projectItem($process->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($process->id);
 
         $replaced = $writer->replacedProcessActivities[0];
 
@@ -274,53 +277,43 @@ class QualityGraphProjectionTest extends TestCase
     }
 
     /**
-     * An article born from an activity is an ordinary page in the graph, edges and all.
+     * An activity is behind every page the run built from its source, not one.
      *
-     * Two things reach Neo4j about it, and they are separate: SOURCE_OF_ARTICLE, which says which
-     * activity produced it and is Kvalitet's own, and its ordinary wikilink relations, which are
-     * the Wiki's and come from the page's text. It used to have only the first, because the step
-     * that materializes the second never ran when Kvalitet created the page — so the article
-     * arrived in the graph attached to its activity and to nothing else in the Wiki.
+     * This is what the source direction buys. One article becomes an article page, a summary, and
+     * the concepts and entities the maintainer decision found in it — and all of them came out of
+     * the step somebody was standing on. A page the run merely patched did not.
      */
-    public function test_an_article_created_from_an_activity_projects_its_ordinary_wiki_relations(): void
+    public function test_an_activity_is_the_source_of_every_page_its_run_created(): void
     {
         $writer = new RecordingGraphProjectionService;
         $customer = $this->createWikiCustomer();
-        $target = $this->createWikiPageWithVersion($customer, 'Leverandorregisteret', 'Slik fores registeret.');
-
-        $actor = User::query()->create([
-            'customer_id' => $customer->id,
-            'name' => 'System Owner',
-            'email' => 'owner-'.uniqid().'@example.test',
-            'password' => bcrypt('secret-password'),
-            'role' => User::ROLE_CUSTOMER_ADMIN,
-            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
-            'is_active' => true,
-        ]);
 
         $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
         $this->flowFor($customer->id, $process->id);
 
-        $article = app(QualityActivityArticleService::class)->create(
-            QualityItem::query()->findOrFail($process->id),
-            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole(),
+        $article = $this->createWikiPageWithVersion($customer, 'Terskelverdier', 'Slik vurderes de.');
+        $concept = $this->createWikiPageWithVersion($customer, 'Anskaffelsesverdi', 'Hva det betyr.');
+        $patched = $this->createWikiPageWithVersion($customer, 'Innkjopspolicy', 'Fantes fra for.');
+
+        $this->sourceFrom(
+            $customer->id,
+            $process->id,
             'vurder',
-            'Terskelverdier ved anskaffelser',
-            "Vurderingen fores i [[{$target->slug}|leverandorregisteret]].",
-            $actor,
-        )['page'];
+            [$article->id, $concept->id],
+            $patched->id,
+        );
 
-        (new EnterpriseWikiGraphProjector($writer))->projectPage($article->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($process->id);
 
-        $outgoing = collect($writer->replacedOutgoing)
-            ->firstWhere('from_page_id', (int) $article->id);
+        $replaced = $writer->replacedProcessActivities[0];
 
-        $this->assertNotNull($outgoing, 'The article page was never projected.');
-        $this->assertSame([(int) $target->id], array_column($outgoing['links'], 'to_page_id'));
-
-        // The target node is written before the edge pointing at it, or the graph writer would
-        // match nothing and drop the relation without a trace.
-        $this->assertContains((int) $target->id, array_column($writer->upsertedPages, 'page_id'));
+        $this->assertSame(
+            [['vurder', (int) $article->id], ['vurder', (int) $concept->id]],
+            array_map(
+                static fn (array $link): array => [$link['activity_key'], (int) $link['page_id']],
+                $replaced['article_links'],
+            ),
+        );
     }
 
     public function test_an_activity_that_has_produced_nothing_is_still_an_activity(): void
@@ -332,7 +325,7 @@ class QualityGraphProjectionTest extends TestCase
 
         $this->flowFor($customer->id, $process->id);
 
-        (new QualityGraphProjector($writer))->projectItem($process->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($process->id);
 
         // The graph has to be able to answer "which activities have produced nothing", which it
         // cannot do if an activity with no articles is left out of it.
@@ -347,7 +340,7 @@ class QualityGraphProjectionTest extends TestCase
 
         $process = $this->item($customer->id, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
 
-        (new QualityGraphProjector($writer))->projectItem($process->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($process->id);
 
         $this->assertSame([], $writer->replacedProcessActivities[0]['activities']);
         $this->assertSame([], $writer->replacedProcessActivities[0]['article_links']);
@@ -360,7 +353,7 @@ class QualityGraphProjectionTest extends TestCase
 
         $policy = $this->item($customer->id, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
 
-        (new QualityGraphProjector($writer))->projectItem($policy->id);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->projectItem($policy->id);
 
         // quality_type is immutable, so a policy can never have left activities behind to clear.
         $this->assertSame([], $writer->replacedProcessActivities);
@@ -377,7 +370,7 @@ class QualityGraphProjectionTest extends TestCase
         $this->flowFor($customer->id, $process->id);
         $this->articleFrom($customer->id, $process->id, 'vurder', $page->id);
 
-        (new EnterpriseWikiGraphProjector($writer))->rebuildCustomer($customer->id);
+        (new EnterpriseWikiGraphProjector($writer, new QualityActivityKnowledgeResolver))->rebuildCustomer($customer->id);
 
         $rebuild = $writer->rebuilds[0];
 
@@ -402,7 +395,7 @@ class QualityGraphProjectionTest extends TestCase
 
         // The row is already gone from SQL by the time the job runs, so the customer cannot be
         // looked up — it has to travel with the delete.
-        (new QualityGraphProjector($writer))->deleteItem(7, 99);
+        (new QualityGraphProjector($writer, new QualityActivityKnowledgeResolver))->deleteItem(7, 99);
 
         $this->assertSame([['customer_id' => 7, 'quality_item_id' => 99]], $writer->deletedQualityItems);
     }
@@ -461,7 +454,10 @@ class QualityGraphProjectionTest extends TestCase
         );
     }
 
-    /** One article recorded as having come out of the named activity. */
+    /**
+     * One article recorded as having come out of the named activity, in the direction that
+     * predates sources: a single page written by hand. Still resolved, still projected.
+     */
     private function articleFrom(int $customerId, int $itemId, string $activityKey, int $pageId): void
     {
         QualityActivityWikiPage::query()->create([
@@ -470,6 +466,64 @@ class QualityGraphProjectionTest extends TestCase
             'activity_key' => $activityKey,
             'enterprise_wiki_page_id' => $pageId,
         ]);
+    }
+
+    /**
+     * The current direction: the activity produced a SOURCE, and the ingest run made these pages
+     * of it. All of them are what the activity is behind.
+     *
+     * @param  list<int>  $createdPageIds
+     */
+    private function sourceFrom(
+        int $customerId,
+        int $itemId,
+        string $activityKey,
+        array $createdPageIds,
+        int $updatedPageId = 0,
+    ): void {
+        $document = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customerId,
+            'original_filename' => 'Kunnskapsartikkel.md',
+            'file_path' => 'customers/'.$customerId.'/wiki-documents/'.Str::ulid().'.md',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => '# Kunnskapsartikkel',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+
+        QualityActivityWikiPage::query()->create([
+            'customer_id' => $customerId,
+            'quality_item_id' => $itemId,
+            'activity_key' => $activityKey,
+            'enterprise_wiki_document_id' => $document->id,
+        ]);
+
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customerId,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', (string) $document->id),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+        ]);
+
+        foreach ($createdPageIds as $pageId) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id' => $pageId,
+                'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            ]);
+        }
+
+        if ($updatedPageId !== 0) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id' => $updatedPageId,
+                'action' => EnterpriseWikiIngestRunPage::ACTION_PATCHED,
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            ]);
+        }
     }
 
     private function link(

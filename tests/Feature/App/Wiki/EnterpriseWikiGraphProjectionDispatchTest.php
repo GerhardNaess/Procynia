@@ -3,6 +3,8 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Jobs\EnterpriseWiki\ProjectEnterpriseWikiPageToGraph;
+use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\QualityItem;
@@ -65,20 +67,20 @@ class EnterpriseWikiGraphProjectionDispatchTest extends TestCase
     }
 
     /**
-     * An article created from a prosessaktivitet reaches the graph the ordinary way.
+     * An article created from a prosessaktivitet reaches the Wiki the ordinary way.
      *
-     * It used to reach it only as a bare node: Kvalitet wrote the page version and stopped, so the
-     * one step that materializes a page's relations — and, with them, dispatches this projection —
-     * never ran, and the article stood isolated in the Wiki graph however much its text linked.
-     * Kvalitet has no projection path of its own and must not grow one; what this holds onto is
-     * that it goes through the same one every other page goes through.
+     * It used to reach it as a hand-written page and nothing else: Kvalitet wrote the page version
+     * itself, so the ingest run — the only thing that ever plans a concept, an entity or a summary,
+     * and the thing that projects each page it generates — never ran at all. What Kvalitet hands
+     * over now is a SOURCE, and the run is the Wiki's. Kvalitet has no page-writing, linking or
+     * projection path of its own and must not grow one; what this holds onto is that it starts
+     * the same run the Kildedokumenter list starts.
      */
-    public function test_an_article_created_from_a_process_activity_dispatches_graph_projection(): void
+    public function test_an_article_created_from_a_process_activity_starts_the_ordinary_ingest_run(): void
     {
         Queue::fake();
 
         $customer = $this->createWikiCustomer();
-        $target = $this->createWikiPageWithVersion($customer, 'Leverandørregisteret', 'Slik føres registeret.');
 
         $actor = User::query()->create([
             'customer_id' => $customer->id,
@@ -120,24 +122,26 @@ class EnterpriseWikiGraphProjectionDispatchTest extends TestCase
             $blueprint,
             'kontroller',
             'Sikkerhetskrav ved vurdering av leverandører',
-            "## Dokumentasjon og resultat\n\nResultatet føres i [[{$target->slug}|leverandørregisteret]].",
+            "## Dokumentasjon og resultat\n\nResultatet føres i leverandørregisteret.",
             $actor,
         );
 
-        /** @var EnterpriseWikiPage $article */
-        $article = $created['page'];
+        // No page, and no page projection: there is nothing to project until the run has built
+        // something.
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+        Queue::assertNotPushed(ProjectEnterpriseWikiPageToGraph::class);
 
-        $this->assertDatabaseHas('enterprise_wiki_page_links', [
-            'customer_id' => $customer->id,
-            'from_page_id' => $article->id,
-            'to_page_id' => $target->id,
-            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
-        ]);
+        $this->assertTrue($created['run_started']);
+        $this->assertSame(
+            EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            $created['run']->source_type,
+        );
+        $this->assertSame((int) $created['document']->id, (int) $created['run']->source_id);
 
         Queue::assertPushed(
-            ProjectEnterpriseWikiPageToGraph::class,
-            fn (ProjectEnterpriseWikiPageToGraph $job): bool => $job->pageId === (int) $article->id
-                && $job->queue === ProjectEnterpriseWikiPageToGraph::QUEUE,
+            RunEnterpriseWikiDocumentFlow::class,
+            fn (RunEnterpriseWikiDocumentFlow $job): bool => $job->runId === (int) $created['run']->id
+                && $job->queue === RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
         );
     }
 }

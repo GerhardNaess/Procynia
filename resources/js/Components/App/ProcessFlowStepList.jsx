@@ -104,15 +104,15 @@ export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = 
     );
 }
 
-/** "2 kunnskapsartikler" — a count, never the titles: see the diagram's ArticleMarker. */
+/** "2 kunnskapssider" — a count, never the titles: see the diagram's ArticleMarker. */
 function articleLabel(tb, articles) {
     if (articles.length === 0) {
-        return tb.articles_none ?? 'Ingen kunnskapsartikkel';
+        return tb.articles_none ?? 'Ingen kunnskap';
     }
 
     const template = articles.length === 1
-        ? (tb.articles_count_one ?? ':count kunnskapsartikkel')
-        : (tb.articles_count ?? ':count kunnskapsartikler');
+        ? (tb.articles_count_one ?? ':count kunnskapsside')
+        : (tb.articles_count ?? ':count kunnskapssider');
 
     return template.replace(':count', String(articles.length));
 }

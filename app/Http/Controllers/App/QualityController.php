@@ -750,11 +750,13 @@ class QualityController extends Controller
     }
 
     /**
-     * Step two: the article the user settled on, as an Enterprise Wiki page in draft.
+     * Step two: the article the user settled on, as an ordinary Enterprise Wiki source.
      *
-     * What is created is an ordinary Wiki page — no special type, no Kvalitet-owned copy — and the
-     * user is taken to it, because everything that happens next (editing, review, approval,
-     * publication) happens in Wiki. Kvalitet keeps one row saying which activity it came out of.
+     * What is created is a source document in the customer's Wiki, and the ordinary ingest run is
+     * started on it — the same run an uploaded policy gets. Which pages it becomes, and of which
+     * types, is the maintainer decision's to make, not Kvalitet's. Kvalitet keeps one row saying
+     * which activity the source came out of, and the user stays on the flow: there is no page to
+     * send them to yet, and inventing one would be the very shortcut this replaced.
      *
      * The text sent is the user's, not the model's: they may have rewritten every word of the
      * draft, or written it from nothing. That is why this endpoint takes a title and a body and
@@ -794,7 +796,7 @@ class QualityController extends Controller
             ]);
         }
 
-        $created = $this->activityArticles->create(
+        $this->activityArticles->create(
             $item,
             $blueprint,
             $activityKey,
@@ -805,12 +807,12 @@ class QualityController extends Controller
 
         // The flow's activities and what they have produced are a relation the graph answers
         // questions about, so a created article has to reach it. afterCommit for the same reason
-        // saving a flow does: the job reads SQL.
+        // saving a flow does: the job reads SQL. The pages themselves arrive later, with the run —
+        // Wiki projects each one as it is generated, and the next projection of this process picks
+        // up the edges to them.
         ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
 
-        return redirect()
-            ->route('app.wiki.show', ['slug' => $created['page']->slug])
-            ->with('success', __('procynia.quality.flash.article_created'));
+        return back()->with('success', __('procynia.quality.flash.article_queued'));
     }
 
     public function storeRelation(Request $request): RedirectResponse
