@@ -1926,6 +1926,7 @@ class QualityController extends Controller
                 'download_url' => $evidence->document !== null
                     ? route('app.wiki.sources.download', ['document' => $evidence->document->id])
                     : null,
+                'document_removed' => $evidence->document_removed_at !== null,
                 'added_by' => $evidence->createdBy?->name,
                 'added_at' => $evidence->created_at?->toDateString(),
             ])

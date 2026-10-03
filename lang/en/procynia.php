@@ -170,6 +170,7 @@ return [
             'evidence_remove' => 'Remove',
             'evidence_remove_confirm' => 'Remove this evidence from the control? A linked document stays in the document archive.',
             'evidence_added_by' => 'Added by',
+            'evidence_document_removed' => 'The linked file no longer exists.',
             'control_activity_missing' => 'The activity no longer exists in the flow',
             'metadata_heading' => 'Governance',
             'structure_heading' => 'Structure',

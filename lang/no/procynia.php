@@ -170,6 +170,7 @@ return [
             'evidence_remove' => 'Fjern',
             'evidence_remove_confirm' => 'Fjern evidensen fra kontrollen? Et koblet dokument beholdes i dokumentarkivet.',
             'evidence_added_by' => 'Lagt til av',
+            'evidence_document_removed' => 'Tilknyttet fil finnes ikke lenger.',
             'control_activity_missing' => 'Aktiviteten finnes ikke lenger i flyten',
             'metadata_heading' => 'Styringsinformasjon',
             'structure_heading' => 'Struktur',

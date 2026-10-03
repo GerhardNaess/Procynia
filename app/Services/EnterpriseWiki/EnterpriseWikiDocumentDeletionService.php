@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\QualityItemDocument;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -302,7 +303,12 @@ class EnterpriseWikiDocumentDeletionService
                     ->delete();
             }
 
-            // Cascades: claim_source_reconciliation_attempts.
+            // Evidence on a quality control is history and outlives its file: it is released here,
+            // keeping its name and description. Every other quality_item_documents row goes with
+            // the file by cascade.
+            QualityItemDocument::releaseEvidenceFromDocument($document);
+
+            // Cascades: claim_source_reconciliation_attempts, quality_item_documents.
             $document->delete();
 
             // The state the active Wiki must be in for this deletion to be allowed to commit. Runs

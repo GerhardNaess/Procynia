@@ -19,6 +19,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * Evidence on a control is the one capacity that may exist without a file: it carries its own
  * title, and the file is optional. Every other capacity is a statement about a file.
+ *
+ * Evidence is also history: when its file is deleted, the evidence stays and only loses the file
+ * (see releaseEvidenceFromDocument()). Every other capacity goes with the file, by FK cascade.
  */
 class QualityItemDocument extends Model
 {
@@ -49,12 +52,39 @@ class QualityItemDocument extends Model
         'customer_id',
         'quality_item_id',
         'enterprise_wiki_document_id',
+        'document_removed_at',
         'relation_type',
         'title',
         'note',
         'source',
         'created_by_user_id',
     ];
+
+    protected $casts = [
+        'document_removed_at' => 'datetime',
+    ];
+
+    /**
+     * Detach evidence from a file that is about to be deleted, so the FK cascade leaves it standing.
+     *
+     * Name, description, author and timestamp are kept. Evidence attached before it had a name of
+     * its own takes the file's name, which is also what the check constraint requires of a
+     * file-less row. Must run before the document row is deleted, in the same transaction.
+     */
+    public static function releaseEvidenceFromDocument(EnterpriseWikiDocument $document): int
+    {
+        $evidence = static::query()
+            ->where('enterprise_wiki_document_id', $document->id)
+            ->where('relation_type', self::RELATION_TYPE_EVIDENCE);
+
+        (clone $evidence)->whereNull('title')->update(['title' => (string) $document->original_filename]);
+
+        return $evidence->update([
+            'enterprise_wiki_document_id' => null,
+            'document_removed_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
 
     public function customer(): BelongsTo
     {

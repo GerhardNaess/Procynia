@@ -365,6 +365,14 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
                                             {' · '}
                                         </>
                                     )}
+                                    {entry.document_removed && (
+                                        <>
+                                            <span className="italic">
+                                                {td.evidence_document_removed ?? 'Tilknyttet fil finnes ikke lenger.'}
+                                            </span>
+                                            {' · '}
+                                        </>
+                                    )}
                                     {entry.added_by ? `${td.evidence_added_by ?? 'Lagt til av'} ${entry.added_by}` : ''}
                                     {entry.added_by && entry.added_at ? ' · ' : ''}
                                     {entry.added_at ?? ''}

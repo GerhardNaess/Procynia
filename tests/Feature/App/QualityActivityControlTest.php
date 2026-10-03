@@ -14,6 +14,7 @@ use App\Models\QualityItemDocument;
 use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessRevision;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\QueryException;
@@ -307,6 +308,67 @@ class QualityActivityControlTest extends TestCase
 
         $this->assertSame(0, QualityItemDocument::query()->where('quality_item_id', $control->id)->count());
         $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
+    }
+
+    public function test_deleting_the_file_keeps_the_evidence_and_only_drops_the_file(): void
+    {
+        $customer = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $control = $this->control($customer);
+        $process = $this->process($customer);
+        $document = $this->document($customer, 'kontrollskjema-q1.pdf');
+
+        $this->actingAs($editor)
+            ->post("/app/quality/items/{$control->id}/evidence", [
+                'title' => 'Signert kontrollskjema Q1',
+                'description' => 'Signert av kvalitetsleder.',
+                'enterprise_wiki_document_id' => $document->id,
+            ])
+            ->assertSessionHasNoErrors();
+        $evidence = QualityItemDocument::query()->where('quality_item_id', $control->id)->sole();
+
+        // Evidence attached as a plain file, before evidence had a name, keeps the file's name.
+        $unnamed = QualityItemDocument::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'enterprise_wiki_document_id' => $document->id,
+            'relation_type' => QualityItemDocument::RELATION_TYPE_EVIDENCE,
+            'source' => QualityItemDocument::SOURCE_MANUAL,
+        ]);
+        // Every other capacity still follows the file.
+        $source = QualityItemDocument::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'enterprise_wiki_document_id' => $document->id,
+            'relation_type' => QualityItemDocument::RELATION_TYPE_SOURCE,
+            'source' => QualityItemDocument::SOURCE_MANUAL,
+        ]);
+
+        $result = app(EnterpriseWikiDocumentDeletionService::class)->delete($document, $editor);
+        $this->assertFalse($result['blocked']);
+        $this->assertNull(EnterpriseWikiDocument::query()->find($document->id));
+
+        $evidence->refresh();
+        $this->assertNull($evidence->enterprise_wiki_document_id);
+        $this->assertNotNull($evidence->document_removed_at);
+        $this->assertSame('Signert kontrollskjema Q1', $evidence->title);
+        $this->assertSame('Signert av kvalitetsleder.', $evidence->note);
+        $this->assertSame((int) $editor->id, (int) $evidence->created_by_user_id);
+        $this->assertNotNull($evidence->created_at);
+
+        $this->assertSame('kontrollskjema-q1.pdf', $unnamed->refresh()->title);
+        $this->assertNull(QualityItemDocument::query()->find($source->id));
+
+        $props = $this->actingAs($editor)->get("/app/quality/items/{$control->id}")->assertOk()->viewData('page')['props'];
+        $this->assertCount(1, $props['control_evidence']);
+        $row = $props['control_evidence'][0];
+        $this->assertSame('Signert kontrollskjema Q1', $row['title']);
+        $this->assertSame('Signert av kvalitetsleder.', $row['description']);
+        $this->assertSame($editor->name, $row['added_by']);
+        $this->assertNotNull($row['added_at']);
+        $this->assertNull($row['filename']);
+        $this->assertNull($row['download_url']);
+        $this->assertTrue($row['document_removed']);
     }
 
     public function test_quality_view_sees_evidence_but_cannot_add_or_remove_it(): void
