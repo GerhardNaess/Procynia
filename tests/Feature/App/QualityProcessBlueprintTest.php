@@ -613,28 +613,46 @@ class QualityProcessBlueprintTest extends TestCase
         $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
     }
 
-    public function test_deleting_the_working_flow_keeps_the_approved_history(): void
+    public function test_discarding_the_working_version_resets_it_to_the_revision_in_force(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
 
         $process = $this->process($customer, 'Avvikshåndtering');
         $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        QualityProcessBlueprint::query()->where('quality_item_id', $process->id)
+            ->update(['description' => 'Saksbehandler vurderer saken.']);
         $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        // Unapproved edits to both the flow and the description it was read out of.
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        QualityProcessBlueprint::query()->where('quality_item_id', $process->id)
+            ->update(['description' => 'Saksbehandler vurderer saken grundig.']);
 
         $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")
             ->assertSessionHasNoErrors()
             ->assertSessionHas('success', __('procynia.quality.flash.blueprint_discarded'));
 
-        $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
-        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+        // No new revision, and the working version is identical to the one in force.
+        $revisions = QualityProcessRevision::query()->where('quality_item_id', $process->id)->get();
+        $this->assertCount(1, $revisions);
+        $revision = $revisions->first();
 
-        // Discarding the working version is not unpublishing: revision 1 is still in force, and
-        // there is no working version left to differ from it.
+        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
+        $this->assertSame($revision->payload, $blueprint->payload);
+        $this->assertSame('Saksbehandler vurderer saken.', $blueprint->description);
+        $this->assertSame($revision->description, $blueprint->description);
+        $this->assertSame($revision->source, $blueprint->source);
+        $this->assertTrue($blueprint->isApproved());
+
+        // The Flyt tab still shows the flow, with no unpublished changes, ready to edit further.
         $props = $this->actingAs($owner)
             ->get("/app/quality/items/{$process->id}?tab=flow")
             ->viewData('page')['props'];
 
-        $this->assertNull($props['blueprint']);
+        $this->assertSame('Vurder saken', $props['blueprint']['nodes'][1]['label']);
+        $this->assertCount(3, $props['blueprint']['nodes']);
         $this->assertSame([
             'state' => 'current',
             'revision_number' => 1,

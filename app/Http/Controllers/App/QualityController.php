@@ -779,9 +779,9 @@ class QualityController extends Controller
      * Afterwards the Flyt tab falls back to its empty state, which is where a new flow is described
      * or generated — so `back()` lands the user exactly where the next step is.
      *
-     * Once a revision has been approved the same request is "Forkast arbeidsversjon": only the
-     * working version goes, the revisions stay, and the latest one is still in force. The action is
-     * identical; only what it is called, and what the user is told afterwards, differs.
+     * Once a revision has been approved the same request is "Forkast arbeidsversjon": the working
+     * version is reset to the latest revision rather than removed, so the Flyt tab still shows the
+     * process in force and editing carries on from it. The revisions are not touched.
      */
     public function destroyBlueprint(QualityItem $item): RedirectResponse
     {

@@ -177,8 +177,8 @@ export default function ProcessFlowPanel({
 
     const draft = { lanes, nodes, edges };
     const hasFlow = reviewing || blueprint !== null;
-    // Once a revision has been approved, removing the flow only discards the working version: the
-    // revision in force stays in force, so the action, its dialog and the empty state say so.
+    // Once a revision has been approved, removing the flow resets the working version to the
+    // revision in force instead, so the action and its dialog say so.
     const publishedRevision = publication?.revision_number ?? null;
     const discards = publishedRevision !== null;
 
@@ -217,11 +217,15 @@ export default function ProcessFlowPanel({
      * Remove the flow and nothing else. The server deletes the blueprint, the props come back with
      * `blueprint: null`, and the tab falls through to its own empty state — which is already where
      * a new flow is described or generated, so there is nowhere else to send the user.
+     *
+     * Once a revision is in force the server resets the working version to it instead, and the
+     * description box follows: it would otherwise still hold the discarded text.
      */
     function deleteFlow() {
         setSaving(true);
         router.delete(`/app/quality/items/${item.id}/blueprint`, {
             preserveScroll: true,
+            onSuccess: (page) => setDescription(page.props.blueprint?.description ?? ''),
             onFinish: () => {
                 setSaving(false);
                 setConfirmingDelete(false);
@@ -622,7 +626,7 @@ export default function ProcessFlowPanel({
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
                             {discards
-                                ? (tb.discard_working_version_removed ?? 'Arbeidsversjonen av flyten — endringene som ikke er godkjent og publisert, og beskrivelsen den ble lest ut av.')
+                                ? (tb.discard_working_version_removed ?? 'Endringene i arbeidsversjonen som ikke er godkjent og publisert, også i beskrivelsen.')
                                 : (tb.delete_flow_removed ?? 'Flyten med aktivitetene sine, og beskrivelsen den ble lest ut av.')}
                         </dd>
                     </div>
@@ -641,7 +645,8 @@ export default function ProcessFlowPanel({
 
                 <p className="mt-4 text-base text-slate-600">
                     {discards
-                        ? (tb.discard_working_version_next ?? 'Gjeldende revisjon fortsetter å gjelde. Etterpå kan du beskrive eller generere en ny arbeidsversjon.')
+                        ? (tb.discard_working_version_next ?? 'Arbeidsversjonen tilbakestilles til gjeldende revisjon :number, og du kan redigere videre derfra.')
+                            .replace(':number', String(publishedRevision))
                         : (tb.delete_flow_next ?? 'Etterpå kan du beskrive eller generere en ny flyt.')}
                 </p>
 

@@ -347,6 +347,19 @@ class QualityProcessBlueprintService
     {
         $this->assertProcess($customerId, $item);
 
+        // Once a revision has been approved this is "Forkast arbeidsversjon", and nothing is
+        // removed: the working version is reset to the revision in force — payload, description and
+        // source — so it is identical to what applies and the user carries on editing from there.
+        // No revision is written; they are only read here. An empty Flyt tab while a revision is in
+        // force would say there is no process to follow, which is false.
+        $latest = $this->latestRevision($customerId, $item);
+
+        if ($latest !== null) {
+            $this->resetToRevision($customerId, $item, $latest);
+
+            return;
+        }
+
         $blueprint = $this->forItem($customerId, $item);
 
         if ($blueprint === null) {
@@ -357,6 +370,34 @@ class QualityProcessBlueprintService
 
         // The activities were nodes in the graph. Reprojecting the item is what clears them: the
         // projector reads SQL, finds no blueprint, and replaces the activity set with an empty one.
+        ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
+    }
+
+    /**
+     * Make the working version exactly the given revision again.
+     *
+     * Written straight from the revision rather than through store(): the payload was normalised and
+     * validated when it was approved, and running it through normalise() again could reshape it —
+     * a subprocess that has since been deleted, say — so that it no longer equals what is in force.
+     * Upserted, so a process whose working version is already gone gets one back.
+     */
+    private function resetToRevision(int $customerId, QualityItem $item, QualityProcessRevision $revision): void
+    {
+        QualityProcessBlueprint::query()->updateOrCreate(
+            ['quality_item_id' => $item->id],
+            [
+                'customer_id' => $customerId,
+                'payload' => $revision->payload,
+                'description' => $revision->description,
+                'source' => $revision->source,
+                'status' => QualityProcessBlueprint::STATUS_APPROVED,
+                // A fresh timestamp is what tells the editor a new flow arrived and to reload from it.
+                'generated_at' => now(),
+                'approved_at' => $revision->approved_at,
+                'approved_by_user_id' => $revision->approved_by_user_id,
+            ],
+        );
+
         ProjectQualityItemToGraph::dispatch((int) $item->id)->afterCommit();
     }
 
