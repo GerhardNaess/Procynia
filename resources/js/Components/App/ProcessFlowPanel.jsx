@@ -153,6 +153,11 @@ export default function ProcessFlowPanel({
 
     const reviewing = proposal !== null && ! dismissed;
 
+    // What the server stored, as a value. generated_at is to the second, so two saves from the
+    // diagram inside one second would otherwise leave the editor holding the flow before the
+    // second — and the next save would write that stale flow back.
+    const storedFlow = JSON.stringify([blueprint?.lanes ?? null, blueprint?.nodes ?? null, blueprint?.edges ?? null]);
+
     // The server is authoritative after every round trip — generate, save and approve all come back
     // through props. Resetting on the blueprint's identity rather than on every render is what lets
     // the editor hold unsaved work in between. A proposal arriving is the same kind of event: new
@@ -180,7 +185,7 @@ export default function ProcessFlowPanel({
         if (proposal?.description) {
             setDescription(proposal.description);
         }
-    }, [blueprint?.id, blueprint?.generated_at, blueprint?.approved_at, proposal]);
+    }, [blueprint?.id, blueprint?.generated_at, blueprint?.approved_at, storedFlow, proposal]);
 
     // Going back to the stored flow has to put the stored flow back in the editor, or "Endre
     // beskrivelsen" would leave the proposal on screen looking saved.
