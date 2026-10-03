@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import { publicationLabel, publicationTone } from '../../../Support/processPublication';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import ProcessFlowPanel from '../../../Components/App/ProcessFlowPanel';
 import {
@@ -76,6 +77,8 @@ export default function QualityItem() {
         active_tab: activeTab = 'document',
         has_flow: hasFlow = false,
         blueprint = null,
+        blueprint_revisions: blueprintRevisions = [],
+        process_publication: publication = null,
         flow_proposal: flowProposal = null,
         flow_error: flowError = null,
         flow_ai_available: flowAiAvailable = false,
@@ -114,9 +117,15 @@ export default function QualityItem() {
                         <StatusBadge tone={TYPE_TONES[item.quality_type] ?? 'slate'}>
                             {typeLabels?.[item.quality_type] ?? item.quality_type}
                         </StatusBadge>
-                        <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
-                            {statusLabels?.[item.status] ?? item.status}
-                        </StatusBadge>
+                        {publication ? (
+                            <StatusBadge tone={publicationTone(publication)}>
+                                {publicationLabel(publication, tq.publication)}
+                            </StatusBadge>
+                        ) : (
+                            <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
+                                {statusLabels?.[item.status] ?? item.status}
+                            </StatusBadge>
+                        )}
                         {item.code && <span className="text-base text-slate-500">{item.code}</span>}
                     </div>
                     {/* No handlingsmeny here. Deleting a whole process is done from the Kvalitet
@@ -138,6 +147,8 @@ export default function QualityItem() {
                         tq={tq}
                         item={item}
                         blueprint={blueprint}
+                        revisions={blueprintRevisions}
+                        publication={publication}
                         canCreate={canCreate}
                         canEdit={canEdit}
                         canApprove={canApprove}

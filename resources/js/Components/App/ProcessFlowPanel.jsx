@@ -69,6 +69,12 @@ export default function ProcessFlowPanel({
     tq,
     item,
     blueprint,
+    // Approved revisions, newest first. They outlive the working version, so they are shown even
+    // when the process has no flow at the moment.
+    revisions = [],
+    // Whether the process is published and which revision is in force — derived server-side from
+    // the revisions. The working version's own status is not the answer to that question.
+    publication = null,
     // One prop per permission the controller gates on, rather than a single "may manage". Saving
     // the flow, vouching for it and starting it over are three decisions the customer may hand to
     // three different roles, so the tab has to be able to offer them one at a time.
@@ -96,6 +102,9 @@ export default function ProcessFlowPanel({
     const [isDirty, setIsDirty] = useState(false);
     const [saving, setSaving] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
+    // Why the last "Godkjenn og publiser" was refused: a heading and one line per problem the flow
+    // validator found in the stored flow.
+    const [approvalErrors, setApprovalErrors] = useState(null);
     // The row-by-row editor is folded away by default. It is the fallback for a correction the
     // description could not express, not the way a flow is normally built — and left open it is
     // the loudest thing on the tab, so the diagram and the steps, which are what the user came to
@@ -137,6 +146,7 @@ export default function ProcessFlowPanel({
         setNodes(source?.nodes ?? []);
         setEdges(source?.edges ?? []);
         setIsDirty(false);
+        setApprovalErrors(null);
         setDismissed(false);
         setDeclined([]);
         // A new flow arrived from the server, so whatever the editor was open for is settled.
@@ -167,6 +177,10 @@ export default function ProcessFlowPanel({
 
     const draft = { lanes, nodes, edges };
     const hasFlow = reviewing || blueprint !== null;
+    // Once a revision has been approved, removing the flow resets the working version to the
+    // revision in force instead, so the action and its dialog say so.
+    const publishedRevision = publication?.revision_number ?? null;
+    const discards = publishedRevision !== null;
 
     function edit(setter) {
         return (value) => {
@@ -185,8 +199,16 @@ export default function ProcessFlowPanel({
 
     function approve() {
         setSaving(true);
+        setApprovalErrors(null);
         router.post(`/app/quality/items/${item.id}/blueprint/approve`, {}, {
             preserveScroll: true,
+            onError: (errors) => setApprovalErrors({
+                heading: errors.blueprint ?? null,
+                problems: Object.keys(errors)
+                    .filter((key) => key.startsWith('blueprint_problems.'))
+                    .sort((a, b) => Number(a.split('.')[1]) - Number(b.split('.')[1]))
+                    .map((key) => errors[key]),
+            }),
             onFinish: () => setSaving(false),
         });
     }
@@ -195,11 +217,15 @@ export default function ProcessFlowPanel({
      * Remove the flow and nothing else. The server deletes the blueprint, the props come back with
      * `blueprint: null`, and the tab falls through to its own empty state — which is already where
      * a new flow is described or generated, so there is nowhere else to send the user.
+     *
+     * Once a revision is in force the server resets the working version to it instead, and the
+     * description box follows: it would otherwise still hold the discarded text.
      */
     function deleteFlow() {
         setSaving(true);
         router.delete(`/app/quality/items/${item.id}/blueprint`, {
             preserveScroll: true,
+            onSuccess: (page) => setDescription(page.props.blueprint?.description ?? ''),
             onFinish: () => {
                 setSaving(false);
                 setConfirmingDelete(false);
@@ -380,11 +406,24 @@ export default function ProcessFlowPanel({
                             canEdit={canEdit}
                         />
                     )
-                    : blueprint && <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} />}
+                    : (
+                        <StatusLine
+                            tq={tq}
+                            blueprint={blueprint}
+                            publication={publication}
+                            isDirty={isDirty}
+                            current={revisions[0] ?? null}
+                        />
+                    )}
 
                 {! hasFlow && (
                     <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-base text-slate-600">
-                        {tb.empty ?? 'Ingen flyt er laget for denne prosessen ennå.'}
+                        {publication?.state === 'retired'
+                            ? (tb.empty_retired ?? 'Det finnes ingen arbeidsversjon av flyten. De godkjente revisjonene ligger i historikken nedenfor.')
+                            : discards
+                            ? (tb.empty_published ?? 'Det finnes ingen arbeidsversjon. Gjeldende revisjon :number gjelder fortsatt.')
+                                .replace(':number', String(publishedRevision))
+                            : (tb.empty ?? 'Ingen flyt er laget for denne prosessen ennå.')}
                     </p>
                 )}
             </section>
@@ -507,14 +546,17 @@ export default function ProcessFlowPanel({
                                         onClick={approve}
                                         // Approving unsaved edits would vouch for a flow the database
                                         // does not hold. Save first, then approve what was saved.
-                                        disabled={saving || isDirty || blueprint.status === 'approved'}
+                                        // Nothing to publish when the saved flow is what is in force.
+                                        disabled={saving || isDirty || (
+                                            publication?.revision_number != null && ! publication?.has_unpublished_changes
+                                        )}
                                     >
-                                        {tb.approve ?? 'Godkjenn struktur'}
+                                        {tb.approve ?? 'Godkjenn og publiser'}
                                     </button>
                                 )}
                                 {canEdit && (
                                     <p className="text-sm text-slate-500">
-                                        {tb.approval_cleared_help ?? 'Endrer du strukturen, faller godkjenningen bort.'}
+                                        {tb.approval_cleared_help ?? 'Endringer du lagrer, er upubliserte til flyten godkjennes og publiseres.'}
                                     </p>
                                 )}
                                 {/* Pushed to the far end on purpose. Lagre and Godkjenn are two
@@ -526,14 +568,29 @@ export default function ProcessFlowPanel({
                                         onClick={() => setConfirmingDelete(true)}
                                         disabled={saving}
                                     >
-                                        {tb.delete_flow ?? 'Slett flyt'}
+                                        {discards
+                                            ? (tb.discard_working_version ?? 'Forkast arbeidsversjon')
+                                            : (tb.delete_flow ?? 'Slett flyt')}
                                     </button>
+                                )}
+                            </div>
+                        )}
+
+                        {approvalErrors && ! reviewing && (
+                            <div role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-base text-rose-800">
+                                {approvalErrors.heading && <p className="font-semibold">{approvalErrors.heading}</p>}
+                                {approvalErrors.problems.length > 0 && (
+                                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                                        {approvalErrors.problems.map((problem) => <li key={problem}>{problem}</li>)}
+                                    </ul>
                                 )}
                             </div>
                         )}
                     </section>
                 </>
             )}
+
+            {revisions.length > 0 && <RevisionHistory tb={tb} revisions={revisions} />}
 
             <ActivityArticlePanel
                 tb={tb}
@@ -556,7 +613,9 @@ export default function ProcessFlowPanel({
                 titleId="process-flow-delete-title"
             >
                 <h2 id="process-flow-delete-title" className="text-xl font-semibold tracking-tight text-slate-950">
-                    {tb.delete_flow_title ?? 'Slett prosessflyten?'}
+                    {discards
+                        ? (tb.discard_working_version_title ?? 'Forkast arbeidsversjonen?')
+                        : (tb.delete_flow_title ?? 'Slett prosessflyten?')}
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
 
@@ -566,7 +625,9 @@ export default function ProcessFlowPanel({
                             {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
-                            {tb.delete_flow_removed ?? 'Flyten med aktivitetene sine, og beskrivelsen den ble lest ut av.'}
+                            {discards
+                                ? (tb.discard_working_version_removed ?? 'Endringene i arbeidsversjonen som ikke er godkjent og publisert, også i beskrivelsen.')
+                                : (tb.delete_flow_removed ?? 'Flyten med aktivitetene sine, og beskrivelsen den ble lest ut av.')}
                         </dd>
                     </div>
                     <div>
@@ -574,20 +635,30 @@ export default function ProcessFlowPanel({
                             {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
-                            {tb.delete_flow_kept ?? 'Prosessen selv, dokumentdataene og kunnskapen i Wiki — også artiklene aktivitetene har vært kilde til. Det er bare flyten som starter på nytt.'}
+                            {discards
+                                ? (tb.discard_working_version_kept ?? 'Gjeldende revisjon :number og alle tidligere godkjente revisjoner, prosessen selv, dokumentdataene og kunnskapen i Wiki.')
+                                    .replace(':number', String(publishedRevision))
+                                : (tb.delete_flow_kept ?? 'Prosessen selv, dokumentdataene og kunnskapen i Wiki — også artiklene aktivitetene har vært kilde til. Det er bare flyten som starter på nytt.')}
                         </dd>
                     </div>
                 </dl>
 
                 <p className="mt-4 text-base text-slate-600">
-                    {tb.delete_flow_next ?? 'Etterpå kan du beskrive eller generere en ny flyt.'}
+                    {discards
+                        ? (tb.discard_working_version_next ?? 'Arbeidsversjonen tilbakestilles til gjeldende revisjon :number, og du kan redigere videre derfra.')
+                            .replace(':number', String(publishedRevision))
+                        : (tb.delete_flow_next ?? 'Etterpå kan du beskrive eller generere en ny flyt.')}
                 </p>
 
                 <div className="mt-6 flex flex-wrap gap-3">
                     <button type="button" className={DESTRUCTIVE_CONFIRM} onClick={deleteFlow} disabled={saving}>
-                        {saving
-                            ? (tb.delete_flow_deleting ?? 'Sletter …')
-                            : (tb.delete_flow_confirm ?? 'Slett flyt')}
+                        {discards
+                            ? (saving
+                                ? (tb.discard_working_version_discarding ?? 'Forkaster …')
+                                : (tb.discard_working_version ?? 'Forkast arbeidsversjon'))
+                            : (saving
+                                ? (tb.delete_flow_deleting ?? 'Sletter …')
+                                : (tb.delete_flow_confirm ?? 'Slett flyt'))}
                     </button>
                     <button
                         type="button"
@@ -1072,32 +1143,82 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
     );
 }
 
-function StatusLine({ tb, blueprint, isDirty }) {
-    const statusLabels = tb.statuses ?? {};
+/**
+ * Where the process stands: not published, the revision in force, or retired — and, separately,
+ * whether the working version has moved on from what is in force. Unsaved edits count as
+ * unpublished changes too; they are not even saved yet.
+ */
+function StatusLine({ tq, blueprint, publication, isDirty, current }) {
+    const tb = tq.blueprint ?? {};
+    const tp = tq.publication ?? {};
     const sourceLabels = tb.sources ?? {};
-    const approved = blueprint.status === 'approved' && ! isDirty;
+    const state = publication?.state ?? 'unpublished';
+    const hasChanges = current !== null && state !== 'retired'
+        && (publication?.has_unpublished_changes || isDirty);
 
     return (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-            <StatusBadge tone={approved ? 'green' : 'slate'}>
-                {statusLabels?.[approved ? 'approved' : 'draft'] ?? blueprint.status}
+            <StatusBadge tone={state === 'retired' || state === 'unpublished' ? 'slate' : 'green'}>
+                {state === 'retired' && (tp.retired ?? 'Utgått')}
+                {state === 'unpublished' && (tp.unpublished ?? 'Ikke publisert')}
+                {(state === 'current' || state === 'current_with_changes')
+                    && (tp.flow_current ?? 'Gjeldende revisjon :number')
+                        .replace(':number', String(publication?.revision_number ?? '—'))}
             </StatusBadge>
-            <StatusBadge tone="slate">{sourceLabels?.[blueprint.source] ?? blueprint.source}</StatusBadge>
+
+            {hasChanges && (
+                <StatusBadge tone="amber">
+                    {tp.unpublished_changes ?? 'Arbeidsversjonen har upubliserte endringer'}
+                </StatusBadge>
+            )}
+
+            {blueprint && (
+                <StatusBadge tone="slate">{sourceLabels?.[blueprint.source] ?? blueprint.source}</StatusBadge>
+            )}
 
             <span className="text-sm text-slate-500">
-                {approved
-                    ? (tb.approved_notice ?? 'Strukturen er godkjent av :name :date.')
-                        .replace(':name', blueprint.approved_by_name ?? '—')
-                        .replace(':date', blueprint.approved_at ?? '—')
-                    : (tb.draft_notice ?? 'Strukturen er et utkast og er ikke godkjent.')}
+                {state === 'unpublished' && (tp.unpublished_help
+                    ?? 'Prosessen blir gjeldende når flyten er godkjent og publisert første gang.')}
+                {state === 'retired' && current && (tp.retired_help
+                    ?? 'Prosessen er utgått. Siste revisjon (:number) er beholdt i historikken, men gjelder ikke lenger.')
+                    .replace(':number', String(current.revision_number))}
+                {state !== 'unpublished' && state !== 'retired' && current
+                    && (tb.history_meta ?? 'Godkjent av :name :date')
+                        .replace(':name', current.approved_by_name ?? '—')
+                        .replace(':date', current.approved_at ?? '—')}
             </span>
 
-            {blueprint.generated_at && (
+            {blueprint?.generated_at && (
                 <span className="text-sm text-slate-400">
                     {(tb.generated_notice ?? 'Sist generert :date.').replace(':date', blueprint.generated_at)}
                 </span>
             )}
         </div>
+    );
+}
+
+/**
+ * What has been approved, newest first. A record, not an editor: no diff and no rollback yet.
+ */
+function RevisionHistory({ tb, revisions }) {
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tb.history_heading ?? 'Godkjente revisjoner'}</h2>
+            <ul className="mt-4 divide-y divide-slate-100">
+                {revisions.map((revision) => (
+                    <li key={revision.revision_number} className="flex flex-wrap items-baseline gap-x-3 py-2">
+                        <span className="text-base font-semibold text-slate-900">
+                            {(tb.history_row ?? 'Revisjon :number').replace(':number', String(revision.revision_number))}
+                        </span>
+                        <span className="text-sm text-slate-500">
+                            {(tb.history_meta ?? 'Godkjent av :name :date')
+                                .replace(':name', revision.approved_by_name ?? '—')
+                                .replace(':date', revision.approved_at ?? '—')}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </section>
     );
 }
 

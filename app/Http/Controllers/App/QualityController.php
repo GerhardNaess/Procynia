@@ -139,6 +139,9 @@ class QualityController extends Controller
 
         $tab = $this->detailTab($request, $item);
         $subprocessView = $this->subprocessView($customerId, $item, $request);
+        $publication = $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
+            ? $this->blueprints->publicationState((int) $customerId, $item)
+            : null;
 
         return Inertia::render('App/Quality/Item', [
             'item' => $this->itemDetail($item),
@@ -147,6 +150,15 @@ class QualityController extends Controller
             // strip exists at all — a policy's page is unchanged by any of this.
             'has_flow' => $item->quality_type === QualityItem::TYPE_PROCESS,
             'blueprint' => $this->blueprintPayload($customerId, $item),
+            // Whether the process is published, which revision is in force and whether the working
+            // version has moved on — read from the revisions, never from the status field.
+            'process_publication' => $publication,
+            // Approved revisions, newest first. Separate from `blueprint` because they outlive it:
+            // the working version can be edited back to draft, or deleted, and what was approved
+            // before is still here.
+            'blueprint_revisions' => $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
+                ? $this->blueprints->history((int) $customerId, $item)
+                : [],
             // Drill-down. The trail is in the URL, so the diagram area is server-driven exactly as
             // the tab is: a subprocess view survives a reload, a back button and a shared link, and
             // it is read from the subprocess's own blueprint every time it is opened.
@@ -164,7 +176,7 @@ class QualityController extends Controller
             'flow_ai_available' => $item->quality_type === QualityItem::TYPE_PROCESS
                 && ProcessFlowInterpretationAiClient::isAvailable(),
             'permissions' => $this->permissionPayload($user),
-            'statuses' => QualityItem::STATUSES,
+            'statuses' => $this->statusOptions($item, $publication),
             'frequencies' => QualityControlDetail::FREQUENCIES,
             'link_types' => QualityItemWikiLink::LINK_TYPES,
             'owner_options' => $this->ownerOptions($customerId),
@@ -213,8 +225,14 @@ class QualityController extends Controller
             $this->attachUploadedDocument($request->file('file'), (int) $customerId, $item, $user);
         }
 
+        // A new process has nothing in force until its flow is described and approved, so that is
+        // where the user is sent. Every other type has no flow and lands on its document.
+        $route = $item->quality_type === QualityItem::TYPE_PROCESS
+            ? ['item' => $item->id, 'tab' => 'flow']
+            : ['item' => $item->id];
+
         return redirect()
-            ->route('app.quality.items.show', ['item' => $item->id])
+            ->route('app.quality.items.show', $route)
             ->with('success', __('procynia.quality.flash.item_created'));
     }
 
@@ -734,7 +752,8 @@ class QualityController extends Controller
      * Vouch for the flow as it stands.
      *
      * Same authority as every other statement about the kvalitetssystem — no new permission. The
-     * approval covers the payload it was given, so any later edit clears it; see the service.
+     * stored flow must pass the flow validator first; a valid approval is recorded as an immutable
+     * revision, and a later edit clears the working version's approval but never the revision.
      */
     public function approveBlueprint(QualityItem $item): RedirectResponse
     {
@@ -759,6 +778,10 @@ class QualityController extends Controller
      *
      * Afterwards the Flyt tab falls back to its empty state, which is where a new flow is described
      * or generated — so `back()` lands the user exactly where the next step is.
+     *
+     * Once a revision has been approved the same request is "Forkast arbeidsversjon": the working
+     * version is reset to the latest revision rather than removed, so the Flyt tab still shows the
+     * process in force and editing carries on from it. The revisions are not touched.
      */
     public function destroyBlueprint(QualityItem $item): RedirectResponse
     {
@@ -768,9 +791,13 @@ class QualityController extends Controller
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_DELETE);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
+        $published = $this->blueprints->latestRevision((int) $customerId, $item) !== null;
+
         $this->blueprints->delete((int) $customerId, $item);
 
-        return back()->with('success', __('procynia.quality.flash.blueprint_deleted'));
+        return back()->with('success', __($published
+            ? 'procynia.quality.flash.blueprint_discarded'
+            : 'procynia.quality.flash.blueprint_deleted'));
     }
 
     /**
@@ -1111,9 +1138,10 @@ class QualityController extends Controller
             ->get();
 
         $producedPages = $this->producedWikiPagesByItem($customerId, $items);
+        $publications = $customerId === null ? [] : $this->blueprints->publicationStates($customerId, $items);
 
         return $items
-            ->map(function (QualityItem $item) use ($producedPages, $user): array {
+            ->map(function (QualityItem $item) use ($producedPages, $publications, $user): array {
                 /** @var Collection<int, EnterpriseWikiPage> $pages */
                 $pages = $producedPages[(int) $item->id] ?? collect();
 
@@ -1123,6 +1151,7 @@ class QualityController extends Controller
                     'title' => $item->title,
                     'code' => $item->code,
                     'status' => $item->status,
+                    'publication' => $publications[(int) $item->id] ?? null,
                     'owner_name' => $item->owner?->name,
                     'next_review_at' => $item->next_review_at?->toDateString(),
                     'wiki_link_count' => (int) $item->wiki_links_count,
@@ -1333,6 +1362,28 @@ class QualityController extends Controller
         }
 
         return $this->subprocesses->options($customerId, $item);
+    }
+
+    /**
+     * The statuses the metadata form may offer. A process is limited by its publication — see
+     * QualityItem::processStatusesFor() — and keeps its stored status in the list even when that
+     * predates the rule, so the select shows what is stored rather than silently picking another.
+     *
+     * @param  array{state: string, revision_number: ?int, has_unpublished_changes: bool}|null  $publication
+     * @return list<string>
+     */
+    private function statusOptions(QualityItem $item, ?array $publication): array
+    {
+        if ($item->quality_type !== QualityItem::TYPE_PROCESS) {
+            return QualityItem::STATUSES;
+        }
+
+        $allowed = QualityItem::processStatusesFor(($publication['revision_number'] ?? null) !== null);
+
+        return array_values(array_filter(
+            QualityItem::STATUSES,
+            static fn (string $status): bool => in_array($status, $allowed, true) || $status === $item->status,
+        ));
     }
 
     /**

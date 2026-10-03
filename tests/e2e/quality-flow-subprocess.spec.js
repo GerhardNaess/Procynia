@@ -61,7 +61,7 @@ test.describe('drilling into a subprocess', () => {
 
         // Nothing that edits the parent is on screen while a child is.
         await expect(page.getByRole('button', { name: 'Lagre struktur' })).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'Godkjenn struktur' })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Godkjenn og publiser' })).toHaveCount(0);
 
         // And back, in one click, to the process we came from.
         await trail.getByRole('button', { name: `Tilbake til ${PARENT}` }).click();

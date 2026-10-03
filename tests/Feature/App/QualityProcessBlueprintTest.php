@@ -16,6 +16,7 @@ use App\Models\Nationality;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
@@ -501,6 +502,208 @@ class QualityProcessBlueprintTest extends TestCase
         $this->assertNull($blueprint->approved_at);
     }
 
+    // ---------------------------------------------------------------------
+    // Approved revisions
+    // ---------------------------------------------------------------------
+
+    /**
+     * normalise() keeps a flow drawable; approval asks the stronger question. A flow with no end is
+     * drawable and still not something anybody can vouch for.
+     */
+    public function test_an_incoherent_flow_cannot_be_approved_and_says_why(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $flow = $this->simpleFlow();
+        array_pop($flow['nodes']);
+        array_pop($flow['edges']);
+
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $flow)->assertSessionHasNoErrors();
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/blueprint/approve")
+            ->assertSessionHasErrors([
+                'blueprint' => __('procynia.quality.errors.blueprint_invalid'),
+                'blueprint_problems.0',
+            ]);
+
+        $problems = collect(session('errors')->getBag('default')->messages())
+            ->filter(fn ($messages, $key) => str_starts_with($key, 'blueprint_problems.'))
+            ->flatten()
+            ->all();
+
+        $this->assertContains(__('procynia.quality.flow_problems.no_end'), $problems);
+        $this->assertSame(
+            QualityProcessBlueprint::STATUS_DRAFT,
+            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->status,
+        );
+        $this->assertSame(0, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_approving_records_an_immutable_revision_of_exactly_what_was_approved(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
+        $revision = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
+
+        $this->assertSame(1, $revision->revision_number);
+        $this->assertEquals($blueprint->payload, $revision->payload);
+        $this->assertSame(QualityProcessBlueprint::SOURCE_MANUAL, $revision->source);
+        $this->assertSame((int) $owner->id, (int) $revision->approved_by_user_id);
+        $this->assertSame($owner->name, $revision->approved_by_name);
+        $this->assertNotNull($revision->approved_at);
+
+        $this->expectException(\LogicException::class);
+        $revision->update(['revision_number' => 9]);
+    }
+
+    /**
+     * The point of the revision: editing the working version sends it back to draft, and what was
+     * approved before is still there, untouched, until the next approval adds to it.
+     */
+    public function test_editing_after_approval_keeps_the_approved_revision_and_the_next_approval_adds_one(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $first = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
+        $approvedPayload = $first->payload;
+
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+
+        $this->assertSame(
+            QualityProcessBlueprint::STATUS_DRAFT,
+            QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole()->status,
+        );
+        $this->assertEquals($approvedPayload, $first->fresh()->payload);
+        $this->assertSame('Vurder saken', $first->fresh()->payload['nodes'][1]['label']);
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $revisions = QualityProcessRevision::query()
+            ->where('quality_item_id', $process->id)
+            ->orderBy('revision_number')
+            ->get();
+
+        $this->assertSame([1, 2], $revisions->pluck('revision_number')->all());
+        $this->assertSame('Vurder saken', $revisions[0]->payload['nodes'][1]['label']);
+        $this->assertSame('Vurder saken grundig', $revisions[1]->payload['nodes'][1]['label']);
+    }
+
+    public function test_approving_an_already_approved_flow_again_does_not_write_a_second_revision(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_discarding_the_working_version_resets_it_to_the_revision_in_force(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        QualityProcessBlueprint::query()->where('quality_item_id', $process->id)
+            ->update(['description' => 'Saksbehandler vurderer saken.']);
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        // Unapproved edits to both the flow and the description it was read out of.
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        QualityProcessBlueprint::query()->where('quality_item_id', $process->id)
+            ->update(['description' => 'Saksbehandler vurderer saken grundig.']);
+
+        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', __('procynia.quality.flash.blueprint_discarded'));
+
+        // No new revision, and the working version is identical to the one in force.
+        $revisions = QualityProcessRevision::query()->where('quality_item_id', $process->id)->get();
+        $this->assertCount(1, $revisions);
+        $revision = $revisions->first();
+
+        $blueprint = QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->sole();
+        $this->assertSame($revision->payload, $blueprint->payload);
+        $this->assertSame('Saksbehandler vurderer saken.', $blueprint->description);
+        $this->assertSame($revision->description, $blueprint->description);
+        $this->assertSame($revision->source, $blueprint->source);
+        $this->assertTrue($blueprint->isApproved());
+
+        // The Flyt tab still shows the flow, with no unpublished changes, ready to edit further.
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertSame('Vurder saken', $props['blueprint']['nodes'][1]['label']);
+        $this->assertCount(3, $props['blueprint']['nodes']);
+        $this->assertSame([
+            'state' => 'current',
+            'revision_number' => 1,
+            'has_unpublished_changes' => false,
+        ], $props['process_publication']);
+        $this->assertSame(QualityItem::STATUS_ACTIVE, $process->fresh()->status);
+    }
+
+    public function test_deleting_a_flow_that_was_never_published_is_reported_as_deleted(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+
+        $this->actingAs($owner)->delete("/app/quality/items/{$process->id}/blueprint")
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', __('procynia.quality.flash.blueprint_deleted'));
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props'];
+
+        $this->assertSame('unpublished', $props['process_publication']['state']);
+    }
+
+    public function test_the_page_carries_the_revision_history_newest_first(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->process($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $history = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['blueprint_revisions'];
+
+        $this->assertSame([2, 1], array_column($history, 'revision_number'));
+        $this->assertSame($owner->name, $history[0]['approved_by_name']);
+        $this->assertNotNull($history[0]['approved_at']);
+        $this->assertSame('Vurder saken grundig', $history[0]['snapshot']['nodes'][1]['label']);
+        $this->assertSame('Vurder saken', $history[1]['snapshot']['nodes'][1]['label']);
+        $this->assertCount(2, $history[1]['snapshot']['edges']);
+    }
+
     public function test_a_process_with_no_flow_has_nothing_to_approve(): void
     {
         ['owner' => $owner, 'customer' => $customer] = $this->context();
@@ -510,6 +713,166 @@ class QualityProcessBlueprintTest extends TestCase
         $this->actingAs($owner)
             ->post("/app/quality/items/{$process->id}/blueprint/approve")
             ->assertSessionHasErrors('blueprint');
+    }
+
+    /**
+     * The latest approved revision is what is in force. The first approval publishes the process;
+     * the status follows it rather than being a second, independent claim.
+     */
+    public function test_the_first_approval_publishes_a_draft_process(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->draftProcess($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+
+        $this->assertSame(
+            ['state' => 'unpublished', 'revision_number' => null, 'has_unpublished_changes' => false],
+            $this->publication($owner, $process),
+        );
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame(QualityItem::STATUS_ACTIVE, $process->fresh()->status);
+        $this->assertSame(
+            ['state' => 'current', 'revision_number' => 1, 'has_unpublished_changes' => false],
+            $this->publication($owner, $process),
+        );
+    }
+
+    public function test_editing_after_publication_keeps_the_process_in_force_with_unpublished_changes(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->draftProcess($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+
+        $this->assertSame(QualityItem::STATUS_ACTIVE, $process->fresh()->status);
+        $this->assertSame(
+            ['state' => 'current_with_changes', 'revision_number' => 1, 'has_unpublished_changes' => true],
+            $this->publication($owner, $process),
+        );
+
+        // Editing back to exactly what is in force leaves nothing unpublished, and approving it
+        // publishes nothing new.
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->assertSame('current', $this->publication($owner, $process)['state']);
+
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+    }
+
+    public function test_a_retired_process_keeps_its_revision_but_is_not_presented_as_current(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->draftProcess($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $this->actingAs($owner)
+            ->patch("/app/quality/items/{$process->id}", ['status' => QualityItem::STATUS_RETIRED])
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('retired', $this->publication($owner, $process)['state']);
+        $this->assertSame(1, $this->publication($owner, $process)['revision_number']);
+
+        // A later approval is not a way to un-retire: retiring is an explicit decision.
+        $changed = $this->simpleFlow();
+        $changed['nodes'][1]['label'] = 'Vurder saken grundig';
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $changed);
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame(QualityItem::STATUS_RETIRED, $process->fresh()->status);
+        $this->assertSame('retired', $this->publication($owner, $process)['state']);
+    }
+
+    public function test_a_process_cannot_be_made_current_by_choosing_a_status(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->draftProcess($customer, 'Avvikshåndtering');
+
+        foreach ([QualityItem::STATUS_ACTIVE, QualityItem::STATUS_UNDER_REVIEW] as $status) {
+            $this->actingAs($owner)
+                ->patch("/app/quality/items/{$process->id}", ['status' => $status])
+                ->assertSessionHasErrors('status');
+        }
+
+        $this->assertSame(QualityItem::STATUS_DRAFT, $process->fresh()->status);
+
+        $this->actingAs($owner)
+            ->post('/app/quality/items', [
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => 'Leverandøroppfølging',
+                'status' => QualityItem::STATUS_ACTIVE,
+            ])
+            ->assertSessionHasErrors('status');
+
+        $statuses = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}")
+            ->viewData('page')['props']['statuses'];
+
+        $this->assertSame([QualityItem::STATUS_DRAFT, QualityItem::STATUS_RETIRED], $statuses);
+    }
+
+    public function test_a_published_process_cannot_be_set_back_to_draft(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $process = $this->draftProcess($customer, 'Avvikshåndtering');
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$process->id}/blueprint/approve");
+
+        $this->actingAs($owner)
+            ->patch("/app/quality/items/{$process->id}", ['status' => QualityItem::STATUS_DRAFT])
+            ->assertSessionHasErrors('status');
+
+        $this->assertSame(QualityItem::STATUS_ACTIVE, $process->fresh()->status);
+    }
+
+    public function test_the_process_list_shows_each_process_publication(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $unpublished = $this->draftProcess($customer, 'A uten publisering');
+        $published = $this->draftProcess($customer, 'B publisert');
+        $this->actingAs($owner)->put("/app/quality/items/{$published->id}/blueprint", $this->simpleFlow());
+        $this->actingAs($owner)->post("/app/quality/items/{$published->id}/blueprint/approve");
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'C policy');
+
+        $rows = collect($this->actingAs($owner)
+            ->get('/app/quality?tab=overview')
+            ->viewData('page')['props']['items'])->keyBy('id');
+
+        $this->assertSame('unpublished', $rows[$unpublished->id]['publication']['state']);
+        $this->assertSame('current', $rows[$published->id]['publication']['state']);
+        $this->assertSame(1, $rows[$published->id]['publication']['revision_number']);
+        $this->assertNull($rows[$policy->id]['publication']);
+    }
+
+    public function test_a_new_process_lands_on_the_flow_tab_and_other_types_do_not(): void
+    {
+        ['owner' => $owner, 'customer' => $customer] = $this->context();
+
+        $this->actingAs($owner)
+            ->post('/app/quality/items', ['quality_type' => QualityItem::TYPE_PROCESS, 'title' => 'Ny prosess'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('app.quality.items.show', [
+                'item' => QualityItem::query()->where('title', 'Ny prosess')->value('id'),
+                'tab' => 'flow',
+            ]));
+
+        $this->actingAs($owner)
+            ->post('/app/quality/items', ['quality_type' => QualityItem::TYPE_POLICY, 'title' => 'Ny policy'])
+            ->assertRedirect(route('app.quality.items.show', [
+                'item' => QualityItem::query()->where('title', 'Ny policy')->value('id'),
+            ]));
     }
 
     public function test_the_approved_flow_reaches_the_page_with_who_approved_it(): void
@@ -1699,5 +2062,23 @@ class QualityProcessBlueprintTest extends TestCase
     private function process(Customer $customer, string $title): QualityItem
     {
         return $this->item($customer, QualityItem::TYPE_PROCESS, $title);
+    }
+
+    private function draftProcess(Customer $customer, string $title): QualityItem
+    {
+        $process = $this->process($customer, $title);
+        $process->forceFill(['status' => QualityItem::STATUS_DRAFT])->save();
+
+        return $process;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function publication(User $actor, QualityItem $process): ?array
+    {
+        return $this->actingAs($actor)
+            ->get("/app/quality/items/{$process->id}?tab=flow")
+            ->viewData('page')['props']['process_publication'];
     }
 }
