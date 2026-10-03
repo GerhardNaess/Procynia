@@ -9,12 +9,14 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityChecklistItem;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
+use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessIo;
 use App\Models\QualityProcessStep;
 use App\Models\User;
@@ -503,6 +505,85 @@ class QualityItemTest extends TestCase
         $this->assertNull(QualityItem::query()->find($process->id));
         $this->assertSame(0, QualityItemWikiLink::query()->where('quality_item_id', $process->id)->count());
         $this->assertNotNull(EnterpriseWikiPage::query()->find($page->id));
+    }
+
+    /**
+     * Deleting a process takes the process away and leaves the knowledge standing.
+     *
+     * The two halves are deliberately asserted together. Everything a process owns — the flow, the
+     * activities on it, the record of which activity was the source of what — is the process's own
+     * and goes with it. The article that came out of an activity, and the source document behind
+     * it, belong to the virksomhet: they were knowledge before the process was deleted and they are
+     * knowledge after. A delete that swept them up would mean a kvalitetsleder could not tidy a
+     * flow without losing what the flow produced.
+     */
+    public function test_deleting_a_process_removes_its_flow_and_keeps_the_knowledge_it_produced(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshandtering');
+        $page = $this->page($customer, 'Avviksrutine');
+        $document = $this->document($customer, 'avviksrutine.pdf');
+
+        $this->actingAs($owner)->put("/app/quality/items/{$process->id}/blueprint", [
+            'lanes' => [
+                ['key' => 'saksbehandler', 'label' => 'Saksbehandler'],
+            ],
+            'nodes' => [
+                ['key' => 'start', 'lane' => 'saksbehandler', 'type' => 'start', 'label' => 'Start'],
+                ['key' => 'vurder', 'lane' => 'saksbehandler', 'type' => 'step', 'label' => 'Vurder avviket'],
+                ['key' => 'ferdig', 'lane' => 'saksbehandler', 'type' => 'end', 'label' => 'Ferdig'],
+            ],
+            'edges' => [
+                ['from' => 'start', 'to' => 'vurder', 'label' => null],
+                ['from' => 'vurder', 'to' => 'ferdig', 'label' => null],
+            ],
+        ])->assertRedirect();
+
+        $this->assertNotNull(QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->first());
+
+        // What the activity "Vurder avviket" was the source of, in both shapes the table holds: the
+        // source document it hands over today, and the page a row written before that direction
+        // changed still names. One target per row — the check constraint says so — so they are two
+        // rows. Written directly rather than through the article endpoint: this is about what a
+        // delete does to the row, not about getting an AI draft back.
+        QualityActivityWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'activity_key' => 'vurder',
+            'enterprise_wiki_document_id' => $document->id,
+            'created_by_user_id' => $owner->id,
+        ]);
+
+        QualityActivityWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'activity_key' => 'vurder',
+            'enterprise_wiki_page_id' => $page->id,
+            'created_by_user_id' => $owner->id,
+        ]);
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/items/{$process->id}")
+            ->assertRedirect('/app/quality');
+
+        $this->assertNull(QualityItem::query()->find($process->id));
+        $this->assertSame(0, QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->count());
+        $this->assertSame(0, QualityActivityWikiPage::query()->where('quality_item_id', $process->id)->count());
+
+        // The knowledge the process produced is untouched.
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($page->id));
+        $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id));
+
+        // And the graph is told, carrying the customer the deleted row can no longer be asked for.
+        // Neo4jGraphProjectionService::deleteQualityItem detaches the activity nodes with the
+        // process; nothing on the Wiki side is touched.
+        Queue::assertPushed(
+            ProjectQualityItemToGraph::class,
+            fn (ProjectQualityItemToGraph $job): bool => $job->itemId === (int) $process->id
+                && $job->deletedForCustomerId === (int) $customer->id,
+        );
     }
 
     // ---------------------------------------------------------------------
