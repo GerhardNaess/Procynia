@@ -251,6 +251,13 @@ Route::prefix('app')
             Route::post('/items/{item}/activities/articles', [QualityController::class, 'storeActivityArticle'])
                 ->name('items.activities.articles.store');
 
+            // Controls on an activity. The control is an ordinary `control` quality item; the flow
+            // is not written. Removing takes it off the activity and leaves it in the register.
+            Route::post('/items/{item}/activities/controls', [QualityController::class, 'storeActivityControl'])
+                ->name('items.activities.controls.store');
+            Route::delete('/activity-controls/{control}', [QualityController::class, 'destroyActivityControl'])
+                ->name('activity-controls.destroy');
+
             // The seam to Wiki. Attaching a page changes nothing about the page.
             Route::post('/items/{item}/wiki-links', [QualityController::class, 'storeWikiLink'])
                 ->name('items.wiki-links.store');
@@ -266,6 +273,19 @@ Route::prefix('app')
                 ->name('items.document-links.store');
             Route::delete('/document-links/{link}', [QualityController::class, 'destroyDocumentLink'])
                 ->name('document-links.destroy');
+
+            // Evidence that a control is met: a name, a description and optionally a file the store
+            // already has. Written to the same seam as above, so removal is document-links.destroy.
+            Route::post('/items/{item}/evidence', [QualityController::class, 'storeControlEvidence'])
+                ->name('items.evidence.store');
+
+            // Verktøy — documents a control is carried out with. The file is in the same archive as
+            // above; a tool is its name and purpose, and a control's use of it is a document-link
+            // row in the `tool` capacity, so removing one is document-links.destroy.
+            Route::post('/tools', [QualityController::class, 'storeTool'])->name('tools.store');
+            Route::get('/tools/{tool}/file', [QualityController::class, 'toolFile'])->name('tools.file');
+            Route::post('/items/{item}/tools', [QualityController::class, 'storeControlTool'])
+                ->name('items.tools.store');
 
             Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
             Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');

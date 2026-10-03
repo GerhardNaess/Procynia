@@ -16,17 +16,16 @@ use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\EnterpriseWikiDocumentFileResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class WikiSourceController extends Controller
 {
@@ -142,20 +141,7 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
-        $disk = Storage::disk('local');
-        abort_unless($disk->exists($document->file_path), 404);
-
-        $mimeType = match (strtolower(pathinfo($document->original_filename, PATHINFO_EXTENSION))) {
-            'pdf' => 'application/pdf',
-            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            default => 'application/octet-stream',
-        };
-
-        $response = response()->file($disk->path($document->file_path), ['Content-Type' => $mimeType]);
-        $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $document->original_filename);
-
-        return $response;
+        return EnterpriseWikiDocumentFileResponse::make($document);
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
+use App\Models\QualityActivityControl;
 use App\Models\QualityActivityWikiPage;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
@@ -15,6 +16,7 @@ use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessBlueprint;
+use App\Models\QualityTool;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowChangeAiClient;
@@ -24,6 +26,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityActivityArticleService;
+use App\Services\Quality\QualityActivityControlService;
 use App\Services\Quality\QualityFlowClarificationService;
 use App\Services\Quality\QualityItemService;
 use App\Services\Quality\QualityProcessBlueprintService;
@@ -31,9 +34,11 @@ use App\Services\Quality\QualityProcessDescriptionClarifier;
 use App\Services\Quality\QualityProcessFlowChangeProposer;
 use App\Services\Quality\QualityProcessFlowInterpreter;
 use App\Services\Quality\QualityProcessSubprocessService;
+use App\Services\Quality\QualityToolService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\EnterpriseWikiDocumentFileResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -43,6 +48,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Kvalitet — the virksomhet's styrende dokumenter as objects of their own.
@@ -58,7 +64,7 @@ use Inertia\Response;
  */
 class QualityController extends Controller
 {
-    private const TABS = ['overview', 'processes', 'controls', 'checklists'];
+    private const TABS = ['overview', 'processes', 'controls', 'tools'];
 
     /**
      * The tabs on one document's page.
@@ -83,7 +89,8 @@ class QualityController extends Controller
         'overview' => QualityItem::TYPES,
         'processes' => [QualityItem::TYPE_PROCESS],
         'controls' => [QualityItem::TYPE_CONTROL],
-        'checklists' => [QualityItem::TYPE_CHECKLIST],
+        // Verktøy is a library of files, not of quality items — see QualityToolService.
+        'tools' => [],
     ];
 
     public function __construct(
@@ -98,7 +105,9 @@ class QualityController extends Controller
         private readonly QualityProcessFlowChangeProposer $flowChanges,
         private readonly QualityProcessSubprocessService $subprocesses,
         private readonly QualityActivityArticleService $activityArticles,
+        private readonly QualityActivityControlService $activityControls,
         private readonly CustomerPermissionService $permissions,
+        private readonly QualityToolService $tools,
     ) {}
 
     public function index(Request $request): Response
@@ -117,7 +126,16 @@ class QualityController extends Controller
             // What this person may do here, resolved from the customer's own roles. The page uses
             // it to decide what to offer; the gates above decide what is accepted.
             'permissions' => $this->permissionPayload($user),
-            'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
+            'items' => self::TAB_TYPES[$tab] === [] ? [] : $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
+            // Kontroller is a register, not a list of documents: what each control checks and where
+            // in the processes it is applied. Read for that tab only.
+            'control_register' => $tab === 'controls' ? $this->controlRegister($customerId) : (object) [],
+            // Verktøy: the library, each tool with the controls carried out with it. The archive
+            // picker lets a file the virksomhet already has become a tool without a second upload.
+            'tools' => $tab === 'tools' && $customerId !== null ? $this->tools->library((int) $customerId) : [],
+            'tool_categories' => QualityTool::CATEGORIES,
+            'tool_document_options' => $tab === 'tools' ? $this->documentOptions($customerId, $request) : [],
+            'document_search' => trim((string) $request->query('document_search', '')),
             'type_counts' => $this->typeCounts($customerId),
             'quality_types' => QualityItem::TYPES,
             'statuses' => QualityItem::STATUSES,
@@ -142,6 +160,7 @@ class QualityController extends Controller
         $item->loadMissing(['owner', 'processSteps', 'processIo', 'checklistItems', 'controlDetail']);
 
         $tab = $this->detailTab($request, $item);
+        $isControl = $item->quality_type === QualityItem::TYPE_CONTROL;
         $subprocessView = $this->subprocessView($customerId, $item, $request);
         $publication = $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
             ? $this->blueprints->publicationState((int) $customerId, $item)
@@ -167,6 +186,15 @@ class QualityController extends Controller
             // the tab is: a subprocess view survives a reload, a back button and a shared link, and
             // it is read from the subprocess's own blueprint every time it is opened.
             'subprocess_view' => $subprocessView,
+            // `?activity=` opens one activity's panel on arrival — the way back from a control in
+            // the register to where it is applied. A key the flow does not have opens nothing.
+            'focus_activity_key' => $tab === 'flow' && is_string($request->query('activity'))
+                ? $request->query('activity')
+                : null,
+            // Where a control is applied, so its page can lead back to the processes using it.
+            'control_placements' => $customerId !== null && $item->quality_type === QualityItem::TYPE_CONTROL
+                ? ($this->activityControls->placementsByControl((int) $customerId, [(int) $item->id])[(int) $item->id] ?? [])
+                : [],
             'subprocess_options' => $this->subprocessOptions($customerId, $item, $user),
             // A draft article, flashed by the redirect that produced it. Nothing is stored until
             // the user has read it and pressed create — see QualityActivityArticleService.
@@ -191,11 +219,33 @@ class QualityController extends Controller
             'wiki_links' => $this->wikiLinkRows($item, $user),
             'wiki_page_options' => $this->wikiPageOptions($customerId, $user, $request),
             'wiki_search' => trim((string) $request->query('wiki_search', '')),
-            'document_relation_types' => QualityItemDocument::RELATION_TYPES,
-            'documents' => $this->documentRows($item),
+            // On a control, evidence has its own section and its own form (name, description,
+            // optional file), so the general document list leaves that capacity out rather than
+            // offering a second way to record the same thing. Tools are the same: they have their
+            // own section, and are never listed or chosen in the general one.
+            'document_relation_types' => $isControl
+                ? array_values(array_diff(QualityItemDocument::GENERAL_RELATION_TYPES, [QualityItemDocument::RELATION_TYPE_EVIDENCE]))
+                : QualityItemDocument::GENERAL_RELATION_TYPES,
+            'documents' => array_values(array_filter(
+                $this->documentRows($item),
+                static fn (array $row): bool => $row['relation_type'] !== QualityItemDocument::RELATION_TYPE_TOOL
+                    && (! $isControl || $row['relation_type'] !== QualityItemDocument::RELATION_TYPE_EVIDENCE),
+            )),
+            'control_evidence' => $isControl ? $this->controlEvidenceRows($item) : [],
+            'control_tools' => $isControl && $customerId !== null ? $this->tools->forControl((int) $customerId, $item) : [],
+            'control_tool_options' => $isControl && $customerId !== null ? $this->tools->optionsForControl((int) $customerId, $item) : [],
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
-            'relations' => $this->relationsForItem($customerId, (int) $item->id),
+            'relations' => $relations = $this->relationsForItem($customerId, (int) $item->id),
+            // A process's styrende dokumenter are the policies that govern it — the incoming side
+            // of the same `governs` rows the overview edits, never a separate store. Linking and
+            // unlinking post to storeRelation()/destroyRelation() like every other relation.
+            'governing_documents' => $item->quality_type === QualityItem::TYPE_PROCESS
+                ? $this->governingDocuments($relations)
+                : [],
+            'governing_document_options' => $item->quality_type === QualityItem::TYPE_PROCESS
+                ? $this->governingDocumentOptions($customerId, $relations)
+                : [],
         ]);
     }
 
@@ -1099,6 +1149,63 @@ class QualityController extends Controller
         return back()->with('success', __('procynia.quality.flash.article_queued'));
     }
 
+    /**
+     * Places a new control on an activity of this process's flow.
+     *
+     * The control is registered as an ordinary `control` quality item — see
+     * QualityActivityControlService. quality.edit, because it changes how the process is run; the
+     * flow itself is not written.
+     */
+    public function storeActivityControl(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        $validated = $request->validate([
+            'activity_key' => ['required', 'string', 'max:80'],
+            'title' => ['required', 'string', 'max:255'],
+            'criterion' => ['nullable', 'string', 'max:2000'],
+        ], [
+            'title.required' => __('procynia.quality.errors.control_title_required'),
+        ]);
+
+        $blueprint = $this->blueprints->forItem((int) $customerId, $item)
+            ?? abort(404);
+
+        $activityKey = (string) $validated['activity_key'];
+
+        abort_unless($this->activityControls->hasActivity($blueprint, $activityKey), 404);
+
+        $this->activityControls->add(
+            $item,
+            $blueprint,
+            $activityKey,
+            (string) $validated['title'],
+            $validated['criterion'] ?? null,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.control_added'));
+    }
+
+    /** Takes a control off its activity. The control stays in the register. */
+    public function destroyActivityControl(QualityActivityControl $control): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $control->customer_id, $customerId);
+
+        $this->activityControls->remove($control);
+
+        return back()->with('success', __('procynia.quality.flash.control_removed'));
+    }
+
     public function storeRelation(Request $request): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
@@ -1221,6 +1328,44 @@ class QualityController extends Controller
     }
 
     /**
+     * Record evidence that a control is met.
+     *
+     * Composing the control's documentation, so it rides on edit — the same permission attaching
+     * an existing file does. No upload here: the optional file is one the store already holds.
+     */
+    public function storeControlEvidence(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'enterprise_wiki_document_id' => ['nullable', 'integer'],
+        ]);
+
+        $document = isset($validated['enterprise_wiki_document_id'])
+            ? EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->findOrFail($validated['enterprise_wiki_document_id'])
+            : null;
+
+        $this->items->addControlEvidence(
+            (int) $customerId,
+            $item,
+            $validated['title'],
+            $validated['description'] ?? null,
+            $document,
+            $user,
+        );
+
+        return back()->with('success', __('procynia.quality.flash.evidence_added'));
+    }
+
+    /**
      * Upload a file and attach it in one step.
      *
      * The upload itself is the existing one — EnterpriseWikiDocumentUploadService is literally what
@@ -1287,6 +1432,90 @@ class QualityController extends Controller
         return back()->with('success', __('procynia.quality.flash.document_unlinked'));
     }
 
+    /**
+     * Put a document into the Verktøy library: a new upload, or a file the archive already has.
+     *
+     * The upload is the same one storeDocument() runs — EnterpriseWikiDocumentUploadService — so the
+     * file lands in the virksomhet's archive and nowhere else, and bytes it already holds are reused
+     * rather than written twice. Registering a tool is composing the kvalitetssystem, so it rides on
+     * quality.edit.
+     */
+    public function storeTool(Request $request): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'category' => ['nullable', 'string', Rule::in(QualityTool::CATEGORIES)],
+            'file' => ['nullable', 'required_without:enterprise_wiki_document_id', 'file', 'mimes:pdf,docx', 'max:20480'],
+            'enterprise_wiki_document_id' => ['nullable', 'required_without:file', 'integer'],
+        ]);
+
+        if ($request->hasFile('file')) {
+            $ownerUserId = ($user?->canBeEnterpriseWikiDocumentOwner() ?? false) ? $user->id : null;
+            $document = $this->documentUploads->store((int) $customerId, $validated['file'], $ownerUserId, $user?->id)['document'];
+        } else {
+            $document = EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->findOrFail($validated['enterprise_wiki_document_id']);
+        }
+
+        $this->tools->register((int) $customerId, $document, $validated, $user);
+
+        return back()->with('success', __('procynia.quality.flash.tool_registered'));
+    }
+
+    /**
+     * Open or download a tool's file.
+     *
+     * Kvalitet's own route rather than Wiki's download, because reading a tool is reading the
+     * kvalitetssystem: quality.view is what a person needs to carry out a control, and Wiki access
+     * is a separate grant they may not have. It reaches only files registered as tools, so it is no
+     * way into the rest of the archive.
+     */
+    public function toolFile(Request $request, QualityTool $tool): BinaryFileResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_VIEW);
+        $this->assertOwnedByCustomer((int) $tool->customer_id, $customerId);
+
+        $document = $tool->document;
+        abort_if($document === null, 404);
+
+        return EnterpriseWikiDocumentFileResponse::make($document, $request->boolean('download'));
+    }
+
+    /**
+     * Say that a control is carried out with a tool from the library. Removal is
+     * destroyDocumentLink() — the use is a document-link row, and the file stays.
+     */
+    public function storeControlTool(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+
+        $validated = $request->validate([
+            'quality_tool_id' => ['required', 'integer'],
+        ]);
+
+        $tool = QualityTool::query()
+            ->where('customer_id', $customerId)
+            ->findOrFail($validated['quality_tool_id']);
+
+        $this->tools->linkToControl((int) $customerId, $item, $tool, $user);
+
+        return back()->with('success', __('procynia.quality.flash.tool_linked'));
+    }
+
     // -----------------------------------------------------------------
     // Payloads
     // -----------------------------------------------------------------
@@ -1343,6 +1572,41 @@ class QualityController extends Controller
             ))
             ->values()
             ->all();
+    }
+
+    /**
+     * What each control checks and where it is applied, keyed by control id.
+     *
+     * Every control of the customer has an entry, placed or not: a control that is on no activity
+     * any more is still in the register, with an empty list, until somebody deletes it.
+     *
+     * An object, so an empty register reaches the page as {} rather than [].
+     *
+     * @return array<int, array{criterion: ?string, placements: list<array<string, mixed>>}>|object
+     */
+    private function controlRegister(?int $customerId): array|object
+    {
+        if ($customerId === null) {
+            return (object) [];
+        }
+
+        $controls = QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->where('quality_type', QualityItem::TYPE_CONTROL)
+            ->with('controlDetail')
+            ->get();
+        $placements = $this->activityControls->placementsByControl($customerId);
+
+        $register = [];
+
+        foreach ($controls as $control) {
+            $register[(int) $control->id] = [
+                'criterion' => $control->controlDetail?->criterion,
+                'placements' => $placements[(int) $control->id] ?? [],
+            ];
+        }
+
+        return $register === [] ? (object) [] : $register;
     }
 
     /**
@@ -1458,6 +1722,9 @@ class QualityController extends Controller
         // as it currently is in Wiki. A page that has been deleted took its provenance row with it
         // and is simply not here.
         $articles = $this->activityArticles->describeForItem($customerId, (int) $blueprint->quality_item_id);
+        // The controls placed on each activity, read the same way: by key, fresh from the control
+        // items, never stored on the node.
+        $controls = $this->activityControls->describeForItem($customerId, (int) $blueprint->quality_item_id);
 
         return array_map(
             fn (array $node): array => $node + [
@@ -1466,6 +1733,7 @@ class QualityController extends Controller
                     $node['subprocess_quality_item_id'] ?? null,
                 ),
                 'articles' => $articles[(string) ($node['key'] ?? '')] ?? [],
+                'controls' => $controls[(string) ($node['key'] ?? '')] ?? [],
             ],
             $nodes,
         );
@@ -1732,6 +2000,39 @@ class QualityController extends Controller
     }
 
     /**
+     * The evidence recorded on one control, file or no file.
+     *
+     * Unlike documentRows(), a row without a file is kept: evidence names itself, and the file is
+     * optional. Removal posts to destroyDocumentLink() — it is the same row.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function controlEvidenceRows(QualityItem $item): array
+    {
+        return QualityItemDocument::query()
+            ->where('quality_item_id', $item->id)
+            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            ->with(['document:id,original_filename', 'createdBy:id,name'])
+            ->orderBy('id')
+            ->get()
+            ->map(static fn (QualityItemDocument $evidence): array => [
+                'id' => (int) $evidence->id,
+                // Evidence attached as a plain file before evidence had a name falls back to it.
+                'title' => $evidence->title ?? $evidence->document?->original_filename,
+                'description' => $evidence->note,
+                'filename' => $evidence->document?->original_filename,
+                'download_url' => $evidence->document !== null
+                    ? route('app.wiki.sources.download', ['document' => $evidence->document->id])
+                    : null,
+                'document_removed' => $evidence->document_removed_at !== null,
+                'added_by' => $evidence->createdBy?->name,
+                'added_at' => $evidence->created_at?->toDateString(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * Files that can be attached.
      *
      * Capped and searchable for the same reason the Wiki page picker is: this is a picker into a
@@ -1799,6 +2100,48 @@ class QualityController extends Controller
                         : null,
                 ];
             })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The policies governing one process, read off its relations.
+     *
+     * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
+     * @return list<array<string, mixed>>
+     */
+    private function governingDocuments(array $relations): array
+    {
+        return array_values(array_filter(
+            $relations,
+            static fn (array $relation): bool => $relation['direction'] === 'incoming'
+                && $relation['relation_type'] === QualityItemRelation::TYPE_GOVERNS,
+        ));
+    }
+
+    /**
+     * The policies that may still be linked to a process: the customer's own, minus those already
+     * governing it. The types come from the matrix, so widening `governs` widens the picker.
+     *
+     * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
+     * @return list<array<string, mixed>>
+     */
+    private function governingDocumentOptions(?int $customerId, array $relations): array
+    {
+        $linkedIds = array_column($this->governingDocuments($relations), 'other_item_id');
+
+        return QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_type', QualityItemRelation::allowedFromTypes(QualityItemRelation::TYPE_GOVERNS))
+            ->whereNotIn('id', $linkedIds)
+            ->orderBy('title')
+            ->get(['id', 'title', 'code', 'quality_type'])
+            ->map(static fn (QualityItem $option): array => [
+                'id' => (int) $option->id,
+                'title' => $option->title,
+                'code' => $option->code,
+                'quality_type' => $option->quality_type,
+            ])
             ->values()
             ->all();
     }

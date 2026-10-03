@@ -27,7 +27,8 @@ import {
  * because it is the one view that is not text. Every other type's page is unchanged: without a
  * flow there is no tab strip at all.
  *
- * Because of that tab, a process's Dokument tab carries neither "Struktur" nor "Relasjoner". Steg,
+ * Because of that tab, a process's Dokument tab carries neither "Struktur" nor "Relasjoner" — it
+ * carries "Styrende dokumenter" instead, the one relation a process owner reads from this side. Steg,
  * input and output were a second, competing place to describe the same run the flow already holds,
  * and leaving both open invited two answers to one question. For a process, the flow is the single
  * place. Checklists and controls keep their Struktur panel — they have no flow to move it to — and
@@ -74,6 +75,8 @@ export default function QualityItem() {
         document_relation_types: documentRelationTypes = [],
         document_search: documentSearch = '',
         relations = [],
+        governing_documents: governingDocuments = [],
+        governing_document_options: governingDocumentOptions = [],
         active_tab: activeTab = 'document',
         has_flow: hasFlow = false,
         blueprint = null,
@@ -88,6 +91,11 @@ export default function QualityItem() {
         subprocess_options: subprocessOptions = [],
         activity_article_draft: articleDraft = null,
         activity_article_error: articleError = null,
+        focus_activity_key: focusActivityKey = null,
+        control_placements: controlPlacements = [],
+        control_evidence: controlEvidence = [],
+        control_tools: controlTools = [],
+        control_tool_options: controlToolOptions = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -165,6 +173,7 @@ export default function QualityItem() {
                         subprocessOptions={subprocessOptions}
                         articleDraft={articleDraft}
                         articleError={articleError}
+                        focusActivityKey={focusActivityKey}
                     />
                 ) : (
                     <>
@@ -186,6 +195,42 @@ export default function QualityItem() {
                                 canEdit={canEdit}
                                 frequencies={frequencies}
                                 frequencyLabels={tq.frequencies ?? {}}
+                            />
+                        )}
+
+                        {isProcess && (
+                            <GoverningDocumentsPanel
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                governingDocuments={governingDocuments}
+                                options={governingDocumentOptions}
+                                typeLabels={typeLabels}
+                            />
+                        )}
+
+                        {item.quality_type === 'control' && (
+                            <ControlPlacementsPanel td={td} placements={controlPlacements} />
+                        )}
+
+                        {item.quality_type === 'control' && (
+                            <ControlToolsPanel
+                                tq={tq}
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                tools={controlTools}
+                                options={controlToolOptions}
+                            />
+                        )}
+
+                        {item.quality_type === 'control' && (
+                            <ControlEvidencePanel
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                evidence={controlEvidence}
+                                documentOptions={documentOptions}
                             />
                         )}
 
@@ -250,6 +295,300 @@ function DetailTabs({ td, item, activeTab }) {
                 </Link>
             ))}
         </nav>
+    );
+}
+
+/**
+ * Where this control is applied: the process activities it sits on, each a link back into the flow
+ * with the activity open. Read-only — a control is placed and taken off from the activity itself.
+ */
+function ControlPlacementsPanel({ td, placements }) {
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.control_placements_heading ?? 'Brukes i prosessaktiviteter'}</h2>
+
+            {placements.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.control_placements_empty ?? 'Kontrollen er ikke koblet til noen prosessaktivitet.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {placements.map((placement) => (
+                        <li key={placement.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-2 text-base">
+                            <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
+                                {placement.process_title}
+                            </Link>
+                            <span className="text-slate-400">›</span>
+                            <ActivityName td={td} placement={placement} />
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </section>
+    );
+}
+
+/**
+ * Documentation that the control is met.
+ *
+ * The same seam as Dokumenter below, in the `evidence` capacity — with a name and a description of
+ * its own, because evidence is often recorded before (or without) a file. The file, when there is
+ * one, is picked from what the store already holds; removing evidence never removes the file.
+ */
+function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) {
+    const form = useForm({ title: '', description: '', enterprise_wiki_document_id: '' });
+
+    function submit(event) {
+        event.preventDefault();
+        form.post(`/app/quality/items/${item.id}/evidence`, {
+            preserveScroll: true,
+            onSuccess: () => form.reset(),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.evidence_heading ?? 'Evidens'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.evidence_help ?? ''}</p>
+
+            {evidence.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.evidence_empty ?? 'Ingen evidens er registrert for denne kontrollen ennå.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {evidence.map((entry) => (
+                        <li key={entry.id} className="flex flex-wrap items-start gap-3 py-3">
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <p className="font-semibold text-slate-950">{entry.title}</p>
+                                {entry.description && (
+                                    <p className="whitespace-pre-line text-sm text-slate-700">{entry.description}</p>
+                                )}
+                                <p className="text-sm text-slate-500">
+                                    {entry.download_url && (
+                                        <>
+                                            <a
+                                                href={entry.download_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="font-semibold text-slate-700 hover:underline"
+                                            >
+                                                {entry.filename}
+                                            </a>
+                                            {' · '}
+                                        </>
+                                    )}
+                                    {entry.document_removed && (
+                                        <>
+                                            <span className="italic">
+                                                {td.evidence_document_removed ?? 'Tilknyttet fil finnes ikke lenger.'}
+                                            </span>
+                                            {' · '}
+                                        </>
+                                    )}
+                                    {entry.added_by ? `${td.evidence_added_by ?? 'Lagt til av'} ${entry.added_by}` : ''}
+                                    {entry.added_by && entry.added_at ? ' · ' : ''}
+                                    {entry.added_at ?? ''}
+                                </p>
+                            </div>
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className={ROW_DESTRUCTIVE}
+                                    onClick={() => {
+                                        if (window.confirm(td.evidence_remove_confirm ?? 'Fjern evidensen fra kontrollen?')) {
+                                            router.delete(`/app/quality/document-links/${entry.id}`, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    {td.evidence_remove ?? 'Fjern'}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && (
+                <form onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-6">
+                    <h3 className="text-base font-semibold text-slate-900">
+                        {td.evidence_add_heading ?? 'Legg til evidens'}
+                    </h3>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <Field label={td.evidence_title ?? 'Navn'} error={form.errors.title}>
+                            <input
+                                className={INPUT}
+                                value={form.data.title}
+                                placeholder={td.evidence_title_placeholder ?? ''}
+                                onChange={(e) => form.setData('title', e.target.value)}
+                            />
+                        </Field>
+                        <Field label={td.evidence_document ?? 'Dokument (valgfritt)'} error={form.errors.enterprise_wiki_document_id}>
+                            <select
+                                className={INPUT}
+                                value={form.data.enterprise_wiki_document_id}
+                                onChange={(e) => form.setData('enterprise_wiki_document_id', e.target.value)}
+                            >
+                                <option value="">{td.evidence_no_document ?? 'Ikke koble til dokument'}</option>
+                                {documentOptions.map((option) => (
+                                    <option key={option.document_id} value={option.document_id}>
+                                        {option.filename}
+                                    </option>
+                                ))}
+                            </select>
+                        </Field>
+                    </div>
+                    <Field label={td.evidence_description ?? 'Beskrivelse'} error={form.errors.description}>
+                        <textarea
+                            className={INPUT}
+                            rows={3}
+                            value={form.data.description}
+                            onChange={(e) => form.setData('description', e.target.value)}
+                        />
+                    </Field>
+                    <button
+                        type="submit"
+                        className={PRIMARY_ACTION}
+                        disabled={form.processing || form.data.title.trim() === ''}
+                    >
+                        {td.evidence_submit ?? 'Legg til evidens'}
+                    </button>
+                </form>
+            )}
+        </section>
+    );
+}
+
+/**
+ * The documents this control is carried out with, from the Verktøy library.
+ *
+ * Linking is a document-link row in the `tool` capacity; removing it is the seam's own removal,
+ * so the document stays in the library and in the archive, still in use by every other control.
+ */
+function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
+    const tt = tq.tools ?? {};
+    const categoryLabels = tq.tool_categories ?? {};
+    const form = useForm({ quality_tool_id: '' });
+
+    function submit(event) {
+        event.preventDefault();
+        form.post(`/app/quality/items/${item.id}/tools`, {
+            preserveScroll: true,
+            onSuccess: () => form.reset(),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.tools_heading ?? 'Verktøy'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.tools_help ?? ''}</p>
+
+            {tools.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.tools_empty ?? 'Ingen verktøy er koblet til denne kontrollen ennå.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {tools.map((tool) => (
+                        <li key={tool.link_id} className="flex flex-wrap items-start gap-3 py-3">
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-semibold text-slate-950">{tool.title}</p>
+                                    {tool.category && (
+                                        <span className="text-sm text-slate-500">· {categoryLabels[tool.category] ?? tool.category}</span>
+                                    )}
+                                </div>
+                                {tool.description && (
+                                    <p className="whitespace-pre-line text-sm text-slate-700">{tool.description}</p>
+                                )}
+                                {tool.filename && <p className="break-all text-sm text-slate-500">{tool.filename}</p>}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <a href={tool.open_url} target="_blank" rel="noreferrer" className={SECONDARY_ACTION}>
+                                    {tt.open ?? 'Åpne'}
+                                </a>
+                                <a href={tool.download_url} className={SECONDARY_ACTION}>
+                                    {tt.download ?? 'Last ned'}
+                                </a>
+                                {canEdit && (
+                                    <button
+                                        type="button"
+                                        className={ROW_DESTRUCTIVE}
+                                        onClick={() => {
+                                            if (window.confirm(td.tools_remove_confirm ?? 'Fjern verktøyet fra kontrollen? Dokumentet beholdes.')) {
+                                                router.delete(`/app/quality/document-links/${tool.link_id}`, { preserveScroll: true });
+                                            }
+                                        }}
+                                    >
+                                        {td.tools_remove ?? 'Fjern'}
+                                    </button>
+                                )}
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && (
+                <div className="mt-6 border-t border-slate-100 pt-6">
+                    {options.length === 0 ? (
+                        <p className="text-sm text-slate-500">
+                            {tools.length === 0
+                                ? (td.tools_library_empty ?? 'Verktøybiblioteket er tomt. Verktøy registreres under Kvalitet → Verktøy.')
+                                : (td.tools_none_available ?? 'Alle verktøy i biblioteket er allerede koblet til.')}{' '}
+                            <Link href="/app/quality?tab=tools" className="font-semibold text-slate-700 hover:underline">
+                                {td.tools_library_link ?? 'Gå til verktøybiblioteket'}
+                            </Link>
+                        </p>
+                    ) : (
+                        <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+                            <div className="min-w-[16rem] flex-1">
+                                <Field label={td.tools_pick ?? 'Verktøy fra biblioteket'} error={form.errors.quality_tool_id}>
+                                    <select
+                                        className={INPUT}
+                                        value={form.data.quality_tool_id}
+                                        onChange={(event) => form.setData('quality_tool_id', event.target.value)}
+                                    >
+                                        <option value="">{td.tools_pick_placeholder ?? 'Velg verktøy …'}</option>
+                                        {options.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.category
+                                                    ? `${option.title} (${categoryLabels[option.category] ?? option.category})`
+                                                    : option.title}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </Field>
+                            </div>
+                            <button
+                                type="submit"
+                                className={PRIMARY_ACTION}
+                                disabled={form.processing || form.data.quality_tool_id === ''}
+                            >
+                                {td.tools_add ?? 'Koble til verktøy'}
+                            </button>
+                        </form>
+                    )}
+                </div>
+            )}
+        </section>
+    );
+}
+
+function ActivityName({ td, placement }) {
+    if (! placement.activity_exists) {
+        return (
+            <span className="text-slate-500 italic">
+                {td.control_activity_missing ?? 'Aktiviteten finnes ikke lenger i flyten'}
+            </span>
+        );
+    }
+
+    return (
+        <span className="text-slate-700">
+            {placement.activity_label}
+            {placement.activity_role && <span className="text-slate-500"> ({placement.activity_role})</span>}
+        </span>
     );
 }
 
@@ -597,6 +936,105 @@ function RelationsPanel({ tq, relations, typeLabels }) {
                         </li>
                     ))}
                 </ul>
+            )}
+        </section>
+    );
+}
+
+/**
+ * The styrende dokumenter a process works inside.
+ *
+ * Not a store of its own: each row is a `governs` relation (policy -> process), the same row the
+ * Kvalitet overview draws and the policy's own page lists as "styrer". Linking posts to the shared
+ * relations endpoint, which checks the tenant and the type matrix; nothing of the policy is copied.
+ */
+function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, options, typeLabels }) {
+    const form = useForm({
+        from_item_id: '',
+        to_item_id: item.id,
+        relation_type: 'governs',
+    });
+
+    function submit(event) {
+        event.preventDefault();
+        form.post('/app/quality/relations', {
+            preserveScroll: true,
+            onSuccess: () => form.reset('from_item_id'),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.governing_heading ?? 'Styrende dokumenter'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.governing_help ?? ''}</p>
+
+            {governingDocuments.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.governing_empty ?? 'Ingen styrende dokumenter er koblet til prosessen.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {governingDocuments.map((relation) => (
+                        <li key={relation.id} className="flex flex-wrap items-center gap-3 py-3">
+                            <StatusBadge tone={TYPE_TONES[relation.other_quality_type] ?? 'slate'}>
+                                {typeLabels?.[relation.other_quality_type] ?? relation.other_quality_type}
+                            </StatusBadge>
+                            <Link href={relation.other_url} className="font-semibold text-slate-950 hover:underline">
+                                {relation.other_code ? `${relation.other_code} — ${relation.other_title}` : relation.other_title}
+                            </Link>
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className={`ml-auto ${ROW_DESTRUCTIVE}`}
+                                    onClick={() => {
+                                        if (window.confirm(td.governing_remove_confirm ?? 'Fjerne koblingen?')) {
+                                            router.delete(`/app/quality/relations/${relation.id}`, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    {td.governing_remove ?? 'Fjern kobling'}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && (
+                options.length === 0 ? (
+                    <p className="mt-4 text-sm text-slate-500">
+                        {td.governing_no_options ?? 'Alle registrerte policyer er allerede koblet til.'}
+                    </p>
+                ) : (
+                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-end gap-3">
+                        <div className="min-w-[16rem] flex-1">
+                            <Field
+                                label={td.governing_select ?? 'Styrende dokument'}
+                                error={form.errors.from_item_id ?? form.errors.relation_type ?? form.errors.to_item_id}
+                            >
+                                <select
+                                    className={INPUT}
+                                    value={form.data.from_item_id}
+                                    onChange={(e) => form.setData('from_item_id', e.target.value)}
+                                >
+                                    <option value="">{td.governing_placeholder ?? 'Velg styrende dokument'}</option>
+                                    {options.map((option) => (
+                                        <option key={option.id} value={option.id}>
+                                            {option.code ? `${option.code} — ${option.title}` : option.title}
+                                        </option>
+                                    ))}
+                                </select>
+                            </Field>
+                        </div>
+                        <button
+                            type="submit"
+                            className={PRIMARY_ACTION}
+                            disabled={form.processing || form.data.from_item_id === ''}
+                        >
+                            {td.governing_submit ?? 'Koble til'}
+                        </button>
+                    </form>
+                )
             )}
         </section>
     );

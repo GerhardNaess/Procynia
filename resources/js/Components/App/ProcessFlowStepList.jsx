@@ -12,7 +12,7 @@ import { flowReadingOrder } from '../../Support/processBlueprintLayout';
  * of sentences than across a swimlane, and the list is also what survives being read aloud in a
  * review meeting.
  */
-export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = null, onOpenActivity = null }) {
+export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {}, onOpenSubprocess = null, onOpenActivity = null }) {
     const steps = flowReadingOrder(blueprint);
 
     if (steps.length === 0) {
@@ -92,6 +92,24 @@ export default function ProcessFlowStepList({ tb, blueprint, onOpenSubprocess = 
                             </p>
                         )}
 
+                        {/* Controls are a count here, like knowledge: what each one checks is in the
+                            activity panel, and the diagram carries neither. */}
+                        {(controlsByKey[step.key] ?? []).length > 0 && (
+                            onOpenActivity ? (
+                                <button
+                                    type="button"
+                                    className="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-sm font-semibold text-emerald-800 transition hover:border-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+                                    onClick={() => onOpenActivity(step)}
+                                >
+                                    {controlLabel(tb, controlsByKey[step.key])}
+                                </button>
+                            ) : (
+                                <p className="mt-1 text-sm font-medium text-emerald-800">
+                                    {controlLabel(tb, controlsByKey[step.key])}
+                                </p>
+                            )
+                        )}
+
                         {step.outcomes.length > 0 && (
                             <p className="mt-1 text-sm text-slate-500">
                                 {(tb.step_outcomes ?? 'Utfall: :outcomes').replace(':outcomes', step.outcomes.join(' / '))}
@@ -115,6 +133,15 @@ function articleLabel(tb, articles) {
         : (tb.articles_count ?? ':count kunnskapssider');
 
     return template.replace(':count', String(articles.length));
+}
+
+/** "2 kontroller". */
+function controlLabel(tb, controls) {
+    const template = controls.length === 1
+        ? (tb.controls_count_one ?? ':count kontroll')
+        : (tb.controls_count ?? ':count kontroller');
+
+    return template.replace(':count', String(controls.length));
 }
 
 /** "Underprosess: Leverandørkontroll (6 steg)" — the name first, because that is what is clicked. */

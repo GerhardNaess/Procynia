@@ -426,6 +426,97 @@ class QualityItemTest extends TestCase
         $this->assertSame(0, QualityItemRelation::query()->count());
     }
 
+    public function test_a_process_shows_its_governing_documents_and_the_policy_shows_the_process(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        ['customer' => $otherCustomer] = $this->context();
+
+        $linked = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy', 'POL-01');
+        $unlinked = $this->item($customer, QualityItem::TYPE_POLICY, 'Informasjonssikkerhetspolicy');
+        $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste');
+        $this->item($otherCustomer, QualityItem::TYPE_POLICY, 'Fremmed policy');
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        $this->actingAs($owner)
+            ->post('/app/quality/relations', [
+                'from_item_id' => $linked->id,
+                'to_item_id' => $process->id,
+                'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+            ])
+            ->assertRedirect();
+
+        $props = $this->actingAs($owner)
+            ->get("/app/quality/items/{$process->id}")
+            ->assertOk()
+            ->viewData('page')['props'];
+
+        $this->assertCount(1, $props['governing_documents']);
+        $this->assertSame((int) $linked->id, $props['governing_documents'][0]['other_item_id']);
+        $this->assertSame('POL-01', $props['governing_documents'][0]['other_code']);
+
+        // The picker offers this customer's policies that are not yet linked — never a checklist,
+        // never another customer's policy, never the one already governing the process.
+        $this->assertSame([(int) $unlinked->id], array_column($props['governing_document_options'], 'id'));
+
+        // The other end reads the same row: no mirrored relation, no copied content.
+        $policyProps = $this->actingAs($owner)
+            ->get("/app/quality/items/{$linked->id}")
+            ->assertOk()
+            ->viewData('page')['props'];
+
+        $this->assertSame([], $policyProps['governing_documents']);
+        $this->assertCount(1, $policyProps['relations']);
+        $this->assertSame('outgoing', $policyProps['relations'][0]['direction']);
+        $this->assertSame((int) $process->id, $policyProps['relations'][0]['other_item_id']);
+        $this->assertSame(1, QualityItemRelation::query()->where('customer_id', $customer->id)->count());
+    }
+
+    public function test_removing_a_governing_document_removes_only_the_link(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        $relation = QualityItemRelation::query()->create([
+            'customer_id' => $customer->id,
+            'from_item_id' => $policy->id,
+            'to_item_id' => $process->id,
+            'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+            'source' => QualityItemRelation::SOURCE_MANUAL,
+        ]);
+
+        $this->actingAs($owner)->delete("/app/quality/relations/{$relation->id}")->assertRedirect();
+
+        $this->assertSame(0, QualityItemRelation::query()->count());
+        $this->assertNotNull($policy->fresh());
+        $this->assertNotNull($process->fresh());
+    }
+
+    public function test_another_customers_governing_link_cannot_be_removed(): void
+    {
+        ['customer' => $customer] = $this->context();
+        ['owner' => $otherOwner] = $this->context();
+
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+
+        $relation = QualityItemRelation::query()->create([
+            'customer_id' => $customer->id,
+            'from_item_id' => $policy->id,
+            'to_item_id' => $process->id,
+            'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+            'source' => QualityItemRelation::SOURCE_MANUAL,
+        ]);
+
+        $this->actingAs($otherOwner)->delete("/app/quality/relations/{$relation->id}");
+
+        $this->assertNotNull($relation->fresh());
+    }
+
     // ---------------------------------------------------------------------
     // The seam to Wiki
     // ---------------------------------------------------------------------
@@ -1104,7 +1195,7 @@ class QualityItemTest extends TestCase
         // Two seams, two props. A Wiki page never appears as a document, or the other way round.
         $this->assertCount(1, $props['wiki_links']);
         $this->assertSame((int) $page->id, $props['wiki_links'][0]['page_id']);
-        $this->assertSame(QualityItemDocument::RELATION_TYPES, $props['document_relation_types']);
+        $this->assertSame(QualityItemDocument::GENERAL_RELATION_TYPES, $props['document_relation_types']);
     }
 
     public function test_the_document_picker_is_scoped_to_the_customer_and_searchable(): void

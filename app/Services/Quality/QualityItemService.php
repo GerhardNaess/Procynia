@@ -534,7 +534,7 @@ class QualityItemService
             ]);
         }
 
-        if (! in_array($relationType, QualityItemDocument::RELATION_TYPES, true)) {
+        if (! in_array($relationType, QualityItemDocument::GENERAL_RELATION_TYPES, true)) {
             throw ValidationException::withMessages([
                 'relation_type' => __('procynia.quality.errors.unknown_document_relation_type'),
             ]);
@@ -553,6 +553,71 @@ class QualityItemService
                 'created_by_user_id' => $actor?->id,
             ],
         );
+    }
+
+    /**
+     * Record evidence that a control is met: a name, a short description and, optionally, a file
+     * the virksomhet already has in its document store.
+     *
+     * The same row linkDocument() writes in the `evidence` capacity — not a parallel store — with
+     * a title of its own so evidence can be recorded before, or without, a file. Removing it is
+     * unlinkDocument(), like any other attachment, and never touches the file.
+     */
+    public function addControlEvidence(
+        int $customerId,
+        QualityItem $control,
+        string $title,
+        ?string $description = null,
+        ?EnterpriseWikiDocument $document = null,
+        ?User $actor = null,
+    ): QualityItemDocument {
+        $this->assertOwned($customerId, $control);
+
+        if ($control->quality_type !== QualityItem::TYPE_CONTROL) {
+            throw ValidationException::withMessages([
+                'title' => __('procynia.quality.errors.evidence_requires_control'),
+            ]);
+        }
+
+        $title = trim($title);
+
+        if ($title === '') {
+            throw ValidationException::withMessages([
+                'title' => __('procynia.quality.errors.evidence_title_required'),
+            ]);
+        }
+
+        if ($document !== null) {
+            if ((int) $document->customer_id !== $customerId) {
+                throw ValidationException::withMessages([
+                    'enterprise_wiki_document_id' => __('procynia.quality.errors.document_not_found'),
+                ]);
+            }
+
+            // One file is evidence for one control once; the unique index would refuse the second.
+            $alreadyEvidence = QualityItemDocument::query()
+                ->where('quality_item_id', $control->id)
+                ->where('enterprise_wiki_document_id', $document->id)
+                ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+                ->exists();
+
+            if ($alreadyEvidence) {
+                throw ValidationException::withMessages([
+                    'enterprise_wiki_document_id' => __('procynia.quality.errors.evidence_document_already_linked'),
+                ]);
+            }
+        }
+
+        return QualityItemDocument::query()->create([
+            'customer_id' => $customerId,
+            'quality_item_id' => $control->id,
+            'enterprise_wiki_document_id' => $document?->id,
+            'relation_type' => QualityItemDocument::RELATION_TYPE_EVIDENCE,
+            'title' => $title,
+            'note' => $this->nullableText($description),
+            'source' => QualityItemDocument::SOURCE_MANUAL,
+            'created_by_user_id' => $actor?->id,
+        ]);
     }
 
     /**

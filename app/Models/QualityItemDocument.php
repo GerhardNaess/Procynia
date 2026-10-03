@@ -16,6 +16,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * The file itself is an EnterpriseWikiDocument: the virksomhet's one uploaded-file store, reused
  * rather than duplicated. See the migration for why. Removing this row removes the connection and
  * nothing else — the file stays where it is, still attached to every other item that uses it.
+ *
+ * Evidence on a control is the one capacity that may exist without a file: it carries its own
+ * title, and the file is optional. Every other capacity is a statement about a file.
+ *
+ * Evidence is also history: when its file is deleted, the evidence stays and only loses the file
+ * (see releaseEvidenceFromDocument()). Every other capacity goes with the file, by FK cascade.
  */
 class QualityItemDocument extends Model
 {
@@ -31,8 +37,28 @@ class QualityItemDocument extends Model
     /** Anything else that belongs with the document without being any of the above. */
     public const RELATION_TYPE_ATTACHMENT = 'attachment';
 
+    /**
+     * A verktøy from the Kvalitet library that a control is carried out with. Only ever written by
+     * linking a QualityTool, never chosen in the general document form — see linkTool().
+     */
+    public const RELATION_TYPE_TOOL = 'tool';
+
     /** @var list<string> */
     public const RELATION_TYPES = [
+        self::RELATION_TYPE_SOURCE,
+        self::RELATION_TYPE_TEMPLATE,
+        self::RELATION_TYPE_EVIDENCE,
+        self::RELATION_TYPE_ATTACHMENT,
+        self::RELATION_TYPE_TOOL,
+    ];
+
+    /**
+     * The capacities the general Dokumenter form offers. Evidence and tools have their own sections
+     * on a control, with their own forms, so they are written there and nowhere else.
+     *
+     * @var list<string>
+     */
+    public const GENERAL_RELATION_TYPES = [
         self::RELATION_TYPE_SOURCE,
         self::RELATION_TYPE_TEMPLATE,
         self::RELATION_TYPE_EVIDENCE,
@@ -46,11 +72,39 @@ class QualityItemDocument extends Model
         'customer_id',
         'quality_item_id',
         'enterprise_wiki_document_id',
+        'document_removed_at',
         'relation_type',
+        'title',
         'note',
         'source',
         'created_by_user_id',
     ];
+
+    protected $casts = [
+        'document_removed_at' => 'datetime',
+    ];
+
+    /**
+     * Detach evidence from a file that is about to be deleted, so the FK cascade leaves it standing.
+     *
+     * Name, description, author and timestamp are kept. Evidence attached before it had a name of
+     * its own takes the file's name, which is also what the check constraint requires of a
+     * file-less row. Must run before the document row is deleted, in the same transaction.
+     */
+    public static function releaseEvidenceFromDocument(EnterpriseWikiDocument $document): int
+    {
+        $evidence = static::query()
+            ->where('enterprise_wiki_document_id', $document->id)
+            ->where('relation_type', self::RELATION_TYPE_EVIDENCE);
+
+        (clone $evidence)->whereNull('title')->update(['title' => (string) $document->original_filename]);
+
+        return $evidence->update([
+            'enterprise_wiki_document_id' => null,
+            'document_removed_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
 
     public function customer(): BelongsTo
     {
