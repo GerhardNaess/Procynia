@@ -195,7 +195,16 @@ class QualityController extends Controller
             'documents' => $this->documentRows($item),
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
-            'relations' => $this->relationsForItem($customerId, (int) $item->id),
+            'relations' => $relations = $this->relationsForItem($customerId, (int) $item->id),
+            // A process's styrende dokumenter are the policies that govern it — the incoming side
+            // of the same `governs` rows the overview edits, never a separate store. Linking and
+            // unlinking post to storeRelation()/destroyRelation() like every other relation.
+            'governing_documents' => $item->quality_type === QualityItem::TYPE_PROCESS
+                ? $this->governingDocuments($relations)
+                : [],
+            'governing_document_options' => $item->quality_type === QualityItem::TYPE_PROCESS
+                ? $this->governingDocumentOptions($customerId, $relations)
+                : [],
         ]);
     }
 
@@ -1799,6 +1808,48 @@ class QualityController extends Controller
                         : null,
                 ];
             })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The policies governing one process, read off its relations.
+     *
+     * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
+     * @return list<array<string, mixed>>
+     */
+    private function governingDocuments(array $relations): array
+    {
+        return array_values(array_filter(
+            $relations,
+            static fn (array $relation): bool => $relation['direction'] === 'incoming'
+                && $relation['relation_type'] === QualityItemRelation::TYPE_GOVERNS,
+        ));
+    }
+
+    /**
+     * The policies that may still be linked to a process: the customer's own, minus those already
+     * governing it. The types come from the matrix, so widening `governs` widens the picker.
+     *
+     * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
+     * @return list<array<string, mixed>>
+     */
+    private function governingDocumentOptions(?int $customerId, array $relations): array
+    {
+        $linkedIds = array_column($this->governingDocuments($relations), 'other_item_id');
+
+        return QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_type', QualityItemRelation::allowedFromTypes(QualityItemRelation::TYPE_GOVERNS))
+            ->whereNotIn('id', $linkedIds)
+            ->orderBy('title')
+            ->get(['id', 'title', 'code', 'quality_type'])
+            ->map(static fn (QualityItem $option): array => [
+                'id' => (int) $option->id,
+                'title' => $option->title,
+                'code' => $option->code,
+                'quality_type' => $option->quality_type,
+            ])
             ->values()
             ->all();
     }

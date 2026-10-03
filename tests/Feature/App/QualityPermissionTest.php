@@ -8,6 +8,7 @@ use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityItem;
+use App\Models\QualityItemRelation;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Quality\QualityProcessBlueprintService;
@@ -126,6 +127,27 @@ class QualityPermissionTest extends TestCase
         $this->actingAs($user)
             ->delete("/app/quality/items/{$process->id}")
             ->assertForbidden();
+
+        // Governing documents are read, never linked or unlinked, on quality.view alone.
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Avvikspolicy');
+        $relation = QualityItemRelation::query()->create([
+            'customer_id' => $customer->id,
+            'from_item_id' => $policy->id,
+            'to_item_id' => $process->id,
+            'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+            'source' => QualityItemRelation::SOURCE_MANUAL,
+        ]);
+        $itemProps = $this->actingAs($user)->get("/app/quality/items/{$process->id}")->assertOk()->viewData('page')['props'];
+        $this->assertSame([(int) $policy->id], array_column($itemProps['governing_documents'], 'other_item_id'));
+        $this->actingAs($user)
+            ->post('/app/quality/relations', [
+                'from_item_id' => $policy->id,
+                'to_item_id' => $process->id,
+                'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+            ])
+            ->assertForbidden();
+        $this->actingAs($user)->delete("/app/quality/relations/{$relation->id}")->assertForbidden();
+        $this->assertNotNull($relation->fresh());
 
         $this->assertSame('Avvikshåndtering', $process->fresh()->title);
         $this->assertNotNull(QualityProcessBlueprint::query()->where('quality_item_id', $process->id)->first());

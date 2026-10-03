@@ -27,7 +27,8 @@ import {
  * because it is the one view that is not text. Every other type's page is unchanged: without a
  * flow there is no tab strip at all.
  *
- * Because of that tab, a process's Dokument tab carries neither "Struktur" nor "Relasjoner". Steg,
+ * Because of that tab, a process's Dokument tab carries neither "Struktur" nor "Relasjoner" — it
+ * carries "Styrende dokumenter" instead, the one relation a process owner reads from this side. Steg,
  * input and output were a second, competing place to describe the same run the flow already holds,
  * and leaving both open invited two answers to one question. For a process, the flow is the single
  * place. Checklists and controls keep their Struktur panel — they have no flow to move it to — and
@@ -74,6 +75,8 @@ export default function QualityItem() {
         document_relation_types: documentRelationTypes = [],
         document_search: documentSearch = '',
         relations = [],
+        governing_documents: governingDocuments = [],
+        governing_document_options: governingDocumentOptions = [],
         active_tab: activeTab = 'document',
         has_flow: hasFlow = false,
         blueprint = null,
@@ -186,6 +189,17 @@ export default function QualityItem() {
                                 canEdit={canEdit}
                                 frequencies={frequencies}
                                 frequencyLabels={tq.frequencies ?? {}}
+                            />
+                        )}
+
+                        {isProcess && (
+                            <GoverningDocumentsPanel
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                governingDocuments={governingDocuments}
+                                options={governingDocumentOptions}
+                                typeLabels={typeLabels}
                             />
                         )}
 
@@ -597,6 +611,105 @@ function RelationsPanel({ tq, relations, typeLabels }) {
                         </li>
                     ))}
                 </ul>
+            )}
+        </section>
+    );
+}
+
+/**
+ * The styrende dokumenter a process works inside.
+ *
+ * Not a store of its own: each row is a `governs` relation (policy -> process), the same row the
+ * Kvalitet overview draws and the policy's own page lists as "styrer". Linking posts to the shared
+ * relations endpoint, which checks the tenant and the type matrix; nothing of the policy is copied.
+ */
+function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, options, typeLabels }) {
+    const form = useForm({
+        from_item_id: '',
+        to_item_id: item.id,
+        relation_type: 'governs',
+    });
+
+    function submit(event) {
+        event.preventDefault();
+        form.post('/app/quality/relations', {
+            preserveScroll: true,
+            onSuccess: () => form.reset('from_item_id'),
+        });
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.governing_heading ?? 'Styrende dokumenter'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.governing_help ?? ''}</p>
+
+            {governingDocuments.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.governing_empty ?? 'Ingen styrende dokumenter er koblet til prosessen.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {governingDocuments.map((relation) => (
+                        <li key={relation.id} className="flex flex-wrap items-center gap-3 py-3">
+                            <StatusBadge tone={TYPE_TONES[relation.other_quality_type] ?? 'slate'}>
+                                {typeLabels?.[relation.other_quality_type] ?? relation.other_quality_type}
+                            </StatusBadge>
+                            <Link href={relation.other_url} className="font-semibold text-slate-950 hover:underline">
+                                {relation.other_code ? `${relation.other_code} — ${relation.other_title}` : relation.other_title}
+                            </Link>
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className={`ml-auto ${ROW_DESTRUCTIVE}`}
+                                    onClick={() => {
+                                        if (window.confirm(td.governing_remove_confirm ?? 'Fjerne koblingen?')) {
+                                            router.delete(`/app/quality/relations/${relation.id}`, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    {td.governing_remove ?? 'Fjern kobling'}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {canEdit && (
+                options.length === 0 ? (
+                    <p className="mt-4 text-sm text-slate-500">
+                        {td.governing_no_options ?? 'Alle registrerte policyer er allerede koblet til.'}
+                    </p>
+                ) : (
+                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-end gap-3">
+                        <div className="min-w-[16rem] flex-1">
+                            <Field
+                                label={td.governing_select ?? 'Styrende dokument'}
+                                error={form.errors.from_item_id ?? form.errors.relation_type ?? form.errors.to_item_id}
+                            >
+                                <select
+                                    className={INPUT}
+                                    value={form.data.from_item_id}
+                                    onChange={(e) => form.setData('from_item_id', e.target.value)}
+                                >
+                                    <option value="">{td.governing_placeholder ?? 'Velg styrende dokument'}</option>
+                                    {options.map((option) => (
+                                        <option key={option.id} value={option.id}>
+                                            {option.code ? `${option.code} — ${option.title}` : option.title}
+                                        </option>
+                                    ))}
+                                </select>
+                            </Field>
+                        </div>
+                        <button
+                            type="submit"
+                            className={PRIMARY_ACTION}
+                            disabled={form.processing || form.data.from_item_id === ''}
+                        >
+                            {td.governing_submit ?? 'Koble til'}
+                        </button>
+                    </form>
+                )
             )}
         </section>
     );
