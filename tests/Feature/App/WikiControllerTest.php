@@ -442,23 +442,16 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($owner): bool {
+        // Source approval is provenance, not a publication gate: an approved owner leaves the page
+        // a draft, and the two statuses are reported separately.
+        $response->assertViewHas('page', function (array $inertia): bool {
             $props = data_get($inertia, 'props');
-            $summary = data_get($props, 'document_owner_approval_summary', []);
-            $approvals = collect(data_get($props, 'document_owner_approvals', []));
-            $approval = $approvals->first();
 
             return data_get($props, 'page.status') === EnterpriseWikiPage::STATUS_DRAFT
-                && ($summary['ready'] ?? null) === true
-                && ($summary['summary_text'] ?? null) === __('procynia.wiki.document_owner_summary_approved', [
-                    'approved' => 1,
-                    'total' => 1,
-                ])
-                && ($approval['summary_text'] ?? null) === __('procynia.wiki.document_owner_sentence_approved', [
-                    'owner' => $owner->name,
-                    'source' => 'test-document.pdf',
-                ])
-                && ($approval['approval_status'] ?? null) === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED;
+                && data_get($props, 'document_owner_summary.state') === 'approved'
+                && data_get($props, 'document_owner_summary.owner_count') === 1
+                && data_get($props, 'document_owner_summary.approved_count') === 1
+                && data_get($props, 'document_owner_summary.pending_count') === 0;
         });
     }
 

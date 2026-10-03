@@ -58,19 +58,27 @@ describe('available and planned look different, and say why', () => {
     });
 
     test('planned modules are not links, are dimmed, and are marked disabled', () => {
-        const planned = sidebar.slice(sidebar.indexOf('{planned.map('));
+        // "Ikke bestilt" and "Planlagt" share one renderer, so its markup is what both groups get.
+        const start = sidebar.indexOf('const renderUnavailableGroup');
+        const unavailable = sidebar.slice(start, sidebar.indexOf('return (', sidebar.indexOf('));', start)));
 
-        assert.ok(planned.includes('<span'), 'a planned module must not render a Link');
-        assert.ok(! planned.includes('<Link'), 'a planned module must not render a Link');
-        assert.match(planned, /aria-disabled="true"/);
-        assert.match(planned, /cursor-not-allowed/);
-        assert.match(planned, /text-slate-400/);
+        assert.ok(start > -1, 'the unavailable groups must have one shared renderer');
+        assert.ok(unavailable.includes('<span'), 'a planned module must not render a Link');
+        assert.ok(! unavailable.includes('<Link'), 'a planned module must not render a Link');
+        assert.match(unavailable, /aria-disabled="true"/);
+        assert.match(unavailable, /cursor-not-allowed/);
+        assert.match(unavailable, /text-slate-400/);
+        assert.match(sidebar, /renderUnavailableGroup\(groups\.planned,/);
+        assert.match(sidebar, /renderUnavailableGroup\(groups\.not_ordered,/);
     });
 
     test('dimming alone would read as a bug, so the group is captioned', () => {
-        assert.match(sidebar, /data-testid="module-sidebar-planned-caption"/);
+        assert.match(sidebar, /data-testid=\{testId\}/);
+        assert.match(sidebar, /testId: 'module-sidebar-planned-caption'/);
+        assert.match(sidebar, /testId: 'module-sidebar-not-ordered-caption'/);
         assert.match(sidebar, /modules\.planned_caption \?\? 'Planlagt'/);
         assert.match(sidebar, /modules\.planned_hint \?\? 'Ikke tilgjengelig ennå'/);
+        assert.match(sidebar, /modules\.not_ordered_caption \?\? 'Ikke bestilt'/);
     });
 });
 
@@ -117,8 +125,8 @@ describe('the rail does not take navigation away from anyone', () => {
         // every other. Wiki never did, and Wiki is the pattern.
         assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a second level');
         assert.ok(! sidebar.includes('activeSectionKey'), 'the rail takes no section state');
-        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeKey = null, collapsed = false, onToggleCollapsed = null \}\)/);
-        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeKey=\{activeModule\}/);
+        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, collapsed = false, onToggleCollapsed = null \}\)/);
+        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}/);
     });
 });
 
@@ -162,7 +170,7 @@ describe('the rail can be collapsed to icons, on desktop only', () => {
 
     test('the icons carry a tooltip once the labels are gone', () => {
         assert.match(sidebar, /title=\{collapsed \? label : undefined\}/);
-        assert.match(sidebar, /title=\{collapsed \? `\$\{label\} — \$\{plannedHint\}` : plannedHint\}/);
+        assert.match(sidebar, /title=\{collapsed \? `\$\{label\} — \$\{hint\}` : hint\}/);
     });
 
     test('the active module keeps its pill, and planned modules keep their dimming', () => {

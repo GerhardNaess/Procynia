@@ -1,8 +1,8 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Clear alerts left over from a step that no longer exists.
@@ -34,9 +34,7 @@ return new class extends Migration
 
     public function up(): void
     {
-        if (! Schema::hasTable('user_notifications')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'user_notifications');
 
         DB::table('user_notifications')
             ->whereIn('event_type', self::LEGACY_EVENT_TYPES)

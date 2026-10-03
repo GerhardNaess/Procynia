@@ -87,10 +87,12 @@ class WikiAskControllerTest extends TestCase
 
         $this->assertStringContainsString("key: 'wiki-ask'", $layout);
         $this->assertStringContainsString("href: '/app/wiki/ask'", $layout);
-        $this->assertStringContainsString('iconOnly: true', $layout);
         $this->assertStringContainsString('ask_nav', $layout, 'the label must come from translations');
+        // Rendered as its own link outside the workflow nav, with only the magnifying glass visible.
+        $this->assertStringContainsString('href={askWikiNavigation.href}', $layout);
         // The icon carries the meaning, so it needs an accessible name.
-        $this->assertStringContainsString('aria-label={item.iconOnly ? item.label : undefined}', $layout);
+        $this->assertStringContainsString('aria-label={askWikiNavigation.label}', $layout);
+        $this->assertStringContainsString('title={askWikiNavigation.label}', $layout);
     }
 
     public function test_both_languages_define_every_ask_translation_key(): void
