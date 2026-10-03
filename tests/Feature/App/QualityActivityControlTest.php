@@ -177,8 +177,80 @@ class QualityActivityControlTest extends TestCase
         $this->assertNotNull($link->fresh());
     }
 
+    public function test_the_controls_tab_is_a_register_of_every_control_and_where_it_is_applied(): void
+    {
+        $customer = $this->customer();
+        $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $process = $this->process($customer);
+        $blueprint = $this->blueprintFor($customer, $process);
+        $placed = $this->placeControl($customer, $process, 'vurder', 'Fire øyne');
+        $unplaced = $this->placeControl($customer, $process, 'vurder', 'Tatt av igjen');
+        $unplaced->delete();
+        $orphaned = $this->placeControl($customer, $process, 'start', 'På en aktivitet som forsvinner');
+
+        // The activity the third control sat on is removed from the flow; the link row remains.
+        $payload = $blueprint->fresh()->payload;
+        $payload['nodes'] = array_values(array_filter($payload['nodes'], fn (array $node): bool => $node['key'] !== 'start'));
+        $payload['edges'] = array_values(array_filter($payload['edges'], fn (array $edge): bool => $edge['from'] !== 'start'));
+        QualityProcessBlueprint::query()->whereKey($blueprint->id)->update(['payload' => json_encode($payload)]);
+
+        $other = $this->customer();
+        $this->placeControl($other, $this->blueprintedProcess($other), 'vurder', 'Annen kunde');
+
+        $props = $this->actingAs($reader)->get('/app/quality?tab=controls')->assertOk()->viewData('page')['props'];
+
+        $titles = array_column($props['items'], 'title', 'id');
+        $this->assertEqualsCanonicalizing(['Fire øyne', 'Tatt av igjen', 'På en aktivitet som forsvinner'], array_values($titles));
+
+        $register = $props['control_register'];
+
+        $placement = $register[$placed->control_item_id]['placements'][0];
+        $this->assertSame((int) $process->id, $placement['process_id']);
+        $this->assertSame('Avvikshåndtering', $placement['process_title']);
+        $this->assertSame('Vurder avviket', $placement['activity_label']);
+        $this->assertSame('Kvalitetsleder', $placement['activity_role']);
+        $this->assertTrue($placement['activity_exists']);
+        $this->assertSame("/app/quality/items/{$process->id}?tab=flow&activity=vurder", $placement['url']);
+
+        // Taken off every activity: still in the register, with nowhere to point.
+        $this->assertSame([], $register[$unplaced->control_item_id]['placements']);
+
+        // Its activity left the flow: still listed, marked as gone rather than hidden.
+        $gone = $register[$orphaned->control_item_id]['placements'][0];
+        $this->assertFalse($gone['activity_exists']);
+        $this->assertNull($gone['activity_label']);
+    }
+
+    public function test_a_control_page_lists_the_activities_it_is_used_in_and_the_flow_opens_on_one(): void
+    {
+        $customer = $this->customer();
+        $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $process = $this->process($customer);
+        $this->blueprintFor($customer, $process);
+        $link = $this->placeControl($customer, $process, 'vurder', 'Fire øyne');
+
+        $props = $this->actingAs($reader)->get("/app/quality/items/{$link->control_item_id}")
+            ->assertOk()->viewData('page')['props'];
+        $this->assertSame(['Vurder avviket'], array_column($props['control_placements'], 'activity_label'));
+
+        $url = $props['control_placements'][0]['url'];
+        $this->assertSame('vurder', $this->actingAs($reader)->get($url)->assertOk()->viewData('page')['props']['focus_activity_key']);
+
+        // Only the flow tab opens an activity.
+        $this->assertNull($this->actingAs($reader)->get("/app/quality/items/{$process->id}?activity=vurder")
+            ->viewData('page')['props']['focus_activity_key']);
+    }
+
     // ---------------------------------------------------------------------
     // Fixtures
+
+    private function blueprintedProcess(Customer $customer): QualityItem
+    {
+        $process = $this->process($customer);
+        $this->blueprintFor($customer, $process);
+
+        return $process;
+    }
     // ---------------------------------------------------------------------
 
     private function placeControl(Customer $customer, QualityItem $process, string $activityKey, string $title): QualityActivityControl

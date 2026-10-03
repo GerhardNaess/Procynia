@@ -63,6 +63,7 @@ export default function QualityIndex() {
         relations = [],
         relation_item_options: relationItemOptions = [],
         owner_options: ownerOptions = [],
+        control_register: controlRegister = {},
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -102,14 +103,24 @@ export default function QualityIndex() {
                     </p>
                 )}
 
-                <ItemTable
-                    items={items}
-                    tq={tq}
-                    canDelete={canDelete}
-                    activeTab={activeTab}
-                    typeLabels={typeLabels}
-                    statusLabels={statusLabels}
-                />
+                {activeTab === 'controls' ? (
+                    <ControlRegister
+                        items={items}
+                        register={controlRegister}
+                        tq={tq}
+                        canDelete={canDelete}
+                        statusLabels={statusLabels}
+                    />
+                ) : (
+                    <ItemTable
+                        items={items}
+                        tq={tq}
+                        canDelete={canDelete}
+                        activeTab={activeTab}
+                        typeLabels={typeLabels}
+                        statusLabels={statusLabels}
+                    />
+                )}
 
                 {activeTab === 'overview' && (
                     <>
@@ -244,6 +255,104 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                                 )}
                             </tr>
                         ))}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    );
+}
+
+/**
+ * Kontroller as a register: what each control checks and the process activities it is applied in.
+ *
+ * Controls are listed whether they are placed or not — one that has been taken off every activity
+ * is still a control the virksomhet has, and stays here until somebody deletes it.
+ */
+function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
+    const tr = tq.register ?? {};
+    const table = tq.table ?? {};
+
+    if (items.length === 0) {
+        return (
+            <EmptyStateBox
+                title={tr.heading ?? 'Kontrollregister'}
+                description={tr.empty ?? 'Ingen kontroller er registrert ennå. Kontroller legges til på aktivitetene i en prosessflyt.'}
+            />
+        );
+    }
+
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{tr.heading ?? 'Kontrollregister'}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                {tr.help ?? 'Alle kontroller i kvalitetssystemet, og hvilke prosessaktiviteter de brukes i.'}
+            </p>
+            <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[820px] text-left text-base">
+                    <thead className="text-sm uppercase tracking-wide text-slate-500">
+                        <tr>
+                            <th className="pb-2">{tr.control ?? 'Kontroll'}</th>
+                            <th className="pb-2">{tr.criterion ?? 'Hva kontrolleres'}</th>
+                            <th className="pb-2">{tr.used_in ?? 'Brukes i'}</th>
+                            <th className="pb-2">{table.owner ?? 'Eier'}</th>
+                            <th className="pb-2">{table.status ?? 'Status'}</th>
+                            {canDelete && (
+                                <th className="pb-2 text-right">
+                                    <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
+                                </th>
+                            )}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {items.map((item) => {
+                            const entry = register?.[item.id] ?? {};
+                            const placements = entry.placements ?? [];
+
+                            return (
+                                <tr key={item.id} className="align-top">
+                                    <td className="py-3 pr-4">
+                                        <Link href={item.url} className="font-semibold text-slate-950 hover:underline">
+                                            {itemLabel(item)}
+                                        </Link>
+                                    </td>
+                                    <td className="max-w-sm py-3 pr-4 text-slate-700">
+                                        {entry.criterion || <span className="text-slate-500">{tr.no_criterion ?? 'Ikke beskrevet'}</span>}
+                                    </td>
+                                    <td className="py-3 pr-4">
+                                        {placements.length === 0 ? (
+                                            <span className="text-slate-500">{tr.unplaced ?? 'Ikke koblet til noen aktivitet'}</span>
+                                        ) : (
+                                            <ul className="space-y-1">
+                                                {placements.map((placement) => (
+                                                    <li key={placement.id} className="text-slate-700">
+                                                        <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
+                                                            {placement.process_title}
+                                                        </Link>
+                                                        <span className="text-slate-400"> › </span>
+                                                        {placement.activity_exists
+                                                            ? placement.activity_label
+                                                            : <span className="italic text-slate-500">{tr.activity_missing ?? 'Aktiviteten finnes ikke lenger'}</span>}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </td>
+                                    <td className="py-3 pr-4 text-slate-700">
+                                        {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
+                                    </td>
+                                    <td className="py-3 pr-4">
+                                        <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
+                                            {statusLabels?.[item.status] ?? item.status}
+                                        </StatusBadge>
+                                    </td>
+                                    {canDelete && (
+                                        <td className="py-3 pl-4 text-right">
+                                            <QualityItemActions tq={tq} item={item} tab="controls" />
+                                        </td>
+                                    )}
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>

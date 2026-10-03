@@ -91,6 +91,8 @@ export default function QualityItem() {
         subprocess_options: subprocessOptions = [],
         activity_article_draft: articleDraft = null,
         activity_article_error: articleError = null,
+        focus_activity_key: focusActivityKey = null,
+        control_placements: controlPlacements = [],
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
@@ -168,6 +170,7 @@ export default function QualityItem() {
                         subprocessOptions={subprocessOptions}
                         articleDraft={articleDraft}
                         articleError={articleError}
+                        focusActivityKey={focusActivityKey}
                     />
                 ) : (
                     <>
@@ -201,6 +204,10 @@ export default function QualityItem() {
                                 options={governingDocumentOptions}
                                 typeLabels={typeLabels}
                             />
+                        )}
+
+                        {item.quality_type === 'control' && (
+                            <ControlPlacementsPanel td={td} placements={controlPlacements} />
                         )}
 
                         {! isProcess && (
@@ -264,6 +271,53 @@ function DetailTabs({ td, item, activeTab }) {
                 </Link>
             ))}
         </nav>
+    );
+}
+
+/**
+ * Where this control is applied: the process activities it sits on, each a link back into the flow
+ * with the activity open. Read-only — a control is placed and taken off from the activity itself.
+ */
+function ControlPlacementsPanel({ td, placements }) {
+    return (
+        <section className={CARD}>
+            <h2 className="text-xl font-semibold text-slate-950">{td.control_placements_heading ?? 'Brukes i prosessaktiviteter'}</h2>
+
+            {placements.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.control_placements_empty ?? 'Kontrollen er ikke koblet til noen prosessaktivitet.'}
+                </p>
+            ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {placements.map((placement) => (
+                        <li key={placement.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-2 text-base">
+                            <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
+                                {placement.process_title}
+                            </Link>
+                            <span className="text-slate-400">›</span>
+                            <ActivityName td={td} placement={placement} />
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </section>
+    );
+}
+
+function ActivityName({ td, placement }) {
+    if (! placement.activity_exists) {
+        return (
+            <span className="text-slate-500 italic">
+                {td.control_activity_missing ?? 'Aktiviteten finnes ikke lenger i flyten'}
+            </span>
+        );
+    }
+
+    return (
+        <span className="text-slate-700">
+            {placement.activity_label}
+            {placement.activity_role && <span className="text-slate-500"> ({placement.activity_role})</span>}
+        </span>
     );
 }
 

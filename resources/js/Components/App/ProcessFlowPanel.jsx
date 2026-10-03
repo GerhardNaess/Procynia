@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router } from '@inertiajs/react';
 import ProcessSwimlaneDiagram from './ProcessSwimlaneDiagram';
 import ProcessFlowStepList from './ProcessFlowStepList';
@@ -110,6 +110,8 @@ export default function ProcessFlowPanel({
     // `proposal`: that replaces the flow, this edits it, and the two are never on screen together.
     changeProposal = null,
     changeError = null,
+    // The activity to open on arrival — set when the reader came from a control in the register.
+    focusActivityKey = null,
     flowAiAvailable = false,
     subprocessView = null,
     subprocessOptions = [],
@@ -136,7 +138,10 @@ export default function ProcessFlowPanel({
     // Which activity's panel is open, by node key rather than by the node itself: the panel has to
     // show the activity as it is now, and holding the object would leave it showing a label the
     // user has since corrected.
-    const [activityKey, setActivityKey] = useState(null);
+    const [activityKey, setActivityKey] = useState(focusActivityKey);
+    // The reset below also runs on mount, where it must not close the activity the page was
+    // opened on.
+    const settledFirstFlow = useRef(false);
     // Which step is open for editing from the diagram — by key, for the same reason as activityKey.
     const [editingStepKey, setEditingStepKey] = useState(null);
     // Which arrow a new activity is being put on from the diagram: { from, to, label }.
@@ -207,7 +212,10 @@ export default function ProcessFlowPanel({
         setDeclined([]);
         // A new flow arrived from the server, so whatever the editor was open for is settled.
         setEditingStructure(false);
-        setActivityKey(null);
+        if (settledFirstFlow.current) {
+            setActivityKey(null);
+        }
+        settledFirstFlow.current = true;
         setEditingStepKey(null);
         setInsertingOn(null);
         setMovingStepKey(null);

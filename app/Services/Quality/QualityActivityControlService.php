@@ -63,6 +63,66 @@ class QualityActivityControlService
     }
 
     /**
+     * Where each control is placed: which process, which activity — keyed by control item id.
+     *
+     * The activity is resolved against the process's working version now, so a renamed step shows
+     * under its current name. A placement whose activity has since been removed from the flow is
+     * still listed, with `activity_exists` false: the row says where the control was put, and
+     * hiding it would make the control look unused when nobody took it off.
+     *
+     * A control with no placements has no entry; it is still a control in the register.
+     *
+     * @param  list<int>|null  $controlIds  null for every control of the customer
+     * @return array<int, list<array{id: int, process_id: int, process_title: string, process_code: ?string, activity_key: string, activity_label: ?string, activity_role: ?string, activity_exists: bool, url: string}>>
+     */
+    public function placementsByControl(int $customerId, ?array $controlIds = null): array
+    {
+        $rows = QualityActivityControl::query()
+            ->where('customer_id', $customerId)
+            ->when($controlIds !== null, fn ($query) => $query->whereIn('control_item_id', $controlIds))
+            ->with('item:id,customer_id,title,code')
+            ->orderBy('id')
+            ->get();
+
+        $blueprints = QualityProcessBlueprint::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $rows->pluck('quality_item_id')->unique())
+            ->get()
+            ->keyBy('quality_item_id');
+
+        $byControl = [];
+
+        foreach ($rows as $row) {
+            $process = $row->item;
+
+            if ($process === null || (int) $process->customer_id !== $customerId) {
+                continue;
+            }
+
+            $blueprint = $blueprints->get($row->quality_item_id);
+            $activity = $blueprint === null ? null : $this->activities->activity($blueprint, (string) $row->activity_key);
+
+            $byControl[(int) $row->control_item_id][] = [
+                'id' => (int) $row->id,
+                'process_id' => (int) $process->id,
+                'process_title' => (string) $process->title,
+                'process_code' => $process->code,
+                'activity_key' => (string) $row->activity_key,
+                'activity_label' => $activity['label'] ?? null,
+                'activity_role' => ($activity['role'] ?? '') !== '' ? $activity['role'] : null,
+                'activity_exists' => $activity !== null,
+                // Straight to the activity in the flow, panel open — see QualityController::show().
+                'url' => '/app/quality/items/'.$process->id.'?'.http_build_query([
+                    'tab' => 'flow',
+                    'activity' => (string) $row->activity_key,
+                ]),
+            ];
+        }
+
+        return $byControl;
+    }
+
+    /**
      * Registers a control and places it on the activity, as one write.
      *
      * The caller has already resolved the blueprint and checked the activity exists on it.

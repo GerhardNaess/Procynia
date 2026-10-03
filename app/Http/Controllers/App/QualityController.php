@@ -121,6 +121,9 @@ class QualityController extends Controller
             // it to decide what to offer; the gates above decide what is accepted.
             'permissions' => $this->permissionPayload($user),
             'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
+            // Kontroller is a register, not a list of documents: what each control checks and where
+            // in the processes it is applied. Read for that tab only.
+            'control_register' => $tab === 'controls' ? $this->controlRegister($customerId) : (object) [],
             'type_counts' => $this->typeCounts($customerId),
             'quality_types' => QualityItem::TYPES,
             'statuses' => QualityItem::STATUSES,
@@ -170,6 +173,15 @@ class QualityController extends Controller
             // the tab is: a subprocess view survives a reload, a back button and a shared link, and
             // it is read from the subprocess's own blueprint every time it is opened.
             'subprocess_view' => $subprocessView,
+            // `?activity=` opens one activity's panel on arrival — the way back from a control in
+            // the register to where it is applied. A key the flow does not have opens nothing.
+            'focus_activity_key' => $tab === 'flow' && is_string($request->query('activity'))
+                ? $request->query('activity')
+                : null,
+            // Where a control is applied, so its page can lead back to the processes using it.
+            'control_placements' => $customerId !== null && $item->quality_type === QualityItem::TYPE_CONTROL
+                ? ($this->activityControls->placementsByControl((int) $customerId, [(int) $item->id])[(int) $item->id] ?? [])
+                : [],
             'subprocess_options' => $this->subprocessOptions($customerId, $item, $user),
             // A draft article, flashed by the redirect that produced it. Nothing is stored until
             // the user has read it and pressed create — see QualityActivityArticleService.
@@ -1412,6 +1424,41 @@ class QualityController extends Controller
             ))
             ->values()
             ->all();
+    }
+
+    /**
+     * What each control checks and where it is applied, keyed by control id.
+     *
+     * Every control of the customer has an entry, placed or not: a control that is on no activity
+     * any more is still in the register, with an empty list, until somebody deletes it.
+     *
+     * An object, so an empty register reaches the page as {} rather than [].
+     *
+     * @return array<int, array{criterion: ?string, placements: list<array<string, mixed>>}>|object
+     */
+    private function controlRegister(?int $customerId): array|object
+    {
+        if ($customerId === null) {
+            return (object) [];
+        }
+
+        $controls = QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->where('quality_type', QualityItem::TYPE_CONTROL)
+            ->with('controlDetail')
+            ->get();
+        $placements = $this->activityControls->placementsByControl($customerId);
+
+        $register = [];
+
+        foreach ($controls as $control) {
+            $register[(int) $control->id] = [
+                'criterion' => $control->controlDetail?->criterion,
+                'placements' => $placements[(int) $control->id] ?? [],
+            ];
+        }
+
+        return $register === [] ? (object) [] : $register;
     }
 
     /**
