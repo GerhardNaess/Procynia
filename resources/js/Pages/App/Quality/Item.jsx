@@ -96,6 +96,9 @@ export default function QualityItem() {
     const canEdit = permissions.can_edit ?? false;
     const canApprove = permissions.can_approve ?? false;
     const canDelete = permissions.can_delete ?? false;
+    // Handing an activity's knowledge to Wiki needs a Wiki permission too, so it is a separate
+    // answer from canCreate rather than a second use of it.
+    const canCreateWikiArticles = permissions.can_create_wiki_articles ?? false;
     /** A process answers "how does this run?" in the Flyt tab, so Dokument does not ask it twice. */
     const isProcess = item.quality_type === 'process';
 
@@ -139,6 +142,7 @@ export default function QualityItem() {
                         canEdit={canEdit}
                         canApprove={canApprove}
                         canDelete={canDelete}
+                        canCreateWikiArticles={canCreateWikiArticles}
                         proposal={flowProposal}
                         flowError={flowError}
                         flowAiAvailable={flowAiAvailable}

@@ -3815,6 +3815,7 @@ return [
         'source' => 'Kilde',
         'sources_title' => 'Kildedokumenter',
         'sources_description' => 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.',
+        'sources_description_read_only' => 'Kildedokumentene Enterprise Wiki er bygget på. Du har lesetilgang til listen, men ikke tilgang til å administrere kilder.',
         'sources_file_label' => 'Velg fil',
         'sources_no_file_selected' => 'Ingen fil valgt',
         'sources_file_hint' => 'PDF eller DOCX · Maks 20 MB',

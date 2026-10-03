@@ -3814,6 +3814,7 @@ return [
         'source' => 'Source',
         'sources_title' => 'Source documents',
         'sources_description' => 'Upload source documents directly to the Enterprise Wiki. The document is stored and text is extracted before it can be used to generate wiki content.',
+        'sources_description_read_only' => 'The source documents the Enterprise Wiki is built from. You can read the list, but you do not have access to manage sources.',
         'sources_file_label' => 'Choose file',
         'sources_no_file_selected' => 'No file selected',
         'sources_file_hint' => 'PDF or DOCX · Max 20 MB',

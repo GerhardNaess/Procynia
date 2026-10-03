@@ -788,6 +788,7 @@ class QualityController extends Controller
         $customerId = $this->customerContext->currentCustomerId();
 
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_CREATE);
+        $this->authorizeActivityArticleHandover($user);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -854,6 +855,7 @@ class QualityController extends Controller
         $customerId = $this->customerContext->currentCustomerId();
 
         $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_CREATE);
+        $this->authorizeActivityArticleHandover($user);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -1721,6 +1723,22 @@ class QualityController extends Controller
     }
 
     /**
+     * The seam out of Kvalitet and into Wiki, as a permission question.
+     *
+     * Handing an activity's knowledge to Wiki creates an Enterprise Wiki source document — see
+     * QualityActivityArticleService — so it is a Wiki source action performed from Kvalitet, and
+     * it asks for both sides: quality.create for the Kvalitet half, wiki.source.manage for the
+     * Wiki half. Neither on its own is enough, because neither module alone is being changed.
+     *
+     * Nothing else in Kvalitet is affected. Attaching an existing Wiki page, uploading a document
+     * against a process and every other Kvalitet action keep exactly the authorization they had.
+     */
+    private function authorizeActivityArticleHandover(?User $user): void
+    {
+        abort_unless($this->may($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE), 403);
+    }
+
+    /**
      * What the React pages are allowed to offer.
      *
      * The same five answers the gates above give, so a button the page shows is a request the
@@ -1736,6 +1754,10 @@ class QualityController extends Controller
             'can_edit' => $this->may($user, CustomerPermissionCatalog::QUALITY_EDIT),
             'can_approve' => $this->may($user, CustomerPermissionCatalog::QUALITY_APPROVE),
             'can_delete' => $this->may($user, CustomerPermissionCatalog::QUALITY_DELETE),
+            // The cross-module one: what the activity article panel may offer. Both halves, so a
+            // button it shows is a request authorizeActivityArticleHandover() accepts.
+            'can_create_wiki_articles' => $this->may($user, CustomerPermissionCatalog::QUALITY_CREATE)
+                && $this->may($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE),
         ];
     }
 

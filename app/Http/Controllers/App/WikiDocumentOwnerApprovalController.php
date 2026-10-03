@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -13,18 +14,23 @@ use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class WikiDocumentOwnerApprovalController extends Controller
 {
+    use AuthorizesWikiPermissions;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $approvalService,
         private readonly EnterpriseWikiReviewNotificationService $reviewNotifications,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiPageVersionDocumentOwnerApproval $approval): RedirectResponse
@@ -83,6 +89,14 @@ class WikiDocumentOwnerApprovalController extends Controller
         $user = $this->customerContext->currentUser();
 
         abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend(), 403);
+
+        // Deliberately wiki.view and not wiki.approve. This is the DOCUMENT owner vouching for
+        // their own material on a page — an authority that comes from owning the source, not from
+        // a role in the Wiki — and requiring wiki.approve here would replace that ownership with a
+        // permission rather than add to it. What it does require is being able to read the Wiki at
+        // all: nobody signs off on a page they cannot open. approvalService->canDecide() below is
+        // still the authority that decides.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_VIEW);
 
         $page = $this->resolvePageForApproval($slug, $approval);
 

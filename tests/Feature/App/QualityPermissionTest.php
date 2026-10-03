@@ -94,7 +94,14 @@ class QualityPermissionTest extends TestCase
         $props = $this->actingAs($user)->get('/app/quality')->assertOk()->viewData('page')['props'];
 
         $this->assertSame(
-            ['can_create' => false, 'can_edit' => false, 'can_approve' => false, 'can_delete' => false],
+            [
+                'can_create' => false,
+                'can_edit' => false,
+                'can_approve' => false,
+                'can_delete' => false,
+                // The cross-module one. quality.view alone never reaches Wiki.
+                'can_create_wiki_articles' => false,
+            ],
             $props['permissions'],
         );
 
@@ -358,7 +365,15 @@ class QualityPermissionTest extends TestCase
         $props = $this->actingAs($owner)->get('/app/quality')->assertOk()->viewData('page')['props'];
 
         $this->assertSame(
-            ['can_create' => true, 'can_edit' => true, 'can_approve' => true, 'can_delete' => true],
+            [
+                'can_create' => true,
+                'can_edit' => true,
+                'can_approve' => true,
+                'can_delete' => true,
+                // System Owner holds the whole catalogue, Wiki's half included, so the handover
+                // into Wiki is open to them too.
+                'can_create_wiki_articles' => true,
+            ],
             $props['permissions'],
         );
 

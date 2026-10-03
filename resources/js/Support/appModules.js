@@ -45,6 +45,9 @@ export const APP_MODULES = [
         // Wiki/Core is the mandatory module every customer holds, so this entry can never be
         // dimmed — but it is still resolved through entitlements rather than asserted here.
         module: 'wiki_core',
+        // Every customer holds the module; not every person has been given work in it. The Wiki
+        // controllers refuse the page without this key, so the rail must not offer it either.
+        permission: 'wiki.view',
         label: (m) => m.wiki ?? 'Wiki',
         areas: ['wiki', 'wiki-ask'],
     },

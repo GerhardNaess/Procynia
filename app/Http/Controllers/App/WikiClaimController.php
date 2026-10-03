@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
@@ -17,7 +18,9 @@ use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,6 +43,7 @@ use Illuminate\Http\Request;
  */
 class WikiClaimController extends Controller
 {
+    use AuthorizesWikiPermissions;
     use PreservesWikiReviewReturnUrl;
 
     public function __construct(
@@ -51,6 +55,7 @@ class WikiClaimController extends Controller
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -649,6 +654,10 @@ class WikiClaimController extends Controller
         $page = $this->resolvePageForClaim($slug, $claim);
         $user = $this->customerContext->currentUser();
 
+        // The verification basis a reviewer reads before deciding a claim — gated with the
+        // decision it serves, not with ordinary page reading.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_REVIEW);
+
         abort_unless($document->customer_id === $this->customerContext->currentCustomerId(), 404);
         abort_unless($claim->enterprise_wiki_page_id === $page->id, 404);
         abort_unless($document->document_status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED, 404);
@@ -667,9 +676,23 @@ class WikiClaimController extends Controller
         ]);
     }
 
+    /**
+     * Deciding a claim is reviewing Wiki content, so wiki.review is required on top of everything
+     * the Wiki already asks. The one gate every claim action in this controller passes through —
+     * approve, reject, unapprove, attach a source reference, override blocking — so a role without
+     * wiki.review cannot act on a claim by any route.
+     *
+     * Added, never substituted: canHandleClaim() still decides whether THIS claim is this user's
+     * to touch, through claim approval authority or document ownership. A permission says the
+     * customer gave this person review work; it does not say the work includes this claim.
+     */
     private function canHandleClaimForPage(EnterpriseWikiPage $page, EnterpriseWikiClaim $claim, ?User $user): bool
     {
         if (! $user instanceof User) {
+            return false;
+        }
+
+        if (! $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)) {
             return false;
         }
 

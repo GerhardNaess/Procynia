@@ -1787,6 +1787,7 @@ function SourcesTab({
     sourcesStoreUrl,
     documentOwnerOptions = [],
     wikiGenerationAvailable,
+    canManageSources = false,
     tw,
     locale,
 }) {
@@ -1804,7 +1805,8 @@ function SourcesTab({
     });
     const { auth = {} } = usePage().props;
     const currentUser = auth.user ?? {};
-    const canAssignDocumentOwner = Boolean(currentUser.can_assign_enterprise_wiki_document_owner);
+    const canAssignDocumentOwner = canManageSources
+        && Boolean(currentUser.can_assign_enterprise_wiki_document_owner);
     const ownerOptions = documentOwnerOptions ?? [];
 
     const navigateSources = (overrides) => {
@@ -1998,10 +2000,16 @@ function SourcesTab({
                             {tw.sources_title ?? 'Kildedokumenter'}
                         </h2>
                         <p className="max-w-2xl text-base leading-6 text-slate-500">
-                            {tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.'}
+                            {canManageSources
+                                ? (tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.')
+                                : (tw.sources_description_read_only ?? 'Kildedokumentene Enterprise Wiki er bygget på. Du har lesetilgang til listen, men ikke tilgang til å administrere kilder.')}
                         </p>
                     </div>
 
+                    {/* Uploading is wiki.source.manage. Hidden rather than disabled for someone
+                        without it: a greyed-out file picker reads as something temporarily
+                        unavailable, and this is not their job at all. The list below stays. */}
+                    {canManageSources && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                         {/* No <form>: there is no submit step left to trigger, and a form with no
                             button would still submit on Enter from the owner select. */}
@@ -2075,6 +2083,7 @@ function SourcesTab({
 
                         </div>
                     </div>
+                    )}
 
                     {/* The step the user still has to take. A dialog rather than a notice in the
                         page: this exists because the document appearing in the list below reads as
@@ -2332,7 +2341,7 @@ function SourcesTab({
                                                             </svg>
                                                             {tw.source_download_button ?? 'Last ned'}
                                                         </a>
-                                                        {source.document_status === 'extracted' && (
+                                                        {canManageSources && source.document_status === 'extracted' && (
                                                             <button
                                                                 type="button"
                                                                 disabled={ingestingIds.has(source.id) || isInProgress || !wikiGenerationAvailable}
@@ -2378,7 +2387,7 @@ function SourcesTab({
                                                             </button>
                                                         )}
                                                     </div>
-                                                    {source.document_status === 'extracted' && !wikiGenerationAvailable && (
+                                                    {canManageSources && source.document_status === 'extracted' && !wikiGenerationAvailable && (
                                                         <span className="text-base text-slate-500">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
                                                         </span>
@@ -3433,6 +3442,9 @@ export default function WikiIndex({
     sources_store_url: sourcesStoreUrl = '/app/wiki/sources',
     wiki_generation_available: wikiGenerationAvailable = false,
     has_active_wiki_run: hasActiveWikiRunAnyTab = false,
+    // What the customer's own roles let this person do in the Wiki. Presentation only: the page
+    // hides what it would be refused, and every route below enforces the same answer again.
+    permissions = {},
 }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -3530,6 +3542,7 @@ export default function WikiIndex({
                         sourcesStoreUrl={sourcesStoreUrl}
                         documentOwnerOptions={documentOwnerOptions}
                         wikiGenerationAvailable={wikiGenerationAvailable}
+                        canManageSources={permissions.can_manage_sources ?? false}
                         tw={tw}
                         locale={locale}
                     />

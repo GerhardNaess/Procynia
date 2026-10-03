@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiPage;
 use App\Models\SavedNotice;
 use App\Models\User;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -31,19 +33,27 @@ class HomeController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function __invoke(Request $request): Response
     {
         [$user, $customerId] = $this->frontendContext($request);
 
+        // Same order as the left rail, minus Hjem itself. The Wiki card is dropped rather than
+        // dimmed for someone the customer has given no Wiki permission: the rail already hides
+        // the module for them, and a card with its page counts would both contradict that and say
+        // how much is in a Wiki they cannot open.
+        $modules = array_values(array_filter([
+            $this->customerPermissions->has($user, CustomerPermissionCatalog::WIKI_VIEW)
+                ? $this->wikiCard($user, $customerId)
+                : null,
+            $this->tendersCard($user),
+            $this->qualityCard(),
+        ]));
+
         return Inertia::render('App/Home/Index', [
-            // Same order as the left rail, minus Hjem itself.
-            'modules' => [
-                $this->wikiCard($user, $customerId),
-                $this->tendersCard($user),
-                $this->qualityCard(),
-            ],
+            'modules' => $modules,
         ]);
     }
 

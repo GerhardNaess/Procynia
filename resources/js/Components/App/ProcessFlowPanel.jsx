@@ -74,6 +74,9 @@ export default function ProcessFlowPanel({
     // three different roles, so the tab has to be able to offer them one at a time.
     canCreate = false,
     canEdit = false,
+    // Creating a knowledge article is a Wiki source action done from Kvalitet, so it has its own
+    // answer — quality.create alone does not open it.
+    canCreateWikiArticles = false,
     canApprove = false,
     canDelete = false,
     proposal = null,
@@ -319,7 +322,7 @@ export default function ProcessFlowPanel({
                     tb={tb}
                     itemId={shownItemId}
                     activity={activityByKey(shown, activityKey)}
-                    canCreate={canCreate}
+                    canCreate={canCreateWikiArticles}
                     aiAvailable={flowAiAvailable}
                     draft={articleDraft}
                     error={articleError}
@@ -536,7 +539,7 @@ export default function ProcessFlowPanel({
                 tb={tb}
                 itemId={item.id}
                 activity={activityByKey(draft, activityKey)}
-                canCreate={canCreate}
+                canCreate={canCreateWikiArticles}
                 aiAvailable={flowAiAvailable}
                 draft={articleDraft}
                 error={articleError}
