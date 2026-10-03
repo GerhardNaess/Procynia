@@ -122,3 +122,80 @@ export function insertAnchor(points, labelled = false) {
 
     return { ...points[points.length - 1] };
 }
+
+/**
+ * The branches out of one decision, as the dialog edits them: what each says and where it goes.
+ *
+ * A branch is nothing but an arrow out of the decision — there is no branch record to keep in step
+ * with the edges. Reading them is filtering the edges; saving them is replacing those edges.
+ */
+export function decisionBranches(edges, key) {
+    return edges
+        .filter((edge) => edge.from === key)
+        .map((edge) => ({ label: edge.label ?? '', to: edge.to }));
+}
+
+/**
+ * The steps a branch may lead to: any existing node but the decision itself and a start.
+ *
+ * normalise() drops an arrow from a node to itself, and an arrow into the start is the validator's
+ * `start_has_incoming` — offering either would let the user pick something that is lost or wrong
+ * the moment it is saved. No step is created here; a branch only ever points at one that exists.
+ */
+export function branchTargets(nodes, key) {
+    return nodes.filter((node) => node.key !== key && (node.type ?? 'step') !== 'start');
+}
+
+/**
+ * What stands between these branches and a decision the flow validator would accept.
+ *
+ * The same three rules as QualityProcessFlowValidator::decisionProblems() — at least two ways out,
+ * every one named, no two named alike (ignoring case) — under the same problem keys, so the dialog
+ * says what approval would say, only before the save rather than after. Plus the one thing the
+ * validator never sees because normalise() has already dropped it: a branch with no valid target.
+ */
+export function branchProblems(branches, nodes, key) {
+    const problems = [];
+    const targets = new Set(branchTargets(nodes, key).map((node) => node.key));
+    const labels = branches.map((branch) => String(branch.label ?? '').trim());
+
+    if (branches.length < 2) {
+        problems.push('decision_needs_two_outcomes');
+    }
+
+    if (labels.some((label) => label === '')) {
+        problems.push('decision_outcome_unnamed');
+    }
+
+    const named = labels.filter((label) => label !== '').map((label) => label.toLocaleLowerCase());
+
+    if (new Set(named).size !== named.length) {
+        problems.push('decision_outcomes_repeat');
+    }
+
+    if (branches.some((branch) => ! targets.has(branch.to))) {
+        problems.push('branch_without_target');
+    }
+
+    return problems;
+}
+
+/**
+ * The flow with one decision's outgoing arrows replaced by these branches.
+ *
+ * They go in where the decision's first arrow stood, so the payload keeps reading in flow order and
+ * a diff of the save shows the branches changing and nothing else moving. Labels are trimmed: what
+ * is saved is what is drawn. Every other arrow, and every node, is left exactly as it was.
+ */
+export function withDecisionBranches(edges, key, branches) {
+    const replacement = branches.map((branch) => ({
+        from: key,
+        to: branch.to,
+        label: String(branch.label ?? '').trim(),
+    }));
+    const at = edges.findIndex((edge) => edge.from === key);
+    const others = edges.filter((edge) => edge.from !== key);
+    const insertAt = at === -1 ? others.length : edges.slice(0, at).filter((edge) => edge.from !== key).length;
+
+    return [...others.slice(0, insertAt), ...replacement, ...others.slice(insertAt)];
+}

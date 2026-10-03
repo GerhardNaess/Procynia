@@ -6,10 +6,14 @@ import ActionDialog from './ActionDialog';
 import StatusBadge from './StatusBadge';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
 import {
+    branchProblems,
+    branchTargets,
     canInsertStepOn,
+    decisionBranches,
     freshStepKey,
     isEditableStep,
     stepEditIsValid,
+    withDecisionBranches,
     withStepEdited,
     withStepInserted,
 } from '../../Support/processStepEdit';
@@ -214,19 +218,20 @@ export default function ProcessFlowPanel({
     }
 
     /**
-     * Save one step's text and role from the diagram's dialog.
+     * Save one step's text and role from the diagram's dialog — and, for a decision, its branches.
      *
      * The working version is saved as the editor holds it, with that one node changed — the same
      * PUT "Lagre struktur" makes, so it clears an approval the same way and is the same kind of
      * change. The local nodes are not touched first: what the diagram shows next is what the
-     * server stored, and a refused save leaves the flow exactly as it was.
+     * server stored, and a refused save leaves the flow exactly as it was. A decision's branches
+     * are its outgoing arrows, so they travel as those arrows replaced, in the same request.
      */
-    function saveStep(key, change, { onError }) {
+    function saveStep(key, { branches = null, ...change }, { onError }) {
         setSaving(true);
         router.put(`/app/quality/items/${item.id}/blueprint`, {
             lanes,
             nodes: withStepEdited(nodes, key, change),
-            edges,
+            edges: branches === null ? edges : withDecisionBranches(edges, key, branches),
         }, {
             preserveScroll: true,
             onError,
@@ -666,6 +671,9 @@ export default function ProcessFlowPanel({
                 tb={tb}
                 step={editingStepKey === null ? null : nodes.find((node) => node.key === editingStepKey && isEditableStep(node)) ?? null}
                 lanes={lanes}
+                nodes={nodes}
+                edges={edges}
+                problemTexts={tq.flow_problems ?? {}}
                 hasUnsavedChanges={isDirty}
                 busy={saving}
                 onSave={(change, options) => saveStep(editingStepKey, change, options)}
@@ -785,27 +793,68 @@ function activityByKey(blueprint, key) {
 }
 
 /**
- * One step, opened from the diagram: what it says and who does it.
+ * One step, opened from the diagram: what it says and who does it — and, for a decision, where it
+ * branches.
  *
- * Deliberately two fields. Type, arrows and subprocess change the shape of the flow and stay in the
- * structure editor; a role is chosen among the flow's own, not created here. The fields are seeded
- * once per opening and owned by the dialog until it saves or closes, so a re-render of the panel
- * does not throw away what the user is typing.
+ * Type and subprocess change the shape of the flow and stay in the structure editor; a role is
+ * chosen among the flow's own, not created here. A decision's branches are the one exception to
+ * "arrows stay in the editor", because a decision is its branches: each is a named outcome pointing
+ * at a step that already exists. No step is created from here.
+ *
+ * The fields are seeded once per opening and owned by the dialog until it saves or closes, so a
+ * re-render of the panel does not throw away what the user is typing.
  */
-function StepEditDialog({ tb, step, inserting = false, lanes, hasUnsavedChanges, busy, onSave, onOpenActivity = null, onClose }) {
+function StepEditDialog({
+    tb,
+    step,
+    inserting = false,
+    lanes,
+    nodes = [],
+    edges = [],
+    problemTexts = {},
+    hasUnsavedChanges,
+    busy,
+    onSave,
+    onOpenActivity = null,
+    onClose,
+}) {
     const titleId = inserting ? 'process-step-insert-title' : 'process-step-edit-title';
     const [label, setLabel] = useState('');
     const [lane, setLane] = useState('');
+    // Null for anything that is not a decision being edited, so its save leaves the arrows alone.
+    const [branches, setBranches] = useState(null);
     const [error, setError] = useState(null);
+
+    const editsBranches = ! inserting && step?.type === 'decision';
 
     useEffect(() => {
         setLabel(step?.label ?? '');
         setLane(step?.lane ?? lanes[0]?.key ?? '');
+        setBranches(editsBranches ? decisionBranches(edges, step.key) : null);
         setError(null);
     }, [step?.key, step?.between?.join('\u0000')]);
 
-    const change = { label, lane };
-    const valid = stepEditIsValid(change, lanes);
+    // Only while a decision is open. The branches state outlives the closing render — it is reset
+    // by the effect, after it — so it cannot be what decides whether there is a decision to read.
+    const shownBranches = editsBranches ? branches : null;
+    const targets = editsBranches ? branchTargets(nodes, step.key) : [];
+    // The validator's rules, checked before the save rather than at approval: a decision cannot be
+    // saved from here with fewer than two named, distinct branches to steps that exist.
+    const problems = shownBranches === null ? [] : branchProblems(shownBranches, nodes, step.key);
+    const change = shownBranches === null ? { label, lane } : { label, lane, branches: shownBranches };
+    const valid = stepEditIsValid(change, lanes) && problems.length === 0;
+
+    function updateBranch(index, patch) {
+        setBranches((current) => current.map((branch, at) => (at === index ? { ...branch, ...patch } : branch)));
+    }
+
+    function problemText(problem) {
+        if (problem === 'branch_without_target') {
+            return tb.branch_without_target ?? 'Hver gren må gå til et steg som finnes i flyten.';
+        }
+
+        return (problemTexts[problem] ?? problem).replace(':label', label.trim() || step.label);
+    }
 
     function submit(event) {
         event.preventDefault();
@@ -868,6 +917,78 @@ function StepEditDialog({ tb, step, inserting = false, lanes, hasUnsavedChanges,
                             ))}
                         </select>
                     </label>
+
+                    {shownBranches !== null && (
+                        <fieldset className="mt-5">
+                            <legend className="block text-sm font-semibold text-slate-700">{tb.branches_heading ?? 'Grener'}</legend>
+                            <p className="mt-1 text-sm leading-5 text-slate-500">
+                                {tb.branches_help ?? 'Hvert utfall av beslutningen går til et steg som allerede finnes i flyten.'}
+                            </p>
+
+                            <ul className="mt-3 space-y-2">
+                                {shownBranches.map((branch, index) => (
+                                    // By position: a branch has no identity of its own until it is saved as an arrow.
+                                    <li key={index} className="flex flex-wrap items-end gap-2">
+                                        <label className="min-w-[8rem] flex-1 space-y-1">
+                                            <span className="block text-xs font-semibold text-slate-600">{tb.branch_label ?? 'Utfall'}</span>
+                                            <input
+                                                type="text"
+                                                className={INPUT}
+                                                value={branch.label}
+                                                maxLength={60}
+                                                placeholder={tb.branch_label_placeholder ?? 'For eksempel Ja'}
+                                                onChange={(event) => updateBranch(index, { label: event.target.value })}
+                                                disabled={busy}
+                                            />
+                                        </label>
+                                        <label className="min-w-[10rem] flex-[2] space-y-1">
+                                            <span className="block text-xs font-semibold text-slate-600">{tb.branch_target ?? 'Går til'}</span>
+                                            <select
+                                                className={INPUT}
+                                                value={branch.to}
+                                                onChange={(event) => updateBranch(index, { to: event.target.value })}
+                                                disabled={busy}
+                                            >
+                                                {! targets.some((node) => node.key === branch.to) && (
+                                                    <option value={branch.to} disabled>{tb.branch_target_choose ?? 'Velg steg …'}</option>
+                                                )}
+                                                {targets.map((node) => (
+                                                    <option key={node.key} value={node.key}>
+                                                        {(node.label || node.key)
+                                                            + ((node.type ?? 'step') === 'step' ? '' : ` (${(tb.node_types ?? {})[node.type] ?? node.type})`)}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            className="rounded-xl px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                                            onClick={() => setBranches((current) => current.filter((_, at) => at !== index))}
+                                            disabled={busy}
+                                            aria-label={(tb.branch_remove ?? 'Fjern grenen «:label»').replace(':label', branch.label.trim() || String(index + 1))}
+                                        >
+                                            {tb.branch_remove_short ?? 'Fjern'}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+
+                            <button
+                                type="button"
+                                className="mt-3 text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                onClick={() => setBranches((current) => [...current, { label: '', to: targets[0]?.key ?? '' }])}
+                                disabled={busy || targets.length === 0}
+                            >
+                                + {tb.branch_add ?? 'Legg til gren'}
+                            </button>
+
+                            {problems.length > 0 && (
+                                <ul className="mt-3 list-disc space-y-1 rounded-xl border border-amber-200 bg-amber-50 py-2 pl-8 pr-3 text-sm text-amber-900">
+                                    {problems.map((problem) => <li key={problem}>{problemText(problem)}</li>)}
+                                </ul>
+                            )}
+                        </fieldset>
+                    )}
 
                     <p className="mt-4 text-sm leading-5 text-slate-500">
                         {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}

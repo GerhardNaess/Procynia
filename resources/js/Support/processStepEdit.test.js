@@ -1,12 +1,16 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    branchProblems,
+    branchTargets,
     canInsertStepOn,
+    decisionBranches,
     freshStepKey,
     insertAnchor,
     isEditableStep,
     stepEditIsValid,
     withStepEdited,
+    withDecisionBranches,
     withStepInserted,
 } from './processStepEdit.js';
 
@@ -110,5 +114,79 @@ describe('adding an activity on an arrow', () => {
         assert.deepEqual(insertAnchor([{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 80 }, { x: 40, y: 80 }]), { x: 20, y: 40 });
         assert.deepEqual(insertAnchor([{ x: 0, y: 0 }, { x: 60, y: 0 }], true), { x: 45, y: 0 });
         assert.equal(insertAnchor([{ x: 0, y: 0 }]), null);
+    });
+});
+
+describe('editing the branches of a decision', () => {
+    const flow = [
+        { key: 'start', lane: 'buyer', type: 'start', label: 'Behov meldt' },
+        { key: 'critical', lane: 'buyer', type: 'decision', label: 'Kritisk?' },
+        { key: 'check', lane: 'buyer', type: 'step', label: 'Kontroller' },
+        { key: 'end', lane: 'finance', type: 'end', label: 'Godkjent' },
+    ];
+    const edges = [
+        { from: 'start', to: 'critical', label: null },
+        { from: 'critical', to: 'check', label: 'Ja' },
+        { from: 'check', to: 'end', label: null },
+        { from: 'critical', to: 'end', label: 'Nei' },
+    ];
+
+    test('reads the arrows out of the decision as branches', () => {
+        assert.deepEqual(decisionBranches(edges, 'critical'), [
+            { label: 'Ja', to: 'check' },
+            { label: 'Nei', to: 'end' },
+        ]);
+        assert.deepEqual(decisionBranches(edges, 'check'), [{ label: '', to: 'end' }]);
+    });
+
+    test('a branch may go to any existing step except the decision itself and the start', () => {
+        assert.deepEqual(branchTargets(flow, 'critical').map((node) => node.key), ['check', 'end']);
+    });
+
+    test('accepts two named, different branches to existing steps', () => {
+        assert.deepEqual(branchProblems(decisionBranches(edges, 'critical'), flow, 'critical'), []);
+    });
+
+    test('refuses what the flow validator would refuse, under the same keys', () => {
+        assert.deepEqual(branchProblems([{ label: 'Ja', to: 'check' }], flow, 'critical'), ['decision_needs_two_outcomes']);
+        assert.deepEqual(branchProblems([{ label: 'Ja', to: 'check' }, { label: '  ', to: 'end' }], flow, 'critical'), ['decision_outcome_unnamed']);
+        assert.deepEqual(branchProblems([{ label: 'Ja', to: 'check' }, { label: ' ja', to: 'end' }], flow, 'critical'), ['decision_outcomes_repeat']);
+        assert.deepEqual(branchProblems([{ label: 'Ja', to: 'check' }, { label: 'Nei', to: 'critical' }], flow, 'critical'), ['branch_without_target']);
+        assert.deepEqual(branchProblems([{ label: 'Ja', to: 'check' }, { label: 'Nei', to: 'start' }], flow, 'critical'), ['branch_without_target']);
+        assert.deepEqual(branchProblems([], flow, 'critical'), ['decision_needs_two_outcomes']);
+    });
+
+    test('replaces the decision\'s arrows where they stood, and leaves the rest alone', () => {
+        const result = withDecisionBranches(edges, 'critical', [
+            { label: ' Ja ', to: 'end' },
+            { label: 'Nei', to: 'check' },
+            { label: 'Vet ikke', to: 'check' },
+        ]);
+
+        assert.deepEqual(result, [
+            edges[0],
+            { from: 'critical', to: 'end', label: 'Ja' },
+            { from: 'critical', to: 'check', label: 'Nei' },
+            { from: 'critical', to: 'check', label: 'Vet ikke' },
+            edges[2],
+        ]);
+        assert.equal(edges.length, 4);
+    });
+
+    test('removing a branch removes only its arrow', () => {
+        const result = withDecisionBranches(edges, 'critical', [{ label: 'Nei', to: 'end' }, { label: 'Ja', to: 'check' }]);
+
+        assert.deepEqual(result, [
+            edges[0],
+            { from: 'critical', to: 'end', label: 'Nei' },
+            { from: 'critical', to: 'check', label: 'Ja' },
+            edges[2],
+        ]);
+    });
+
+    test('a decision with no arrows yet gets its branches at the end', () => {
+        const result = withDecisionBranches([edges[0]], 'critical', [{ label: 'Ja', to: 'check' }, { label: 'Nei', to: 'end' }]);
+
+        assert.deepEqual(result.map((edge) => edge.to), ['critical', 'check', 'end']);
     });
 });
