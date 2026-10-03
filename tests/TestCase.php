@@ -2,9 +2,12 @@
 
 namespace Tests;
 
+use App\Models\Customer;
+use App\Models\CustomerPackageEntitlement;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
@@ -41,6 +44,41 @@ abstract class TestCase extends BaseTestCase
         'username' => 'procynia_test_user',
         'password' => 'test_only_local_9f3a1c',
     ];
+
+    /**
+     * Whether a customer created during the test starts out holding the Tender package.
+     *
+     * Every customer that existed when packages were introduced was given Tender by
+     * 2026_10_01_000002_grant_tender_package_to_existing_customers; a customer created afterwards
+     * starts with Wiki/Core only. A test customer is always created after the migrations, so
+     * without this every Anbud route (app.ai.*, app.notices.*, app.bid-status, ...) redirects to
+     * Hjem from EnsureModuleIsEnabled before the behaviour under test is reached. The default
+     * therefore mirrors the customers Anbud actually serves today.
+     *
+     * A test about entitlements themselves sets this to false and grants what it needs.
+     */
+    protected bool $customersHoldTenderPackage = true;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if ($this->customersHoldTenderPackage) {
+            Customer::created(function (Customer $customer): void {
+                // Hand-built SQLite schemas without the table have no packages to hold.
+                if (! Schema::connection($customer->getConnectionName())->hasTable('customer_package_entitlements')) {
+                    return;
+                }
+
+                CustomerPackageEntitlement::query()->create([
+                    'customer_id' => $customer->id,
+                    'package_key' => 'tender',
+                    'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
+                    'activated_at' => now(),
+                ]);
+            });
+        }
+    }
 
     /**
      * Create the application and stop immediately if tests resolve to an unsafe database.

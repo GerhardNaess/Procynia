@@ -1,9 +1,9 @@
 <?php
 
 use App\Models\EnterpriseWikiIngestRun;
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Settle runs left waiting for an approval that no longer gates anything.
@@ -32,9 +32,7 @@ return new class extends Migration
 
     public function up(): void
     {
-        if (! Schema::hasTable('enterprise_wiki_ingest_runs')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'enterprise_wiki_ingest_runs');
 
         DB::table('enterprise_wiki_ingest_runs')
             ->where('status', self::LEGACY_STATUS)

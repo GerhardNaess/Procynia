@@ -17,6 +17,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -26,6 +27,7 @@ use Tests\TestCase;
  */
 class WikiClaimControllerTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -1082,7 +1084,7 @@ class WikiClaimControllerTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole, bool $isQa = false): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Wiki Claim Tester',
             'email' => Str::lower(Str::random(8)).'@wiki-claim-test.invalid',
             'password' => bcrypt('secret'),
@@ -1091,7 +1093,7 @@ class WikiClaimControllerTest extends TestCase
             'is_qa' => $isQa,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     /**

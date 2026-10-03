@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\GraphQuery\EnterpriseWikiGraphFocusService;
 use App\Services\EnterpriseWiki\GraphQuery\GraphDirection;
 use App\Services\EnterpriseWiki\GraphQuery\GraphFocusQuery;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -25,14 +28,19 @@ use Throwable;
  */
 class WikiGraphFocusController extends Controller
 {
+    use AuthorizesWikiPermissions;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiGraphFocusService $focusService,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function __invoke(Request $request): JsonResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_VIEW);
 
         if ($customerId === null) {
             return response()->json(['error' => 'No customer context.'], 403);

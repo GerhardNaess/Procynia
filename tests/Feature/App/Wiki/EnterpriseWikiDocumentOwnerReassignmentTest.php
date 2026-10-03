@@ -19,6 +19,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -37,6 +38,7 @@ use Tests\TestCase;
 class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -266,7 +268,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Bruker '.Str::random(5),
             'email' => Str::lower(Str::random(8)).'@eierbytte.test',
             'password' => bcrypt('secret'),
@@ -274,7 +276,7 @@ class EnterpriseWikiDocumentOwnerReassignmentTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createDocument(Customer $customer, ?User $owner, string $filename): EnterpriseWikiDocument

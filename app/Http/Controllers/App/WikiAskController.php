@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Data\Ai\AiCallContext;
 use App\Exceptions\Ai\AiCostControlException;
+use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
@@ -11,8 +12,10 @@ use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQuestionAnswerService;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -30,11 +33,14 @@ use Throwable;
  */
 class WikiAskController extends Controller
 {
+    use AuthorizesWikiPermissions;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiQuestionAnswerService $questionAnswerService,
         private readonly BillingEntitlementService $billingEntitlementService,
         private readonly AiCostControlService $costControl,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function index(): Response
@@ -42,6 +48,9 @@ class WikiAskController extends Controller
         // Customer scope comes from the resolved context, never from the request — the same rule the
         // rest of the Enterprise Wiki surface follows.
         $this->customerContext->currentCustomerId();
+
+        // Spør Wiki reads the Wiki and writes nothing, so it asks for nothing beyond wiki.view.
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_VIEW);
 
         return Inertia::render('App/Wiki/Ask', [
             'question' => null,
@@ -54,6 +63,8 @@ class WikiAskController extends Controller
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
+
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_VIEW);
 
         $customer = $this->customerContext->currentCustomer($user);
         abort_unless(

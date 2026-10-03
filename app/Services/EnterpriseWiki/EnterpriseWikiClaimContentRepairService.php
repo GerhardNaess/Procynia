@@ -228,7 +228,7 @@ class EnterpriseWikiClaimContentRepairService
                 ->where('generated_page_version_id', $current->id)
                 ->update(['generated_page_version_id' => $newVersion->id]);
 
-            $published = $this->publicationSettlement->afterManualEdit($page, $newVersion, $actor);
+            $this->publicationSettlement->afterManualEdit($page);
 
             Log::info('[PROCYNIA][WIKI_WORKING_VERSION_EDIT] Manual edit saved.', [
                 'page_id' => (int) $page->id,
@@ -239,7 +239,6 @@ class EnterpriseWikiClaimContentRepairService
                 'copied_claims' => count($copiedClaimIds),
                 'dropped_claims' => count($droppedClaimIds),
                 'edited_by_user_id' => (int) $actor->id,
-                'published_directly' => $published,
             ]);
 
             return [
@@ -248,7 +247,6 @@ class EnterpriseWikiClaimContentRepairService
                 'changed_content_block_keys' => array_values($changedBlockKeys),
                 'copied_claim_ids' => $copiedClaimIds,
                 'dropped_claim_ids' => $droppedClaimIds,
-                'published_directly' => $published,
             ];
         });
     }

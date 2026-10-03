@@ -17,6 +17,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -34,6 +35,7 @@ use Tests\TestCase;
 class EnterpriseWikiQaAssignmentTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -428,7 +430,7 @@ class EnterpriseWikiQaAssignmentTest extends TestCase
         bool $isQa = false,
         bool $isWikiApprover = false,
     ): User {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Bruker '.Str::random(5),
             'email' => Str::lower(Str::random(9)).'@kvalitet.test',
             'password' => bcrypt('secret'),
@@ -438,7 +440,7 @@ class EnterpriseWikiQaAssignmentTest extends TestCase
             'is_active' => true,
             'is_qa' => $isQa,
             'is_wiki_approver' => $isWikiApprover,
-        ]);
+        ]));
     }
 
     private function customer(string $name = 'Kvalitet AS'): Customer

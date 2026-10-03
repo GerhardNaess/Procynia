@@ -107,14 +107,17 @@ class WikiShowPageHelpTest extends TestCase
 
     public function test_the_help_describes_document_owner_as_a_source_check_not_publication(): void
     {
-        // The distinction people got wrong: signing off your own document is not publishing a page.
+        // The distinction people got wrong: a document owner's view is traceability, not a gate on
+        // publishing the page.
         $norwegian = mb_strtolower($this->wiki('no')['show_page_help_item_document_owner_text']);
         $this->assertStringContainsString('kildedokument', $norwegian);
-        $this->assertStringContainsString('ikke en publisering', $norwegian);
+        $this->assertStringContainsString('sporbarhet', $norwegian);
+        $this->assertStringContainsString('kan publiseres uten at dokumenteier', $norwegian);
 
         $english = mb_strtolower($this->wiki('en')['show_page_help_item_document_owner_text']);
         $this->assertStringContainsString('source document', $english);
-        $this->assertStringContainsString('does not publish', $english);
+        $this->assertStringContainsString('traceability', $english);
+        $this->assertStringContainsString('whether or not they have taken a view', $english);
     }
 
     public function test_the_help_describes_the_reviewer_as_the_final_decision(): void
@@ -123,9 +126,12 @@ class WikiShowPageHelpTest extends TestCase
         $this->assertStringContainsString('endelige', $norwegian);
         $this->assertStringContainsString('publiseres', $norwegian);
 
+        $this->assertStringContainsString('en annen enn den som sendte den inn', $norwegian);
+
         $english = mb_strtolower($this->wiki('en')['show_page_help_item_reviewer_text']);
         $this->assertStringContainsString('final review', $english);
         $this->assertStringContainsString('published', $english);
+        $this->assertStringContainsString('somebody other than the person who sent it in', $english);
     }
 
     // F. submitting names somebody

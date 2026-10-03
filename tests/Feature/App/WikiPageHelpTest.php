@@ -8,11 +8,13 @@ use App\Models\Nationality;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class WikiPageHelpTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -145,7 +147,7 @@ class WikiPageHelpTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Test User',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -153,6 +155,6 @@ class WikiPageHelpTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 }

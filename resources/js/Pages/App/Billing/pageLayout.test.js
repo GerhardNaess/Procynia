@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 const pages = join(dirname(fileURLToPath(import.meta.url)), '..');
 const billing = readFileSync(join(pages, 'Billing', 'Index.jsx'), 'utf8');
 const reference = readFileSync(join(pages, 'CustomerEnvironment', 'Index.jsx'), 'utf8');
+// Kundemiljø renders its header through a component it shares with Rediger bruker.
+const referenceHeader = readFileSync(join(pages, 'CustomerEnvironment', 'CustomerEnvironmentHeader.jsx'), 'utf8');
 
 /** The classes on the single wrapper the page puts directly inside CustomerAppLayout. */
 function pageWrapper(source) {
@@ -58,7 +60,7 @@ describe('the header block matches the reference', () => {
     }
 
     test('help sits beside the title, not pushed to the far edge', () => {
-        for (const [name, source] of [['billing', billing], ['reference', reference]]) {
+        for (const [name, source] of [['billing', billing], ['reference', referenceHeader]]) {
             const row = header(source);
 
             assert.match(row, /<div className="flex items-center gap-3">/, `${name}: title row`);
@@ -69,7 +71,7 @@ describe('the header block matches the reference', () => {
     test('the title carries the same weight as every other page title', () => {
         const heading = (source) => header(source).match(/<h1 className="([^"]+)"/)[1];
 
-        assert.equal(heading(billing), heading(reference));
+        assert.equal(heading(billing), heading(referenceHeader));
     });
 
     test('the page help button is part of the title row', () => {
@@ -80,7 +82,7 @@ describe('the header block matches the reference', () => {
 
     test('the intro text sits directly under the title, in the reference measure', () => {
         const intros = [...header(billing).matchAll(/<p className="([^"]+)">/g)].map(([, classes]) => classes);
-        const referenceIntro = header(reference).match(/<p className="([^"]+)">/)[1];
+        const referenceIntro = header(referenceHeader).match(/<p className="([^"]+)">/)[1];
 
         assert.notEqual(intros.length, 0, 'the intro text is gone');
 

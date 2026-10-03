@@ -112,7 +112,7 @@ class CrossTenantIsolationTest extends TestCase
         // That is a convention, and a convention needs a test. A new action that used the bound model
         // directly would be a cross-tenant read, and it fails here.
         $markers = [
-            "where('customer_id'", 'customer_id !==', 'customer_id !=',
+            "where('customer_id'", 'customer_id !==', 'customer_id !=', 'customer_id ===',
             'whereKey(', 'currentCustomerId', 'frontendContext(',
             'scoped', 'visible', 'Visible', 'resolve', 'AccessService',
             'assertAiAccess', 'canHandle', 'forCustomer', '$this->decide(',

@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
+use App\Http\Controllers\App\CustomerRoleController;
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
@@ -262,6 +263,16 @@ Route::prefix('app')
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
+
+        // Customer-defined roles. System Owner only, enforced in the controller — these sit beside
+        // the fixed bid_role matrix above and never touch anbud authorization. Tilganger defines
+        // a role; handing it to a person happens on the user's own edit screen.
+        Route::post('/customer-environment/roles', [CustomerRoleController::class, 'store'])
+            ->name('customer-environment.roles.store');
+        Route::patch('/customer-environment/roles/{customerRole}', [CustomerRoleController::class, 'update'])
+            ->name('customer-environment.roles.update');
+        Route::delete('/customer-environment/roles/{customerRole}', [CustomerRoleController::class, 'destroy'])
+            ->name('customer-environment.roles.destroy');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');

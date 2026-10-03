@@ -3,6 +3,7 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
+use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -16,6 +17,7 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -440,23 +442,16 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($owner): bool {
+        // Source approval is provenance, not a publication gate: an approved owner leaves the page
+        // a draft, and the two statuses are reported separately.
+        $response->assertViewHas('page', function (array $inertia): bool {
             $props = data_get($inertia, 'props');
-            $summary = data_get($props, 'document_owner_approval_summary', []);
-            $approvals = collect(data_get($props, 'document_owner_approvals', []));
-            $approval = $approvals->first();
 
             return data_get($props, 'page.status') === EnterpriseWikiPage::STATUS_DRAFT
-                && ($summary['ready'] ?? null) === true
-                && ($summary['summary_text'] ?? null) === __('procynia.wiki.document_owner_summary_approved', [
-                    'approved' => 1,
-                    'total' => 1,
-                ])
-                && ($approval['summary_text'] ?? null) === __('procynia.wiki.document_owner_sentence_approved', [
-                    'owner' => $owner->name,
-                    'source' => 'test-document.pdf',
-                ])
-                && ($approval['approval_status'] ?? null) === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED;
+                && data_get($props, 'document_owner_summary.state') === 'approved'
+                && data_get($props, 'document_owner_summary.owner_count') === 1
+                && data_get($props, 'document_owner_summary.approved_count') === 1
+                && data_get($props, 'document_owner_summary.pending_count') === 0;
         });
     }
 
@@ -2607,7 +2602,7 @@ class WikiControllerTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole, bool $isQa = false): User
     {
-        return User::query()->create([
+        $user = User::query()->create([
             'name' => 'Test User',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -2617,6 +2612,39 @@ class WikiControllerTest extends TestCase
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
+
+        $this->grantWikiPermissions($customer, $user);
+
+        return $user;
+    }
+
+    /**
+     * Give the user a customer role holding the whole Wiki permission catalogue.
+     *
+     * Enterprise Wiki is gated by the customer's own roles on top of its existing authority model
+     * (see WikiPermissionTest, which is where the permissions themselves are varied). These tests
+     * are about that existing model — ownership, the reviewer handover, the four-eyes rule,
+     * statuses — so they start from a person the customer has given Wiki work to, and the
+     * behaviour under test is whatever the Wiki's own rules then decide.
+     */
+    private function grantWikiPermissions(Customer $customer, User $user): void
+    {
+        $role = CustomerRole::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Wiki '.Str::upper(Str::random(8)),
+            'is_active' => true,
+        ]);
+
+        $role->syncPermissions([
+            CustomerPermissionCatalog::WIKI_VIEW,
+            CustomerPermissionCatalog::WIKI_EDIT,
+            CustomerPermissionCatalog::WIKI_REVIEW,
+            CustomerPermissionCatalog::WIKI_APPROVE,
+            CustomerPermissionCatalog::WIKI_DELETE,
+            CustomerPermissionCatalog::WIKI_SOURCE_MANAGE,
+        ]);
+
+        $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
     }
 
     /**

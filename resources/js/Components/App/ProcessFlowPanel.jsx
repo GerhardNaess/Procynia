@@ -69,7 +69,16 @@ export default function ProcessFlowPanel({
     tq,
     item,
     blueprint,
-    canManage,
+    // One prop per permission the controller gates on, rather than a single "may manage". Saving
+    // the flow, vouching for it and starting it over are three decisions the customer may hand to
+    // three different roles, so the tab has to be able to offer them one at a time.
+    canCreate = false,
+    canEdit = false,
+    // Creating a knowledge article is a Wiki source action done from Kvalitet, so it has its own
+    // answer — quality.create alone does not open it.
+    canCreateWikiArticles = false,
+    canApprove = false,
+    canDelete = false,
     proposal = null,
     flowError = null,
     flowAiAvailable = false,
@@ -313,7 +322,7 @@ export default function ProcessFlowPanel({
                     tb={tb}
                     itemId={shownItemId}
                     activity={activityByKey(shown, activityKey)}
-                    canManage={canManage}
+                    canCreate={canCreateWikiArticles}
                     aiAvailable={flowAiAvailable}
                     draft={articleDraft}
                     error={articleError}
@@ -327,7 +336,7 @@ export default function ProcessFlowPanel({
         <div className="space-y-6">
             <DescriptionCard tq={tq} tb={tb} item={item} />
 
-            {canManage && (
+            {canEdit && (
                 <InterpretCard
                     tb={tb}
                     value={description}
@@ -368,7 +377,7 @@ export default function ProcessFlowPanel({
                             onClarify={clarify}
                             onDecline={declineClarification}
                             busy={saving}
-                            canManage={canManage}
+                            canEdit={canEdit}
                         />
                     )
                     : blueprint && <StatusLine tb={tb} blueprint={blueprint} isDirty={isDirty} />}
@@ -431,7 +440,7 @@ export default function ProcessFlowPanel({
                             >
                                 {editingStructure
                                     ? (tb.structure_edit_hide ?? 'Skjul manuell redigering')
-                                    : canManage
+                                    : canEdit
                                         ? (tb.structure_edit_open ?? 'Rediger struktur manuelt')
                                         : (tb.structure_show ?? 'Vis struktur')}
                             </button>
@@ -445,7 +454,7 @@ export default function ProcessFlowPanel({
                                     setLanes={edit(setLanes)}
                                     nodes={nodes}
                                     setNodes={edit(setNodes)}
-                                    canManage={canManage}
+                                    canEdit={canEdit}
                                 />
                                 <NodeEditor
                                     tb={tb}
@@ -455,7 +464,7 @@ export default function ProcessFlowPanel({
                                     setNodes={edit(setNodes)}
                                     edges={edges}
                                     setEdges={edit(setEdges)}
-                                    canManage={canManage}
+                                    canEdit={canEdit}
                                     subprocessOptions={subprocessOptions}
                                 />
                                 <EdgeEditor
@@ -463,12 +472,12 @@ export default function ProcessFlowPanel({
                                     nodes={nodes}
                                     edges={edges}
                                     setEdges={edit(setEdges)}
-                                    canManage={canManage}
+                                    canEdit={canEdit}
                                 />
                             </div>
                         )}
 
-                        {canManage && reviewing && (
+                        {canEdit && reviewing && (
                             <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
                                 <button type="button" className={PRIMARY_ACTION} onClick={adopt} disabled={saving}>
                                     {tb.proposal_adopt ?? 'Bruk denne prosessflyten'}
@@ -484,34 +493,42 @@ export default function ProcessFlowPanel({
                             </div>
                         )}
 
-                        {canManage && ! reviewing && (
+                        {(canEdit || canApprove || canDelete) && ! reviewing && (
                             <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
-                                <button type="button" className={PRIMARY_ACTION} onClick={save} disabled={saving}>
-                                    {tb.save ?? 'Lagre struktur'}
-                                </button>
-                                <button
-                                    type="button"
-                                    className={SECONDARY_ACTION}
-                                    onClick={approve}
-                                    // Approving unsaved edits would vouch for a flow the database
-                                    // does not hold. Save first, then approve what was saved.
-                                    disabled={saving || isDirty || blueprint.status === 'approved'}
-                                >
-                                    {tb.approve ?? 'Godkjenn struktur'}
-                                </button>
-                                <p className="text-sm text-slate-500">
-                                    {tb.approval_cleared_help ?? 'Endrer du strukturen, faller godkjenningen bort.'}
-                                </p>
+                                {canEdit && (
+                                    <button type="button" className={PRIMARY_ACTION} onClick={save} disabled={saving}>
+                                        {tb.save ?? 'Lagre struktur'}
+                                    </button>
+                                )}
+                                {canApprove && (
+                                    <button
+                                        type="button"
+                                        className={SECONDARY_ACTION}
+                                        onClick={approve}
+                                        // Approving unsaved edits would vouch for a flow the database
+                                        // does not hold. Save first, then approve what was saved.
+                                        disabled={saving || isDirty || blueprint.status === 'approved'}
+                                    >
+                                        {tb.approve ?? 'Godkjenn struktur'}
+                                    </button>
+                                )}
+                                {canEdit && (
+                                    <p className="text-sm text-slate-500">
+                                        {tb.approval_cleared_help ?? 'Endrer du strukturen, faller godkjenningen bort.'}
+                                    </p>
+                                )}
                                 {/* Pushed to the far end on purpose. Lagre and Godkjenn are two
                                     steps of one sequence; starting the flow over is not a third. */}
-                                <button
-                                    type="button"
-                                    className={`ml-auto ${DESTRUCTIVE_ACTION}`}
-                                    onClick={() => setConfirmingDelete(true)}
-                                    disabled={saving}
-                                >
-                                    {tb.delete_flow ?? 'Slett flyt'}
-                                </button>
+                                {canDelete && (
+                                    <button
+                                        type="button"
+                                        className={`ml-auto ${DESTRUCTIVE_ACTION}`}
+                                        onClick={() => setConfirmingDelete(true)}
+                                        disabled={saving}
+                                    >
+                                        {tb.delete_flow ?? 'Slett flyt'}
+                                    </button>
+                                )}
                             </div>
                         )}
                     </section>
@@ -522,7 +539,7 @@ export default function ProcessFlowPanel({
                 tb={tb}
                 itemId={item.id}
                 activity={activityByKey(draft, activityKey)}
-                canManage={canManage}
+                canCreate={canCreateWikiArticles}
                 aiAvailable={flowAiAvailable}
                 draft={articleDraft}
                 error={articleError}
@@ -912,7 +929,7 @@ function FlowErrorCard({ tb, flowError }) {
  * and the copy in both panels says so, because a user who believes they have to answer first will
  * answer first.
  */
-function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline, busy, canManage }) {
+function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline, busy, canEdit }) {
     return (
         <div className="mt-4 space-y-4">
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5">
@@ -950,7 +967,7 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
                     onClarify={onClarify}
                     onDecline={onDecline}
                     busy={busy}
-                    canManage={canManage}
+                    canEdit={canEdit}
                 />
             )}
         </div>
@@ -972,7 +989,7 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
  * sequence to work through, no state between the suggestions, and no step that has to be completed.
  * Answer one, answer none, dismiss the rest — the flow is adoptable either way.
  */
-function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, canManage }) {
+function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, canEdit }) {
     const [answering, setAnswering] = useState(null);
     const [answer, setAnswer] = useState('');
 
@@ -1033,7 +1050,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
                                     </button>
                                 </div>
                             </div>
-                        ) : canManage && (
+                        ) : canEdit && (
                             <div className="mt-3 flex flex-wrap gap-2">
                                 <button type="button" className={ROW_ADD} onClick={() => open(question)} disabled={busy}>
                                     {tb.clarification_clarify ?? 'Avklar'}
@@ -1091,7 +1108,7 @@ function StatusLine({ tb, blueprint, isDirty }) {
  * alternative — leaving the nodes behind in a lane that no longer exists — is exactly the dangling
  * state the backend would silently repair by moving them somewhere the user did not choose.
  */
-function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canManage }) {
+function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canEdit }) {
     function update(index, value) {
         setLanes(lanes.map((lane, i) => (i === index ? { ...lane, label: value } : lane)));
     }
@@ -1122,9 +1139,9 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canManage }) {
                                 value={lane.label ?? ''}
                                 aria-label={tb.lane_label ?? 'Rolle'}
                                 onChange={(event) => update(index, event.target.value)}
-                                disabled={! canManage}
+                                disabled={! canEdit}
                             />
-                            {canManage && (
+                            {canEdit && (
                                 <button type="button" className={ROW_DESTRUCTIVE} onClick={() => remove(index)}>
                                     {tb.remove_row ?? 'Fjern'}
                                 </button>
@@ -1134,7 +1151,7 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canManage }) {
                 </ul>
             )}
 
-            {canManage && (
+            {canEdit && (
                 <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={add}>
                     {tb.add_lane ?? 'Legg til rolle'}
                 </button>
@@ -1149,7 +1166,7 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canManage }) {
  * Removing a node removes the arrows that reached it, here rather than on the server, so the
  * diagram beside the editor is correct immediately instead of after a save.
  */
-function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdges, canManage, subprocessOptions = [] }) {
+function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdges, canEdit, subprocessOptions = [] }) {
     function update(index, field, value) {
         setNodes(nodes.map((node, i) => (i === index ? { ...node, [field]: value } : node)));
     }
@@ -1217,7 +1234,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                 {subprocessOptions.length > 0 && (
                                     <th className="pb-2 pr-3">{tb.node_subprocess ?? 'Underprosess'}</th>
                                 )}
-                                {canManage && <th className="pb-2" />}
+                                {canEdit && <th className="pb-2" />}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -1228,7 +1245,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                             className={SMALL_INPUT}
                                             value={node.label ?? ''}
                                             onChange={(event) => update(index, 'label', event.target.value)}
-                                            disabled={! canManage}
+                                            disabled={! canEdit}
                                         />
                                     </td>
                                     <td className="py-2 pr-3">
@@ -1236,7 +1253,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                             className={SMALL_INPUT}
                                             value={node.lane ?? ''}
                                             onChange={(event) => update(index, 'lane', event.target.value)}
-                                            disabled={! canManage}
+                                            disabled={! canEdit}
                                         >
                                             {lanes.map((lane) => (
                                                 <option key={lane.key} value={lane.key}>{lane.label}</option>
@@ -1248,7 +1265,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                             className={SMALL_INPUT}
                                             value={node.type ?? 'step'}
                                             onChange={(event) => update(index, 'type', event.target.value)}
-                                            disabled={! canManage}
+                                            disabled={! canEdit}
                                         >
                                             {NODE_TYPES.map((type) => (
                                                 <option key={type} value={type}>
@@ -1264,7 +1281,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                                 value={node.subprocess_quality_item_id ?? ''}
                                                 aria-label={tb.node_subprocess ?? 'Underprosess'}
                                                 onChange={(event) => setSubprocess(index, event.target.value)}
-                                                disabled={! canManage}
+                                                disabled={! canEdit}
                                             >
                                                 <option value="">{tb.node_subprocess_none ?? '— ingen —'}</option>
                                                 {subprocessOptions.map((option) => (
@@ -1273,7 +1290,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                             </select>
                                         </td>
                                     )}
-                                    {canManage && (
+                                    {canEdit && (
                                         <td className="py-2">
                                             <button
                                                 type="button"
@@ -1291,7 +1308,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                 </div>
             )}
 
-            {canManage && lanes.length > 0 && (
+            {canEdit && lanes.length > 0 && (
                 <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={add}>
                     {tb.add_node ?? 'Legg til node'}
                 </button>
@@ -1304,7 +1321,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
  * The arrows. `label` is the outcome a decision branches on — "Ja" / "Nei" — and is what makes a
  * branch readable; it is blank for an ordinary next step, where naming it would be noise.
  */
-function EdgeEditor({ tb, nodes, edges, setEdges, canManage }) {
+function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
     function update(index, field, value) {
         setEdges(edges.map((edge, i) => (i === index ? { ...edge, [field]: value } : edge)));
     }
@@ -1335,7 +1352,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canManage }) {
                                 <th className="pb-2 pr-3">{tb.edge_from ?? 'Fra'}</th>
                                 <th className="pb-2 pr-3">{tb.edge_to ?? 'Til'}</th>
                                 <th className="pb-2 pr-3">{tb.edge_label ?? 'Utfall'}</th>
-                                {canManage && <th className="pb-2" />}
+                                {canEdit && <th className="pb-2" />}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -1346,7 +1363,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canManage }) {
                                             nodes={nodes}
                                             value={edge.from}
                                             onChange={(value) => update(index, 'from', value)}
-                                            disabled={! canManage}
+                                            disabled={! canEdit}
                                         />
                                     </td>
                                     <td className="py-2 pr-3">
@@ -1354,7 +1371,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canManage }) {
                                             nodes={nodes}
                                             value={edge.to}
                                             onChange={(value) => update(index, 'to', value)}
-                                            disabled={! canManage}
+                                            disabled={! canEdit}
                                         />
                                     </td>
                                     <td className="py-2 pr-3">
@@ -1363,10 +1380,10 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canManage }) {
                                             value={edge.label ?? ''}
                                             placeholder={tb.edge_label_placeholder ?? ''}
                                             onChange={(event) => update(index, 'label', event.target.value)}
-                                            disabled={! canManage}
+                                            disabled={! canEdit}
                                         />
                                     </td>
-                                    {canManage && (
+                                    {canEdit && (
                                         <td className="py-2">
                                             <button
                                                 type="button"
@@ -1384,7 +1401,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canManage }) {
                 </div>
             )}
 
-            {canManage && nodes.length > 1 && (
+            {canEdit && nodes.length > 1 && (
                 <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={add}>
                     {tb.add_edge ?? 'Legg til forbindelse'}
                 </button>
@@ -1480,7 +1497,9 @@ function ActivityArticlePanel({
     tb,
     itemId,
     activity,
-    canManage,
+    // Writing an article off an activity creates a new Wiki source, so it is quality.create —
+    // the same permission as registering a new styrende dokument, not the one for editing one.
+    canCreate,
     aiAvailable,
     draft = null,
     error = null,
@@ -1566,7 +1585,9 @@ function ActivityArticlePanel({
         });
     }
 
-    const canCreate = title.trim() !== '' && markdown.trim() !== '' && ! busy;
+    // Whether the form is submittable, which is a different question from whether this person
+    // may create at all — that is the canCreate prop, and the dialog never offers the form without it.
+    const canSubmit = title.trim() !== '' && markdown.trim() !== '' && ! busy;
 
     return (
         <ActionDialog isOpen={activity !== null} onClose={close} titleId={titleId}>
@@ -1639,7 +1660,7 @@ function ActivityArticlePanel({
                         </p>
                     )}
 
-                    {canManage && ! writing && (
+                    {canCreate && ! writing && (
                         <div className="mt-6 border-t border-slate-100 pt-5">
                             <p className="text-sm leading-5 text-slate-600">
                                 {tb.articles_help
@@ -1656,7 +1677,11 @@ function ActivityArticlePanel({
                                     <button type="button" className={PRIMARY_ACTION} onClick={requestDraft} disabled={busy}>
                                         {busy
                                             ? (tb.articles_drafting ?? 'Lager utkast …')
-                                            : (tb.articles_draft ?? 'Opprett kunnskapsartikkel')}
+                                            // With knowledge already listed above, the button adds
+                                            // to it rather than reading as the first article.
+                                            : articles.length > 0
+                                                ? (tb.articles_draft_another ?? 'Opprett ny kunnskapsartikkel')
+                                                : (tb.articles_draft ?? 'Opprett kunnskapsartikkel')}
                                     </button>
                                 )}
 
@@ -1667,7 +1692,7 @@ function ActivityArticlePanel({
                         </div>
                     )}
 
-                    {canManage && writing && (
+                    {canCreate && writing && (
                         <div className="mt-6 border-t border-slate-100 pt-5">
                             <p className="text-sm leading-5 text-slate-600">
                                 {tb.articles_review_help
@@ -1706,7 +1731,7 @@ function ActivityArticlePanel({
                                 <button type="button" className={SECONDARY_ACTION} onClick={() => setWriting(false)}>
                                     {tb.articles_cancel ?? 'Avbryt'}
                                 </button>
-                                <button type="button" className={PRIMARY_ACTION} onClick={create} disabled={! canCreate}>
+                                <button type="button" className={PRIMARY_ACTION} onClick={create} disabled={! canSubmit}>
                                     {tb.articles_create ?? 'Legg artikkelen inn i Wiki'}
                                 </button>
                             </div>

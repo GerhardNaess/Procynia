@@ -17,6 +17,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -34,6 +35,7 @@ use Tests\TestCase;
 class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -601,7 +603,7 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole, bool $isQa = false): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Best Practice Tester',
             'email' => Str::lower(Str::random(8)).'@best-practice-test.invalid',
             'password' => bcrypt('secret'),
@@ -610,7 +612,7 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
             'is_qa' => $isQa,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createPage(

@@ -7,7 +7,6 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationSettlementService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
@@ -17,8 +16,9 @@ use Tests\TestCase;
  * The one rule every non-review writer obeys: a new version never publishes itself, and an older
  * published version never silently stops serving.
  *
- * The three cases differ only in who wrote the version. A person who may approve publishes by
- * saving; anyone else, and any machine, produces a working version the approved one outlives.
+ * Who wrote the version makes no difference: a person — System Owner and Wiki approver included —
+ * and any machine produce a working version the approved one outlives, and somebody other than
+ * the editor approves it.
  */
 class EnterpriseWikiPublicationSettlementServiceTest extends TestCase
 {
@@ -104,50 +104,39 @@ class EnterpriseWikiPublicationSettlementServiceTest extends TestCase
         $this->assertSame((int) $v1->id, (int) $page->published_version_id);
     }
 
-    // ── Manual edits, unchanged from 9933c7e ────────────────────────────────
+    // ── Manual edits ────────────────────────────────────────────────────────
 
-    public function test_an_approver_editing_a_published_page_publishes_by_saving(): void
-    {
-        [$page] = $this->publishedPage();
-        $v2 = $this->version($page, 2);
-        $approver = $this->user(isWikiApprover: true);
-
-        $this->assertTrue($this->service->afterManualEdit($page, $v2, $approver));
-
-        $page->refresh();
-        $this->assertSame((int) $v2->id, (int) $page->published_version_id);
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
-        $this->assertSame((int) $approver->id, (int) $page->reviewed_by_user_id);
-    }
-
-    public function test_any_other_editor_leaves_the_published_version_serving(): void
+    /** Saving is not approving, however much authority the editor holds. */
+    public function test_a_manual_edit_never_publishes_itself(): void
     {
         [$page, $v1] = $this->publishedPage();
-        $v2 = $this->version($page, 2);
+        $this->version($page, 2);
 
-        $this->assertFalse($this->service->afterManualEdit($page, $v2, $this->user()));
+        $this->assertTrue($this->service->afterManualEdit($page));
 
         $page->refresh();
-        $this->assertSame((int) $v1->id, (int) $page->published_version_id);
+        $this->assertSame((int) $v1->id, (int) $page->published_version_id, 'readers keep the approved text');
         $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status, 'so it can be sent for review');
     }
 
-    /**
-     * The difference between the two paths is exactly one capability, and nothing else. Asserted
-     * side by side because the whole design rests on it.
-     */
-    public function test_the_only_difference_between_the_two_editors_is_the_capability(): void
+    /** The editor is not even an input any more — there is no capability to branch on. */
+    public function test_the_editor_cannot_change_the_outcome(): void
     {
-        [$pageA] = $this->publishedPage();
-        $vA = $this->version($pageA, 2);
-        [$pageB] = $this->publishedPage();
-        $vB = $this->version($pageB, 2);
+        $method = new \ReflectionMethod(EnterpriseWikiPublicationSettlementService::class, 'afterManualEdit');
 
-        $this->service->afterManualEdit($pageA, $vA, $this->user(isWikiApprover: true));
-        $this->service->afterManualEdit($pageB, $vB, $this->user(isQa: true));
+        $this->assertSame(['page'], array_map(
+            static fn (\ReflectionParameter $parameter): string => $parameter->getName(),
+            $method->getParameters(),
+        ));
+    }
 
-        $this->assertSame((int) $vA->id, (int) $pageA->fresh()->published_version_id);
-        $this->assertNotSame((int) $vB->id, (int) $pageB->fresh()->published_version_id, 'QA is not article authority');
+    public function test_a_manual_edit_to_a_page_that_was_never_published_is_left_alone(): void
+    {
+        $page = $this->page(EnterpriseWikiPage::STATUS_DRAFT);
+        $this->version($page, 1);
+
+        $this->assertFalse($this->service->afterManualEdit($page));
+        $this->assertNull($page->fresh()->published_version_id);
     }
 
     // ── Coverage ────────────────────────────────────────────────────────────
@@ -269,21 +258,6 @@ class EnterpriseWikiPublicationSettlementServiceTest extends TestCase
             'is_current' => true,
             'content_markdown' => "# Versjon {$number}",
             'generated_by_model' => 'gpt-5',
-        ]);
-    }
-
-    private function user(bool $isWikiApprover = false, bool $isQa = false): User
-    {
-        return User::query()->create([
-            'name' => 'Bruker '.Str::random(5),
-            'email' => Str::lower(Str::random(9)).'@oppgjor.test',
-            'password' => bcrypt('secret'),
-            'role' => User::ROLE_USER,
-            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
-            'customer_id' => $this->customer()->id,
-            'is_active' => true,
-            'is_wiki_approver' => $isWikiApprover,
-            'is_qa' => $isQa,
         ]);
     }
 

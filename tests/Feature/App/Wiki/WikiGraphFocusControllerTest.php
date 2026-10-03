@@ -9,6 +9,7 @@ use App\Services\EnterpriseWiki\GraphQuery\NullGraphQueryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\Support\FakeGraphQueryService;
 use Tests\TestCase;
 
@@ -21,6 +22,7 @@ use Tests\TestCase;
 class WikiGraphFocusControllerTest extends TestCase
 {
     use CreatesEnterpriseWikiFixtures;
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     public function test_guest_is_redirected(): void
@@ -126,7 +128,7 @@ class WikiGraphFocusControllerTest extends TestCase
 
     private function createCustomerUser(int $customerId): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customerId, User::query()->create([
             'name' => 'Test User',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -134,7 +136,7 @@ class WikiGraphFocusControllerTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customerId,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     /** @return array<string, mixed> */

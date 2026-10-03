@@ -12,20 +12,16 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Testing\TestResponse;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\CreatesWikiManualEditFixture;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
  * What a manual edit does to an already-published Wiki article.
  *
- * The rule: authority over the whole article is canApproveWikiPages(), the same check approve()
- * uses. Someone holding it has nobody above them to hand the change to — and could not submit it to
- * themselves anyway, since submit() refuses a reviewer who is the submitter — so their save is the
- * approval, and readers keep getting current text. Everyone else produces a working version, the
- * previously published one keeps serving, and a Wiki approver still has to approve it.
- *
- * Three boundaries are deliberate and each has a test: a page that was never published is not
- * fast-tracked to a first publication however senior the editor, QA and document ownership answer
- * different questions and confer nothing here, and automated paths never reach this code at all.
+ * The rule: saving is never approving. Every editor — System Owner and Wiki approver included —
+ * produces a working version, the previously published one keeps serving, and the page goes back to
+ * draft so it can be sent for review. Somebody other than the editor then publishes it through the
+ * ordinary submit/approve flow; the four-eyes rule has no exception for whoever wrote the change.
  *
  * Shares CreatesWikiManualEditFixture with WikiWorkingVersionEditControllerTest: both exercise the
  * same endpoint, and a fixture that drifted between them would let one pass on a shape the other
@@ -36,6 +32,7 @@ class WikiAuthoritativeManualEditTest extends TestCase
     use CreatesEnterpriseWikiFixtures;
     use CreatesWikiManualEditFixture;
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -44,38 +41,56 @@ class WikiAuthoritativeManualEditTest extends TestCase
         config(['services.enterprise_wiki.ai_enabled' => true]);
     }
 
-    // ── Authoritative: saving is approving ──────────────────────────────────
+    // ── Nobody publishes by saving ──────────────────────────────────────────
 
-    public function test_a_wiki_approver_editing_a_published_article_publishes_it_directly(): void
+    public function test_a_wiki_approver_editing_a_published_article_does_not_publish_it(): void
     {
-        $fixture = $this->publishedFixture('Autoritativ Godkjenner AS');
+        $fixture = $this->publishedFixture('Godkjenner Redigerer AS');
         $approver = $this->pageOwnerWith($fixture, isWikiApprover: true);
 
-        $this->edit($approver, $fixture)->assertSessionHas('success');
-
-        $page = $fixture['page']->fresh();
-        $new = $this->currentVersion($page);
-
-        $this->assertSame(2, (int) $new->version_number);
-        $this->assertSame((int) $new->id, (int) $page->published_version_id, 'the edit is what readers now get');
-        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
-        $this->assertSame((int) $approver->id, (int) $page->reviewed_by_user_id);
-        $this->assertNotNull($page->reviewed_at);
+        $this->assertEditLeavesThePublishedVersionServing($approver, $fixture);
     }
 
-    public function test_a_system_owner_editing_a_published_article_publishes_it_directly(): void
+    public function test_a_system_owner_editing_a_published_article_does_not_publish_it(): void
     {
-        $fixture = $this->publishedFixture('Autoritativ Systemeier AS');
+        $fixture = $this->publishedFixture('Systemeier Redigerer AS');
         // The fixture's own actor is a System Owner; owning the page is what lets them edit it.
         $systemOwner = $fixture['actor'];
         $fixture['page']->forceFill(['owner_user_id' => $systemOwner->id])->save();
 
+        $this->assertEditLeavesThePublishedVersionServing($systemOwner, $fixture);
+    }
+
+    /**
+     * The whole route, end to end: the System Owner's edit goes to somebody else, the System Owner
+     * cannot sign it off themselves, and the person it was sent to publishes it.
+     */
+    public function test_the_edit_is_published_by_somebody_other_than_the_editor(): void
+    {
+        $fixture = $this->publishedFixture('Fire Øyne AS');
+        $systemOwner = $fixture['actor'];
+        $fixture['page']->forceFill(['owner_user_id' => $systemOwner->id])->save();
+        $reviewer = $this->userWith($fixture, isWikiApprover: true);
+
         $this->edit($systemOwner, $fixture)->assertSessionHas('success');
-
         $page = $fixture['page']->fresh();
+        $edited = $this->currentVersion($page);
 
-        $this->assertSame((int) $this->currentVersion($page)->id, (int) $page->published_version_id);
+        $this->actingAs($systemOwner)->patch(route('app.wiki.approve', ['slug' => $page->slug]))->assertStatus(422);
+
+        $this->actingAs($systemOwner)
+            ->patch(route('app.wiki.submit', ['slug' => $page->slug]), ['reviewer_user_id' => $reviewer->id])
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $this->actingAs($systemOwner)->patch(route('app.wiki.approve', ['slug' => $page->slug]))->assertForbidden();
+        $this->assertSame((int) $fixture['version']->id, (int) $page->fresh()->published_version_id);
+
+        $this->actingAs($reviewer)->patch(route('app.wiki.approve', ['slug' => $page->slug]))->assertRedirect();
+
+        $page->refresh();
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->status);
+        $this->assertSame((int) $edited->id, (int) $page->published_version_id);
+        $this->assertSame((int) $reviewer->id, (int) $page->reviewed_by_user_id);
     }
 
     /** The previous version is history, not something publication overwrites. */
@@ -168,11 +183,7 @@ class WikiAuthoritativeManualEditTest extends TestCase
 
     // ── Boundaries ──────────────────────────────────────────────────────────
 
-    /**
-     * "Saving is approval" only makes sense for an article that has already been through approval
-     * once. A first publication is a different decision, and manual editing must not become a way
-     * around it.
-     */
+    /** A page that was never published stays a draft; manual editing is no way to a first publication. */
     public function test_a_page_that_was_never_published_is_not_fast_tracked(): void
     {
         $fixture = $this->createManualEditFixture('Aldri Publisert AS');
@@ -188,42 +199,15 @@ class WikiAuthoritativeManualEditTest extends TestCase
     }
 
     /**
-     * Publishing by saving is the manual path's privilege alone.
-     *
-     * Asserted structurally because the alternative — running an ingest here — would test the
-     * pipeline rather than this rule. afterManualEdit() is the only method that can move
-     * published_version_id without a review, so what matters is that exactly one caller reaches it
-     * and that caller is the manual working-version edit.
+     * No writer outside review moves the published pointer. Asserted structurally because the
+     * settlement service is the one place every non-review writer goes through, and a direct
+     * publication would have to be written there.
      */
-    public function test_only_the_manual_edit_path_can_publish_directly(): void
+    public function test_the_settlement_service_never_publishes(): void
     {
         $settlement = file_get_contents(app_path('Services/EnterpriseWiki/EnterpriseWikiPublicationSettlementService.php'));
 
-        $this->assertStringContainsString(
-            "'published_version_id' => \$newVersion->id,",
-            $settlement,
-            'afterManualEdit() is where publication moves without a review',
-        );
-
-        $callers = [];
-
-        foreach (glob(app_path('Services/EnterpriseWiki/*.php')) as $path) {
-            if (str_contains(file_get_contents($path), 'afterManualEdit(')
-                && ! str_ends_with($path, 'EnterpriseWikiPublicationSettlementService.php')) {
-                $callers[] = basename($path);
-            }
-        }
-
-        $this->assertSame(['EnterpriseWikiClaimContentRepairService.php'], $callers);
-
-        $service = file_get_contents(app_path('Services/EnterpriseWiki/EnterpriseWikiClaimContentRepairService.php'));
-        $callSite = substr($service, 0, strpos($service, '$this->publicationSettlement->afterManualEdit('));
-
-        $this->assertStringContainsString(
-            'public function applyWorkingVersionBlockEdits(',
-            $callSite,
-            'and it sits inside the manual working-version edit',
-        );
+        $this->assertStringNotContainsString("'published_version_id' =>", $settlement);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -240,6 +224,21 @@ class WikiAuthoritativeManualEditTest extends TestCase
         ])->save();
 
         return $fixture;
+    }
+
+    /** @param array<string, mixed> $fixture */
+    private function assertEditLeavesThePublishedVersionServing(User $editor, array $fixture): void
+    {
+        $publishedId = (int) $fixture['version']->id;
+
+        $this->edit($editor, $fixture)->assertSessionHas('success', 'Endringene er lagret i en ny arbeidsversjon.');
+
+        $page = $fixture['page']->fresh();
+        $new = $this->currentVersion($page);
+
+        $this->assertSame(2, (int) $new->version_number, 'the edit is a new working version');
+        $this->assertSame($publishedId, (int) $page->published_version_id, 'readers keep the approved text');
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status, 'so it can be sent for review');
     }
 
     /** @param array<string, mixed> $fixture */
@@ -273,14 +272,14 @@ class WikiAuthoritativeManualEditTest extends TestCase
     /** @param array<string, mixed> $fixture */
     private function userWith(array $fixture, bool $isWikiApprover = false, bool $isQa = false): User
     {
-        return User::factory()->create([
+        return $this->grantWikiPermissions($fixture['customer'], User::factory()->create([
             'customer_id' => $fixture['customer']->id,
             'role' => User::ROLE_USER,
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'is_active' => true,
             'is_wiki_approver' => $isWikiApprover,
             'is_qa' => $isQa,
-        ]);
+        ]));
     }
 
     private function currentVersion(EnterpriseWikiPage $page): EnterpriseWikiPageVersion

@@ -5,6 +5,7 @@ namespace Tests\Feature\App;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
+use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -22,6 +23,7 @@ use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessIo;
 use App\Models\QualityProcessStep;
 use App\Models\User;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Http\UploadedFile;
@@ -639,12 +641,13 @@ class QualityItemTest extends TestCase
     }
 
     /**
-     * Deleting a Wiki page is Wiki's authority, and managing the kvalitetssystem does not carry it.
+     * Deleting a Wiki page is Wiki's authority, and quality.delete does not carry it.
      *
-     * A Contributor with QA may delete a process — canApproveWikiClaims() is what the module asks
-     * for — but may not delete a Wiki page they do not own. Rather than quietly deleting the
-     * process and keeping the pages they asked to be rid of, the request is refused whole: nothing
-     * is deleted, and the message says to choose "keep" instead.
+     * A user whose customer role grants quality.delete may delete a process — but may not delete a
+     * Wiki page they do not own. Rather than quietly deleting the process and keeping the pages
+     * they asked to be rid of, the request is refused whole: nothing is deleted, and the message
+     * says to choose "keep" instead. This is the invariant that a permission never stands in for
+     * object security.
      */
     public function test_a_user_who_may_manage_quality_but_not_delete_wiki_pages_is_refused(): void
     {
@@ -661,6 +664,17 @@ class QualityItemTest extends TestCase
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
+
+        $role = CustomerRole::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Kvalitetsleder',
+            'is_active' => true,
+        ]);
+        $role->syncPermissions([
+            CustomerPermissionCatalog::QUALITY_VIEW,
+            CustomerPermissionCatalog::QUALITY_DELETE,
+        ]);
+        $qa->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
 
         $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshandtering');
         $document = $this->document($customer, 'avviksrutine.pdf');

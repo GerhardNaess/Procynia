@@ -2,9 +2,9 @@
 
 namespace Tests\Feature\App;
 
+use App\Models\BidSubmission;
 use App\Models\Customer;
 use App\Models\Department;
-use App\Models\BidSubmission;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticePhaseComment;
@@ -16,10 +16,13 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesCustomerAccessSqliteSchema;
 use Tests\TestCase;
 
 class DashboardControllerTest extends TestCase
 {
+    use CreatesCustomerAccessSqliteSchema;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -1236,6 +1239,8 @@ class DashboardControllerTest extends TestCase
             $table->timestamps();
         });
 
+        $this->createCustomerAccessTables();
+
         Schema::create('departments', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('customer_id');
@@ -1381,8 +1386,7 @@ class DashboardControllerTest extends TestCase
         string $email,
         ?string $bidRole = null,
         ?string $bidManagerScope = null,
-    ): User
-    {
+    ): User {
         $user = User::factory()->create([
             'name' => Str::before($email, '@'),
             'role' => $role,
@@ -1442,8 +1446,7 @@ class DashboardControllerTest extends TestCase
         ?string $createdAt = null,
         ?string $archivedAt = null,
         ?string $historyType = null,
-    ): SavedNotice
-    {
+    ): SavedNotice {
         $notice = SavedNotice::query()->create([
             'customer_id' => $customerId,
             'saved_by_user_id' => null,

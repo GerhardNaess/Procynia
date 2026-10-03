@@ -17,6 +17,7 @@ use App\Models\Nationality;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,7 @@ use Tests\TestCase;
  */
 class WikiGraphDataControllerTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     // =========================================================================
@@ -1261,7 +1263,7 @@ class WikiGraphDataControllerTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Test User',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -1269,13 +1271,13 @@ class WikiGraphDataControllerTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     /** A user with a specific, assertable display name — used as a document owner in tests. */
     private function createNamedUser(Customer $customer, string $name): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => $name,
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -1283,7 +1285,7 @@ class WikiGraphDataControllerTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createPage(Customer $customer, string $pageType, string $title, string $status = EnterpriseWikiPage::STATUS_APPROVED): EnterpriseWikiPage
@@ -1301,7 +1303,7 @@ class WikiGraphDataControllerTest extends TestCase
 
     private function createSystemOwner(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'System Owner',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -1309,7 +1311,7 @@ class WikiGraphDataControllerTest extends TestCase
             'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     /**

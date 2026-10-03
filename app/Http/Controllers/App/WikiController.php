@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Exceptions\EnterpriseWikiWithdrawalNotRepresentableException;
+use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
 use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
@@ -31,7 +32,9 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
 use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use App\Support\EnterpriseWiki\WikiQualityCheckPresentation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -45,6 +48,7 @@ use Inertia\Response;
 
 class WikiController extends Controller
 {
+    use AuthorizesWikiPermissions;
     use PreservesWikiReviewReturnUrl;
     use RedirectsToWikiIndexTab;
 
@@ -79,12 +83,18 @@ class WikiController extends Controller
         private readonly EnterpriseWikiMaintainerDecisionFailureRecoveryService $maintainerDecisionRecoveryService,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly EnterpriseWikiPageDeletionService $pageDeletionService,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function index(Request $request): Response
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
+
+        // Opening the Wiki at all. The three tabs below stay readable for anyone who gets this
+        // far; what each tab OFFERS is decided per action, by the permissions folded into the
+        // payload flags and enforced again on every write.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_VIEW);
 
         $tab = $this->resolveWikiReturnTab($request);
 
@@ -102,6 +112,9 @@ class WikiController extends Controller
             'wiki_generation_available' => EnterpriseWikiMaintainerDecisionAiClient::isAvailable(),
             'sources_store_url' => route('app.wiki.sources.store'),
             'has_active_wiki_run' => $hasActiveWikiRun,
+            // What this person may do in the Wiki, from the customer's own roles. The page uses it
+            // to decide what to offer; the gates in this controller decide what is accepted.
+            'permissions' => $this->wikiPermissionPayload($user),
         ];
 
         $props += match ($tab) {
@@ -721,7 +734,8 @@ class WikiController extends Controller
             'owner_name' => $doc->owner?->name,
             'owner_email' => $doc->owner?->email,
             'owner_is_active' => $doc->owner?->is_active,
-            'can_delete' => $user?->canDeleteEnterpriseWikiDocument($doc) ?? false,
+            'can_delete' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
+                && ($user?->canDeleteEnterpriseWikiDocument($doc) ?? false),
             'created_at' => $doc->created_at,
             'latest_ingest_run' => $latestRuns->has($doc->id) ? [
                 'status' => $latestRuns[$doc->id]->status,
@@ -858,6 +872,7 @@ class WikiController extends Controller
                     'source_id' => $run->source_id,
                     'can_cancel' => $run->isCancellable()
                         && $document instanceof EnterpriseWikiDocument
+                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
                     // Wiki run-592/run-593: only true when
                     // EnterpriseWikiMaintainerDecisionFailureRecoveryService itself would actually
@@ -868,6 +883,7 @@ class WikiController extends Controller
                     // otherwise the button's visibility and the action's real eligibility disagree.
                     'can_retry_maintainer_decision' => $run->status === EnterpriseWikiIngestRun::STATUS_FAILED
                         && $document instanceof EnterpriseWikiDocument
+                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE)
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
                         && $this->maintainerDecisionRecoveryService->evaluate($run->id, allowManualOverride: true)->isResumed(),
                     'error_message' => $run->error_message,
@@ -927,6 +943,8 @@ class WikiController extends Controller
      */
     public function runPages(EnterpriseWikiIngestRun $run): JsonResponse
     {
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_VIEW);
+
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
 
@@ -984,6 +1002,10 @@ class WikiController extends Controller
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
 
+        // An ingest run is a source document being turned into Wiki pages, so stopping or
+        // resuming one is source administration. Document ownership still decides which run.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
+
         abort_unless((int) $run->customer_id === (int) $customerId, 404);
         abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
 
@@ -1028,6 +1050,10 @@ class WikiController extends Controller
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
+
+        // An ingest run is a source document being turned into Wiki pages, so stopping or
+        // resuming one is source administration. Document ownership still decides which run.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
 
         abort_unless((int) $run->customer_id === (int) $customerId, 404);
         abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
@@ -1238,6 +1264,8 @@ class WikiController extends Controller
      */
     public function runFindings(EnterpriseWikiIngestRun $run): JsonResponse
     {
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_VIEW);
+
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
 
@@ -1353,8 +1381,16 @@ class WikiController extends Controller
 
         // reviewer/submittedBy are read further down for the review payload anyway; loading them
         // with the version turns two lazy lookups into one eager pair.
+        // Opening a Wiki page. Status still does not gate reading — see
+        // User::visibleEnterpriseWikiPageStatuses() — but having a job in the Wiki does.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_VIEW);
+
         $currentVersion = $page->currentVersion()->with(['reviewer', 'submittedBy', 'qaAssignee', 'qaAssignedBy'])->first();
-        $canApproveWikiClaims = $user?->isSystemOwner() || $user?->canApproveWikiClaims();
+        // Claim handling is review work, so wiki.review is required on top of the Wiki's own
+        // claim-approval authority. Everything downstream of this flag — the claim actions, the
+        // manual block edit, the source-document picker — inherits it.
+        $canApproveWikiClaims = $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
+            && ($user?->isSystemOwner() || $user?->canApproveWikiClaims());
 
         // Read access is not gated by page status: any authorized user of this customer's
         // Enterprise Wiki may open the page regardless of draft/pending_review/approved/rejected
@@ -1373,12 +1409,14 @@ class WikiController extends Controller
                 ->get();
         }
 
-        $canHandleWikiClaims = $user instanceof User && (
-            $canApproveWikiClaims
-            || ($currentVersion !== null && $claimCollection->contains(
-                fn (EnterpriseWikiClaim $claim): bool => $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion)
-            ))
-        );
+        $canHandleWikiClaims = $user instanceof User
+            && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
+            && (
+                $canApproveWikiClaims
+                || ($currentVersion !== null && $claimCollection->contains(
+                    fn (EnterpriseWikiClaim $claim): bool => $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion)
+                ))
+            );
 
         // The requirement rows are still kept current — they record which source documents this
         // version drew on and who owns them, which is provenance worth having. What they no longer
@@ -1484,7 +1522,9 @@ class WikiController extends Controller
                                     : null,
                             ])
                             ->all(),
-                        'can_handle' => $user instanceof User && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion),
+                        'can_handle' => $user instanceof User
+                            && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
+                            && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion),
                     ];
                 })
                 ->all();
@@ -1629,8 +1669,12 @@ class WikiController extends Controller
                 'reviewer' => $currentVersion?->reviewer !== null
                     ? ['id' => $currentVersion->reviewer->id, 'name' => $currentVersion->reviewer->name]
                     : null,
-                'can_submit' => $user->canSubmitEnterpriseWikiPage($page),
+                // Handing the page over is the last step of working on it, so it rides with
+                // wiki.edit rather than with the review permissions on the other side of it.
+                'can_submit' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_EDIT)
+                    && $user->canSubmitEnterpriseWikiPage($page),
                 'can_review' => $currentVersion !== null
+                    && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
                     && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
                 'eligible_reviewers' => $this->eligibleReviewerOptions($page, $user),
                 // An empty list means two different things, and the page has to say which: nobody
@@ -1638,7 +1682,11 @@ class WikiController extends Controller
                 // reading — and submit() refuses a reviewer who is the submitter. Telling a lone
                 // approver to "grant someone the role" when they already have it sends them to the
                 // access screen to fix something that is not broken.
-                'actor_can_approve_wiki_pages' => $user->canApproveWikiPages(),
+                'actor_can_approve_wiki_pages' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_APPROVE)
+                    && $user->canApproveWikiPages(),
+                // What to grant when nobody else can approve. Roles are named by the customer, so the
+                // page names the permission a role needs rather than any one role.
+                'approve_permission_label' => CustomerPermissionCatalog::label(CustomerPermissionCatalog::WIKI_APPROVE),
                 'published_version_id' => $page->published_version_id !== null ? (int) $page->published_version_id : null,
                 // The number, not just the id: the page says "Publisert versjon v3", and looking it
                 // up in the client would mean shipping every version just to render one label.
@@ -1656,6 +1704,8 @@ class WikiController extends Controller
                 // gate hid the one action that was still available and was the way out of it.
                 'can_send_back' => $currentVersion !== null
                     && $this->mayActOnCurrentVersion($user, $page, $currentVersion),
+                // Sending back is review; publishing is approval. The two permissions are not
+                // interchangeable, so the panel is told about them separately.
                 'final_approval_blocker' => $currentVersion !== null
                     ? $this->finalApprovalBlocker($page, $currentVersion, $user)
                     : 'no_working_version',
@@ -1673,17 +1723,15 @@ class WikiController extends Controller
                 $page,
                 $currentVersion,
                 [
-                    'can_submit' => $user->canSubmitEnterpriseWikiPage($page),
+                    'can_submit' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_EDIT)
+                        && $user->canSubmitEnterpriseWikiPage($page),
                     'eligible_reviewer_count' => count($this->eligibleReviewerOptions($page, $user)),
                     'final_approval_blocker' => $currentVersion !== null
                         ? $this->finalApprovalBlocker($page, $currentVersion, $user)
                         : 'no_working_version',
                     'is_assigned_reviewer' => $currentVersion !== null
+                        && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
                         && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
-                    // So the next step names the shorter route when there is one.
-                    'can_publish_draft' => $page->status === EnterpriseWikiPage::STATUS_DRAFT
-                        && $currentVersion !== null
-                        && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
                 ],
                 [
                     'total' => $claimCollection->count(),
@@ -1718,8 +1766,10 @@ class WikiController extends Controller
             'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
             'backlinks' => $backlinks,
+            'permissions' => $this->wikiPermissionPayload($user),
             'can_handle_wiki_claims' => $canHandleWikiClaims,
-            'can_delete_page' => $user->canDeleteEnterpriseWikiPage($page),
+            'can_delete_page' => $this->mayWiki($user, CustomerPermissionCatalog::WIKI_DELETE)
+                && $user->canDeleteEnterpriseWikiPage($page),
             'can_edit_wiki_claims' => (bool) $canApproveWikiClaims,
             'manual_block_edit' => $manualBlockEdit,
             'working_version_edit' => $this->workingVersionEditContext($page, $currentVersion, $customerId, $user),
@@ -1735,6 +1785,9 @@ class WikiController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
+        // Claim repair: a reviewer correcting the text a claim is attached to. Review, not
+        // ordinary editing — it is reached from the claim, and it keeps the claim's authorization.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_REVIEW);
         abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend() && $user->canApproveWikiClaims(), 403);
 
         $validated = $request->validate([
@@ -1887,6 +1940,9 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
+        // wiki.edit says the customer gave this person editing work in the Wiki;
+        // canSubmitEnterpriseWikiPage() still says whether THIS page is theirs to edit.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_EDIT);
         abort_unless(
             $user instanceof User
                 && $user->is_active
@@ -1929,7 +1985,7 @@ class WikiController extends Controller
         $normalizedBlocks = $this->validatedManualMixedBlockEditBlocks($submittedBlocks, $currentVersion);
 
         try {
-            $result = $this->claimContentRepairService->applyWorkingVersionBlockEdits(
+            $this->claimContentRepairService->applyWorkingVersionBlockEdits(
                 $page,
                 $currentVersion,
                 $normalizedBlocks,
@@ -1962,14 +2018,11 @@ class WikiController extends Controller
                 ->with('error', $this->workingVersionEditFailureMessage($e));
         }
 
-        // The two outcomes are genuinely different things to have done, so they are not reported
-        // with one message: an approver has just changed what readers and tender drafting get,
-        // while everyone else has produced something that still needs approving.
+        // A manual edit never publishes itself — the new working version goes through review by
+        // somebody other than the editor, whoever the editor is.
         return redirect()
             ->route('app.wiki.show', ['slug' => $page->slug])
-            ->with('success', ($result['published_directly'] ?? false)
-                ? 'Endringene er lagret og publisert.'
-                : 'Endringene er lagret i en ny arbeidsversjon.');
+            ->with('success', 'Endringene er lagret i en ny arbeidsversjon.');
     }
 
     /**
@@ -2050,7 +2103,9 @@ class WikiController extends Controller
             'unavailable_reason' => null,
         ];
 
-        if (! $user instanceof User || ! $user->canSubmitEnterpriseWikiPage($page)) {
+        if (! $this->mayWiki($user, CustomerPermissionCatalog::WIKI_EDIT)
+            || ! $user instanceof User
+            || ! $user->canSubmitEnterpriseWikiPage($page)) {
             $context['unavailable_reason'] = 'not_authorized';
 
             return $context;
@@ -2481,6 +2536,8 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_EDIT);
+
         if (! $user?->canSubmitEnterpriseWikiPage($page)) {
             abort(403);
         }
@@ -2513,7 +2570,9 @@ class WikiController extends Controller
 
         $reviewer = User::query()->find($reviewerId);
 
-        if (! $reviewer instanceof User || ! $reviewer->canBeEnterpriseWikiReviewerFor($page, $user->id)) {
+        if (! $reviewer instanceof User
+            || ! $this->mayWiki($reviewer, CustomerPermissionCatalog::WIKI_REVIEW)
+            || ! $reviewer->canBeEnterpriseWikiReviewerFor($page, $user->id)) {
             return redirect()->route('app.wiki.show', $page->slug)
                 ->with('error', 'Velg en gyldig kontrollør: en aktiv bruker hos samme kunde som kan godkjenne Wiki-sider, og som ikke er deg selv.');
         }
@@ -2577,6 +2636,8 @@ class WikiController extends Controller
 
         // Authorized by capability, not by job title. System Owner still passes, because
         // roleHasPermission() short-circuits for them — an override, not the normal route.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_APPROVE);
+
         if (! $user?->canApproveWikiPages()) {
             abort(403);
         }
@@ -2637,7 +2698,11 @@ class WikiController extends Controller
     {
         $user = $this->customerContext->currentUser();
 
-        // Same capability as approve: sending a page back is a review decision too.
+        // wiki.review and NOT wiki.approve: sending a page back is a review decision, and the
+        // two permissions are deliberately not interchangeable. The Wiki's own capability check is
+        // unchanged — it is the same one approve() makes, because the reviewer's turn is the same.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_REVIEW);
+
         if (! $user?->canApproveWikiPages()) {
             abort(403);
         }
@@ -2713,6 +2778,10 @@ class WikiController extends Controller
 
         abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend(), 404);
 
+        // wiki.delete first, page ownership after. Holding the permission does not make somebody
+        // else's page yours to remove, and owning a page is no longer enough on its own.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_DELETE);
+
         $page = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->where('slug', $slug)
@@ -2774,6 +2843,10 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
+        // Asking for quality assurance is review work being organised, so it needs wiki.review
+        // on top of the Wiki's existing rule about who may hand this page onward.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_REVIEW);
+
         if (! $user?->canSubmitEnterpriseWikiPage($page)) {
             abort(403);
         }
@@ -2829,6 +2902,9 @@ class WikiController extends Controller
     {
         return $candidate->is_active
             && (int) $candidate->customer_id === (int) $page->customer_id
+            // Only somebody who may actually review can be asked to. Offering a name the claim
+            // actions would then refuse is a request that cannot be answered.
+            && $this->mayWiki($candidate, CustomerPermissionCatalog::WIKI_REVIEW)
             && $candidate->canApproveWikiClaims();
     }
 
@@ -2884,9 +2960,13 @@ class WikiController extends Controller
             'assignee' => $assignee !== null ? ['id' => (int) $assignee->id, 'name' => $assignee->name] : null,
             'assigned_at' => optional($version?->qa_assigned_at)?->toIso8601String(),
             'assigned_by' => $assignedBy !== null ? ['id' => (int) $assignedBy->id, 'name' => $assignedBy->name] : null,
-            'can_assign' => $version !== null && $user->canSubmitEnterpriseWikiPage($page),
+            'can_assign' => $version !== null
+                && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
+                && $user->canSubmitEnterpriseWikiPage($page),
             'assign_url' => route('app.wiki.qa-assignment.update', ['slug' => $page->slug], false),
-            'eligible_qa_users' => $version !== null && $user->canSubmitEnterpriseWikiPage($page)
+            'eligible_qa_users' => $version !== null
+                && $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)
+                && $user->canSubmitEnterpriseWikiPage($page)
                 ? $this->eligibleQaUserOptions($page)
                 : [],
             'claims' => [
@@ -2907,7 +2987,8 @@ class WikiController extends Controller
      */
     private function eligibleReviewerOptions(EnterpriseWikiPage $page, User $actor): array
     {
-        if (! $actor->canSubmitEnterpriseWikiPage($page)) {
+        if (! $this->mayWiki($actor, CustomerPermissionCatalog::WIKI_EDIT)
+            || ! $actor->canSubmitEnterpriseWikiPage($page)) {
             return [];
         }
 
@@ -2917,7 +2998,11 @@ class WikiController extends Controller
             ->whereKeyNot($actor->id)
             ->orderBy('name')
             ->get(User::CAPABILITY_COLUMNS)
-            ->filter(fn (User $candidate): bool => $candidate->canBeEnterpriseWikiReviewerFor($page, $actor->id))
+            // A reviewer is handed the page to review it, so wiki.review is what makes somebody
+            // offerable. Publishing it afterwards additionally needs wiki.approve — approve() asks
+            // for that separately, and the review panel reports the gap rather than hiding it.
+            ->filter(fn (User $candidate): bool => $this->mayWiki($candidate, CustomerPermissionCatalog::WIKI_REVIEW)
+                && $candidate->canBeEnterpriseWikiReviewerFor($page, $actor->id))
             ->map(static fn (User $candidate): array => ['id' => (int) $candidate->id, 'name' => $candidate->name])
             ->values()
             ->all();
@@ -2932,21 +3017,17 @@ class WikiController extends Controller
      */
     private function finalApprovalBlocker(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, User $user): ?string
     {
-        // A System Owner may publish a draft outright. Review is a way of getting a second pair of
-        // eyes, not a toll every page has to pay: sending a page to yourself, or to somebody whose
-        // approval you can overrule anyway, is paperwork rather than control. Everyone else still
-        // has to be handed the page.
-        $directPublish = $page->status === EnterpriseWikiPage::STATUS_DRAFT && $user->isSystemOwner();
-
+        // Publishing is the end of a review, for everyone. A draft has to be sent to somebody else
+        // first — the four-eyes rule leaves no direct route, System Owner included.
         return match (true) {
-            ! $directPublish
-                && $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
-            // A draft has no handover to be stale against; the check is about a version that moved
-            // after somebody was asked to look at it.
-            ! $directPublish
-                && ($version->reviewer_user_id === null
-                    || $version->submitted_by_user_id === null
-                    || $version->submitted_at === null) => 'missing_assignment',
+            $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
+            $version->reviewer_user_id === null
+                || $version->submitted_by_user_id === null
+                || $version->submitted_at === null => 'missing_assignment',
+            // Same blocker for both halves of the answer: the customer never gave this person
+            // approval work, or the Wiki's own capability matrix does not. Either way the page
+            // says the capability is missing rather than silently offering nothing.
+            ! $this->mayWiki($user, CustomerPermissionCatalog::WIKI_APPROVE) => 'missing_capability',
             ! $user->canApproveWikiPages() => 'missing_capability',
             // Reported separately from not_assigned because the two can need different sentences:
             // one is "somebody else is holding this", the other is "you cannot sign off your own
@@ -3112,6 +3193,11 @@ class WikiController extends Controller
     private function mayActOnCurrentVersion(User $user, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version): bool
     {
         if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return false;
+        }
+
+        // Acting on a version in review — sending it back — is review work.
+        if (! $this->mayWiki($user, CustomerPermissionCatalog::WIKI_REVIEW)) {
             return false;
         }
 

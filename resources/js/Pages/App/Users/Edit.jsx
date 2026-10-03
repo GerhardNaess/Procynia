@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import CustomerEnvironmentHeader from '../CustomerEnvironment/CustomerEnvironmentHeader';
 import AlertBox from '../../../Components/App/AlertBox';
 import DepartmentCheckboxGroup from '../../../Components/App/DepartmentCheckboxGroup';
 import FormButtonRow from '../../../Components/App/FormButtonRow';
@@ -13,6 +14,7 @@ function classNames(...values) {
 
 export default function UsersEdit({
     redirectTo,
+    customerEnvironment,
     user,
     bidRoleOptions,
     bidManagerScopeOptions,
@@ -21,6 +23,8 @@ export default function UsersEdit({
     managedDepartmentOptions,
     canEditRole,
     canEditBidManagerScope,
+    canEditCustomerRoles = false,
+    customerRoleOptions = [],
 }) {
     const page = usePage();
     const { translations = {} } = page.props;
@@ -31,6 +35,7 @@ export default function UsersEdit({
         bid_role: user.bid_role_value,
         is_qa: user.is_qa ?? false,
         is_wiki_approver: user.is_wiki_approver ?? false,
+        customer_role_ids: user.customer_role_ids ?? [],
         bid_manager_scope: user.bid_manager_scope_value ?? (bidManagerScopeOptions[0]?.value ?? 'company'),
         primary_affiliation_scope: user.primary_affiliation_scope_value ?? (primaryAffiliationScopeOptions[0]?.value ?? 'company'),
         primary_department_id: user.primary_department_id ?? '',
@@ -78,6 +83,15 @@ export default function UsersEdit({
         if (!nextSelection.includes(Number(form.data.primary_department_id))) {
             form.setData('primary_department_id', nextSelection[0]);
         }
+    };
+
+    const toggleCustomerRole = (roleId) => {
+        const selected = form.data.customer_role_ids ?? [];
+
+        form.setData(
+            'customer_role_ids',
+            selected.includes(roleId) ? selected.filter((value) => value !== roleId) : [...selected, roleId],
+        );
     };
 
     const handleBidRoleChange = (value) => {
@@ -129,12 +143,11 @@ export default function UsersEdit({
     return (
         <CustomerAppLayout title="Rediger bruker" showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Rediger bruker</h1>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        Oppdater rolle, status og passord for brukeren innenfor din egen kunde.
-                    </p>
-                </section>
+                <CustomerEnvironmentHeader
+                    activeTab="users"
+                    onChangeTab={(tab) => router.get(customerEnvironment.index_url, { tab })}
+                    showPermissions={customerEnvironment.show_permissions}
+                />
 
                 <div className="mx-auto max-w-3xl">
                     <form
@@ -145,6 +158,15 @@ export default function UsersEdit({
                         {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
                         <input type="hidden" name="_method" value="put" />
                         <input type="hidden" name="redirect_to" value={form.data.redirect_to} />
+
+                        <div className="space-y-1">
+                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                {usersFormText.edit_title ?? 'Rediger bruker'}
+                            </h2>
+                            <p className="text-sm leading-6 text-slate-500">
+                                {usersFormText.edit_subtitle ?? 'Oppdater rolle, status og passord for brukeren innenfor din egen kunde.'}
+                            </p>
+                        </div>
 
                         {firstError ? (
                             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
@@ -311,6 +333,100 @@ export default function UsersEdit({
                                     </p>
                                 </div>
                             ) : null}
+
+                            {/* The customer's own roles. Separate from Rolle above, which stays
+                                Procynia's anbud vocabulary — a user keeps that role and may in
+                                addition hold any number of these. An inactive role is shown only
+                                when the user already holds it, and cannot be ticked on. */}
+                            {canEditCustomerRoles ? (
+                                <div className="space-y-2 md:col-span-2">
+                                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                                        {usersFormText.customer_roles_label ?? 'Egne roller'}
+                                        <InfoHint
+                                            size="sm"
+                                            label="Vis forklaring for Egne roller"
+                                            text={usersFormText.customer_roles_help ?? 'Rollene dere har definert selv under Kundemiljø → Tilganger. Brukeren kan ha ingen, én eller flere. Anbudsrollen over er uendret.'}
+                                        />
+                                    </span>
+                                    {customerRoleOptions.length > 0 ? (
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            {customerRoleOptions.map((role) => {
+                                                const checked = (form.data.customer_role_ids ?? []).includes(role.id);
+
+                                                return (
+                                                    <label
+                                                        key={role.id}
+                                                        className={classNames(
+                                                            'flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition',
+                                                            checked
+                                                                ? 'border-violet-300 bg-violet-50 text-violet-900'
+                                                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                                                        )}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            name="customer_role_ids[]"
+                                                            value={role.id}
+                                                            checked={checked}
+                                                            disabled={!role.is_active && !checked}
+                                                            onChange={() => toggleCustomerRole(role.id)}
+                                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
+                                                        />
+                                                        <span>
+                                                            {role.name}
+                                                            {!role.is_active ? (
+                                                                <span className="ml-2 text-xs font-semibold text-slate-500">
+                                                                    ({usersFormText.customer_roles_inactive ?? 'Inaktiv'})
+                                                                </span>
+                                                            ) : null}
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                                            {usersFormText.customer_roles_none ?? 'Dere har ingen egne roller ennå. Opprett dem under Kundemiljø → Tilganger.'}
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-slate-400">
+                                        {usersFormText.customer_roles_hint ?? 'En inaktiv rolle beholder tildelingen sin, men gir ingen rettigheter.'}
+                                    </p>
+                                    {errors.customer_role_ids ? (
+                                        <p className="text-sm text-rose-600">{errors.customer_role_ids}</p>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <div className="space-y-2 md:col-span-2">
+                                    <span className="text-sm font-medium text-slate-700">
+                                        {usersFormText.customer_roles_label ?? 'Egne roller'}
+                                    </span>
+                                    {(user.customer_roles ?? []).length > 0 ? (
+                                        <div className="flex flex-wrap gap-2">
+                                            {user.customer_roles.map((role) => (
+                                                <span
+                                                    key={role.id}
+                                                    className={classNames(
+                                                        'inline-flex rounded-full px-3 py-1 text-xs font-semibold',
+                                                        role.is_active
+                                                            ? 'bg-violet-100 text-violet-700'
+                                                            : 'bg-slate-200 text-slate-600',
+                                                    )}
+                                                >
+                                                    {role.name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500">
+                                            {usersFormText.customer_roles_empty ?? 'Ingen'}
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-slate-400">
+                                        {usersFormText.customer_roles_locked ?? 'Egne roller tildeles av systemeier.'}
+                                    </p>
+                                </div>
+                            )}
 
                             <label className="space-y-2 md:col-span-1">
                                 <span className="text-sm font-medium text-slate-700">Nytt passord</span>

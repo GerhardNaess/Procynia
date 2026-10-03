@@ -23,6 +23,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiPageDeletionTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     // =========================================================================
@@ -522,7 +524,7 @@ class EnterpriseWikiPageDeletionTest extends TestCase
 
     private function user(Customer $customer, string $bidRole): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Bruker',
             'email' => Str::lower(Str::random(10)).'@page-delete-test.invalid',
             'password' => bcrypt('secret'),
@@ -530,6 +532,6 @@ class EnterpriseWikiPageDeletionTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 }

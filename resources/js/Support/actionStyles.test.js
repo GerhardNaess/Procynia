@@ -98,7 +98,7 @@ describe('navigation no longer wears the primary colour', () => {
     test('opening a notice in Doffin is secondary on the work list', () => {
         const source = read('Notices/Index.jsx');
 
-        for (const label of ['noticesText.alertsOpenDoffin', 'noticesText.openInDoffinLabel']) {
+        for (const label of ['{watchAlertLinkLabel(notice, noticesText)}', 'noticesText.openInDoffinLabel']) {
             for (const className of classNamesRendering(source, label)) {
                 assert.ok(!className.includes('bg-violet-50'), `${label} must not use the violet tint`);
                 assert.ok(/bg-white|SECONDARY_ACTION/.test(className), `${label} must be secondary`);
@@ -242,7 +242,7 @@ describe('live search puts the weight on saving, not on leaving', () => {
     test('opening a notice in Doffin stays a support action everywhere it appears', () => {
         // Only the button-shaped renderings: the same label also appears as a plain hyperlink inside
         // a detail field, where button semantics — and button geometry — do not apply.
-        for (const label of ['noticesText.alertsOpenDoffin', 'noticesText.openInDoffinLabel', '{noticeExternalLinkLabel(notice, noticesText)}']) {
+        for (const label of ['{watchAlertLinkLabel(notice, noticesText)}', 'noticesText.openInDoffinLabel', '{noticeExternalLinkLabel(notice, noticesText)}']) {
             const asButton = classNamesRendering(index, label).filter((className) => /inline-flex|_ACTION/.test(className));
 
             assert.notEqual(asButton.length, 0, `${label} is no longer rendered as an action`);

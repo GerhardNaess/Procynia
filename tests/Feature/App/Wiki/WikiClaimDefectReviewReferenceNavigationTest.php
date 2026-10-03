@@ -15,9 +15,11 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -35,6 +37,7 @@ use Tests\TestCase;
 class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
 {
     use DatabaseTransactions;
+    use GrantsWikiPermissions;
 
     protected function setUp(): void
     {
@@ -149,7 +152,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
     public function test_non_editor_still_gets_highlighted_legacy_excerpt_block_without_edit_context(): void
     {
         $customer = $this->createCustomer();
-        $user = User::query()->create([
+        $user = $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Read Only',
             'email' => Str::lower(Str::random(8)).'@navigasjon-test.invalid',
             'password' => bcrypt('secret'),
@@ -157,7 +160,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]), [CustomerPermissionCatalog::WIKI_VIEW]);
         $page = $this->createPage($customer, 'Lesetilgang med funn');
         $targetParagraph = 'Den operative leveransen organiseres i tre tverrfaglige team med tydelig ansvarsdeling.';
         $version = $this->createLegacyVersionWithMarkdown($page, implode("\n\n", [
@@ -514,7 +517,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Navigasjon Tester',
             'email' => Str::lower(Str::random(8)).'@navigasjon-test.invalid',
             'password' => bcrypt('secret'),
@@ -522,7 +525,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createPage(

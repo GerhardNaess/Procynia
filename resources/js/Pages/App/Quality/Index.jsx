@@ -53,7 +53,7 @@ export default function QualityIndex() {
     const {
         translations = {},
         active_tab: activeTab = 'overview',
-        can_manage: canManage = false,
+        permissions = {},
         items = [],
         type_counts: typeCounts = {},
         quality_types: qualityTypes = [],
@@ -67,6 +67,14 @@ export default function QualityIndex() {
     const tq = translations?.quality ?? {};
     const typeLabels = tq.types ?? {};
     const statusLabels = tq.statuses ?? {};
+
+    // One flag per permission the backend gates on, never a single "may manage". A reader who may
+    // edit but not delete sees every editing affordance and no delete button — which is the only
+    // way the page can stop offering requests the controller is going to refuse.
+    const canCreate = permissions.can_create ?? false;
+    const canEdit = permissions.can_edit ?? false;
+    const canDelete = permissions.can_delete ?? false;
+    const canChange = canCreate || canEdit || canDelete;
 
     return (
         <CustomerAppLayout title={tq.index_title ?? 'Kvalitet'} showPageTitle={false}>
@@ -87,7 +95,7 @@ export default function QualityIndex() {
 
                 <Tabs activeTab={activeTab} tq={tq} />
 
-                {! canManage && (
+                {! canChange && (
                     <p className="text-sm text-slate-500">
                         {tq.manage_denied ?? 'Du kan se kvalitetssystemet, men ikke endre det.'}
                     </p>
@@ -96,7 +104,7 @@ export default function QualityIndex() {
                 <ItemTable
                     items={items}
                     tq={tq}
-                    canManage={canManage}
+                    canDelete={canDelete}
                     activeTab={activeTab}
                     typeLabels={typeLabels}
                     statusLabels={statusLabels}
@@ -106,14 +114,14 @@ export default function QualityIndex() {
                     <>
                         <RelationPanel
                             tq={tq}
-                            canManage={canManage}
+                            canEdit={canEdit}
                             relations={relations}
                             relationTypes={relationTypes}
                             itemOptions={relationItemOptions}
                             typeLabels={typeLabels}
                         />
 
-                        {canManage && (
+                        {canCreate && (
                             <CreateItemPanel
                                 tq={tq}
                                 qualityTypes={qualityTypes}
@@ -163,7 +171,7 @@ function Tabs({ activeTab, tq }) {
     );
 }
 
-function ItemTable({ items, tq, canManage, activeTab, typeLabels, statusLabels }) {
+function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }) {
     const table = tq.table ?? {};
 
     if (items.length === 0) {
@@ -188,7 +196,7 @@ function ItemTable({ items, tq, canManage, activeTab, typeLabels, statusLabels }
                             <th className="pb-2">{table.status ?? 'Status'}</th>
                             <th className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
                             <th className="pb-2">{table.wiki ?? 'Wiki'}</th>
-                            {canManage && (
+                            {canDelete && (
                                 <th className="pb-2 text-right">
                                     <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
                                 </th>
@@ -220,7 +228,7 @@ function ItemTable({ items, tq, canManage, activeTab, typeLabels, statusLabels }
                                     {item.next_review_at ?? (tq.no_review ?? 'Ingen revisjonssyklus')}
                                 </td>
                                 <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
-                                {canManage && (
+                                {canDelete && (
                                     <td className="py-3 pl-4 text-right">
                                         <QualityItemActions tq={tq} item={item} tab={activeTab} />
                                     </td>
@@ -382,7 +390,7 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
     );
 }
 
-function RelationPanel({ tq, canManage, relations, relationTypes, itemOptions, typeLabels }) {
+function RelationPanel({ tq, canEdit, relations, relationTypes, itemOptions, typeLabels }) {
     const relationLabels = tq.relation_types ?? {};
     const usableTypes = useMemo(
         () => relationTypes.filter((entry) => relationTypeIsUsable(itemOptions, relationTypes, entry.key)),
@@ -429,7 +437,7 @@ function RelationPanel({ tq, canManage, relations, relationTypes, itemOptions, t
                                 {relationLabels?.[relation.relation_type] ?? relation.relation_type}
                             </span>
                             <span className="font-semibold">{relation.to_title}</span>
-                            {canManage && (
+                            {canEdit && (
                                 <button
                                     type="button"
                                     className={ROW_DESTRUCTIVE}
@@ -447,7 +455,7 @@ function RelationPanel({ tq, canManage, relations, relationTypes, itemOptions, t
                 </ul>
             )}
 
-            {canManage && (
+            {canEdit && (
                 usableTypes.length === 0 ? (
                     <p className="mt-4 text-sm text-slate-500">
                         {tq.relation_no_candidates ?? 'Ingen dokumenter er registrert slik at denne relasjonen kan brukes.'}

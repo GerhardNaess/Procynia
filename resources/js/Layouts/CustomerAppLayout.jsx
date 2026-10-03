@@ -136,6 +136,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     // Which technical modules this customer holds, resolved server-side from their package
     // entitlements. The rail presents it; the routes enforce it.
     const activeModules = page.props.entitlements?.modules ?? [];
+    // What the customer's own roles let this person do, shared on every request. The rail uses it
+    // to stop offering a module they have no permission in; the routes enforce the same answer.
+    const userPermissions = page.props.access?.permissions ?? [];
     const tw = translations?.wiki ?? {};
     const tq = translations?.quality ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
@@ -695,6 +698,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 phone: the group grew by two controls, and on a narrow screen the
                                 user button would otherwise be pushed off the right edge. */}
                             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:flex-nowrap lg:justify-end">
+                                {/* Spør Wiki reads the Wiki, so it goes where the Wiki goes: a
+                                    person without wiki.view is not offered a search over a Wiki
+                                    the rail is not offering them either. */}
+                                {userPermissions.includes('wiki.view') && (
                                 <Link
                                     href={askWikiNavigation.href}
                                     title={askWikiNavigation.label}
@@ -712,6 +719,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                         <path d="M13 13L17 17" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
                                     </svg>
                                 </Link>
+                                )}
 
                                 {/* The line that says the workflow ends here. Hidden where the
                                     header wraps, because a divider between two stacked rows
@@ -901,6 +909,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             <ModuleSidebar
                                 modules={modules}
                                 activeModules={activeModules}
+                                permissions={userPermissions}
                                 activeKey={activeModule}
                                 collapsed={sidebarCollapsed}
                                 onToggleCollapsed={toggleSidebarCollapsed}

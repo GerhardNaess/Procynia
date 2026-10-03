@@ -216,6 +216,15 @@ class Customer extends Model
         return $this->hasMany(User::class);
     }
 
+    /**
+     * Roles the customer defined and named themselves. Separate from the bid_role matrix above:
+     * that one is Procynia's vocabulary for anbud, this one is the customer's own.
+     */
+    public function customerRoles(): HasMany
+    {
+        return $this->hasMany(CustomerRole::class);
+    }
+
     public function nationality(): BelongsTo
     {
         return $this->belongsTo(Nationality::class);

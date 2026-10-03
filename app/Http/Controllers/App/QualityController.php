@@ -20,6 +20,7 @@ use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Services\Quality\QualityActivityArticleService;
 use App\Services\Quality\QualityFlowClarificationService;
@@ -30,6 +31,7 @@ use App\Services\Quality\QualityProcessFlowInterpreter;
 use App\Services\Quality\QualityProcessSubprocessService;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -92,6 +94,7 @@ class QualityController extends Controller
         private readonly QualityProcessDescriptionClarifier $flowClarifier,
         private readonly QualityProcessSubprocessService $subprocesses,
         private readonly QualityActivityArticleService $activityArticles,
+        private readonly CustomerPermissionService $permissions,
     ) {}
 
     public function index(Request $request): Response
@@ -99,15 +102,17 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
+        // Reading the kvalitetssystem is itself a permission the customer grants. The module
+        // entitlement says the virksomhet has Kvalitet; this says this person works in it.
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_VIEW);
+
         $tab = in_array($request->query('tab'), self::TABS, true) ? $request->query('tab') : 'overview';
 
         return Inertia::render('App/Quality/Index', [
             'active_tab' => $tab,
-            // Creating a styrende dokument and drawing a relation between two are statements about
-            // the kvalitetssystem, so they use the same authority that already vouches for Wiki
-            // content — System Owner, or a role the customer has given Wiki claim approval to. No
-            // new permission was introduced.
-            'can_manage' => $user?->canApproveWikiClaims() ?? false,
+            // What this person may do here, resolved from the customer's own roles. The page uses
+            // it to decide what to offer; the gates above decide what is accepted.
+            'permissions' => $this->permissionPayload($user),
             'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
             'type_counts' => $this->typeCounts($customerId),
             'quality_types' => QualityItem::TYPES,
@@ -127,6 +132,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_VIEW);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $item->loadMissing(['owner', 'processSteps', 'processIo', 'checklistItems', 'controlDetail']);
@@ -157,7 +163,7 @@ class QualityController extends Controller
             'flow_error' => $this->flashedFlowState($item, 'flow_error'),
             'flow_ai_available' => $item->quality_type === QualityItem::TYPE_PROCESS
                 && ProcessFlowInterpretationAiClient::isAvailable(),
-            'can_manage' => $user?->canApproveWikiClaims() ?? false,
+            'permissions' => $this->permissionPayload($user),
             'statuses' => QualityItem::STATUSES,
             'frequencies' => QualityControlDetail::FREQUENCIES,
             'link_types' => QualityItemWikiLink::LINK_TYPES,
@@ -178,7 +184,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_CREATE);
 
         $validated = $request->validate([
             'quality_type' => ['required', 'string'],
@@ -254,7 +260,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate([
@@ -286,7 +292,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_DELETE);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $tab = in_array($request->query('tab'), self::TABS, true) ? $request->query('tab') : null;
@@ -348,7 +354,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate([
@@ -413,7 +419,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate($this->blueprintRules());
@@ -447,7 +453,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -522,7 +528,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -640,7 +646,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -676,7 +682,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate($this->blueprintRules() + [
@@ -735,7 +741,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_APPROVE);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $this->blueprints->approve((int) $customerId, $item, $user);
@@ -759,7 +765,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_DELETE);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $this->blueprints->delete((int) $customerId, $item);
@@ -781,7 +787,8 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_CREATE);
+        $this->authorizeActivityArticleHandover($user);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -847,7 +854,8 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_CREATE);
+        $this->authorizeActivityArticleHandover($user);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
         $this->assertProcess($item);
 
@@ -900,7 +908,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
 
         $validated = $request->validate([
             'from_item_id' => ['required', 'integer'],
@@ -929,7 +937,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $relation->customer_id, $customerId);
 
         $this->items->unrelate((int) $customerId, $relation);
@@ -942,7 +950,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate([
@@ -972,7 +980,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $link->customer_id, $customerId);
 
         $this->items->unlinkWikiPage((int) $customerId, $link);
@@ -991,7 +999,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate([
@@ -1034,7 +1042,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_CREATE);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
         $validated = $request->validate([
@@ -1075,7 +1083,7 @@ class QualityController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $this->authorizeManagement($user);
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
         $this->assertOwnedByCustomer((int) $link->customer_id, $customerId);
 
         $this->items->unlinkDocument((int) $customerId, $link);
@@ -1320,7 +1328,7 @@ class QualityController extends Controller
     {
         if ($customerId === null
             || $item->quality_type !== QualityItem::TYPE_PROCESS
-            || ! ($user?->canApproveWikiClaims() ?? false)) {
+            || ! $this->may($user, CustomerPermissionCatalog::QUALITY_EDIT)) {
             return [];
         }
 
@@ -1687,9 +1695,70 @@ class QualityController extends Controller
         return $user?->visibleEnterpriseWikiPageStatuses() ?? [];
     }
 
-    private function authorizeManagement(?User $user): void
+    /**
+     * Whether the user holds one of Kvalitet's permissions.
+     *
+     * The answer comes from CustomerPermissionService and from nowhere else — it is the one place
+     * that resolves a customer's own roles, and System Owner's unconditional grant lives there
+     * rather than being restated here.
+     */
+    private function may(?User $user, string $permissionKey): bool
     {
-        abort_unless($user?->canApproveWikiClaims() ?? false, 403);
+        return $user instanceof User && $this->permissions->has($user, $permissionKey);
+    }
+
+    /**
+     * The authoritative gate. Every write below opens with one of these, before the tenant check
+     * and before validation: a permission the user does not hold is a 403 whatever the payload
+     * says.
+     *
+     * A permission is never a substitute for object security. assertOwnedByCustomer() still runs,
+     * the Wiki's own authority still decides what happens to a Wiki page, and a process still has
+     * to be a process — quality.edit says the user may edit the kvalitetssystem, not that this
+     * particular row is theirs to touch.
+     */
+    private function authorizePermission(?User $user, string $permissionKey): void
+    {
+        abort_unless($this->may($user, $permissionKey), 403);
+    }
+
+    /**
+     * The seam out of Kvalitet and into Wiki, as a permission question.
+     *
+     * Handing an activity's knowledge to Wiki creates an Enterprise Wiki source document — see
+     * QualityActivityArticleService — so it is a Wiki source action performed from Kvalitet, and
+     * it asks for both sides: quality.create for the Kvalitet half, wiki.source.manage for the
+     * Wiki half. Neither on its own is enough, because neither module alone is being changed.
+     *
+     * Nothing else in Kvalitet is affected. Attaching an existing Wiki page, uploading a document
+     * against a process and every other Kvalitet action keep exactly the authorization they had.
+     */
+    private function authorizeActivityArticleHandover(?User $user): void
+    {
+        abort_unless($this->may($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE), 403);
+    }
+
+    /**
+     * What the React pages are allowed to offer.
+     *
+     * The same five answers the gates above give, so a button the page shows is a request the
+     * controller accepts and a button it hides is one the controller would refuse. The UI hides;
+     * the controller is what enforces.
+     *
+     * @return array<string, bool>
+     */
+    private function permissionPayload(?User $user): array
+    {
+        return [
+            'can_create' => $this->may($user, CustomerPermissionCatalog::QUALITY_CREATE),
+            'can_edit' => $this->may($user, CustomerPermissionCatalog::QUALITY_EDIT),
+            'can_approve' => $this->may($user, CustomerPermissionCatalog::QUALITY_APPROVE),
+            'can_delete' => $this->may($user, CustomerPermissionCatalog::QUALITY_DELETE),
+            // The cross-module one: what the activity article panel may offer. Both halves, so a
+            // button it shows is a request authorizeActivityArticleHandover() accepts.
+            'can_create_wiki_articles' => $this->may($user, CustomerPermissionCatalog::QUALITY_CREATE)
+                && $this->may($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE),
+        ];
     }
 
     /**

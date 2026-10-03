@@ -2,18 +2,22 @@
 
 namespace Tests\Feature\App;
 
+use App\Models\CpvCode;
 use App\Models\Customer;
 use App\Models\Department;
 use App\Models\User;
 use App\Models\WatchProfile;
-use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesCustomerAccessSqliteSchema;
 use Tests\TestCase;
 
 class CustomerWatchProfileManagementTest extends TestCase
 {
+    use CreatesCustomerAccessSqliteSchema;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -447,6 +451,8 @@ class CustomerWatchProfileManagementTest extends TestCase
             $table->timestamps();
         });
 
+        $this->createCustomerAccessTables();
+
         Schema::create('departments', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('customer_id');
@@ -557,7 +563,7 @@ class CustomerWatchProfileManagementTest extends TestCase
         foreach ($codes as $entry) {
             $code = is_array($entry) ? (string) ($entry['code'] ?? '') : (string) $entry;
 
-            \App\Models\CpvCode::query()->create([
+            CpvCode::query()->create([
                 'code' => $code,
                 'description_en' => is_array($entry)
                     ? (string) ($entry['description_en'] ?? "Description {$code}")
@@ -568,5 +574,4 @@ class CustomerWatchProfileManagementTest extends TestCase
             ]);
         }
     }
-
 }

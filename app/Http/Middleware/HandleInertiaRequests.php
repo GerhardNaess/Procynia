@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Services\UserNotificationService;
 use App\Support\CustomerContext;
 use Illuminate\Http\Request;
@@ -17,6 +18,7 @@ class HandleInertiaRequests extends Middleware
         private readonly CustomerContext $customerContext,
         private readonly UserNotificationService $notificationService,
         private readonly ModuleEntitlementService $moduleEntitlements,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function version(Request $request): ?string
@@ -76,6 +78,18 @@ class HandleInertiaRequests extends Middleware
             'entitlements' => [
                 'modules' => $customer !== null
                     ? $this->moduleEntitlements->modulesFor($customer)
+                    : [],
+            ],
+            // What the customer's own roles let this person do, as permission keys. Deliberately
+            // not shared under `permissions`: a page may serve its own `permissions` prop — the
+            // Kvalitet pages do — and a page prop shadows a shared one of the same name, which
+            // would leave the rail reading the wrong shape.
+            //
+            // The rail uses it to stop offering a module the person has no permission in. That is
+            // presentation; every route still enforces the same answer server-side.
+            'access' => [
+                'permissions' => $user instanceof User
+                    ? $this->customerPermissions->effectivePermissions($user)
                     : [],
             ],
             'notifications' => $user instanceof User
@@ -433,6 +447,13 @@ class HandleInertiaRequests extends Middleware
                     'hint_role' => __('procynia.users_form.hint_role'),
                     'hint_user_license' => __('procynia.users_form.hint_user_license'),
                     'hint_admin_scope' => __('procynia.users_form.hint_admin_scope'),
+                    'customer_roles_label' => __('procynia.users_form.customer_roles_label'),
+                    'customer_roles_help' => __('procynia.users_form.customer_roles_help'),
+                    'customer_roles_hint' => __('procynia.users_form.customer_roles_hint'),
+                    'customer_roles_none' => __('procynia.users_form.customer_roles_none'),
+                    'customer_roles_empty' => __('procynia.users_form.customer_roles_empty'),
+                    'customer_roles_inactive' => __('procynia.users_form.customer_roles_inactive'),
+                    'customer_roles_locked' => __('procynia.users_form.customer_roles_locked'),
                 ],
                 'customer_env' => [
                     'title' => __('procynia.customer_env.title'),
@@ -475,6 +496,8 @@ class HandleInertiaRequests extends Middleware
                     'inactive_status' => __('procynia.customer_env.inactive_status'),
                     'col_email' => __('procynia.customer_env.col_email'),
                     'col_role' => __('procynia.customer_env.col_role'),
+                    'col_customer_roles' => __('procynia.customer_env.col_customer_roles'),
+                    'no_customer_roles' => __('procynia.customer_env.no_customer_roles'),
                     'col_departments' => __('procynia.customer_env.col_departments'),
                     'created_prefix' => __('procynia.customer_env.created_prefix'),
                     'user_member_of' => __('procynia.customer_env.user_member_of'),
@@ -498,6 +521,10 @@ class HandleInertiaRequests extends Middleware
                     'permissions_heading' => __('procynia.customer_env.permissions_heading'),
                     'permissions_subtitle' => __('procynia.customer_env.permissions_subtitle'),
                     'col_action' => __('procynia.customer_env.col_action'),
+                    // Shared as a block: the customer-role gallery is one self-contained surface
+                    // whose every string belongs to it, so naming them individually would only
+                    // repeat the lang file.
+                    'roles' => __('procynia.customer_env.roles'),
                 ],
                 'auth' => [
                     'email' => __('procynia.user.email'),

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\AuthorizesWikiPermissions;
 use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiDocument;
@@ -12,7 +13,9 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
+use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -27,6 +30,7 @@ use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class WikiSourceController extends Controller
 {
+    use AuthorizesWikiPermissions;
     use RedirectsToWikiIndexTab;
 
     public function __construct(
@@ -35,12 +39,17 @@ class WikiSourceController extends Controller
         private readonly EnterpriseWikiDocumentDeletionService $deletionService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiDocumentUploadService $uploadService,
+        private readonly CustomerPermissionService $customerPermissions,
     ) {}
 
     public function store(Request $request): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
+
+        // Bringing a source document into the Wiki is source administration, whoever ends up
+        // owning the file.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
 
         $validated = $request->validate([
             'file' => ['required', 'file', 'mimes:pdf,docx', 'max:20480'],
@@ -83,6 +92,10 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
+        // Both gates, and the stricter one still decides: wiki.source.manage says this person
+        // administers sources at all, canAssignEnterpriseWikiDocumentOwner() is the Wiki's own
+        // existing rule about who may name an owner.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
         abort_unless($user?->canAssignEnterpriseWikiDocumentOwner() ?? false, 403);
 
         $validated = $request->validate([
@@ -122,6 +135,9 @@ class WikiSourceController extends Controller
     {
         $customerId = $this->customerContext->currentCustomerId();
 
+        // Reading the document behind a Wiki page is ordinary Wiki reading, not administration.
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_VIEW);
+
         if ($document->customer_id !== $customerId) {
             abort(404);
         }
@@ -155,6 +171,9 @@ class WikiSourceController extends Controller
     public function image(EnterpriseWikiDocument $document, string $imageKey): Response
     {
         $customerId = $this->customerContext->currentCustomerId();
+
+        // An image inside a Wiki page. Same read gate as the page it is rendered on.
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_VIEW);
 
         if ($document->customer_id !== $customerId) {
             abort(404);
@@ -227,6 +246,7 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
         abort_unless($user?->canDeleteEnterpriseWikiDocument($document) ?? false, 403);
 
         return response()->json($this->deletionService->preview($document));
@@ -251,6 +271,7 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
         $blockingRuns = $this->deletionService->documentRuns($document)
@@ -285,6 +306,10 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
+        // Deleting a source document is source administration — wiki.delete is about Wiki PAGES,
+        // and holding it is not a licence over the documents the Wiki was built from. Document
+        // ownership (canDeleteEnterpriseWikiDocument) still decides which document.
+        $this->authorizeWikiPermission($user, CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
         $documentId = $document->id;
@@ -346,6 +371,10 @@ class WikiSourceController extends Controller
     public function ingest(Request $request, EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
+
+        // Starting ingest is a source action: it is what turns an uploaded document into Wiki
+        // pages, so it belongs to whoever administers sources rather than to whoever edits pages.
+        $this->authorizeWikiPermission($this->customerContext->currentUser(), CustomerPermissionCatalog::WIKI_SOURCE_MANAGE);
 
         if ($document->customer_id !== $customerId) {
             abort(403);

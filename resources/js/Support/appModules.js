@@ -19,6 +19,15 @@
  *
  * `module: null` means the entry is not something a customer buys — Hjem is the app itself, and
  * the unbuilt entries have no technical module assigned yet.
+ *
+ * A THIRD GATE, AND ONLY WHERE A MODULE HAS ONE.
+ *
+ * `permission` names a key from CustomerPermissionCatalog the person must hold to have anything to
+ * do in the module at all. Where it is set, an entry the person has no permission in is dropped
+ * from the rail entirely rather than dimmed: "Ikke bestilt" and "Planlagt" are statements about
+ * the product, and neither is true of a module the virksomhet owns and simply has not given this
+ * person. Entries that declare no `permission` are untouched by this, which is why adding it to
+ * one module changes nothing about the others.
  */
 export const APP_MODULES = [
     {
@@ -36,6 +45,9 @@ export const APP_MODULES = [
         // Wiki/Core is the mandatory module every customer holds, so this entry can never be
         // dimmed — but it is still resolved through entitlements rather than asserted here.
         module: 'wiki_core',
+        // Every customer holds the module; not every person has been given work in it. The Wiki
+        // controllers refuse the page without this key, so the rail must not offer it either.
+        permission: 'wiki.view',
         label: (m) => m.wiki ?? 'Wiki',
         areas: ['wiki', 'wiki-ask'],
     },
@@ -52,6 +64,9 @@ export const APP_MODULES = [
         href: '/app/quality',
         built: true,
         module: 'quality',
+        // Kvalitet is the first module gated by the customer's own roles. QualityController
+        // refuses the page without this key, so the rail must not offer it either.
+        permission: 'quality.view',
         label: (m) => m.quality ?? 'Kvalitet',
         areas: ['quality'],
     },
@@ -77,10 +92,15 @@ export const APP_MODULES = [
  *                 from "not built yet" and leads somewhere different (Abonnement).
  * - `planned`   — not built. Dimmed, whether or not an entitlement happens to cover it.
  *
+ * - `not_permitted` — built and entitled, but this person holds none of the module's permissions.
+ *                 Not shown at all: see the note on `permission` above.
+ *
  * `planned` is checked first on purpose. That single ordering is what stops a package from
- * advertising a destination that does not exist.
+ * advertising a destination that does not exist. `not_permitted` is checked last, after the
+ * module is known to be both built and bought — a person's permissions are not a reason to hide
+ * that the product has Risiko, or that Kvalitet could be ordered.
  */
-export function moduleAvailability(module, activeModules = []) {
+export function moduleAvailability(module, activeModules = [], permissions = []) {
     if (! module.built) {
         return 'planned';
     }
@@ -89,17 +109,25 @@ export function moduleAvailability(module, activeModules = []) {
         return 'active';
     }
 
-    return activeModules.includes(module.module) ? 'active' : 'not_ordered';
+    if (! activeModules.includes(module.module)) {
+        return 'not_ordered';
+    }
+
+    if (module.permission && ! permissions.includes(module.permission)) {
+        return 'not_permitted';
+    }
+
+    return 'active';
 }
 
 /**
  * The rail's three groups, in render order, from one pass over the catalog.
  */
-export function partitionModules(activeModules = []) {
-    const groups = { active: [], not_ordered: [], planned: [] };
+export function partitionModules(activeModules = [], permissions = []) {
+    const groups = { active: [], not_ordered: [], planned: [], not_permitted: [] };
 
     for (const module of APP_MODULES) {
-        groups[moduleAvailability(module, activeModules)].push(module);
+        groups[moduleAvailability(module, activeModules, permissions)].push(module);
     }
 
     return groups;

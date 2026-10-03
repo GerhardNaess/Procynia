@@ -3,8 +3,6 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiPage;
-use App\Models\EnterpriseWikiPageVersion;
-use App\Models\User;
 
 /**
  * What writing a new version does to a page's publication, for every writer that is not the
@@ -14,14 +12,10 @@ use App\Models\User;
  * drifting apart: a new current version never silently becomes the published one, and an older
  * published version never silently stops serving.
  *
- * Who may approve is canApproveWikiPages(), the same check WikiController::approve() uses.
- *
- *   A HUMAN WHO MAY APPROVE, editing an already-published article, publishes by saving. They have
- *   nobody above them to hand it to, and submit() refuses a reviewer who is the submitter, so
- *   requiring a handover would be requiring an impossibility.
- *
- *   ANY OTHER HUMAN produces a working version. The published one keeps serving, and the page goes
- *   back to draft so it can actually be sent for review — submit() only accepts a draft page.
+ *   A HUMAN produces a working version — whoever they are, System Owner and Wiki approvers
+ *   included. The published one keeps serving, and the page goes back to draft so it can be sent
+ *   for review (submit() only accepts a draft page). Somebody other than the editor then approves
+ *   it: the four-eyes rule has no exception for the person who wrote the change.
  *
  *   A MACHINE produces a working version, always. It may propose knowledge; it may not approve it.
  *   Automated repair and relinking reach real, already-published pages, and an AI revision that
@@ -36,32 +30,22 @@ class EnterpriseWikiPublicationSettlementService
     /**
      * Settle publication after a person edited the page by hand.
      *
-     * @return bool whether this edit was published immediately
+     * Never publishes. The edit is a working version like any other, and the editor's authority
+     * does not change that — saving is not approving.
+     *
+     * @return bool whether the page was returned to draft
      */
-    public function afterManualEdit(
-        EnterpriseWikiPage $page,
-        EnterpriseWikiPageVersion $newVersion,
-        User $actor,
-    ): bool {
+    public function afterManualEdit(EnterpriseWikiPage $page): bool
+    {
         $locked = $this->settleablePage($page->id);
 
         if ($locked === null) {
             return false;
         }
 
-        if (! $actor->canApproveWikiPages()) {
-            $locked->forceFill(['status' => EnterpriseWikiPage::STATUS_DRAFT])->save();
-
-            return false;
-        }
-
-        // Status stays approved; the pointer moves. reviewed_at/reviewed_by are the same trail
-        // approve() leaves, so a direct publication is as traceable as a reviewed one.
-        $locked->forceFill([
-            'published_version_id' => $newVersion->id,
-            'reviewed_at' => now(),
-            'reviewed_by_user_id' => $actor->id,
-        ])->save();
+        // published_version_id is untouched: the approved version keeps serving until somebody
+        // other than the editor approves the new one.
+        $locked->forceFill(['status' => EnterpriseWikiPage::STATUS_DRAFT])->save();
 
         return true;
     }

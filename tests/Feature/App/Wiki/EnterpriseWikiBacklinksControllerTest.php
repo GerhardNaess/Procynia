@@ -11,6 +11,7 @@ use App\Models\Nationality;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -18,6 +19,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiBacklinksControllerTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     public function test_show_returns_rendered_markdown_with_clickable_internal_link(): void
@@ -67,7 +69,7 @@ class EnterpriseWikiBacklinksControllerTest extends TestCase
         $response = $this->actingAs($user)->get('/app/wiki/'.$target->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($target): bool {
+        $response->assertViewHas('page', function (array $inertia): bool {
             $backlinks = data_get($inertia, 'props.backlinks', []);
 
             return count($backlinks) === 1
@@ -177,7 +179,7 @@ class EnterpriseWikiBacklinksControllerTest extends TestCase
 
     private function createUser(Customer $customer): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Test User',
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
@@ -185,7 +187,7 @@ class EnterpriseWikiBacklinksControllerTest extends TestCase
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createPage(

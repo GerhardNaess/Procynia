@@ -4,9 +4,11 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
 use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -40,6 +42,7 @@ class CustomerEnvironmentController extends Controller
                 'primaryDepartment:id,name',
                 'departments:id,name,is_active',
                 'managedDepartments:id,name,is_active',
+                'customerRoles:id,name,is_active',
             ])
             ->orderByDesc('created_at')
             ->get()
@@ -67,12 +70,18 @@ class CustomerEnvironmentController extends Controller
             'permissionSettings' => $actor->isSystemOwner()
                 ? $this->permissionSettingsPayload($actor, $customerId)
                 : null,
+            // Customer-defined roles live beside the fixed bid_role matrix, not inside it. Same
+            // gate: System Owner administers both.
+            'customerRoles' => $actor->isSystemOwner()
+                ? $this->customerRolesPayload($customerId)
+                : null,
             'routes' => [
                 'index' => route('app.customer-environment.index'),
                 'departments_store' => route('app.departments.store'),
                 'users_store' => route('app.users.store'),
                 'users_create' => route('app.users.create'),
                 'permissions_update' => route('app.customer-environment.permissions.update'),
+                'roles_store' => route('app.customer-environment.roles.store'),
             ],
         ]);
     }
@@ -131,6 +140,56 @@ class CustomerEnvironmentController extends Controller
         $customer->save();
 
         return redirect()->route('app.customer-environment.index', ['tab' => 'permissions']);
+    }
+
+    /**
+     * The customer's own roles, the catalogue they can be built from, and who holds them.
+     *
+     * The catalogue is grouped by domain because the gallery renders one table per domain — Kvalitet
+     * and Enterprise Wiki each get their own — while a single role may hold permissions in both.
+     * That is the whole point of separating the role from the permission: the customer decides that
+     * their «Kvalitetsdirektør» also publishes Wiki pages, and nothing in the model objects.
+     */
+    private function customerRolesPayload(int $customerId): array
+    {
+        $roles = CustomerRole::query()
+            ->forCustomer($customerId)
+            ->with('permissions')
+            ->withCount('users')
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (CustomerRole $role): array => [
+                'id' => $role->id,
+                'name' => $role->name,
+                'description' => $role->description,
+                'is_active' => (bool) $role->is_active,
+                'permission_keys' => $role->permissionKeys(),
+                'user_count' => (int) $role->users_count,
+                'update_url' => route('app.customer-environment.roles.update', ['customerRole' => $role->id]),
+                'delete_url' => route('app.customer-environment.roles.destroy', ['customerRole' => $role->id]),
+            ])
+            ->all();
+
+        $domains = collect(CustomerPermissionCatalog::domains())
+            ->map(fn (array $permissionKeys, string $domain): array => [
+                'key' => $domain,
+                'label' => CustomerPermissionCatalog::domainLabel($domain),
+                'permissions' => collect($permissionKeys)
+                    ->map(fn (string $key): array => [
+                        'key' => $key,
+                        'label' => CustomerPermissionCatalog::label($key),
+                    ])
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'domains' => $domains,
+            'roles' => $roles,
+            'store_url' => route('app.customer-environment.roles.store'),
+        ];
     }
 
     private function permissionSettingsPayload(User $actor, int $customerId): array
@@ -303,6 +362,15 @@ class CustomerEnvironmentController extends Controller
                     'id' => $department->id,
                     'name' => $department->name,
                     'is_active' => (bool) $department->is_active,
+                ])
+                ->all(),
+            // Read-only here: the Brukere table shows what a person holds, and Rediger bruker is
+            // where it is changed.
+            'customer_roles' => $user->customerRoles
+                ->map(fn (CustomerRole $role): array => [
+                    'id' => $role->id,
+                    'name' => $role->name,
+                    'is_active' => (bool) $role->is_active,
                 ])
                 ->all(),
             'managed_department_ids' => $user->managedDepartments->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),

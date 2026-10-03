@@ -5,18 +5,19 @@ namespace Tests\Feature\App;
 use App\Http\Middleware\VerifyCsrfToken;
 use App\Models\Customer;
 use App\Models\Department;
-use App\Models\Language;
-use App\Models\Nationality;
 use App\Models\User;
 use App\Models\UserNotification;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesCustomerAccessSqliteSchema;
 use Tests\TestCase;
 
 class CustomerNotificationCenterTest extends TestCase
 {
+    use CreatesCustomerAccessSqliteSchema;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -302,6 +303,8 @@ class CustomerNotificationCenterTest extends TestCase
             $table->boolean('is_active')->default(true);
             $table->timestamps();
         });
+
+        $this->createCustomerAccessTables();
 
         Schema::create('departments', function (Blueprint $table): void {
             $table->id();

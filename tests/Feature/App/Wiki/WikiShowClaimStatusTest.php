@@ -13,6 +13,7 @@ use App\Models\User;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -23,6 +24,7 @@ use Tests\TestCase;
  */
 class WikiShowClaimStatusTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -214,7 +216,7 @@ class WikiShowClaimStatusTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Status Tester',
             'email' => Str::lower(Str::random(8)).'@show-status-test.invalid',
             'password' => bcrypt('secret'),
@@ -222,6 +224,6 @@ class WikiShowClaimStatusTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 }

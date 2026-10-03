@@ -6,6 +6,7 @@ use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
+use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -17,6 +18,7 @@ use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Quality\QualityProcessBlueprintService;
+use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
@@ -988,12 +990,13 @@ class QualityProcessBlueprintTest extends TestCase
         $this->blueprintFor($customer, $parent, $this->flowWithSubprocess($child->id));
 
         $reader = $this->user($customer, User::ROLE_USER, User::BID_ROLE_CONTRIBUTOR);
+        $this->grantQualityPermissions($customer, $reader, [CustomerPermissionCatalog::QUALITY_VIEW]);
 
         $props = $this->actingAs($reader)
             ->get("/app/quality/items/{$parent->id}?tab=flow&subprocess={$child->id}")
             ->viewData('page')['props'];
 
-        $this->assertFalse($props['can_manage']);
+        $this->assertFalse($props['permissions']['can_edit']);
         $this->assertSame([], $props['subprocess_options']);
 
         // Reading the subprocess is not an edit, so the drill-down itself still works.
@@ -1647,6 +1650,27 @@ class QualityProcessBlueprintTest extends TestCase
         }
 
         return ['customer' => $customer, 'owner' => $owner];
+    }
+
+    /**
+     * Hand the user a customer role carrying exactly these Kvalitet permissions.
+     *
+     * Kvalitet is gated by CustomerPermissionService, so a non-System-Owner reaches the module
+     * through a role the customer defined and through nothing else.
+     *
+     * @param  list<string>  $permissionKeys
+     */
+    private function grantQualityPermissions(Customer $customer, User $user, array $permissionKeys): void
+    {
+        $role = CustomerRole::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Kvalitetsrolle '.Str::upper(Str::random(6)),
+            'is_active' => true,
+        ]);
+
+        $role->syncPermissions($permissionKeys);
+
+        $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
     }
 
     private function user(Customer $customer, string $role, string $bidRole): User

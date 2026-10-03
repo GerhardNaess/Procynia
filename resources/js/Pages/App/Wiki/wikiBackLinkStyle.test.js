@@ -34,7 +34,7 @@ describe('the "Tilbake til funn" button reuses Procynia\'s shared primary action
 
     test('its colours come from the shared primary role, not from this file', () => {
         assert.match(buttonClass, /\$\{PRIMARY_COLOURS\}/);
-        assert.match(source, /import \{ PRIMARY_COLOURS \} from '\.\.\/\.\.\/\.\.\/Support\/actionStyles'/);
+        assert.match(source, /import \{[^}]*\bPRIMARY_COLOURS\b[^}]*\} from '\.\.\/\.\.\/\.\.\/Support\/actionStyles'/);
     });
 
     test('it introduces no colour of its own', () => {

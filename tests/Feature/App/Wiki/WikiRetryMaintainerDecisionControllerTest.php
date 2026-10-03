@@ -12,6 +12,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Tests\Concerns\GrantsWikiPermissions;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,7 @@ use Tests\TestCase;
  */
 class WikiRetryMaintainerDecisionControllerTest extends TestCase
 {
+    use GrantsWikiPermissions;
     use RefreshDatabase;
 
     public function test_system_owner_can_retry_a_transiently_failed_run(): void
@@ -183,7 +185,7 @@ class WikiRetryMaintainerDecisionControllerTest extends TestCase
 
     private function createUser(Customer $customer, string $bidRole): User
     {
-        return User::query()->create([
+        return $this->grantWikiPermissions($customer, User::query()->create([
             'name' => 'Retry Maintainer Decision Tester',
             'email' => Str::lower(Str::random(8)).'@retry-maintainer-decision-controller-test.invalid',
             'password' => bcrypt('secret'),
@@ -191,7 +193,7 @@ class WikiRetryMaintainerDecisionControllerTest extends TestCase
             'bid_role' => $bidRole,
             'customer_id' => $customer->id,
             'is_active' => true,
-        ]);
+        ]));
     }
 
     private function createDocument(Customer $customer, ?int $ownerUserId = null): EnterpriseWikiDocument
