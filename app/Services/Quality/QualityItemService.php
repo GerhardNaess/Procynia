@@ -14,7 +14,9 @@ use App\Models\QualityItemWikiLink;
 use App\Models\QualityProcessIo;
 use App\Models\QualityProcessStep;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageDeletionService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -37,6 +39,11 @@ use Illuminate\Validation\ValidationException;
  */
 class QualityItemService
 {
+    public function __construct(
+        private readonly QualityActivityKnowledgeResolver $activityKnowledge,
+        private readonly EnterpriseWikiPageDeletionService $wikiPageDeletion,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $attributes
      */
@@ -129,11 +136,68 @@ class QualityItemService
         return $item->refresh();
     }
 
-    public function deleteItem(int $customerId, QualityItem $item): void
+    /**
+     * The Wiki pages this process produced, as pages rather than ids.
+     *
+     * One resolution, three readers: the list row that says how many there are, the authorisation
+     * check that asks whether this user may delete each of them, and the deletion itself. Asking
+     * three times is what would let the three answers disagree about the same process.
+     *
+     * Safety is QualityActivityKnowledgeResolver's, not a rule invented here: a page counts only
+     * when a provenance row names this process AND the run that produced it recorded the page as
+     * CREATED from this process's own source document. A page the run merely updated, or a page
+     * that happens to share a run, is not this process's to remove and never appears here.
+     *
+     * @return Collection<int, EnterpriseWikiPage>
+     */
+    public function producedWikiPages(int $customerId, QualityItem $item): Collection
+    {
+        $this->assertOwned($customerId, $item);
+
+        $resolved = $this->activityKnowledge->resolve($customerId, (int) $item->id);
+
+        return collect($resolved['pages_by_row'])
+            ->flatten(1)
+            ->filter(static fn (mixed $page): bool => $page instanceof EnterpriseWikiPage)
+            ->unique(static fn (EnterpriseWikiPage $page): int => (int) $page->id)
+            ->values();
+    }
+
+    /**
+     * Deleting a styrende dokument, and — only when asked — the Wiki knowledge it produced.
+     *
+     * $deleteProducedWikiPagesAs is the user on whose behalf the Wiki deletion is performed, not a
+     * flag: Wiki will not delete a page without an actor, and a caller that has not decided who is
+     * asking has not decided to delete anything. Null is the default and means the knowledge stays,
+     * which is what it has always done.
+     *
+     * The Wiki pages go FIRST, through EnterpriseWikiPageDeletionService — the one place a Wiki
+     * page is deleted — because the provenance rows that identify them cascade away with the item.
+     * Quality implements none of that cleanup: it hands Wiki a set of pages and lets Wiki's own
+     * withdrawal, cascades and fail-closed assertion decide what happens. If Wiki refuses, the
+     * exception propagates and the process is still here, which is the right half to keep.
+     *
+     * The source documents are never touched either way. A file the virksomhet uploaded is the
+     * virksomhet's, and that was true before this option existed.
+     *
+     * @return array{wiki_pages_deleted: int}
+     */
+    public function deleteItem(int $customerId, QualityItem $item, ?User $deleteProducedWikiPagesAs = null): array
     {
         $this->assertOwned($customerId, $item);
 
         $itemId = (int) $item->id;
+        $wikiPagesDeleted = 0;
+
+        if ($deleteProducedWikiPagesAs !== null) {
+            $pageIds = $this->producedWikiPages($customerId, $item)
+                ->map(static fn (EnterpriseWikiPage $page): int => (int) $page->id);
+
+            if ($pageIds->isNotEmpty()) {
+                $wikiPagesDeleted = $this->wikiPageDeletion
+                    ->deletePages($customerId, $pageIds, $deleteProducedWikiPagesAs)['pages_deleted'];
+            }
+        }
 
         // The other end of every edge that touched this item has to be reprojected too: the graph
         // stores edges as the outgoing set of their start node, so an incoming edge is only removed
@@ -151,6 +215,8 @@ class QualityItemService
 
         $this->deprojectItem($customerId, $itemId);
         $this->reproject($neighbourIds);
+
+        return ['wiki_pages_deleted' => $wikiPagesDeleted];
     }
 
     // -----------------------------------------------------------------

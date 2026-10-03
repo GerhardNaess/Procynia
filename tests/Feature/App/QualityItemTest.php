@@ -6,6 +6,8 @@ use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -587,6 +589,114 @@ class QualityItemTest extends TestCase
     }
 
     /**
+     * The second half of the same decision: the knowledge may go with the process, when asked.
+     *
+     * Asked, never assumed — the request has to carry delete_wiki_pages, and the test above proves
+     * that without it nothing in Wiki moves. What this one pins is the boundary of "produced":
+     * only a page the run CREATED from this process's own source document, which is
+     * QualityActivityKnowledgeResolver's rule rather than one invented for deletion. A page the
+     * same run merely updated was already the Wiki's before this process touched it, and a page
+     * from another process is not this one's at all. Both stay, and so does the source document.
+     */
+    public function test_deleting_a_process_can_take_the_wiki_pages_it_produced_with_it(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshandtering');
+        $document = $this->document($customer, 'avviksrutine.pdf');
+
+        $produced = $this->page($customer, 'Avviksrutine');
+        $updatedByTheSameRun = $this->page($customer, 'Hendelsesbegrepet');
+        $someoneElses = $this->page($customer, 'Leverandorrutine');
+
+        // The run the Wiki made of this process's source. One page it created, one it only
+        // patched — the second is exactly the page a naive "same run" rule would sweep up.
+        $run = $this->ingestRun($customer, $document);
+        $this->runPage($run, $produced, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->runPage($run, $updatedByTheSameRun, EnterpriseWikiIngestRunPage::ACTION_UPDATED);
+
+        QualityActivityWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'activity_key' => 'vurder',
+            'enterprise_wiki_document_id' => $document->id,
+            'created_by_user_id' => $owner->id,
+        ]);
+
+        $this->actingAs($owner)
+            ->delete("/app/quality/items/{$process->id}?delete_wiki_pages=1")
+            ->assertRedirect('/app/quality')
+            ->assertSessionHas('success');
+
+        $this->assertNull(QualityItem::query()->find($process->id));
+        $this->assertNull(EnterpriseWikiPage::query()->find($produced->id), 'the page this process produced goes with it');
+
+        // Everything the process did not produce stays, including the file it was written into.
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($updatedByTheSameRun->id), 'a page the run only updated was never this process\'s to delete');
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($someoneElses->id));
+        $this->assertNotNull(EnterpriseWikiDocument::query()->find($document->id), 'the source document is the virksomhet\'s');
+    }
+
+    /**
+     * Deleting a Wiki page is Wiki's authority, and managing the kvalitetssystem does not carry it.
+     *
+     * A Contributor with QA may delete a process — canApproveWikiClaims() is what the module asks
+     * for — but may not delete a Wiki page they do not own. Rather than quietly deleting the
+     * process and keeping the pages they asked to be rid of, the request is refused whole: nothing
+     * is deleted, and the message says to choose "keep" instead.
+     */
+    public function test_a_user_who_may_manage_quality_but_not_delete_wiki_pages_is_refused(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $qa = User::query()->create([
+            'name' => 'Kvalitetsleder',
+            'email' => 'qa-'.Str::lower(Str::random(10)).'@procynia.local',
+            'password' => bcrypt('secret-password'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'is_qa' => true,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshandtering');
+        $document = $this->document($customer, 'avviksrutine.pdf');
+        $produced = $this->page($customer, 'Avviksrutine');
+
+        $run = $this->ingestRun($customer, $document);
+        $this->runPage($run, $produced, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+
+        QualityActivityWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'activity_key' => 'vurder',
+            'enterprise_wiki_document_id' => $document->id,
+            'created_by_user_id' => $owner->id,
+        ]);
+
+        $this->actingAs($qa)
+            ->delete("/app/quality/items/{$process->id}?delete_wiki_pages=1")
+            ->assertRedirect('/app/quality')
+            ->assertSessionHas('error');
+
+        // Nothing moved: refusing is all-or-nothing.
+        $this->assertNotNull(QualityItem::query()->find($process->id));
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($produced->id));
+
+        // The same user may still delete the process while keeping the knowledge.
+        $this->actingAs($qa)
+            ->delete("/app/quality/items/{$process->id}")
+            ->assertRedirect('/app/quality')
+            ->assertSessionHas('success');
+
+        $this->assertNull(QualityItem::query()->find($process->id));
+        $this->assertNotNull(EnterpriseWikiPage::query()->find($produced->id));
+    }
+
+    /**
      * Deleting is reachable from the Prosesser list as well as from the process's own page, so the
      * redirect keeps the tab the request came from. A user clearing out two processes should not
      * have to find their way back to Prosesser between them.
@@ -1082,6 +1192,28 @@ class QualityItemTest extends TestCase
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    private function ingestRun(Customer $customer, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
+    {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+        ]);
+    }
+
+    private function runPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $action): void
+    {
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => $action,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
         ]);
     }
 

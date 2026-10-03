@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\App;
 
 use App\Exceptions\Ai\AiCostControlException;
+use App\Exceptions\EnterpriseWikiWithdrawalNotRepresentableException;
 use App\Http\Controllers\Controller;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
+use App\Models\QualityActivityWikiPage;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
@@ -31,6 +33,8 @@ use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -104,7 +108,7 @@ class QualityController extends Controller
             // content — System Owner, or a role the customer has given Wiki claim approval to. No
             // new permission was introduced.
             'can_manage' => $user?->canApproveWikiClaims() ?? false,
-            'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab]),
+            'items' => $this->itemRows($customerId, self::TAB_TYPES[$tab], $user),
             'type_counts' => $this->typeCounts($customerId),
             'quality_types' => QualityItem::TYPES,
             'statuses' => QualityItem::STATUSES,
@@ -285,13 +289,54 @@ class QualityController extends Controller
         $this->authorizeManagement($user);
         $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
 
-        $this->items->deleteItem((int) $customerId, $item);
-
         $tab = in_array($request->query('tab'), self::TABS, true) ? $request->query('tab') : null;
+        $backToIndex = fn (): RedirectResponse => redirect()
+            ->route('app.quality.index', $tab !== null ? ['tab' => $tab] : []);
 
-        return redirect()
-            ->route('app.quality.index', $tab !== null ? ['tab' => $tab] : [])
-            ->with('success', __('procynia.quality.flash.item_deleted'));
+        // The knowledge a process produced outlives the process by default. Removing it too is a
+        // second decision, taken in the same dialog and never implied by the first.
+        $deleteWikiPages = $request->boolean('delete_wiki_pages');
+        $producedPages = $deleteWikiPages
+            ? $this->items->producedWikiPages((int) $customerId, $item)
+            : collect();
+
+        // Deleting a Wiki page is Wiki's authority, not Kvalitet's: managing the kvalitetssystem
+        // does not carry the right to remove a page from the Wiki. Checked page by page with the
+        // Wiki's own rule, and all-or-nothing — a partial delete would leave the user believing
+        // the process's knowledge was gone when some of it is still there.
+        $undeletable = $producedPages->first(
+            fn (EnterpriseWikiPage $page): bool => ! $user->canDeleteEnterpriseWikiPage($page),
+        );
+
+        if ($undeletable instanceof EnterpriseWikiPage) {
+            return $backToIndex()->with('error', __('procynia.quality.errors.wiki_pages_not_deletable'));
+        }
+
+        try {
+            $result = $this->items->deleteItem((int) $customerId, $item, $deleteWikiPages ? $user : null);
+        } catch (EnterpriseWikiWithdrawalNotRepresentableException $e) {
+            // Wiki fails closed, and so does this: the pages are untouched and the process is still
+            // here, which is the half worth keeping.
+            Log::warning('[PROCYNIA][QUALITY] Process deletion refused — Wiki could not let go of the pages it produced.', [
+                'quality_item_id' => $item->id,
+                'customer_id' => $customerId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $backToIndex()->with('error', __('procynia.quality.errors.wiki_page_deletion_failed'));
+        }
+
+        $message = __('procynia.quality.flash.item_deleted');
+
+        if ($result['wiki_pages_deleted'] > 0) {
+            $message .= ' '.trans_choice(
+                'procynia.quality.flash.item_deleted_wiki_pages',
+                $result['wiki_pages_deleted'],
+                ['count' => $result['wiki_pages_deleted']],
+            );
+        }
+
+        return $backToIndex()->with('success', $message);
     }
 
     /**
@@ -1046,27 +1091,43 @@ class QualityController extends Controller
      * @param  list<string>  $types
      * @return list<array<string, mixed>>
      */
-    private function itemRows(?int $customerId, array $types): array
+    private function itemRows(?int $customerId, array $types, ?User $user): array
     {
         $typeOrder = array_flip(QualityItem::TYPES);
 
-        return QualityItem::query()
+        $items = QualityItem::query()
             ->where('customer_id', $customerId)
             ->whereIn('quality_type', $types)
             ->with(['owner:id,name'])
             ->withCount('wikiLinks')
-            ->get()
-            ->map(static fn (QualityItem $item): array => [
-                'id' => (int) $item->id,
-                'quality_type' => $item->quality_type,
-                'title' => $item->title,
-                'code' => $item->code,
-                'status' => $item->status,
-                'owner_name' => $item->owner?->name,
-                'next_review_at' => $item->next_review_at?->toDateString(),
-                'wiki_link_count' => (int) $item->wiki_links_count,
-                'url' => route('app.quality.items.show', ['item' => $item->id]),
-            ])
+            ->get();
+
+        $producedPages = $this->producedWikiPagesByItem($customerId, $items);
+
+        return $items
+            ->map(function (QualityItem $item) use ($producedPages, $user): array {
+                /** @var Collection<int, EnterpriseWikiPage> $pages */
+                $pages = $producedPages[(int) $item->id] ?? collect();
+
+                return [
+                    'id' => (int) $item->id,
+                    'quality_type' => $item->quality_type,
+                    'title' => $item->title,
+                    'code' => $item->code,
+                    'status' => $item->status,
+                    'owner_name' => $item->owner?->name,
+                    'next_review_at' => $item->next_review_at?->toDateString(),
+                    'wiki_link_count' => (int) $item->wiki_links_count,
+                    // What the delete dialog has to say before it asks. The count is the knowledge
+                    // this process produced; the flag is whether this reader may remove it, so the
+                    // dialog never offers a choice the controller would refuse.
+                    'produced_wiki_page_count' => $pages->count(),
+                    'can_delete_produced_wiki_pages' => $pages->isNotEmpty()
+                        && $user instanceof User
+                        && $pages->every(fn (EnterpriseWikiPage $page): bool => $user->canDeleteEnterpriseWikiPage($page)),
+                    'url' => route('app.quality.items.show', ['item' => $item->id]),
+                ];
+            })
             // Governing documents first, then alphabetically within each type — the order a
             // kvalitetshåndbok is read in, not the order rows happened to be created in.
             ->sortBy(static fn (array $row): string => sprintf(
@@ -1076,6 +1137,40 @@ class QualityController extends Controller
             ))
             ->values()
             ->all();
+    }
+
+    /**
+     * The Wiki pages each listed item produced, keyed by item id.
+     *
+     * Resolved only for the items that have a provenance row at all — one query to find them,
+     * rather than a full resolution per row of a list where most rows have produced nothing.
+     *
+     * @param  Collection<int, QualityItem>  $items
+     * @return array<int, Collection<int, EnterpriseWikiPage>>
+     */
+    private function producedWikiPagesByItem(?int $customerId, Collection $items): array
+    {
+        if ($customerId === null || $items->isEmpty()) {
+            return [];
+        }
+
+        $itemIds = QualityActivityWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $items->pluck('id'))
+            ->distinct()
+            ->pluck('quality_item_id')
+            ->map(static fn (mixed $value): int => (int) $value)
+            ->all();
+
+        $byItem = [];
+
+        foreach ($items as $item) {
+            if (in_array((int) $item->id, $itemIds, true)) {
+                $byItem[(int) $item->id] = $this->items->producedWikiPages($customerId, $item);
+            }
+        }
+
+        return $byItem;
     }
 
     /**
