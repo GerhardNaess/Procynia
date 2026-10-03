@@ -414,7 +414,9 @@ export default function ProcessFlowPanel({
 
                 {! hasFlow && (
                     <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-base text-slate-600">
-                        {discards
+                        {publication?.state === 'retired'
+                            ? (tb.empty_retired ?? 'Det finnes ingen arbeidsversjon av flyten. De godkjente revisjonene ligger i historikken nedenfor.')
+                            : discards
                             ? (tb.empty_published ?? 'Det finnes ingen arbeidsversjon. Gjeldende revisjon :number gjelder fortsatt.')
                                 .replace(':number', String(publishedRevision))
                             : (tb.empty ?? 'Ingen flyt er laget for denne prosessen ennå.')}

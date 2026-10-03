@@ -258,6 +258,7 @@ return [
             'discard_working_version_next' => 'Gjeldende revisjon fortsetter å gjelde. Etterpå kan du beskrive eller generere en ny arbeidsversjon.',
             'discard_working_version_discarding' => 'Forkaster …',
             'empty_published' => 'Det finnes ingen arbeidsversjon. Gjeldende revisjon :number gjelder fortsatt. Skriv prosessbeskrivelsen i feltet over og generer en ny flyt for å lage en arbeidsversjon.',
+            'empty_retired' => 'Det finnes ingen arbeidsversjon av flyten. De godkjente revisjonene ligger i historikken nedenfor.',
             'approval_cleared_help' => 'Endringer du lagrer, er upubliserte til flyten godkjennes og publiseres. Gjeldende revisjon gjelder fram til da.',
             'history_heading' => 'Godkjente revisjoner',
             'history_empty' => 'Ingen revisjoner er godkjent ennå.',

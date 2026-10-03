@@ -258,6 +258,7 @@ return [
             'discard_working_version_next' => 'The revision in force stays in force. Afterwards you can describe or generate a new working version.',
             'discard_working_version_discarding' => 'Discarding …',
             'empty_published' => 'There is no working version. Revision :number is still in force. Write the process description in the field above and generate a new flow to start a working version.',
+            'empty_retired' => 'There is no working version of the flow. The approved revisions are kept in the history below.',
             'approval_cleared_help' => 'Changes you save stay unpublished until the flow is approved and published. The revision in force applies until then.',
             'history_heading' => 'Approved revisions',
             'history_empty' => 'No revision has been approved yet.',
