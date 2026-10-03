@@ -498,6 +498,10 @@ class HandleInertiaRequests extends Middleware
                     'permissions_heading' => __('procynia.customer_env.permissions_heading'),
                     'permissions_subtitle' => __('procynia.customer_env.permissions_subtitle'),
                     'col_action' => __('procynia.customer_env.col_action'),
+                    // Shared as a block: the customer-role gallery is one self-contained surface
+                    // whose every string belongs to it, so naming them individually would only
+                    // repeat the lang file.
+                    'roles' => __('procynia.customer_env.roles'),
                 ],
                 'auth' => [
                     'email' => __('procynia.user.email'),

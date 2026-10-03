@@ -3,6 +3,7 @@ import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Su
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import CustomerRolesPanel from './CustomerRolesPanel';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -192,6 +193,7 @@ export default function CustomerEnvironmentIndex({
     departmentFilterOptions,
     canCreateDepartments,
     permissionSettings = null,
+    customerRoles = null,
     routes,
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
@@ -873,6 +875,17 @@ export default function CustomerEnvironmentIndex({
                                 </table>
                             </div>
                         </div>
+
+                        {/* Customer-defined roles sit below the fixed matrix, never inside it: the
+                            matrix is Procynia's anbud vocabulary, this is the customer's own. */}
+                        {customerRoles ? (
+                            <CustomerRolesPanel
+                                customerRoles={customerRoles}
+                                users={users}
+                                modal={EnvironmentModal}
+                                t={tce.roles ?? {}}
+                            />
+                        ) : null}
                     </section>
                 ) : null}
 

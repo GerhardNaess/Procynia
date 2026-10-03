@@ -209,6 +209,21 @@ class User extends Authenticatable implements FilamentUser
         return $this->belongsTo(Customer::class);
     }
 
+    /**
+     * Customer-defined roles the user holds, additively and alongside their bid_role. Never a
+     * replacement for it: anbud authorization does not read this relation at all.
+     *
+     * Reach for App\Services\Permissions\CustomerPermissionService rather than this relation when
+     * the question is what the user may do — it applies the tenant guard and System Owner's
+     * unconditional grant, which a raw relation read does not.
+     */
+    public function customerRoles(): BelongsToMany
+    {
+        return $this->belongsToMany(CustomerRole::class, 'customer_user_roles', 'user_id', 'customer_role_id')
+            ->withTimestamps()
+            ->orderBy('customer_roles.name');
+    }
+
     public function watchProfiles(): HasMany
     {
         return $this->hasMany(WatchProfile::class);
