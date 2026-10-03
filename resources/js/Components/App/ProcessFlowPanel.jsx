@@ -1677,7 +1677,11 @@ function ActivityArticlePanel({
                                     <button type="button" className={PRIMARY_ACTION} onClick={requestDraft} disabled={busy}>
                                         {busy
                                             ? (tb.articles_drafting ?? 'Lager utkast …')
-                                            : (tb.articles_draft ?? 'Opprett kunnskapsartikkel')}
+                                            // With knowledge already listed above, the button adds
+                                            // to it rather than reading as the first article.
+                                            : articles.length > 0
+                                                ? (tb.articles_draft_another ?? 'Opprett ny kunnskapsartikkel')
+                                                : (tb.articles_draft ?? 'Opprett kunnskapsartikkel')}
                                     </button>
                                 )}
 

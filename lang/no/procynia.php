@@ -305,6 +305,7 @@ return [
             'articles_open' => 'Åpne kunnskapen bak :label',
             'articles_open_page' => 'Åpne i Wiki',
             'articles_draft' => 'Opprett kunnskapsartikkel',
+            'articles_draft_another' => 'Opprett ny kunnskapsartikkel',
             'articles_drafting' => 'Lager utkast …',
             'articles_write' => 'Skriv artikkelen selv',
             'articles_title' => 'Tittel',

@@ -103,3 +103,15 @@ describe('answering a flow clarification', () => {
         );
     });
 });
+
+/** With knowledge already listed on the activity, the button adds to it rather than starting it. */
+describe('the article button reads against what the activity already has', () => {
+    test('an activity with articles offers a new one, an empty one the first', () => {
+        assert.match(panel, /articles\.length > 0\s*\n\s*\? \(tb\.articles_draft_another \?\? 'Opprett ny kunnskapsartikkel'\)\s*\n\s*: \(tb\.articles_draft \?\? 'Opprett kunnskapsartikkel'\)/);
+    });
+
+    test('both labels exist in both languages', () => {
+        assert.match(langFile('no'), /'articles_draft_another' => 'Opprett ny kunnskapsartikkel'/);
+        assert.match(langFile('en'), /'articles_draft_another' => 'Create new knowledge article'/);
+    });
+});

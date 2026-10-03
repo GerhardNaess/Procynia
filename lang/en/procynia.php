@@ -303,6 +303,7 @@ return [
             'articles_open' => 'Open the knowledge behind :label',
             'articles_open_page' => 'Open in Wiki',
             'articles_draft' => 'Create knowledge article',
+            'articles_draft_another' => 'Create new knowledge article',
             'articles_drafting' => 'Drafting …',
             'articles_write' => 'Write the article yourself',
             'articles_title' => 'Title',
