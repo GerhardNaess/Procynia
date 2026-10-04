@@ -20,6 +20,7 @@ use App\Http\Controllers\App\RiskAssessmentController;
 use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
+use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
@@ -325,6 +326,8 @@ Route::prefix('app')
             // Acceptance of residual risk. Never edited; a mistake is revoked and accepted anew. risk.accept in the area.
             Route::post('/risks/{riskId}/acceptances', [RiskAcceptanceController::class, 'store'])->whereNumber('riskId')->name('acceptances.store');
             Route::post('/risks/{riskId}/acceptances/{acceptanceId}/revoke', [RiskAcceptanceController::class, 'revoke'])->whereNumber(['riskId', 'acceptanceId'])->name('acceptances.revoke');
+            // Risiko → Enterprise Wiki: what the person wrote becomes an ordinary Wiki source. risk.edit + wiki.source.manage.
+            Route::post('/risks/{riskId}/wiki-knowledge', [RiskWikiKnowledgeController::class, 'store'])->whereNumber('riskId')->name('wiki-knowledge.store');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

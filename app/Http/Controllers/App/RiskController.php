@@ -16,6 +16,7 @@ use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Services\Risk\RiskStatement;
 use App\Services\Risk\RiskTreatmentService;
+use App\Services\Risk\RiskWikiKnowledgeService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -51,6 +52,7 @@ class RiskController extends Controller
         private readonly RiskReviewSchedule $reviewSchedule,
         private readonly RiskStatement $statement,
         private readonly RiskAttentionService $attention,
+        private readonly RiskWikiKnowledgeService $wikiKnowledge,
     ) {}
 
     public function index(Request $request): Response
@@ -161,6 +163,9 @@ class RiskController extends Controller
             'treatment_owner_options' => $canEdit ? $this->treatments->ownerOptions($risk) : [],
             // The residual-risk decision and its history: whoever may see the risk may read them.
             'risk_acceptance' => $this->acceptances->decisionFor($risk),
+            // Wiki knowledge handed over from this risk, read live from the Wiki. Links only for
+            // someone who may read the Wiki; nothing of the risk was copied into it.
+            'wiki_knowledge' => $this->wikiKnowledge->describeForRisk($risk, $this->wikiKnowledge->canReadWiki($user)),
             'permissions' => [
                 'can_edit' => $canEdit,
                 'can_link_controls' => $canReadControls && $canEdit,
@@ -169,6 +174,7 @@ class RiskController extends Controller
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_accept' => $this->access->can($user, CustomerPermissionCatalog::RISK_ACCEPT, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
+                'can_create_wiki_knowledge' => $this->wikiKnowledge->canHandOff($user, $risk),
             ],
             'area_options' => $this->areaOptions($editableAreas),
             'owner_options' => $canEdit ? $this->ownerOptions($user, $editableAreas) : [],

@@ -11,6 +11,7 @@ import RiskForm from './RiskForm';
 import RiskReviewSchedule from './RiskReviewSchedule';
 import RiskTreatmentPanel from './RiskTreatmentPanel';
 import RiskTreatmentStrategy from './RiskTreatmentStrategy';
+import RiskWikiKnowledgePanel from './RiskWikiKnowledgePanel';
 import RiskDescription from './RiskDescription';
 import { RISK_STATUS_TONES } from './riskStatus';
 
@@ -38,6 +39,7 @@ export default function RiskShow() {
         treatment_owner_options: treatmentOwnerOptions = [],
         risk_acceptance: riskAcceptance = null,
         review_schedule: reviewSchedule = null,
+        wiki_knowledge: wikiKnowledge = [],
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -195,6 +197,13 @@ export default function RiskShow() {
                         qualityStatuses={translations?.quality?.statuses ?? {}}
                     />
                 )}
+
+                <RiskWikiKnowledgePanel
+                    riskId={risk.id}
+                    entries={wikiKnowledge}
+                    canCreate={Boolean(permissions.can_create_wiki_knowledge)}
+                    tr={tr}
+                />
             </div>
         </CustomerAppLayout>
     );
