@@ -303,14 +303,14 @@ class QualityProcessFlowInterpretationTest extends TestCase
         // Compared by content, not by key order: a jsonb round trip is free to reorder the keys of
         // an object, and the flow is the same flow either way.
         //
-        // The served node carries two fields the stored one does not: what its subprocess reference
-        // resolves to today, and the articles its activity has produced. Both are read fresh on
-        // every page load rather than stored, so they are checked separately rather than smuggled
-        // into the comparison with what was adopted.
+        // The served node carries three fields the stored one does not: what its subprocess reference
+        // resolves to today, the articles its activity has produced, and the controls placed on it.
+        // All are read fresh on every page load rather than stored, so they are checked separately
+        // rather than smuggled into the comparison with what was adopted.
         $this->assertEquals(
             $proposal['nodes'],
             array_map(
-                static fn (array $node): array => collect($node)->except(['subprocess', 'articles'])->all(),
+                static fn (array $node): array => collect($node)->except(['subprocess', 'articles', 'controls'])->all(),
                 $props['blueprint']['nodes'],
             ),
         );
@@ -319,6 +319,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             $this->assertNull($node['subprocess_quality_item_id']);
             $this->assertNull($node['subprocess']);
             $this->assertSame([], $node['articles']);
+            $this->assertSame([], $node['controls']);
         }
 
         $this->assertEquals($proposal['edges'], $props['blueprint']['edges']);
