@@ -72,6 +72,12 @@ class Risk extends Model
         return $this->hasMany(RiskControl::class);
     }
 
+    /** Acceptances of residual risk, current and historical. See RiskAcceptanceService. */
+    public function acceptances(): HasMany
+    {
+        return $this->hasMany(RiskAcceptance::class);
+    }
+
     /** Tiltak on this risk. Reached only through the risk; see RiskTreatmentService. */
     public function treatmentActions(): HasMany
     {

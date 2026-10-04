@@ -7,6 +7,7 @@ use App\Models\BusinessArea;
 use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Models\User;
+use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
@@ -43,6 +44,7 @@ class RiskController extends Controller
         private readonly RiskControlService $controls,
         private readonly RiskQualityContextService $context,
         private readonly RiskTreatmentService $treatments,
+        private readonly RiskAcceptanceService $acceptances,
     ) {}
 
     public function index(Request $request): Response
@@ -136,12 +138,15 @@ class RiskController extends Controller
             // Tiltak carry no access of their own: whoever may see the risk sees them; risk.edit changes them.
             'treatment_actions' => $this->treatments->actionsFor($risk),
             'treatment_owner_options' => $canEdit ? $this->treatments->ownerOptions($risk) : [],
+            // The residual-risk decision and its history: whoever may see the risk may read them.
+            'risk_acceptance' => $this->acceptances->decisionFor($risk),
             'permissions' => [
                 'can_edit' => $canEdit,
                 'can_link_controls' => $canReadControls && $canEdit,
                 'can_link_context' => $canReadControls && $canEdit,
                 'can_manage_actions' => $canEdit,
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
+                'can_accept' => $this->access->can($user, CustomerPermissionCatalog::RISK_ACCEPT, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
             ],
             'area_options' => $this->areaOptions($editableAreas),

@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import RiskAcceptancePanel from './RiskAcceptancePanel';
 import RiskAssessmentPanel from './RiskAssessmentPanel';
 import RiskContextPanel from './RiskContextPanel';
 import RiskControlsPanel from './RiskControlsPanel';
@@ -30,6 +31,7 @@ export default function RiskShow() {
         quality_context_options: qualityContextOptions = [],
         treatment_actions: treatmentActions = [],
         treatment_owner_options: treatmentOwnerOptions = [],
+        risk_acceptance: riskAcceptance = null,
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -137,6 +139,13 @@ export default function RiskShow() {
                     assessments={assessments}
                     criteria={riskCriteria}
                     canAssess={Boolean(permissions.can_assess)}
+                    tr={tr}
+                />
+
+                <RiskAcceptancePanel
+                    riskId={risk.id}
+                    decision={riskAcceptance}
+                    canAccept={Boolean(permissions.can_accept)}
                     tr={tr}
                 />
 

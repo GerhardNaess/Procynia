@@ -58,6 +58,12 @@ final class CustomerPermissionCatalog
      */
     public const RISK_ASSESS = 'risk.assess';
 
+    /*
+     * Accepting the residual risk of an assessment, and revoking that acceptance. A decision, not
+     * an edit: neither risk.edit nor risk.assess implies it, and it implies neither of them.
+     */
+    public const RISK_ACCEPT = 'risk.accept';
+
     public const RISK_DELETE = 'risk.delete';
 
     /**
@@ -88,6 +94,7 @@ final class CustomerPermissionCatalog
                 self::RISK_CREATE,
                 self::RISK_EDIT,
                 self::RISK_ASSESS,
+                self::RISK_ACCEPT,
                 self::RISK_DELETE,
             ],
         ];

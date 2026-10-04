@@ -15,6 +15,7 @@ use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\QualityController;
+use App\Http\Controllers\App\RiskAcceptanceController;
 use App\Http\Controllers\App\RiskAssessmentController;
 use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
@@ -321,6 +322,9 @@ Route::prefix('app')
             Route::patch('/risks/{riskId}/actions/{actionId}', [RiskTreatmentActionController::class, 'update'])->whereNumber(['riskId', 'actionId'])->name('actions.update');
             Route::post('/risks/{riskId}/actions/{actionId}/complete', [RiskTreatmentActionController::class, 'complete'])->whereNumber(['riskId', 'actionId'])->name('actions.complete');
             Route::post('/risks/{riskId}/actions/{actionId}/reopen', [RiskTreatmentActionController::class, 'reopen'])->whereNumber(['riskId', 'actionId'])->name('actions.reopen');
+            // Acceptance of residual risk. Never edited; a mistake is revoked and accepted anew. risk.accept in the area.
+            Route::post('/risks/{riskId}/acceptances', [RiskAcceptanceController::class, 'store'])->whereNumber('riskId')->name('acceptances.store');
+            Route::post('/risks/{riskId}/acceptances/{acceptanceId}/revoke', [RiskAcceptanceController::class, 'revoke'])->whereNumber(['riskId', 'acceptanceId'])->name('acceptances.revoke');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
