@@ -5,8 +5,10 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\Risk;
 use App\Models\RiskAccessArea;
+use App\Models\RiskAssessment;
 use App\Models\User;
 use App\Services\Risk\RiskAccessService;
+use App\Services\Risk\RiskScoringPolicy;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -34,6 +36,7 @@ class RiskController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly RiskAccessService $access,
+        private readonly RiskScoringPolicy $scoring,
     ) {}
 
     public function index(Request $request): Response
@@ -86,8 +89,17 @@ class RiskController extends Controller
         return Inertia::render('App/Risk/Show', [
             'risk' => $this->riskRow($risk),
             'statuses' => Risk::STATUSES,
+            // The risk was reached through visibleRisks(), and its assessments carry no access of
+            // their own — whoever may see the risk sees its whole history.
+            'assessments' => $risk->assessments()->with('assessor:id,name')->get()
+                ->map(fn (RiskAssessment $assessment): array => $this->assessmentRow($assessment))
+                ->all(),
+            // The scale and bands for the form, so the page can show the level before saving
+            // without keeping its own copy of the rules.
+            'risk_criteria' => $this->scoring->criteria(),
             'permissions' => [
                 'can_edit' => $canEdit,
+                'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
             ],
             'area_options' => $this->areaOptions($editableAreas),
@@ -249,6 +261,29 @@ class RiskController extends Controller
             'owner_name' => $risk->owner?->name,
             'updated_at' => $risk->updated_at?->toIso8601String(),
             'url' => route('app.risk.show', ['riskId' => $risk->id]),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function assessmentRow(RiskAssessment $assessment): array
+    {
+        return [
+            'id' => (int) $assessment->id,
+            'assessed_at' => $assessment->assessed_at?->toIso8601String(),
+            'assessed_by_name' => $assessment->assessor?->name,
+            'rationale' => $assessment->rationale,
+            'inherent' => $this->scoring->evaluate(
+                $assessment->inherent_likelihood,
+                $assessment->inherent_consequence,
+                $assessment->criteria_key,
+            ),
+            'residual' => $assessment->hasResidual()
+                ? $this->scoring->evaluate(
+                    $assessment->residual_likelihood,
+                    $assessment->residual_consequence,
+                    $assessment->criteria_key,
+                )
+                : null,
         ];
     }
 

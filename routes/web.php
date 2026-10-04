@@ -15,6 +15,7 @@ use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\QualityController;
 use App\Http\Controllers\App\RiskAccessAreaController;
+use App\Http\Controllers\App\RiskAssessmentController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
@@ -302,6 +303,8 @@ Route::prefix('app')
             Route::get('/risks/{riskId}', [RiskController::class, 'show'])->whereNumber('riskId')->name('show');
             Route::patch('/risks/{riskId}', [RiskController::class, 'update'])->whereNumber('riskId')->name('update');
             Route::delete('/risks/{riskId}', [RiskController::class, 'destroy'])->whereNumber('riskId')->name('destroy');
+            // Assessments are only ever added: no update or delete route exists on purpose.
+            Route::post('/risks/{riskId}/assessments', [RiskAssessmentController::class, 'store'])->whereNumber('riskId')->name('assessments.store');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

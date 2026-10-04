@@ -52,6 +52,12 @@ final class CustomerPermissionCatalog
 
     public const RISK_EDIT = 'risk.edit';
 
+    /*
+     * Registering a likelihood/consequence assessment. Separate from risk.edit on purpose: a
+     * fagperson can assess a risk in their area without being able to rewrite what the risk is.
+     */
+    public const RISK_ASSESS = 'risk.assess';
+
     public const RISK_DELETE = 'risk.delete';
 
     /**
@@ -81,6 +87,7 @@ final class CustomerPermissionCatalog
                 self::RISK_VIEW,
                 self::RISK_CREATE,
                 self::RISK_EDIT,
+                self::RISK_ASSESS,
                 self::RISK_DELETE,
             ],
         ];

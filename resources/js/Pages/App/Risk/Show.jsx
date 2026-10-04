@@ -3,20 +3,24 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import RiskAssessmentPanel from './RiskAssessmentPanel';
 import RiskForm from './RiskForm';
 import { RISK_STATUS_TONES } from './riskStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
 /**
- * One risk. Edit and delete are offered only when the server said this person may do them to a
- * risk in this area; the controller refuses them otherwise.
+ * One risk. Edit, assess and delete are offered only when the server said this person may do them
+ * to a risk in this area; the controllers refuse them otherwise. Status (lifecycle) and risk level
+ * (latest assessment) are shown apart on purpose.
  */
 export default function RiskShow() {
     const {
         translations = {},
         risk,
         statuses = [],
+        assessments = [],
+        risk_criteria: riskCriteria,
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -118,6 +122,14 @@ export default function RiskShow() {
                         </dl>
                     </section>
                 )}
+
+                <RiskAssessmentPanel
+                    riskId={risk.id}
+                    assessments={assessments}
+                    criteria={riskCriteria}
+                    canAssess={Boolean(permissions.can_assess)}
+                    tr={tr}
+                />
             </div>
         </CustomerAppLayout>
     );
