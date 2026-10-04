@@ -64,4 +64,10 @@ class Risk extends Model
     {
         return $this->hasMany(RiskAssessment::class)->orderByDesc('assessed_at')->orderByDesc('id');
     }
+
+    /** Links to the Kvalitet controls that handle this risk. See RiskControlService. */
+    public function controlLinks(): HasMany
+    {
+        return $this->hasMany(RiskControl::class);
+    }
 }

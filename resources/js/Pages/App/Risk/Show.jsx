@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RiskAssessmentPanel from './RiskAssessmentPanel';
+import RiskControlsPanel from './RiskControlsPanel';
 import RiskForm from './RiskForm';
 import { RISK_STATUS_TONES } from './riskStatus';
 
@@ -21,6 +22,8 @@ export default function RiskShow() {
         statuses = [],
         assessments = [],
         risk_criteria: riskCriteria,
+        controls = null,
+        control_options: controlOptions = [],
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -130,6 +133,18 @@ export default function RiskShow() {
                     canAssess={Boolean(permissions.can_assess)}
                     tr={tr}
                 />
+
+                {/* null, not empty: the person cannot read controls in Kvalitet, so nothing is said about them. */}
+                {controls !== null && (
+                    <RiskControlsPanel
+                        riskId={risk.id}
+                        controls={controls}
+                        options={controlOptions}
+                        canLink={Boolean(permissions.can_link_controls)}
+                        tr={tr}
+                        qualityStatuses={translations?.quality?.statuses ?? {}}
+                    />
+                )}
             </div>
         </CustomerAppLayout>
     );

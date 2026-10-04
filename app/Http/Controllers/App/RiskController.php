@@ -8,6 +8,7 @@ use App\Models\RiskAccessArea;
 use App\Models\RiskAssessment;
 use App\Models\User;
 use App\Services\Risk\RiskAccessService;
+use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -37,6 +38,7 @@ class RiskController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly RiskAccessService $access,
         private readonly RiskScoringPolicy $scoring,
+        private readonly RiskControlService $controls,
     ) {}
 
     public function index(Request $request): Response
@@ -82,6 +84,9 @@ class RiskController extends Controller
         $risk->loadMissing(['accessArea:id,name', 'owner:id,name']);
 
         $canEdit = $this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk);
+        // Control information is Kvalitet's, so it is shown only to someone who can read it there.
+        // Without that, the page says nothing about controls — not even how many are linked.
+        $canReadControls = $this->controls->canReadControls($user);
         $editableAreas = $canEdit
             ? $this->access->areasFor($user, CustomerPermissionCatalog::RISK_EDIT)
             : new EloquentCollection;
@@ -97,8 +102,11 @@ class RiskController extends Controller
             // The scale and bands for the form, so the page can show the level before saving
             // without keeping its own copy of the rules.
             'risk_criteria' => $this->scoring->criteria(),
+            'controls' => $canReadControls ? $this->controls->linkedControls($risk) : null,
+            'control_options' => $canReadControls && $canEdit ? $this->controls->controlOptions($risk) : [],
             'permissions' => [
                 'can_edit' => $canEdit,
+                'can_link_controls' => $canReadControls && $canEdit,
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
             ],
