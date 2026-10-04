@@ -425,6 +425,19 @@ class EnterpriseWikiFinalReviewTest extends TestCase
                 ->where('review_assignment.final_approval_blocker', 'missing_assignment'));
     }
 
+    public function test_the_review_step_tells_the_reviewer_the_working_version_changed_after_submission(): void
+    {
+        // The review step used to compute this reason and then return an empty list, so the
+        // reviewer saw "awaiting review" with nothing explaining why approval was refused.
+        $case = $this->unassignedPendingPage();
+
+        $this->actingAs($case['reviewer'])
+            ->get("/app/wiki/{$case['page']->slug}")
+            ->assertInertia(fn ($inertia) => $inertia
+                ->where('publication.next_step', 'awaiting_review')
+                ->where('publication.blocking_reasons', [__('procynia.wiki.publication_blocker_version_changed')]));
+    }
+
     // =========================================================================
     // Fixtures
     // =========================================================================
