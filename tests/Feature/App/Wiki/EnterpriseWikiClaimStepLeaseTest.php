@@ -194,14 +194,16 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $service = app(EnterpriseWikiExtractPageClaimsService::class);
         $result = $service->extract($run->fresh());
 
+        // Two AI-extracted claims plus the one deterministic claim for the page's source_based
+        // block, which is verified as a whole against its own source elements.
         $this->assertSame(1, $result['pages']);
-        $this->assertSame(2, $result['claims']);
+        $this->assertSame(3, $result['claims']);
         $this->assertSame(0, $result['busy']);
 
         $fresh = $row->fresh();
         $this->assertNotNull($fresh->claims_extracted_at);
         $this->assertNull($fresh->claims_claim_token);
-        $this->assertSame(2, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+        $this->assertSame(3, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
 
         // Worker A, holding the now-superseded token, belatedly tries to persist its own
         // result — must be rejected, and must not create any claims.
@@ -218,7 +220,7 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         );
 
         $this->assertNull($lateResult);
-        $this->assertSame(2, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+        $this->assertSame(3, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
     }
 
     // =========================================================================

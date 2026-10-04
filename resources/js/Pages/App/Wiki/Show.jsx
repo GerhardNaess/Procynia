@@ -1053,6 +1053,9 @@ export default function WikiShow({
     const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
     const [approvalComments, setApprovalComments] = useState({});
     const [claimTextEdits, setClaimTextEdits] = useState({});
+    // Claims whose "Fjern teksten" opened the editor instead of removing a partially supported
+    // paragraph — the card then says why, next to the field.
+    const [claimRemoveHints, setClaimRemoveHints] = useState({});
     const [wikiBlockEditingKey, setWikiBlockEditingKey] = useState(null);
     const [wikiBlockEditDrafts, setWikiBlockEditDrafts] = useState({});
     const [wikiBlockSaveProcessingKey, setWikiBlockSaveProcessingKey] = useState(null);
@@ -1236,6 +1239,27 @@ export default function WikiShow({
         )
     );
     const openClaims = verificationClaims.filter(claimRequiresAction);
+
+    // What the reviewer edits (and approves): WikiClaimController replaces the BLOCK's markdown with
+    // whatever is submitted, so the field is seeded from the block — the whole visible section for
+    // a best-practice suggestion — rather than from claim_text, which for a block that produced
+    // several claims is only one fragment of it. Falls back to claim_text when the block is no
+    // longer present in the current version.
+    const claimEditBaselineFor = (claim) => {
+        const blockKey = typeof claim.content_block_key === 'string' ? claim.content_block_key.trim() : '';
+        const isBestPractice = claim.content_origin === 'best_practice';
+
+        if (blockKey === '' || (!isBestPractice && !claim.source_based_block_finding)) {
+            return claim.claim_text ?? '';
+        }
+
+        const section = isBestPractice ? resolveBestPracticeSectionForBlock(contentBlocks, blockKey) : null;
+        const markdown = section !== null
+            ? section.markdown
+            : getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === blockKey) ?? {});
+
+        return markdown.trim() !== '' ? markdown : (claim.claim_text ?? '');
+    };
     const verifiedClaims = verificationClaims.filter((claim) => !openClaims.includes(claim));
 
     const sendAction = (action) => {
@@ -1249,8 +1273,10 @@ export default function WikiShow({
     const approveClaim = (claim) => {
         if (claimProcessing) return;
         setClaimProcessing(claim.id);
-        const approvedText = claim.content_origin === 'best_practice'
-            ? String(claimTextEdits[claim.id] ?? claim.claim_text ?? '').trim()
+        // A finding on a source_based block is edited in place too; an untouched field is sent
+        // as-is and the server treats it as a plain "Behold teksten".
+        const approvedText = claim.content_origin === 'best_practice' || claim.source_based_block_finding
+            ? String(claimTextEdits[claim.id] ?? claimEditBaselineFor(claim)).trim()
             : '';
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
@@ -1396,6 +1422,18 @@ export default function WikiShow({
         });
     };
 
+    // A partially supported source_based paragraph also carries text the source backs, so removing
+    // it whole would discard documented content. "Fjern teksten" opens its editor instead.
+    const removeClaimText = (claim) => {
+        if (!claim.remove_requires_edit) {
+            rejectClaim(claim);
+            return;
+        }
+
+        setClaimRemoveHints((prev) => ({ ...prev, [claim.id]: true }));
+        window.requestAnimationFrame(() => document.getElementById(`claim-text-edit-${claim.id}`)?.focus());
+    };
+
     const rejectClaim = (claim) => {
         if (claimProcessing) return;
         setClaimProcessing(claim.id);
@@ -1504,6 +1542,11 @@ export default function WikiShow({
     };
 
     const claimProblemLabel = (claim) => {
+        // Text presented as source-based: say exactly which part the source does not carry.
+        if (claim.source_based_block_finding && claim.finding_explanation) {
+            return claim.finding_explanation;
+        }
+
         if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') {
             return tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.';
         }
@@ -1538,23 +1581,16 @@ export default function WikiShow({
         const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
         const sourceDraft = claimSourceDrafts[claim.id] ?? {};
-        // The reviewer edits (and approves) the whole block: WikiClaimController::
-        // applyBestPracticeTextEdit() replaces the BLOCK's markdown with whatever is submitted
-        // here. Seeding this from claim_text was therefore lossy for any block that produced more
-        // than one claim — approving would have replaced the entire block with the single
-        // fragment this card happened to represent. Seed from the block's own markdown instead,
-        // falling back to claim_text when the block is no longer present in the current version.
-        const claimBlockKey = typeof claim.content_block_key === 'string' ? claim.content_block_key.trim() : '';
-        const claimSection = claimBlockKey !== '' ? resolveBestPracticeSectionForBlock(contentBlocks, claimBlockKey) : null;
-        const claimBlockMarkdown = claimSection !== null
-            ? claimSection.markdown
-            : (claimBlockKey !== ''
-                ? getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === claimBlockKey) ?? {})
-                : '');
-        const claimEditBaseline = claim.content_origin === 'best_practice' && claimBlockMarkdown.trim() !== ''
-            ? claimBlockMarkdown
-            : (claim.claim_text ?? '');
+        // Seeded from the block, never claim_text — see claimEditBaselineFor().
+        const claimEditBaseline = claimEditBaselineFor(claim);
         const claimTextEdit = claimTextEdits[claim.id] ?? claimEditBaseline;
+        const isSourceFinding = claim.source_based_block_finding === true;
+        const canEditClaimText = claim.content_origin === 'best_practice' || isSourceFinding;
+        const claimTextChanged = String(claimTextEdit).trim() !== String(claimEditBaseline).trim();
+        const keepTextLabel = isSourceFinding && claimTextChanged
+            ? (tw.claim_card_approve_edited_text ?? 'Godkjenn redigert tekst')
+            : (tw.claim_card_keep_text ?? 'Behold teksten');
+        const showRemoveHint = claimRemoveHints[claim.id] === true;
         const groupedClaimCount = options.claimCount ?? 1;
         const sourceReferences = claim.source_references ?? [];
         const hasSourceReferences = sourceReferences.length > 0;
@@ -1649,14 +1685,24 @@ export default function WikiShow({
 
                         {canHandleClaim && isPendingDecision && (
                             <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                {claim.content_origin === 'best_practice' && (
+                                {canEditClaimText && (
                                     <label className="block space-y-1">
                                         <span className="text-base font-semibold text-amber-700">
-                                            {tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn'}
+                                            {isSourceFinding
+                                                ? (tw.claim_card_source_finding_edit_label ?? 'Rediger og godkjenn')
+                                                : (tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn')}
                                         </span>
+                                        {isSourceFinding && (
+                                            <span className="block text-base leading-7 text-slate-600">
+                                                {showRemoveHint
+                                                    ? (tw.claim_card_source_finding_remove_hint ?? 'Avsnittet inneholder også tekst som kilden støtter, så det fjernes ikke i sin helhet. Fjern den udokumenterte delen i tekstfeltet og velg «Godkjenn redigert tekst».')
+                                                    : (tw.claim_card_source_finding_edit_hint ?? 'Teksten presenteres som kildebasert. Fjern eller endre det kilden ikke støtter, og godkjenn den redigerte teksten.')}
+                                            </span>
+                                        )}
                                         <textarea
-                                            rows={3}
-                                            maxLength={4000}
+                                            id={`claim-text-edit-${claim.id}`}
+                                            rows={isSourceFinding ? 5 : 3}
+                                            maxLength={20000}
                                             value={claimTextEdit}
                                             onChange={(e) => setClaimTextEdits((prev) => ({
                                                 ...prev,
@@ -1685,12 +1731,12 @@ export default function WikiShow({
                                         onClick={() => approveClaim(claim)}
                                         className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                                     >
-                                        {tw.claim_card_keep_text ?? 'Behold teksten'}
+                                        {keepTextLabel}
                                     </button>
                                     <button
                                         type="button"
                                         disabled={claimProcessing === claim.id}
-                                        onClick={() => rejectClaim(claim)}
+                                        onClick={() => removeClaimText(claim)}
                                         className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                                     >
                                         {tw.claim_card_remove_text ?? 'Fjern teksten'}
@@ -1965,15 +2011,18 @@ export default function WikiShow({
                                 {/* The "this is not documented customer knowledge" warning that used
                                     to sit here repeated the badge and the why-block above it, so
                                     only the editable suggested text remains. */}
-                                {isBestPracticeClaim && canHandleClaim && isPendingDecision && (
+                                {canEditClaimText && canHandleClaim && isPendingDecision && (
                                     <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
                                         <label className="block space-y-1">
                                             <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-                                                {tw.verification_basis_best_practice_edit_label ?? 'Foreslått tekst'}
+                                                {isSourceFinding
+                                                    ? (tw.claim_card_source_finding_edit_label ?? 'Rediger og godkjenn')
+                                                    : (tw.verification_basis_best_practice_edit_label ?? 'Foreslått tekst')}
                                             </span>
                                             <textarea
-                                                rows={3}
-                                                maxLength={4000}
+                                                id={`claim-text-edit-${claim.id}`}
+                                                rows={isSourceFinding ? 5 : 3}
+                                                maxLength={20000}
                                                 value={claimTextEdit}
                                                 onChange={(e) => setClaimTextEdits((prev) => ({
                                                     ...prev,
@@ -1983,7 +2032,11 @@ export default function WikiShow({
                                             />
                                         </label>
                                         <p className="text-[11px] leading-5 text-amber-800">
-                                            {tw.claim_card_best_practice_edit_hint ?? 'Du kan justere teksten før du beholder den.'}
+                                            {!isSourceFinding
+                                                ? (tw.claim_card_best_practice_edit_hint ?? 'Du kan justere teksten før du beholder den.')
+                                                : showRemoveHint
+                                                    ? (tw.claim_card_source_finding_remove_hint ?? 'Avsnittet inneholder også tekst som kilden støtter, så det fjernes ikke i sin helhet. Fjern den udokumenterte delen i tekstfeltet og velg «Godkjenn redigert tekst».')
+                                                    : (tw.claim_card_source_finding_edit_hint ?? 'Teksten presenteres som kildebasert. Fjern eller endre det kilden ikke støtter, og godkjenn den redigerte teksten.')}
                                         </p>
                                     </div>
                                 )}
@@ -2300,12 +2353,12 @@ export default function WikiShow({
                                     onClick={() => approveClaim(claim)}
                                     className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                                 >
-                                    {tw.claim_card_keep_text ?? 'Behold teksten'}
+                                    {keepTextLabel}
                                 </button>
                                 <button
                                     type="button"
                                     disabled={claimProcessing === claim.id}
-                                    onClick={() => rejectClaim(claim)}
+                                    onClick={() => removeClaimText(claim)}
                                     className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                                 >
                                     {tw.claim_card_remove_text ?? 'Fjern teksten'}

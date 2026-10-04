@@ -128,11 +128,22 @@ class EnterpriseWikiTableIngestTest extends TestCase
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $this->assertSame(
-            0,
-            EnterpriseWikiClaim::query()->where('enterprise_wiki_page_id', $article->id)->count(),
-            'Document content must never be persisted as a claim.',
-        );
+        // The deterministic table block is built from source data, not written by a model, so it
+        // never becomes a claim. Generated prose citing the table does — one whole-block claim to
+        // verify its wording (EnterpriseWikiExtractPageClaimsService::sourceBasedClaimBlocks()).
+        $tableBlockKeys = collect(EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->where('is_current', true)
+            ->firstOrFail()
+            ->content_blocks_json)
+            ->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'table')
+            ->pluck('block_key')
+            ->all();
+        $claims = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_id', $article->id)->get();
+
+        $this->assertNotSame([], $tableBlockKeys);
+        $this->assertTrue($claims->whereIn('content_block_key', $tableBlockKeys)->isEmpty(), 'A table block must never be persisted as a claim.');
+        $this->assertTrue($claims->every(fn (EnterpriseWikiClaim $claim): bool => ($claim->review_metadata['classification_basis'] ?? null) === 'source_based_block'));
         $this->assertSame(0, EnterpriseWikiSourceReference::query()->count());
 
         // The page was processed rather than skipped — zero claims is a real result, not an

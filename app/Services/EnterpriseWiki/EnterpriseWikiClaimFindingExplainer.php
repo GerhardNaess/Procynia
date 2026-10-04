@@ -4,6 +4,7 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiPageVersion;
 
 /**
  * The single place that turns a claim's raw verification data (content_origin, generation_issue,
@@ -237,6 +238,52 @@ class EnterpriseWikiClaimFindingExplainer
             'requires_decision' => $requiresDecision,
             'blocks_gate' => $userDecision === self::USER_DECISION_BLOCKING || $requiresDecision,
         ];
+    }
+
+    /**
+     * Whether this finding sits on text the page still presents as document content: an
+     * unsupported_generated_content claim anchored to a source_based block of its own version.
+     * That is the one case where the reader cannot see that the text goes beyond the source, which
+     * is what separates it from a best-practice suggestion (labelled as Procynia's own advice) and
+     * from a block generation already marked unsupported.
+     */
+    public function presentsUnsupportedTextAsSourceBased(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $version): bool
+    {
+        if ($claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT
+            || (int) $claim->enterprise_wiki_page_version_id !== (int) $version->id
+        ) {
+            return false;
+        }
+
+        $blockKey = trim((string) $claim->content_block_key);
+
+        if ($blockKey === '') {
+            return false;
+        }
+
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (is_array($block) && (string) ($block['block_key'] ?? '') === $blockKey) {
+                return ($block['content_origin'] ?? null) === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether this claim holds up final approval of the version: unsupported text presented as
+     * source-based that nobody has decided on yet. Reads the existing gate computation
+     * (blockingState()'s blocks_gate) rather than a rule of its own, so the recommendation shown
+     * on the finding and the gate cannot disagree. An explicit decision releases it — keeping the
+     * text (approve), editing it (approve with new text), removing it (reject), or recording
+     * "Godkjenn avvik / Ikke blokker". Best-practice suggestions and every other pending claim stay
+     * advisory.
+     */
+    public function blocksPublication(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $version): bool
+    {
+        return $claim->isPending()
+            && $this->presentsUnsupportedTextAsSourceBased($claim, $version)
+            && $this->blockingState($claim)['blocks_gate'];
     }
 
     /**

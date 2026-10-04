@@ -242,13 +242,17 @@ class EnterpriseWikiPublicationStatusService
             $reasons[] = __('procynia.wiki.publication_blocker_version_changed');
         }
 
+        if ($blocker === 'unresolved_source_findings') {
+            $reasons[] = __('procynia.wiki.publication_blocker_unresolved_source_findings');
+        }
+
         // Only the person whose turn it is gets an action; everyone else is told who they are
         // waiting for. The list never claims to know, because it does not compute this per row.
         if (($reviewContext['is_assigned_reviewer'] ?? false) === true && $blocker === null) {
             return ['approve', []];
         }
 
-        return ['awaiting_review', []];
+        return ['awaiting_review', $reasons];
     }
 
     /**

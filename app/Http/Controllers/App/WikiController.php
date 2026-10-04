@@ -1507,6 +1507,13 @@ class WikiController extends Controller
                         'requires_decision' => $blockingState['requires_decision'] ?? null,
                         'blocking_override_by_name' => $claim->blockingOverrideBy?->name,
                         'blocking_override_at' => $claim->blocking_override_at,
+                        // Text the page presents as document content that the source does not
+                        // fully carry: the reviewer may edit the block before approving it, and
+                        // a partially supported block is never removed whole — the source-backed
+                        // part stays, so "Fjern teksten" opens the editor instead.
+                        'source_based_block_finding' => $this->claimFindingExplainer->presentsUnsupportedTextAsSourceBased($claim, $currentVersion),
+                        'remove_requires_edit' => $claim->generation_issue === 'claim_partially_supported'
+                            && $this->claimFindingExplainer->presentsUnsupportedTextAsSourceBased($claim, $currentVersion),
                         'source_references' => $claim->sourceReferences
                             ->map(fn ($ref) => [
                                 'id' => $ref->id,
@@ -3035,11 +3042,30 @@ class WikiController extends Controller
             // says so by naming them.
             (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
             ! $user->canFinalApproveEnterpriseWikiVersion($version, $page) => 'not_assigned',
+            // The system sent a finding to a person because text presented as document content
+            // goes beyond its source. Publishing it with nobody having decided would publish that
+            // misrepresentation. Best-practice suggestions stay advisory and are not counted.
+            $this->hasUnresolvedSourceBasedFindings($version) => 'unresolved_source_findings',
             // Source documents are provenance, not a level of approval. Whether a document owner
             // has vouched for their own material is recorded and visible, and it no longer decides
             // whether the Wiki page may be published — the page is the thing being approved.
             default => null,
         };
+    }
+
+    /**
+     * Whether the version carries a finding EnterpriseWikiClaimFindingExplainer::blocksPublication()
+     * holds up final approval for.
+     */
+    private function hasUnresolvedSourceBasedFindings(EnterpriseWikiPageVersion $version): bool
+    {
+        return EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
+            ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)
+            ->with(['canonicalFact', 'sourceReferences'])
+            ->get()
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->blocksPublication($claim, $version));
     }
 
     /**
@@ -3167,11 +3193,12 @@ class WikiController extends Controller
         }
 
         abort(match ($blocker) {
-            'missing_assignment' => 409,
+            'missing_assignment', 'unresolved_source_findings' => 409,
             'not_in_review' => 422,
             default => 403,
         }, match ($blocker) {
             'missing_assignment' => 'Arbeidsversjonen er endret etter at siden ble sendt til gjennomgang, og kan ikke godkjennes som den er. Send siden tilbake, så kan den sendes til gjennomgang på nytt.',
+            'unresolved_source_findings' => __('procynia.wiki.publication_blocker_unresolved_source_findings'),
             'own_submission' => 'Du kan ikke godkjenne en versjon du selv har sendt til gjennomgang.',
             'missing_capability' => 'Du har ikke tilgang til å godkjenne Wiki-sider.',
             'not_in_review' => 'Versjonen er ikke sendt til gjennomgang.',

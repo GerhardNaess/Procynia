@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use Illuminate\Support\Facades\DB;
 
 class EnterpriseWikiPageContentBlockService
 {
@@ -218,6 +219,32 @@ class EnterpriseWikiPageContentBlockService
         }
 
         return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    /**
+     * replaceBlockMarkdown() for wording a person rewrote while deciding a claim on a source_based
+     * block. The document no longer vouches for the new words, so the block is recorded as
+     * human_authored and its document provenance is dropped — the same rule ordinary working-version
+     * editing applies (EnterpriseWikiClaimContentRepairService::humanAuthoredBlock()).
+     */
+    public function replaceBlockMarkdownAsHumanAuthored(EnterpriseWikiPageVersion $version, string $blockKey, string $replacement): bool
+    {
+        return DB::transaction(function () use ($version, $blockKey, $replacement): bool {
+            if (! $this->replaceBlockMarkdown($version, $blockKey, $replacement)) {
+                return false;
+            }
+
+            $version->update([
+                'content_blocks_json' => array_values(array_map(
+                    static fn (mixed $block): mixed => is_array($block) && ($block['block_key'] ?? null) === $blockKey
+                        ? EnterpriseWikiClaimContentRepairService::humanAuthoredBlock($block)
+                        : $block,
+                    (array) ($version->content_blocks_json ?? []),
+                )),
+            ]);
+
+            return true;
+        });
     }
 
     public function replaceBlockMarkdown(EnterpriseWikiPageVersion $version, string $blockKey, string $replacement): bool

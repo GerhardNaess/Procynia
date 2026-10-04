@@ -557,7 +557,14 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->value('claims_extracted_at'));
     }
 
-    public function test_source_based_blocks_for_roles_requirements_dates_and_procedures_do_not_become_claims(): void
+    /**
+     * Source-based text is never read by the extraction AI. Each paragraph becomes exactly one
+     * claim carrying its whole wording, so verification judges the complete assertion against the
+     * block's own source elements (EnterpriseWikiExtractPageClaimsService::sourceBasedClaimBlocks()).
+     * Only the fixture's first block cites a source element; the other two cite none and have
+     * nothing to be verified against.
+     */
+    public function test_source_based_blocks_become_whole_block_claims_without_the_extraction_ai(): void
     {
         $customer = $this->createCustomer();
         [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
@@ -583,7 +590,12 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
 
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+        $claim = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->sole();
+        $this->assertSame('block-0001', $claim->content_block_key);
+        $this->assertSame('Dokumenteier er ansvarlig for godkjenning.', $claim->claim_text);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertSame('source_based_block', $claim->review_metadata['classification_basis'] ?? null);
+        $this->assertNull($claim->verified_at, 'Provisional until verification decides.');
     }
 
     public function test_mixed_page_persists_only_procynia_content_even_if_ai_returns_a_direct_source_statement(): void
@@ -622,8 +634,12 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         // deterministically backfills it — hence 2 claims total, not 1. The point of this test —
         // that source_based text is never persisted as a claim, and that a real AI-extracted
         // best_practice claim keeps its conflict flag — is unaffected and still asserted below.
-        $this->assertCount(2, $claims);
-        $this->assertFalse($claims->contains('claim_text', 'Dokumenteier godkjenner endringer før publisering.'));
+        // Plus one deterministic whole-block claim for block-0001, created without the AI: the
+        // AI's own restatement of that source text is still never persisted as an AI claim.
+        $this->assertCount(3, $claims);
+        $sourceBlockClaim = $claims->firstWhere('content_block_key', 'block-0001');
+        $this->assertSame('source_based_block', $sourceBlockClaim->review_metadata['classification_basis'] ?? null);
+        $this->assertSame(1, $claims->where('claim_text', 'Dokumenteier godkjenner endringer før publisering.')->count());
 
         $extractedClaim = $claims->firstWhere('claim_text', 'Uavhengig kontroll før publisering reduserer operasjonell risiko.');
         $this->assertNotNull($extractedClaim);
@@ -946,12 +962,15 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
 
         $claims = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->get();
 
-        $this->assertSame(1, $result['claims']);
-        $this->assertCount(1, $claims);
-        $this->assertSame('block-0001', $claims->first()->content_block_key);
-        $this->assertSame($version->id, $claims->first()->enterprise_wiki_page_version_id);
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claims->first()->content_origin);
-        $this->assertSame('best_practice_block_extraction_returned_no_claim', $claims->first()->generation_issue);
+        // block-0002 is a source_based paragraph and gets its own whole-block claim alongside.
+        $this->assertSame(2, $result['claims']);
+        $this->assertCount(2, $claims);
+        $fallback = $claims->firstWhere('content_block_key', 'block-0001');
+        $this->assertNotNull($fallback);
+        $this->assertSame($version->id, $fallback->enterprise_wiki_page_version_id);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $fallback->content_origin);
+        $this->assertSame('best_practice_block_extraction_returned_no_claim', $fallback->generation_issue);
+        $this->assertSame('source_based_block', $claims->firstWhere('content_block_key', 'block-0002')->review_metadata['classification_basis'] ?? null);
     }
 
     /**

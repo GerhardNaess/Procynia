@@ -53,11 +53,14 @@ class EnterpriseWikiQaTaskService
                     EnterpriseWikiPage::STATUS_SUPERSEDED,
                 ]))
             ->with('page:id,slug,title,customer_id,status')
+            // A source-based claim that already carries its source reference is verified document
+            // content, not a decision anybody has to make — counting it would keep every page's
+            // task open forever.
             ->withCount([
-                'claims as claims_total',
-                'claims as claims_pending' => fn ($query) => $query
+                'claims as claims_total' => fn ($query) => $this->scopeReviewableClaims($query),
+                'claims as claims_pending' => fn ($query) => $this->scopeReviewableClaims($query)
                     ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING),
-                'claims as claims_handled' => fn ($query) => $query
+                'claims as claims_handled' => fn ($query) => $this->scopeReviewableClaims($query)
                     ->whereIn('approval_status', [
                         EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
                         EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
@@ -73,6 +76,13 @@ class EnterpriseWikiQaTaskService
             ->filter(static fn (EnterpriseWikiPageVersion $version): bool => $version->claims_pending > 0)
             ->map(fn (EnterpriseWikiPageVersion $version): array => $this->taskPayload($version))
             ->values();
+    }
+
+    private function scopeReviewableClaims($query)
+    {
+        return $query->where(fn ($query) => $query
+            ->where('content_origin', '!=', EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED)
+            ->orWhereDoesntHave('sourceReferences'));
     }
 
     /** How many of them, for the "Mine oppgaver" counter. */

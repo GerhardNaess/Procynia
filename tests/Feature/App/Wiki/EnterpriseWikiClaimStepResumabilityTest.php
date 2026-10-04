@@ -77,11 +77,13 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
 
         $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
 
+        // The unfinished page gets its two AI claims plus the deterministic claim for its
+        // source_based block; the finished page is left exactly as it was.
         $this->assertSame(1, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $doneVersion->id)->count());
-        $this->assertSame(2, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $pendingVersion->id)->count());
+        $this->assertSame(3, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $pendingVersion->id)->count());
         $this->assertNotNull($pendingRow->fresh()->claims_extracted_at);
         $this->assertSame(1, $result['pages']);
-        $this->assertSame(2, $result['claims']);
+        $this->assertSame(3, $result['claims']);
         $this->assertSame(1, $result['skipped']);
     }
 

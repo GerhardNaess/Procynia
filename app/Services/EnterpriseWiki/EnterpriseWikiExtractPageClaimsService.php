@@ -100,7 +100,10 @@ class EnterpriseWikiExtractPageClaimsService
             ->get();
 
         $maxNewClaims = (int) config('services.enterprise_wiki.max_new_claims_per_run', 60);
-        $persistedClaimCount = $this->existingClaimCountForPages($pivotRows->pluck('page.id')->filter()->values());
+        // Measured against AI-extracted claims only. A source-based block claim is one
+        // deterministic claim per generated paragraph, bounded by the page itself, and must never
+        // crowd a later page's best_practice blocks out of the cap.
+        $cappedClaimCount = $this->existingClaimCountForPages($pivotRows->pluck('page.id')->filter()->values());
 
         $pages = 0;
         $claims = 0;
@@ -153,7 +156,7 @@ class EnterpriseWikiExtractPageClaimsService
             // checkpoint is still recorded so this never re-appears as an incomplete step
             // (EnterpriseWikiPostIngestQaService::findIncompleteSteps()) and the run still
             // completes normally.
-            if (($persistedClaimCount + $claims) >= $maxNewClaims) {
+            if ($cappedClaimCount >= $maxNewClaims) {
                 $updated = EnterpriseWikiIngestRunPage::query()
                     ->whereKey($row->id)
                     ->whereHas('run', fn ($query) => $query->nonTerminal())
@@ -198,9 +201,10 @@ class EnterpriseWikiExtractPageClaimsService
             try {
                 $allClaimCandidateBlocks = $this->claimCandidateBlocks($version);
                 $claimCandidateBlocks = $this->claimCandidateBlocksWithoutExistingClaims($version, $allClaimCandidateBlocks);
+                $sourceBasedBlocks = $this->claimCandidateBlocksWithoutExistingClaims($version, $this->sourceBasedClaimBlocks($version));
 
                 if ($allClaimCandidateBlocks->isNotEmpty() && $claimCandidateBlocks->isEmpty()) {
-                    $completed = $this->persist($run->id, $row->id, $page, $version, $token, ['claims' => []], collect());
+                    $completed = $this->persist($run->id, $row->id, $page, $version, $token, ['claims' => []], collect(), $sourceBasedBlocks);
 
                     if ($completed === null) {
                         $busy++;
@@ -238,6 +242,7 @@ class EnterpriseWikiExtractPageClaimsService
                 $token,
                 $result,
                 $claimCandidateBlocks,
+                $sourceBasedBlocks,
             );
 
             if ($pageClaimsCreated === null) {
@@ -249,6 +254,8 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             $claims += $pageClaimsCreated;
+            // persist() writes exactly one claim per source-based block it was handed.
+            $cappedClaimCount += $pageClaimsCreated - $sourceBasedBlocks->count();
             $pages++;
         }
 
@@ -270,9 +277,10 @@ class EnterpriseWikiExtractPageClaimsService
     }
 
     /**
-     * Claims describe Procynia additions to the Wiki, never direct document statements. The
-     * persisted block origin is the authoritative boundary: source_based blocks retain their
-     * document/element provenance on the page but are excluded from the claim AI input.
+     * The extraction AI only ever reads Procynia's own additions. The persisted block origin is
+     * the authoritative boundary: source_based blocks retain their document/element provenance on
+     * the page and are excluded from this AI input — they are verified as whole blocks instead,
+     * see sourceBasedClaimBlocks().
      */
     private function claimCandidateMarkdown(Collection $blocks): string
     {
@@ -334,6 +342,58 @@ class EnterpriseWikiExtractPageClaimsService
                 return array_merge($block, ['block_key' => $blockKey, 'markdown' => $markdown]);
             })
             ->values();
+    }
+
+    /**
+     * Generated source_based paragraphs whose wording must be verified against the source elements
+     * the block cites. Generation can attach an inferred purpose, cause or effect to a sentence
+     * the source does support ("…, slik at hendelser oppdages tidligere"), and the block would
+     * still read as document content. Each such block becomes exactly one claim carrying its whole
+     * markdown, so the verifier judges the complete assertion — never an AI-extracted fragment that
+     * may have dropped the very clause in question. These claims never pass through the extraction
+     * AI: claimCandidateMarkdown() stays limited to Procynia's own additions.
+     *
+     * Excluded: headings (no assertion), deterministic tables/images (built from source data, not
+     * written by a model), and blocks with no cited source element (nothing to verify against).
+     */
+    private function sourceBasedClaimBlocks(EnterpriseWikiPageVersion $version): Collection
+    {
+        return collect((array) ($version->content_blocks_json ?? []))
+            ->filter(fn (mixed $block): bool => is_array($block) && $this->isSourceBasedClaimBlock($block))
+            ->sortBy(static fn (array $block): int => (int) ($block['position'] ?? PHP_INT_MAX))
+            ->map(static fn (array $block): array => array_merge($block, [
+                'block_key' => trim((string) $block['block_key']),
+                'markdown' => trim((string) $block['markdown']),
+            ]))
+            ->values();
+    }
+
+    /** @param  array<string, mixed>  $block */
+    private function isSourceBasedClaimBlock(array $block): bool
+    {
+        if (($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+            || EnterpriseWikiWorkingVersionBlockEditPolicy::carriesStructuredData($block)
+            || trim((string) ($block['block_key'] ?? '')) === ''
+        ) {
+            return false;
+        }
+
+        $markdown = trim((string) ($block['markdown'] ?? ''));
+
+        if ($markdown === '' || preg_match('/\A#{1,6}\s[^\n]*\z/u', $markdown) === 1) {
+            return false;
+        }
+
+        foreach ((array) ($block['source_elements'] ?? []) as $element) {
+            if (is_array($element)
+                && trim((string) ($element['source_element_key'] ?? '')) !== ''
+                && trim((string) ($element['source_excerpt'] ?? '')) !== ''
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -401,18 +461,29 @@ class EnterpriseWikiExtractPageClaimsService
             return 0;
         }
 
-        $currentVersionIds = EnterpriseWikiPageVersion::query()
+        $currentVersions = EnterpriseWikiPageVersion::query()
             ->whereIn('enterprise_wiki_page_id', $pageIds)
             ->where('is_current', true)
-            ->pluck('id');
+            ->get(['id', 'content_blocks_json']);
 
-        if ($currentVersionIds->isEmpty()) {
+        if ($currentVersions->isEmpty()) {
             return 0;
         }
 
-        return EnterpriseWikiClaim::query()
-            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
-            ->count();
+        $count = 0;
+
+        foreach ($currentVersions as $version) {
+            $sourceBasedBlockKeys = $this->sourceBasedClaimBlocks($version)->pluck('block_key')->all();
+
+            $count += EnterpriseWikiClaim::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->when($sourceBasedBlockKeys !== [], fn ($query) => $query->where(fn ($query) => $query
+                    ->whereNull('content_block_key')
+                    ->orWhereNotIn('content_block_key', $sourceBasedBlockKeys)))
+                ->count();
+        }
+
+        return $count;
     }
 
     /**
@@ -529,9 +600,11 @@ class EnterpriseWikiExtractPageClaimsService
      *
      * @return int|null the number of claims created, or null if the reservation was lost
      */
-    private function persist(int $runId, int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, Collection $claimCandidateBlocks): ?int
+    private function persist(int $runId, int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, Collection $claimCandidateBlocks, ?Collection $sourceBasedBlocks = null): ?int
     {
-        return DB::transaction(function () use ($runId, $rowId, $page, $version, $token, $result, $claimCandidateBlocks): ?int {
+        $sourceBasedBlocks ??= collect();
+
+        return DB::transaction(function () use ($runId, $rowId, $page, $version, $token, $result, $claimCandidateBlocks, $sourceBasedBlocks): ?int {
             $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
             if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
@@ -683,6 +756,38 @@ class EnterpriseWikiExtractPageClaimsService
                 ]);
 
                 $createdBlockKeys[$blockKey] = true;
+                $created++;
+            }
+
+            // One provisional claim per generated source_based paragraph — see
+            // sourceBasedClaimBlocks(). It inherits the block's origin exactly as an extracted
+            // best_practice claim does; EnterpriseWikiVerifyPageClaimsService then checks the whole
+            // text against the block's own source elements. Fully supported text stays source_based
+            // with a real source reference and asks nothing of anyone; anything the source does not
+            // carry becomes the ordinary unsupported_generated_content finding.
+            foreach ($sourceBasedBlocks as $block) {
+                $blockKey = (string) $block['block_key'];
+                $blockMarkdown = (string) $block['markdown'];
+
+                EnterpriseWikiClaim::query()->create([
+                    'enterprise_wiki_page_id' => $page->id,
+                    'enterprise_wiki_page_version_id' => $version->id,
+                    'claim_text' => $blockMarkdown,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'page_excerpt' => $blockMarkdown,
+                    'content_block_key' => $blockKey,
+                    'review_reason' => null,
+                    'review_metadata' => [
+                        'classification_basis' => 'source_based_block',
+                        'decision_source' => EnterpriseWikiClaimClassificationService::SOURCE_EXTRACTION,
+                    ],
+                    'generation_issue' => null,
+                    'position_order' => $created,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'conflict_flag' => false,
+                    'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                ]);
+
                 $created++;
             }
 

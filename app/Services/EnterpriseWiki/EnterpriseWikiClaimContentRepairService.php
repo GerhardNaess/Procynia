@@ -259,7 +259,7 @@ class EnterpriseWikiClaimContentRepairService
      * @param  array<string, mixed>  $block
      * @return array<string, mixed>
      */
-    private function humanAuthoredBlock(array $block): array
+    public static function humanAuthoredBlock(array $block): array
     {
         $block['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_HUMAN_AUTHORED;
         $block['source_elements'] = [];

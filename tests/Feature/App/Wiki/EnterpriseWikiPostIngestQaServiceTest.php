@@ -560,12 +560,13 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     }
 
     // =========================================================================
-    // Run-482 fix: a document like "Incident Management Illustration.docx" whose only real
-    // content is one short paragraph plus one figure generates additional best-practice
-    // guidance beyond the source — this must not, on its own, escalate the run.
+    // Run-482: a document like "Incident Management Illustration.docx" whose only real
+    // content is one short paragraph plus one figure generates additional guidance beyond the
+    // source and tags it source_based. That guidance now surfaces as a finding for a person —
+    // but, as before, it must not on its own escalate the run.
     // =========================================================================
 
-    public function test_run_with_only_correctly_marked_best_practice_content_does_not_escalate(): void
+    public function test_run_with_advice_tagged_source_based_surfaces_a_finding_but_does_not_escalate(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -644,15 +645,18 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         // isolation.
         app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
 
+        // No longer rescued to best_practice: the block still presents this advice as document
+        // content, so it remains an unsupported finding for a person to decide. The QA signal is
+        // informational only (v0.10) and never escalates the run.
         $bestPracticeClaim->refresh();
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $bestPracticeClaim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $bestPracticeClaim->content_origin);
 
         $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run->fresh());
 
         $this->assertNotNull($result);
-        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
+        $this->assertContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);

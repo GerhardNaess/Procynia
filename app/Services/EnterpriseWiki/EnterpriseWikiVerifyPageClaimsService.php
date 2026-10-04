@@ -907,6 +907,16 @@ class EnterpriseWikiVerifyPageClaimsService
             return $counts;
         }
 
+        // A claim covering a generated source_based block (EnterpriseWikiExtractPageClaimsService::
+        // sourceBasedClaimBlocks()) is text the page presents as document content. If the source does
+        // not carry it, that is exactly the defect to surface — never a suggestion that may quietly
+        // become an advisory best_practice item because its wording happens to sound normative.
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+            && ($this->findBlockByKey($version, (string) ($claim->content_block_key ?? ''))['content_origin'] ?? null) === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+        ) {
+            $policy['allow_best_practice_promotion'] = false;
+        }
+
         $evidence = $this->verificationEvidenceForPolicy($claim, $version, $policy);
         $candidateElements = $evidence['candidate_elements'];
 

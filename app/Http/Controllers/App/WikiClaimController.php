@@ -15,6 +15,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
@@ -56,6 +57,7 @@ class WikiClaimController extends Controller
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
         private readonly CustomerPermissionService $customerPermissions,
+        private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -67,18 +69,29 @@ class WikiClaimController extends Controller
 
         $validated = $request->validate([
             'comment' => ['nullable', 'string', 'max:1000'],
-            'approved_text' => ['nullable', 'string', 'max:4000'],
+            'approved_text' => ['nullable', 'string', 'max:20000'],
             'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
         $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
 
+        $textBeforeEdit = (string) $claim->claim_text;
+        $sourceFindingEdited = $this->applySourceBasedFindingTextEdit($claim, $validated['approved_text'] ?? null);
+
+        // The edit happens in place on the version, so the decision row is where the replaced
+        // wording survives: who changed it, when, and from what to what.
         $this->storeDecision(
             $claim->fresh(),
             $user->id,
             EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
             $validated['comment'] ?? null,
+            $sourceFindingEdited ? ['claim_text' => $textBeforeEdit] : [],
+            $sourceFindingEdited ? ['claim_text' => (string) $claim->fresh()->claim_text] : [],
         );
+
+        if ($sourceFindingEdited) {
+            $this->pageLinksService->materializeWikilinksForPage($page);
+        }
 
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
             $this->pageLinksService->materializeWikilinksForPage($page);
@@ -112,12 +125,34 @@ class WikiClaimController extends Controller
             'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
+        $claim->loadMissing('version');
+        $isSourceBasedFinding = $claim->version !== null
+            && $this->claimFindingExplainer->presentsUnsupportedTextAsSourceBased($claim, $claim->version);
+
+        // A partially supported paragraph also carries text the source does back. Removing the
+        // whole block would throw that away, and guessing which fragment is the unsupported one is
+        // not something to do automatically — the reviewer edits the block instead (approve with
+        // approved_text), which Show.jsx opens when "Fjern teksten" is chosen.
+        abort_if(
+            $isSourceBasedFinding && $claim->generation_issue === 'claim_partially_supported',
+            422,
+            'Avsnittet inneholder også tekst som kilden støtter. Rediger teksten for å fjerne bare den udokumenterte delen.',
+        );
+
         $this->storeDecision(
             $claim,
             $user->id,
             EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
             $validated['comment'] ?? null,
         );
+
+        // The claim covers the whole block and the source supports none of it, so "fjern teksten"
+        // removes exactly what the reviewer was shown — the same blanking a rejected best-practice
+        // block gets.
+        if ($isSourceBasedFinding) {
+            $this->removeSourceBasedFindingText($claim);
+            $this->pageLinksService->materializeWikilinksForPage($page->fresh());
+        }
 
         // v0.7 binding quality-strategy rule: "avvis" on a best-practice addition means "fjern
         // teksten" — the only two outcomes for text the system added beyond the source are keep
@@ -503,18 +538,25 @@ class WikiClaimController extends Controller
             ->with('success', $newBlocking ? 'Blokkeringen er beholdt.' : 'Blokkeringen er fjernet.');
     }
 
+    /**
+     * @param  array<string, mixed>  $previousExtra  further pre-decision state worth keeping (an
+     *                                               edited claim's original wording)
+     * @param  array<string, mixed>  $newExtra
+     */
     private function storeDecision(
         EnterpriseWikiClaim $claim,
         int $userId,
         string $status,
         ?string $comment,
+        array $previousExtra = [],
+        array $newExtra = [],
     ): void {
         $this->recordDecision(
             $claim,
             $userId,
             EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
-            ['approval_status' => $claim->approval_status],
-            ['approval_status' => $status],
+            array_merge(['approval_status' => $claim->approval_status], $previousExtra),
+            array_merge(['approval_status' => $status], $newExtra),
             $comment,
         );
 
@@ -622,6 +664,83 @@ class WikiClaimController extends Controller
                 'edited_before_approval' => true,
             ]),
         ]);
+    }
+
+    /**
+     * "Rediger og godkjenn" for a finding on a source_based block: the reviewer rewrote the block —
+     * typically removing an inferred purpose or effect the source does not state — and takes
+     * responsibility for the result. The rewrite is authoritative, exactly like ordinary editing: the
+     * block becomes human_authored and is not sent back through AI verification.
+     *
+     * Unchanged text is not an edit; approving it is the plain "Behold teksten" decision and the
+     * block keeps its source_based provenance.
+     *
+     * @return bool whether the block text was replaced
+     */
+    private function applySourceBasedFindingTextEdit(EnterpriseWikiClaim $claim, ?string $approvedText): bool
+    {
+        $approvedText = $this->normalizeNullableString($approvedText);
+
+        if ($approvedText === null) {
+            return false;
+        }
+
+        $claim->loadMissing('version');
+        $version = $claim->version;
+
+        if ($version === null || ! $this->claimFindingExplainer->presentsUnsupportedTextAsSourceBased($claim, $version)) {
+            return false;
+        }
+
+        $blockKey = trim((string) $claim->content_block_key);
+        $blockMarkdown = collect((array) ($version->content_blocks_json ?? []))
+            ->first(static fn (mixed $block): bool => is_array($block) && ($block['block_key'] ?? null) === $blockKey)['markdown'] ?? '';
+
+        if ($approvedText === trim((string) $blockMarkdown)) {
+            return false;
+        }
+
+        abort_unless($version->is_current, 422, 'Teksten kan bare redigeres i sidens gjeldende arbeidsversjon.');
+        abort_unless(
+            $this->contentBlockService->replaceBlockMarkdownAsHumanAuthored($version, $blockKey, $approvedText),
+            422,
+            'Avsnittet finnes ikke lenger i sidens gjeldende arbeidsversjon.',
+        );
+
+        if ($claim->canonical_fact_id !== null) {
+            $fact = $claim->canonicalFact ?? $claim->canonicalFact()->first();
+
+            if ($fact !== null) {
+                $this->canonicalizationService->markStaleIfDiverged($fact, $approvedText);
+            }
+        }
+
+        $claim->update([
+            'claim_text' => $approvedText,
+            'page_excerpt' => $approvedText,
+            'review_metadata' => array_merge((array) ($claim->review_metadata ?? []), [
+                'edited_before_approval' => true,
+            ]),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * "Fjern teksten" for a source_based block the source supports none of — blanks the block,
+     * the same mechanism removeBestPracticeText() uses. Never reached for a partially supported
+     * block; reject() refuses that case before any decision is stored.
+     */
+    private function removeSourceBasedFindingText(EnterpriseWikiClaim $claim): void
+    {
+        $blockKey = trim((string) $claim->content_block_key);
+        $version = $claim->version;
+
+        if ($blockKey === '' || $version === null || ! $version->is_current) {
+            return;
+        }
+
+        $this->contentBlockService->replaceBlockMarkdown($version, $blockKey, '');
     }
 
     private function resolvePageForClaim(string $slug, EnterpriseWikiClaim $claim): EnterpriseWikiPage

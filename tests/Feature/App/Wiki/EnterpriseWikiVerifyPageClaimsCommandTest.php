@@ -324,11 +324,13 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
     }
 
     // =========================================================================
-    // Run-482 fix: a claim the model mis-tagged source_based, but whose text genuinely reads
-    // as advice, is rescued to best_practice instead of unsupported_generated_content
+    // Run-482 rescue, superseded for source_based blocks: advice the model mis-tagged
+    // source_based still renders as document content on the page. Turning its claim into an
+    // advisory best_practice item would let that misrepresentation reach publication without a
+    // decision, so it stays an unsupported finding the reviewer keeps, edits or removes.
     // =========================================================================
 
-    public function test_source_based_claim_with_genuine_best_practice_wording_is_rescued_to_best_practice_on_not_supported_verdict(): void
+    public function test_source_based_claim_with_best_practice_wording_is_not_rescued_and_stays_a_finding(): void
     {
         $customer = $this->createCustomer();
 
@@ -355,8 +357,8 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
 
         $claim->refresh();
 
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
-        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT, $claim->sourceStatus());
         $this->assertFalse(
             EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists(),
         );
