@@ -17,7 +17,8 @@ test('a role with a tilgangsområde lets its holder register and read risks ther
     // System Owner reaches the register but reads nothing in it without a role.
     await page.goto('/app/risk');
     await expect(page.getByRole('heading', { name: 'Risikoregister' })).toBeVisible();
-    await expect(page.getByText('Du har ingen tilgangsområder for risiko ennå')).toBeVisible();
+    // Whether areas exist yet depends on earlier runs; either way System Owner is sent to Tilganger.
+    await expect(page.getByText(/^(Ingen risikoområder er opprettet ennå|Du har ikke tilgang til noen risikoområder ennå)$/)).toBeVisible();
 
     // Name the area.
     await page.goto('/app/customer-environment?tab=permissions');

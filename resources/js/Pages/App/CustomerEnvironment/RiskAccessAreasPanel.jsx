@@ -59,7 +59,7 @@ export default function RiskAccessAreasPanel({ areas = [], roles = [], storeUrl,
 
     return (
         <>
-            <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+            <div id="risk-access-areas" className="mt-6 scroll-mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                         <h2 className="text-lg font-semibold text-slate-950">{t.heading ?? 'Tilgangsområder for risiko'}</h2>

@@ -17,6 +17,42 @@ const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 
  * rows, the count and the search. Nothing here filters for access; it only renders what it was
  * given.
  */
+/**
+ * The register when none of the person's roles reaches an area. A regular user is told who can
+ * fix that; System Owner, who is that person, is sent to Kundemiljø → Tilganger instead.
+ */
+function NoAreasState({ accessSetup, tr }) {
+    if (! accessSetup) {
+        return (
+            <EmptyStateBox
+                title={tr.no_areas_title ?? 'Du har ingen tilgangsområder for risiko ennå'}
+                description={tr.no_areas_hint ?? 'Be System Owner gi en av rollene dine tilgang til et område under Kundemiljø → Tilganger.'}
+            />
+        );
+    }
+
+    const noneExist = ! accessSetup.customer_has_areas;
+
+    return (
+        <EmptyStateBox
+            title={noneExist
+                ? (tr.owner_no_areas_title ?? 'Ingen risikoområder er opprettet ennå')
+                : (tr.owner_no_access_title ?? 'Du har ikke tilgang til noen risikoområder ennå')}
+            description={noneExist
+                ? (tr.owner_no_areas_hint ?? 'Risikoer registreres i risikoområder. Opprett et område under Kundemiljø → Tilganger, og gi en rolle tilgang til det.')
+                : (tr.owner_no_access_hint ?? 'Tilgang til risikoer gis til en rolle under Kundemiljø → Tilganger. Gi en av rollene dine tilgang til et område for å se risikoene der.')}
+        >
+            <div className="mt-5">
+                <Link href={accessSetup.manage_url} className={PRIMARY_ACTION}>
+                    {noneExist
+                        ? (tr.owner_create_area ?? 'Opprett risikoområde')
+                        : (tr.owner_manage_access ?? 'Administrer risikotilgang')}
+                </Link>
+            </div>
+        </EmptyStateBox>
+    );
+}
+
 export default function RiskIndex() {
     const {
         translations = {},
@@ -25,6 +61,7 @@ export default function RiskIndex() {
         filters = {},
         statuses = [],
         has_areas: hasAreas = false,
+        access_setup: accessSetup = null,
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -105,10 +142,7 @@ export default function RiskIndex() {
                 )}
 
                 {! hasAreas ? (
-                    <EmptyStateBox
-                        title={tr.no_areas_title ?? 'Du har ingen tilgangsområder for risiko ennå'}
-                        description={tr.no_areas_hint ?? 'Be System Owner gi en av rollene dine tilgang til et område under Kundemiljø → Tilganger.'}
-                    />
+                    <NoAreasState accessSetup={accessSetup} tr={tr} />
                 ) : (
                     <section className={CARD}>
                         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-3">

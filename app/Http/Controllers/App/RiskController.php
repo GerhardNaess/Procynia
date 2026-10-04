@@ -63,6 +63,7 @@ class RiskController extends Controller
         }
 
         $creatableAreas = $this->access->areasFor($user, CustomerPermissionCatalog::RISK_CREATE);
+        $hasAreas = $this->access->areaIdsFor($user, CustomerPermissionCatalog::RISK_VIEW) !== [];
 
         return Inertia::render('App/Risk/Index', [
             'risks' => $query->orderBy('risks.title')->get()->map(fn (Risk $risk): array => $this->riskRow($risk))->all(),
@@ -70,11 +71,32 @@ class RiskController extends Controller
             'visible_count' => $this->access->visibleRisks($user)->count(),
             'filters' => ['search' => $search, 'status' => $status],
             'statuses' => Risk::STATUSES,
-            'has_areas' => $this->access->areaIdsFor($user, CustomerPermissionCatalog::RISK_VIEW) !== [],
+            'has_areas' => $hasAreas,
+            'access_setup' => $hasAreas ? null : $this->accessSetup($user),
             'permissions' => ['can_create' => $creatableAreas->isNotEmpty()],
             'area_options' => $this->areaOptions($creatableAreas),
             'owner_options' => $this->ownerOptions($user, $creatableAreas),
         ]);
+    }
+
+    /**
+     * Where System Owner goes from an empty register. They administer areas and roles, so they
+     * are pointed at Kundemiljø → Tilganger rather than told to ask themselves. Whether any area
+     * exists is no secret to them — Tilganger lists every area — and it still grants no risk data:
+     * the register stays empty until one of their roles reaches an area.
+     *
+     * @return array{customer_has_areas: bool, manage_url: string}|null
+     */
+    private function accessSetup(User $user): ?array
+    {
+        if (! $user->isSystemOwner()) {
+            return null;
+        }
+
+        return [
+            'customer_has_areas' => RiskAccessArea::query()->forCustomer((int) $user->customer_id)->exists(),
+            'manage_url' => route('app.customer-environment.index', ['tab' => 'permissions']).'#risk-access-areas',
+        ];
     }
 
     public function show(int $riskId): Response

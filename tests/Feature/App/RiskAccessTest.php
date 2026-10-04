@@ -247,6 +247,9 @@ class RiskAccessTest extends TestCase
         $this->assertSame(0, $props['visible_count']);
         $this->assertFalse($props['has_areas']);
         $this->assertFalse($props['permissions']['can_create']);
+        // Pointed at Tilganger to give a role the area — which is not the same as seeing it.
+        $this->assertTrue($props['access_setup']['customer_has_areas']);
+        $this->assertStringEndsWith('?tab=permissions#risk-access-areas', $props['access_setup']['manage_url']);
         $this->actingAs($owner)->get("/app/risk/risks/{$risk->id}")->assertNotFound();
 
         // The way in is a role, which System Owner may give themselves.
@@ -259,6 +262,32 @@ class RiskAccessTest extends TestCase
         $owner->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
 
         $this->actingAs($owner)->get("/app/risk/risks/{$risk->id}")->assertOk();
+        $props = $this->actingAs($owner)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertTrue($props['has_areas']);
+        $this->assertNull($props['access_setup']);
+    }
+
+    public function test_the_empty_register_sends_system_owner_to_tilganger_and_others_to_system_owner(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+
+        $props = $this->actingAs($owner)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertFalse($props['has_areas']);
+        $this->assertFalse($props['access_setup']['customer_has_areas']);
+
+        // Another customer's area is not this customer's.
+        ['customer' => $other] = $this->context();
+        $this->area($other, 'Andres område');
+        $props = $this->actingAs($owner)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertFalse($props['access_setup']['customer_has_areas']);
+
+        // A regular user who can open Risiko but reaches no area keeps the plain message.
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [CustomerPermissionCatalog::RISK_VIEW]);
+        $this->area($customer, 'HR');
+        $props = $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertFalse($props['has_areas']);
+        $this->assertNull($props['access_setup']);
     }
 
     public function test_tilganger_administers_areas_and_their_roles_for_system_owner_only(): void
