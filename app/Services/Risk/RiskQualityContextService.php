@@ -2,6 +2,7 @@
 
 namespace App\Services\Risk;
 
+use App\Models\QualityActivityControl;
 use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\Risk;
@@ -204,6 +205,53 @@ class RiskQualityContextService
             ->where('quality_item_id', $processId)
             ->whereNotIn('activity_key', array_keys($this->steps($blueprint)))
             ->delete();
+    }
+
+    /**
+     * Where controls sit in Kvalitet's flows: «Prosess › Aktivitet» for each placement, keyed by
+     * control id, read live like everything else here. A placement whose activity is no longer in
+     * the flow is left out.
+     *
+     * @param  list<int>  $controlIds
+     * @return array<int, list<string>>
+     */
+    public function controlPlacements(int $customerId, array $controlIds): array
+    {
+        if ($controlIds === []) {
+            return [];
+        }
+
+        $placements = QualityActivityControl::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('control_item_id', $controlIds)
+            ->orderBy('id')
+            ->get(['quality_item_id', 'activity_key', 'control_item_id']);
+
+        $processIds = $placements->pluck('quality_item_id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
+        $processes = $this->processesQuery($customerId)->whereIn('quality_items.id', $processIds)->get()->keyBy('id');
+        $blueprints = $this->blueprints($customerId, $processIds);
+        $steps = [];
+        $rows = [];
+
+        foreach ($placements as $placement) {
+            $process = $processes->get((int) $placement->quality_item_id);
+
+            if ($process === null) {
+                continue;
+            }
+
+            $steps[$process->id] ??= $this->steps($blueprints->get($process->id));
+            $step = $steps[$process->id][(string) $placement->activity_key] ?? null;
+
+            if ($step === null) {
+                continue;
+            }
+
+            $label = $step['label'] !== '' ? $process->title.' › '.$step['label'] : (string) $process->title;
+            $rows[(int) $placement->control_item_id][] = $label;
+        }
+
+        return array_map(fn (array $labels): array => array_values(array_unique($labels)), $rows);
     }
 
     /** @return Builder<QualityItem> */

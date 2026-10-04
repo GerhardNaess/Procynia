@@ -104,7 +104,11 @@ class RiskTreatmentService
             'title' => trim($data['title']),
             'owner_user_id' => (int) $data['owner_user_id'],
             'due_at' => $data['due_at'],
-            'outcome_note' => $this->normalizedText($data['outcome_note'] ?? null),
+            // The result is written when the action is completed; an edit that does not send it
+            // (an open action's form has no such field) leaves an earlier result in place.
+            'outcome_note' => array_key_exists('outcome_note', $data)
+                ? $this->normalizedText($data['outcome_note'])
+                : $action->outcome_note,
             'updated_by' => $actor->id,
         ])->save();
     }

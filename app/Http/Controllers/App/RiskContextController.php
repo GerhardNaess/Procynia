@@ -10,6 +10,7 @@ use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -36,7 +37,9 @@ class RiskContextController extends Controller
         $validated = $request->validate([
             'quality_item_id' => ['required', 'integer'],
             'activity_key' => ['nullable', 'string', 'max:80'],
-        ]);
+        ], RiskValidationMessages::messages(), RiskValidationMessages::attributes([
+            'quality_item_id' => __('procynia.risk.context.choose_process'),
+        ]));
 
         $activityKey = isset($validated['activity_key']) && $validated['activity_key'] !== '' ? (string) $validated['activity_key'] : null;
 

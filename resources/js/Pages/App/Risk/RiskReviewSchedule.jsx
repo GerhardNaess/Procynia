@@ -1,4 +1,5 @@
 import StatusBadge from '../../../Components/App/StatusBadge';
+import { SECONDARY_ACTION } from '../../../Support/actionStyles';
 
 /** "2026-10-04" as "4. oktober 2026", read as a calendar day so no time zone can shift it. */
 export function formatDay(day) {
@@ -14,9 +15,10 @@ export function formatDay(day) {
 /**
  * Periodisk vurdering on the risk page. Every value comes from the server, which derives the next
  * review from the latest assessment and the interval; the page only words it. A review is done by
- * registering a new risk assessment, so there is no action here.
+ * registering a new risk assessment; «Endre» (given only with risk.edit) opens the risk's edit form
+ * at Vurderingsintervall, as Behandling → Endre does for behandlingsvalg.
  */
-export default function RiskReviewSchedule({ schedule, status, tr }) {
+export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr }) {
     const trReview = tr.review ?? {};
     const interval = schedule.interval_months;
     const intervalLabel = interval ? (trReview.intervals?.[interval] ?? String(interval)) : (trReview.no_interval ?? 'Ingen fast intervall');
@@ -40,7 +42,19 @@ export default function RiskReviewSchedule({ schedule, status, tr }) {
             <dl className="grid gap-4 sm:grid-cols-3">
                 <div>
                     <dt className="text-sm font-semibold text-slate-600">{trReview.field_interval ?? 'Vurderingsintervall'}</dt>
-                    <dd className="mt-1 text-base text-slate-900">{intervalLabel}</dd>
+                    <dd className="mt-1 flex flex-wrap items-center gap-3 text-base text-slate-900">
+                        <span>{intervalLabel}</span>
+                        {onEdit && (
+                            <button
+                                type="button"
+                                onClick={onEdit}
+                                aria-label={`${trReview.edit ?? 'Endre'} ${(trReview.field_interval ?? 'Vurderingsintervall').toLowerCase()}`}
+                                className="text-sm font-semibold text-violet-700 hover:text-violet-900"
+                            >
+                                {trReview.edit ?? 'Endre'}
+                            </button>
+                        )}
+                    </dd>
                 </div>
                 <div>
                     <dt className="text-sm font-semibold text-slate-600">{trReview.last_assessed ?? 'Sist vurdert'}</dt>

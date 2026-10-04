@@ -35,6 +35,7 @@ class RiskControlService
     public function __construct(
         private readonly CustomerPermissionService $permissions,
         private readonly ModuleEntitlementService $entitlements,
+        private readonly RiskQualityContextService $context,
     ) {}
 
     /**
@@ -53,36 +54,44 @@ class RiskControlService
     /**
      * The controls linked to the risk, read live from Kvalitet.
      *
-     * @return list<array{id: int, title: string, code: ?string, status: string, criterion: ?string, url: string}>
+     * @return list<array{id: int, title: string, code: ?string, status: string, criterion: ?string, url: string, placements: list<string>}>
      */
     public function linkedControls(Risk $risk): array
     {
-        return $this->controlsQuery((int) $risk->customer_id)
+        $controls = $this->controlsQuery((int) $risk->customer_id)
             ->whereIn('quality_items.id', RiskControl::query()
                 ->where('risk_id', $risk->id)
                 ->where('customer_id', $risk->customer_id)
                 ->select('quality_item_id'))
             ->with('controlDetail:id,quality_item_id,criterion')
-            ->get()
-            ->map(fn (QualityItem $control): array => $this->controlRow($control))
+            ->get();
+        $placements = $this->context->controlPlacements((int) $risk->customer_id, $controls->pluck('id')->map(fn ($id): int => (int) $id)->all());
+
+        return $controls
+            ->map(fn (QualityItem $control): array => [...$this->controlRow($control), 'placements' => $placements[(int) $control->id] ?? []])
             ->all();
     }
 
     /**
-     * Controls of the risk's customer not yet linked to it, to choose from.
+     * Controls of the risk's customer not yet linked to it, to choose from — each with where it sits
+     * in Kvalitet's flows, so two controls with similar names can be told apart.
      *
-     * @return list<array{id: int, title: string, code: ?string, status: string}>
+     * @return list<array{id: int, title: string, code: ?string, status: string, placements: list<string>}>
      */
     public function controlOptions(Risk $risk): array
     {
-        return $this->controlsQuery((int) $risk->customer_id)
+        $controls = $this->controlsQuery((int) $risk->customer_id)
             ->whereNotIn('quality_items.id', RiskControl::query()->where('risk_id', $risk->id)->select('quality_item_id'))
-            ->get()
+            ->get();
+        $placements = $this->context->controlPlacements((int) $risk->customer_id, $controls->pluck('id')->map(fn ($id): int => (int) $id)->all());
+
+        return $controls
             ->map(fn (QualityItem $control): array => [
                 'id' => (int) $control->id,
                 'title' => $control->title,
                 'code' => $control->code,
                 'status' => $control->status,
+                'placements' => $placements[(int) $control->id] ?? [],
             ])
             ->all();
     }

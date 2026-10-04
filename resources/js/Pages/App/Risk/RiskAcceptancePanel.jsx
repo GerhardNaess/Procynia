@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import RequiredMark from './RequiredMark';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -12,7 +13,7 @@ const formatDate = (value) => (value ? new Date(value).toLocaleDateString('nb-NO
 const formatDay = (value) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString('nb-NO') : '—');
 
 /**
- * Risikobeslutning: whether the residual risk in the latest assessment has been accepted, by whom,
+ * Aksept av restrisiko: whether the residual risk in the latest assessment has been accepted, by whom,
  * when and why. Which acceptance applies and whether it has expired are the server's answers
  * (current, is_expired), not computed here. Accept and revoke are offered only when the server
  * said this person holds risk.accept for the risk's area; earlier acceptances sit folded beneath.
@@ -36,9 +37,9 @@ export default function RiskAcceptancePanel({ riskId, decision, canAccept, tr })
         <section className={CARD}>
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h2 className="text-lg font-semibold text-slate-950">{tx.title ?? 'Risikobeslutning'}</h2>
+                    <h2 className="text-lg font-semibold text-slate-950">{tx.title ?? 'Aksept av restrisiko'}</h2>
                     <p className="mt-1 text-sm text-slate-600">
-                        {tx.description ?? 'Aksept av restrisiko i siste vurdering. Aksept endrer ikke status eller vurdering — risikoen følges fortsatt opp.'}
+                        {tx.description ?? 'Formell beslutning om at restrisikoen i siste vurdering kan aksepteres. Behandlingsvalget «Akseptere» er bare retningen — det er denne beslutningen som gjelder. Risikoen følges fortsatt opp.'}
                     </p>
                 </div>
                 {canOfferAccept && (
@@ -160,7 +161,7 @@ function AcceptForm({ riskId, assessmentId, onDone, tx }) {
         <form onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="text-base font-semibold text-slate-950">{tx.form_heading ?? 'Aksepter restrisiko'}</h3>
             <div>
-                <label htmlFor="risk-acceptance-rationale" className={LABEL}>{tx.field_rationale ?? 'Begrunnelse'}</label>
+                <label htmlFor="risk-acceptance-rationale" className={LABEL}>{tx.field_rationale ?? 'Begrunnelse'}<RequiredMark /></label>
                 <textarea
                     id="risk-acceptance-rationale"
                     rows={3}

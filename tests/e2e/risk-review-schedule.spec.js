@@ -75,17 +75,20 @@ test('a quarterly interval shows the next review, and a new assessment moves it'
 
     const details = page.locator('section', { has: page.getByRole('heading', { name: 'Detaljer', exact: true }) });
     const field = (label) => details.locator('dt', { hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd');
-    await expect(field('Vurderingsintervall')).toHaveText('Ingen fast intervall');
+    // The interval's value, without the «Endre» beside it.
+    const interval = () => field('Vurderingsintervall').locator('span').first();
+    await expect(interval()).toHaveText('Ingen fast intervall');
     await expect(field('Sist vurdert')).toHaveText('30. juni 2026');
     await expect(field('Neste vurdering')).toHaveText('Ingen fast vurdering');
 
-    // Kvartalsvis, set in the edit form.
-    await page.getByRole('button', { name: 'Rediger' }).click();
+    // Kvartalsvis — «Endre» beside the interval opens the edit form right at it.
+    await field('Vurderingsintervall').getByRole('button', { name: 'Endre vurderingsintervall' }).click();
+    await expect(page.locator('#risk-review-interval')).toBeFocused();
     await page.locator('#risk-review-interval').selectOption({ label: 'Kvartalsvis' });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.locator('#risk-review-interval')).toHaveCount(0);
 
-    await expect(field('Vurderingsintervall')).toHaveText('Kvartalsvis');
+    await expect(interval()).toHaveText('Kvartalsvis');
     await expect(field('Sist vurdert')).toHaveText('30. juni 2026');
     await expect(field('Neste vurdering')).toContainText('30. september 2026');
     await expect(field('Neste vurdering').getByText('Forfalt', { exact: true })).toBeVisible();

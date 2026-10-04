@@ -19,7 +19,7 @@ export const TREATMENT_LABELS = {
 /**
  * Behandling: the direction chosen for the risk. It is only a direction — tiltak and formal
  * acceptance live in their own panels. When the direction is «Akseptere», the page says whether the
- * residual risk is actually accepted, from the server's Risikobeslutning (a current acceptance that
+ * residual risk is actually accepted, from the server's acceptance decision (a current acceptance that
  * has not expired); choosing the direction never makes it so.
  *
  * «Endre» (given only with risk.edit) opens the risk's own edit form at Behandlingsvalg — there is no
@@ -49,8 +49,8 @@ export default function RiskTreatmentStrategy({ strategy, decision, onEdit = nul
                     {strategy === 'accept' && (
                         <p className={`rounded-xl px-3 py-2 text-sm ${formallyAccepted ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
                             {formallyAccepted
-                                ? (tt.accept_formal ?? 'Restrisikoen er formelt akseptert — se Risikobeslutning.')
-                                : (tt.accept_pending ?? 'Planlagt retning. Restrisikoen er ikke formelt akseptert før en med rett til å akseptere risiko har registrert beslutningen under Risikobeslutning.')}
+                                ? (tt.accept_formal ?? 'Restrisikoen er formelt akseptert — se Aksept av restrisiko.')
+                                : (tt.accept_pending ?? '«Akseptere» er valgt som retning. Restrisikoen er ikke akseptert før beslutningen er registrert under Aksept av restrisiko.')}
                         </p>
                     )}
                 </div>

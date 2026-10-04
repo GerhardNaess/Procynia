@@ -10,6 +10,7 @@ use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskTreatmentService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -54,7 +55,7 @@ class RiskTreatmentActionController extends Controller
 
         $validated = $request->validate([
             'outcome_note' => ['nullable', 'string', 'max:5000'],
-        ]);
+        ], RiskValidationMessages::messages(), $this->attributes());
 
         $this->treatments->complete($user, $action, $validated['outcome_note'] ?? null);
 
@@ -98,6 +99,15 @@ class RiskTreatmentActionController extends Controller
             'owner_user_id' => ['required', 'integer'],
             'due_at' => ['required', 'date_format:Y-m-d'],
             'outcome_note' => ['nullable', 'string', 'max:5000'],
+        ], RiskValidationMessages::messages(), $this->attributes());
+    }
+
+    /** @return array<string, string> */
+    private function attributes(): array
+    {
+        return RiskValidationMessages::attributes([
+            'title' => __('procynia.risk.treatment.field_title'),
+            'owner_user_id' => __('procynia.risk.treatment.field_owner'),
         ]);
     }
 }

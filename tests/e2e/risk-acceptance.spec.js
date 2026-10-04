@@ -51,7 +51,7 @@ test('residual risk is accepted, revoked and accepted again', async ({ page }) =
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/risk\/risks\/\d+$/);
 
-    const panel = page.locator('section', { has: page.getByRole('heading', { name: 'Risikobeslutning', exact: true }) });
+    const panel = page.locator('section', { has: page.getByRole('heading', { name: 'Aksept av restrisiko', exact: true }) });
     await expect(panel.getByText(/Risikoen er ikke vurdert ennå/)).toBeVisible();
     await expect(panel.getByRole('button', { name: 'Aksepter restrisiko' })).toHaveCount(0);
 

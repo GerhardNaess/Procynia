@@ -8,11 +8,14 @@ use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\QualityActivityControl;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
+use App\Models\QualityProcessBlueprint;
 use App\Models\Risk;
 use App\Models\RiskControl;
 use App\Models\User;
+use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -115,6 +118,47 @@ class RiskControlLinkTest extends TestCase
 
         // Unlinking what is not linked is a 404.
         $this->actingAs($user)->delete("{$this->url($risk)}/{$control->id}")->assertNotFound();
+    }
+
+    public function test_a_control_says_where_it_sits_in_kvalitet_both_as_an_option_and_once_linked(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr, 'Feil lønnsutbetaling');
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [...self::RISK_EDITOR, CustomerPermissionCatalog::QUALITY_VIEW], [$hr]);
+
+        $placed = $this->control($customer, 'Fire-øyne-kontroll');
+        $unplaced = $this->control($customer, 'Tilgangsgjennomgang');
+        $payroll = $this->process($customer, $user, 'Lønnskjøring', ['Beregn lønn', 'Godkjenn utbetaling']);
+        $this->place($customer, $payroll, 'godkjenn-utbetaling', $placed);
+        // A key no longer in the flow says nothing.
+        $this->place($customer, $payroll, 'fjernet-steg', $placed);
+
+        // Another tenant's placement of the same control id never shows.
+        ['customer' => $other] = $this->context(false);
+        $foreignProcess = $this->process($other, $this->member($other), 'Fremmed prosess', ['Hemmelig steg']);
+        $this->place($other, $foreignProcess, 'hemmelig-steg', $placed);
+
+        $options = collect($this->showProps($user, $risk)['control_options'])->keyBy('id');
+        $this->assertSame(['Lønnskjøring › Godkjenn utbetaling'], $options[$placed->id]['placements']);
+        $this->assertSame([], $options[$unplaced->id]['placements']);
+
+        $this->actingAs($user)->post($this->url($risk), ['quality_item_id' => $placed->id])->assertRedirect();
+        $controls = $this->showProps($user, $risk)['controls'];
+        $this->assertSame(['Lønnskjøring › Godkjenn utbetaling'], $controls[0]['placements']);
+    }
+
+    public function test_a_missing_control_is_refused_in_the_users_language(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr, 'Feil lønnsutbetaling');
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [...self::RISK_EDITOR, CustomerPermissionCatalog::QUALITY_VIEW], [$hr]);
+
+        $this->actingAs($user)->post($this->url($risk), [])
+            ->assertSessionHasErrors(['quality_item_id' => 'Kontroll må fylles ut.']);
     }
 
     public function test_without_quality_view_the_risk_page_says_nothing_about_controls_and_cannot_link(): void
@@ -336,6 +380,47 @@ class RiskControlLinkTest extends TestCase
         }
 
         return $control;
+    }
+
+    /** @param  list<string>  $steps */
+    private function process(Customer $customer, User $actor, string $title, array $steps): QualityItem
+    {
+        $process = QualityItem::query()->create([
+            'customer_id' => $customer->id,
+            'quality_type' => QualityItem::TYPE_PROCESS,
+            'title' => $title,
+            'status' => QualityItem::STATUS_DRAFT,
+        ]);
+
+        $nodes = [['key' => 'start', 'lane' => 'lonn', 'type' => 'start', 'label' => 'Start']];
+        foreach ($steps as $step) {
+            $nodes[] = ['key' => Str::slug($step), 'lane' => 'lonn', 'type' => 'step', 'label' => $step];
+        }
+        $nodes[] = ['key' => 'slutt', 'lane' => 'lonn', 'type' => 'end', 'label' => 'Slutt'];
+        $edges = [];
+        for ($i = 1; $i < count($nodes); $i++) {
+            $edges[] = ['from' => $nodes[$i - 1]['key'], 'to' => $nodes[$i]['key']];
+        }
+
+        app(QualityProcessBlueprintService::class)->store(
+            (int) $customer->id,
+            $process,
+            ['lanes' => [['key' => 'lonn', 'label' => 'Lønnsansvarlig']], 'nodes' => $nodes, 'edges' => $edges],
+            QualityProcessBlueprint::SOURCE_MANUAL,
+            $actor,
+        );
+
+        return $process;
+    }
+
+    private function place(Customer $customer, QualityItem $process, string $activityKey, QualityItem $control): void
+    {
+        QualityActivityControl::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $process->id,
+            'activity_key' => $activityKey,
+            'control_item_id' => $control->id,
+        ]);
     }
 
     private function url(Risk $risk): string

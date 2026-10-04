@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskWikiKnowledgeService;
 use App\Support\CustomerContext;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -39,7 +40,10 @@ class RiskWikiKnowledgeController extends Controller
         ], [
             'title.required' => __('procynia.risk.validation.knowledge_title_required'),
             'markdown.required' => __('procynia.risk.validation.knowledge_markdown_required'),
-        ]);
+            ...RiskValidationMessages::messages(),
+        ], RiskValidationMessages::attributes([
+            'markdown' => __('procynia.risk.wiki_knowledge.field_markdown'),
+        ]));
 
         if ($this->knowledge->countForRisk($risk) >= RiskWikiKnowledgeService::MAX_PER_RISK) {
             throw ValidationException::withMessages([

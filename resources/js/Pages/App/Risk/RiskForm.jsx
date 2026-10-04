@@ -1,4 +1,5 @@
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import RequiredMark from './RequiredMark';
 import { ownersForArea } from './riskOwners';
 import { TREATMENT_EXPLANATIONS, TREATMENT_LABELS } from './RiskTreatmentStrategy';
 
@@ -18,8 +19,12 @@ const DESCRIPTION_PARTS = [
  * person may create (or edit) in, and the owner list follows the chosen area — both come from the
  * server, which checks them again on save. `missingStructure` marks an older risk that has no
  * årsak/hendelse/konsekvens yet: it must get them before it can be saved again.
+ *
+ * `creating` keeps Ny risiko to what the risk is and who owns it. Status starts as the first
+ * lifecycle step, and behandlingsvalg and vurderingsintervall are set from the risk page once there
+ * is something to decide on — the server takes neither as required.
  */
-export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, reviewIntervals = [], treatmentStrategies = [], missingStructure = false, tr }) {
+export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, reviewIntervals = [], treatmentStrategies = [], missingStructure = false, creating = false, tr }) {
     const trReview = tr.review ?? {};
     const ts = tr.structured ?? {};
     const tt = tr.treatment_strategy ?? {};
@@ -39,10 +44,11 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
     return (
         <form onSubmit={onSubmit} className="space-y-4">
             <div>
-                <label htmlFor="risk-title" className={LABEL}>{tr.field_title ?? 'Tittel'}</label>
+                <label htmlFor="risk-title" className={LABEL}>{tr.field_title ?? 'Tittel'}<RequiredMark /></label>
                 <input
                     id="risk-title"
                     type="text"
+                    aria-required="true"
                     value={form.data.title}
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
@@ -59,7 +65,7 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                 )}
                 {DESCRIPTION_PARTS.map(({ field, label, hint }) => (
                     <div key={field}>
-                        <label htmlFor={`risk-${field}`} className={LABEL}>{ts[`field_${field}`] ?? label}</label>
+                        <label htmlFor={`risk-${field}`} className={LABEL}>{ts[`field_${field}`] ?? label}<RequiredMark /></label>
                         <p id={`risk-${field}-hint`} className="text-sm text-slate-600">{ts[`field_${field}_hint`] ?? hint}</p>
                         <textarea
                             id={`risk-${field}`}
@@ -91,11 +97,12 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                 {form.errors.description && <p className="mt-1 text-sm text-rose-600">{form.errors.description}</p>}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className={`grid gap-4 ${creating ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
                 <div>
-                    <label htmlFor="risk-area" className={LABEL}>{tr.field_area ?? 'Fagområde'}</label>
+                    <label htmlFor="risk-area" className={LABEL}>{tr.field_area ?? 'Fagområde'}<RequiredMark /></label>
                     <select
                         id="risk-area"
+                        aria-required="true"
                         value={form.data.business_area_id}
                         onChange={(event) => changeArea(event.target.value)}
                         className={`mt-1 ${INPUT}`}
@@ -128,73 +135,79 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                     {form.errors.owner_user_id && <p className="mt-1 text-sm text-rose-600">{form.errors.owner_user_id}</p>}
                 </div>
 
-                <div>
-                    <label htmlFor="risk-status" className={LABEL}>{tr.field_status ?? 'Status'}</label>
-                    <select
-                        id="risk-status"
-                        value={form.data.status}
-                        onChange={(event) => form.setData('status', event.target.value)}
-                        aria-describedby="risk-status-hint"
-                        className={`mt-1 ${INPUT}`}
-                    >
-                        {statuses.map((status) => (
-                            <option key={status} value={status}>{statusLabels[status] ?? status}</option>
-                        ))}
-                    </select>
-                    <p id="risk-status-hint" className="mt-1 text-sm text-slate-500">
-                        {tr.field_status_hint ?? 'Hvor risikoen er i livsløpet. Settes manuelt — endres ikke av vurdering, tiltak eller aksept.'}
-                    </p>
-                    {form.errors.status && <p className="mt-1 text-sm text-rose-600">{form.errors.status}</p>}
-                </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-3">
-                <div>
-                    <label htmlFor="risk-review-interval" className={LABEL}>{trReview.field_interval ?? 'Vurderingsintervall'}</label>
-                    <select
-                        id="risk-review-interval"
-                        value={form.data.review_interval_months}
-                        onChange={(event) => form.setData('review_interval_months', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
-                    >
-                        <option value="">{trReview.no_interval ?? 'Ingen fast intervall'}</option>
-                        {reviewIntervals.map((months) => (
-                            <option key={months} value={months}>{trReview.intervals?.[months] ?? months}</option>
-                        ))}
-                    </select>
-                    <p className="mt-1 text-sm text-slate-500">
-                        {trReview.field_interval_hint ?? 'Hvor ofte risikoen skal vurderes på nytt. Neste vurdering beregnes fra siste risikovurdering.'}
-                    </p>
-                    {form.errors.review_interval_months && <p className="mt-1 text-sm text-rose-600">{form.errors.review_interval_months}</p>}
-                </div>
-
-                <div className="md:col-span-2">
-                    <label htmlFor="risk-treatment-strategy" className={LABEL}>{tt.field ?? 'Behandlingsvalg'}</label>
-                    <select
-                        id="risk-treatment-strategy"
-                        value={strategy ?? ''}
-                        onChange={(event) => form.setData('treatment_strategy', event.target.value)}
-                        aria-describedby="risk-treatment-strategy-hint"
-                        className={`mt-1 ${INPUT}`}
-                    >
-                        <option value="">{tt.none ?? 'Ikke besluttet ennå'}</option>
-                        {treatmentStrategies.map((key) => (
-                            <option key={key} value={key}>{tt.options?.[key] ?? TREATMENT_LABELS[key] ?? key}</option>
-                        ))}
-                    </select>
-                    <p id="risk-treatment-strategy-hint" className="mt-1 text-sm text-slate-500">
-                        {strategy
-                            ? (tt.explanations?.[strategy] ?? TREATMENT_EXPLANATIONS[strategy])
-                            : (tt.field_hint ?? 'Hvordan virksomheten vil håndtere risikoen. Konkrete tiltak og formell aksept registreres separat.')}
-                    </p>
-                    {strategy === 'accept' && (
-                        <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                            {tt.accept_form_note ?? 'Valget registrerer ikke aksept. Formell aksept av restrisiko registreres separat under Risikobeslutning, av en med rett til å akseptere risiko.'}
+                {! creating && (
+                    <div>
+                        <label htmlFor="risk-status" className={LABEL}>{tr.field_status ?? 'Status'}</label>
+                        <select
+                            id="risk-status"
+                            value={form.data.status}
+                            onChange={(event) => form.setData('status', event.target.value)}
+                            aria-describedby="risk-status-hint"
+                            className={`mt-1 ${INPUT}`}
+                        >
+                            {statuses.map((status) => (
+                                <option key={status} value={status}>{statusLabels[status] ?? status}</option>
+                            ))}
+                        </select>
+                        <p id="risk-status-hint" className="mt-1 text-sm text-slate-500">
+                            {tr.field_status_hint ?? 'Hvor risikoen er i livsløpet. Settes manuelt når arbeidet med risikoen går videre.'}
                         </p>
-                    )}
-                    {form.errors.treatment_strategy && <p className="mt-1 text-sm text-rose-600">{form.errors.treatment_strategy}</p>}
-                </div>
+                        {form.errors.status && <p className="mt-1 text-sm text-rose-600">{form.errors.status}</p>}
+                    </div>
+                )}
             </div>
+
+            {! creating && (
+                <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                        <label htmlFor="risk-review-interval" className={LABEL}>{trReview.field_interval ?? 'Vurderingsintervall'}</label>
+                        <select
+                            id="risk-review-interval"
+                            value={form.data.review_interval_months}
+                            onChange={(event) => form.setData('review_interval_months', event.target.value)}
+                            className={`mt-1 ${INPUT}`}
+                        >
+                            <option value="">{trReview.no_interval ?? 'Ingen fast intervall'}</option>
+                            {reviewIntervals.map((months) => (
+                                <option key={months} value={months}>{trReview.intervals?.[months] ?? months}</option>
+                            ))}
+                        </select>
+                        <p className="mt-1 text-sm text-slate-500">
+                            {trReview.field_interval_hint ?? 'Hvor ofte risikoen skal vurderes på nytt. Neste vurdering beregnes fra siste risikovurdering.'}
+                        </p>
+                        {form.errors.review_interval_months && <p className="mt-1 text-sm text-rose-600">{form.errors.review_interval_months}</p>}
+                    </div>
+
+                    <div className="md:col-span-2">
+                        <label htmlFor="risk-treatment-strategy" className={LABEL}>{tt.field ?? 'Behandlingsvalg'}</label>
+                        <select
+                            id="risk-treatment-strategy"
+                            value={strategy ?? ''}
+                            onChange={(event) => form.setData('treatment_strategy', event.target.value)}
+                            aria-describedby="risk-treatment-strategy-hint"
+                            className={`mt-1 ${INPUT}`}
+                        >
+                            <option value="">{tt.none ?? 'Ikke besluttet ennå'}</option>
+                            {treatmentStrategies.map((key) => (
+                                <option key={key} value={key}>{tt.options?.[key] ?? TREATMENT_LABELS[key] ?? key}</option>
+                            ))}
+                        </select>
+                        <p id="risk-treatment-strategy-hint" className="mt-1 text-sm text-slate-500">
+                            {strategy
+                                ? (tt.explanations?.[strategy] ?? TREATMENT_EXPLANATIONS[strategy])
+                                : (tt.field_hint ?? 'Overordnet retning for hvordan risikoen skal håndteres. Tiltak og aksept av restrisiko registreres i egne seksjoner.')}
+                        </p>
+                        {strategy === 'accept' && (
+                            <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                {tt.accept_form_note ?? '«Akseptere» er bare retningen. Selve aksepten av restrisikoen registreres under Aksept av restrisiko, av en med rett til å akseptere risiko.'}
+                            </p>
+                        )}
+                        {form.errors.treatment_strategy && <p className="mt-1 text-sm text-rose-600">{form.errors.treatment_strategy}</p>}
+                    </div>
+                </div>
+            )}
+
+            <p className="text-sm text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
 
             <div className="flex flex-wrap justify-end gap-3">
                 {onCancel && (

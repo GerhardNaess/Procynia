@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import RequiredMark from './RequiredMark';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -40,6 +41,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                         ownerOptions={ownerOptions}
                         onDone={() => setEditing(null)}
                         tt={tt}
+                        tr={tr}
                     />
                 </li>
             );
@@ -73,7 +75,9 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                         </div>
                         {action.outcome_note && (
                             <p className="whitespace-pre-line text-sm text-slate-700">
-                                <span className="font-semibold">{tt.outcome_note ?? 'Resultat'}:</span> {action.outcome_note}
+                                <span className="font-semibold">
+                                    {open ? (tt.previous_outcome_note ?? 'Tidligere resultat') : (tt.outcome_note ?? 'Resultat')}:
+                                </span> {action.outcome_note}
                             </p>
                         )}
                     </div>
@@ -119,7 +123,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
 
             {editing === 'new' && (
                 <div className="mt-4">
-                    <ActionForm riskId={riskId} action={null} ownerOptions={ownerOptions} onDone={() => setEditing(null)} tt={tt} />
+                    <ActionForm riskId={riskId} action={null} ownerOptions={ownerOptions} onDone={() => setEditing(null)} tt={tt} tr={tr} />
                 </div>
             )}
 
@@ -144,12 +148,18 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
     );
 }
 
-function ActionForm({ riskId, action, ownerOptions, onDone, tt }) {
+/**
+ * Create or edit an action. The result belongs to completing it: a new or open action's form has no
+ * such field and does not send one, so a result kept from before a reopen stays as it was. Only a
+ * completed action's result can be corrected here.
+ */
+function ActionForm({ riskId, action, ownerOptions, onDone, tt, tr }) {
+    const withOutcome = action !== null && action.status !== 'open';
     const form = useForm({
         title: action?.title ?? '',
         owner_user_id: action?.owner_user_id ? String(action.owner_user_id) : '',
         due_at: action?.due_at ?? '',
-        outcome_note: action?.outcome_note ?? '',
+        ...(withOutcome ? { outcome_note: action.outcome_note ?? '' } : {}),
     });
     const prefix = action ? `risk-action-${action.id}` : 'risk-action-new';
 
@@ -167,10 +177,11 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt }) {
     return (
         <form onSubmit={submit} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div>
-                <label htmlFor={`${prefix}-title`} className={LABEL}>{tt.field_title ?? 'Hva skal gjøres'}</label>
+                <label htmlFor={`${prefix}-title`} className={LABEL}>{tt.field_title ?? 'Hva skal gjøres'}<RequiredMark /></label>
                 <input
                     id={`${prefix}-title`}
                     type="text"
+                    aria-required="true"
                     value={form.data.title}
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
@@ -179,9 +190,10 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt }) {
             </div>
             <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                    <label htmlFor={`${prefix}-owner`} className={LABEL}>{tt.field_owner ?? 'Ansvarlig'}</label>
+                    <label htmlFor={`${prefix}-owner`} className={LABEL}>{tt.field_owner ?? 'Ansvarlig'}<RequiredMark /></label>
                     <select
                         id={`${prefix}-owner`}
+                        aria-required="true"
                         value={form.data.owner_user_id}
                         onChange={(event) => form.setData('owner_user_id', event.target.value)}
                         className={`mt-1 ${INPUT}`}
@@ -197,9 +209,10 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt }) {
                     {form.errors.owner_user_id && <p className="mt-1 text-sm text-rose-700">{form.errors.owner_user_id}</p>}
                 </div>
                 <div>
-                    <label htmlFor={`${prefix}-due`} className={LABEL}>{tt.field_due_at ?? 'Frist'}</label>
+                    <label htmlFor={`${prefix}-due`} className={LABEL}>{tt.field_due_at ?? 'Frist'}<RequiredMark /></label>
                     <input
                         id={`${prefix}-due`}
+                        aria-required="true"
                         type="date"
                         value={form.data.due_at}
                         onChange={(event) => form.setData('due_at', event.target.value)}
@@ -208,17 +221,20 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt }) {
                     {form.errors.due_at && <p className="mt-1 text-sm text-rose-700">{form.errors.due_at}</p>}
                 </div>
             </div>
-            <div>
-                <label htmlFor={`${prefix}-note`} className={LABEL}>{tt.field_outcome_note ?? 'Resultat / sluttnotat (valgfritt)'}</label>
-                <textarea
-                    id={`${prefix}-note`}
-                    rows={2}
-                    value={form.data.outcome_note}
-                    onChange={(event) => form.setData('outcome_note', event.target.value)}
-                    className={`mt-1 ${INPUT}`}
-                />
-                {form.errors.outcome_note && <p className="mt-1 text-sm text-rose-700">{form.errors.outcome_note}</p>}
-            </div>
+            {withOutcome && (
+                <div>
+                    <label htmlFor={`${prefix}-note`} className={LABEL}>{tt.field_outcome_note ?? 'Resultat (valgfritt)'}</label>
+                    <textarea
+                        id={`${prefix}-note`}
+                        rows={2}
+                        value={form.data.outcome_note}
+                        onChange={(event) => form.setData('outcome_note', event.target.value)}
+                        className={`mt-1 ${INPUT}`}
+                    />
+                    {form.errors.outcome_note && <p className="mt-1 text-sm text-rose-700">{form.errors.outcome_note}</p>}
+                </div>
+            )}
+            <p className="text-sm text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
             <div className="flex flex-wrap gap-2">
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{tt.save ?? 'Lagre tiltak'}</button>
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>
@@ -241,10 +257,12 @@ function CompleteForm({ riskId, action, onDone, tt }) {
     return (
         <form onSubmit={submit} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div>
-                <label htmlFor={id} className={LABEL}>{tt.field_outcome_note ?? 'Resultat / sluttnotat (valgfritt)'}</label>
+                <label htmlFor={id} className={LABEL}>{tt.field_outcome_note ?? 'Resultat (valgfritt)'}</label>
+                <p id={`${id}-hint`} className="text-sm text-slate-600">{tt.field_outcome_note_hint ?? 'Hva ble gjort, og hva ble resultatet?'}</p>
                 <textarea
                     id={id}
-                    rows={2}
+                    rows={3}
+                    aria-describedby={`${id}-hint`}
                     value={form.data.outcome_note}
                     onChange={(event) => form.setData('outcome_note', event.target.value)}
                     className={`mt-1 ${INPUT}`}

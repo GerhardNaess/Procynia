@@ -67,7 +67,8 @@ test('a risk is linked to an existing Kvalitet control and unlinked again', asyn
 
     const option = select.locator('option').nth(1);
     const controlId = await option.getAttribute('value');
-    const controlLabel = (await option.textContent()).trim();
+    // The option also says where the control sits in Kvalitet («— Prosess › Aktivitet»); the link is the control alone.
+    const controlLabel = (await option.textContent()).split(' — ')[0].trim();
     await select.selectOption(controlId);
     await panel.getByRole('button', { name: 'Koble', exact: true }).click();
 

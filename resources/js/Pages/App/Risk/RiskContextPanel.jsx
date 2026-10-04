@@ -46,7 +46,7 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontekst'}</h2>
                     <p className="mt-1 text-sm text-slate-600">
-                        {tc.description ?? 'Prosesser og aktiviteter i Kvalitet der risikoen hører hjemme. Vises bare her — Kvalitet viser ikke hvilke risikoer som er koblet.'}
+                        {tc.description ?? 'Prosessene og aktivitetene i Kvalitet der risikoen kan oppstå.'}
                     </p>
                 </div>
                 {canLink && ! linking && (

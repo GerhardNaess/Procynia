@@ -55,6 +55,15 @@ test('a risk gets an action that is edited, completed and reopened', async ({ pa
 
     // Nytt tiltak — with a deadline already passed, so it shows as Forfalt.
     await panel.getByRole('button', { name: 'Nytt tiltak' }).click();
+    // The result belongs to completing an action, not to creating one.
+    await expect(page.locator('#risk-action-new-note')).toHaveCount(0);
+    // Ansvarlig is required — marked, and refused in Norwegian when left out.
+    await expect(panel.locator('label[for="risk-action-new-owner"]')).toContainText('*');
+    await page.locator('#risk-action-new-title').fill('Innfør fire-øyne-kontroll');
+    await page.locator('#risk-action-new-due').fill('2026-01-15');
+    await panel.getByRole('button', { name: 'Lagre tiltak' }).click();
+    await expect(panel.getByText('Ansvarlig må fylles ut.')).toBeVisible();
+    await expect(page.getByText('The owner user id field is required.')).toHaveCount(0);
     await page.locator('#risk-action-new-title').fill('Innfør fire-øyne-kontroll');
     await page.locator('#risk-action-new-owner').selectOption({ index: 1 });
     await page.locator('#risk-action-new-due').fill('2026-01-15');
@@ -95,6 +104,9 @@ test('a risk gets an action that is edited, completed and reopened', async ({ pa
     const reopened = panel.locator('div', { has: page.getByRole('heading', { name: 'Åpne tiltak' }) })
         .locator('li', { hasText: 'Innfør fire-øyne-kontroll på lønnskjøring' });
     await expect(reopened.getByText('Åpen', { exact: true })).toBeVisible();
+    // The earlier result stays, as what came of the last attempt.
+    await expect(reopened.getByText('Tidligere resultat:')).toBeVisible();
+    await expect(reopened.getByText('Innført fra oktober.')).toBeVisible();
     await expect(panel.getByRole('heading', { name: 'Fullførte tiltak' })).toHaveCount(0);
     await page.screenshot({ path: 'test-results/risk-treatment-reopened.png', fullPage: true });
 });

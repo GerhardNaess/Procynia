@@ -62,8 +62,6 @@ export default function RiskIndex() {
         visible_count: visibleCount = 0,
         filters = {},
         statuses = [],
-        review_intervals: reviewIntervals = [],
-        treatment_strategies: treatmentStrategies = [],
         has_areas: hasAreas = false,
         attention = null,
         access_setup: accessSetup = null,
@@ -89,9 +87,8 @@ export default function RiskIndex() {
         description: '',
         business_area_id: areaOptions.length === 1 ? String(areaOptions[0].id) : '',
         owner_user_id: '',
+        // A new risk starts at the first lifecycle step; behandlingsvalg and intervall are set on its page.
         status: statuses[0] ?? 'identified',
-        review_interval_months: '',
-        treatment_strategy: '',
     });
 
     const submitSearch = (event) => {
@@ -147,8 +144,7 @@ export default function RiskIndex() {
                             ownerOptions={ownerOptions}
                             statuses={statuses}
                             statusLabels={statusLabels}
-                            reviewIntervals={reviewIntervals}
-                            treatmentStrategies={treatmentStrategies}
+                            creating
                             tr={tr}
                         />
                     </section>

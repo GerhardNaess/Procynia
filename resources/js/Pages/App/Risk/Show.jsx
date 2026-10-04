@@ -189,7 +189,14 @@ export default function RiskShow() {
                                     </dd>
                                 </div>
                             </dl>
-                            {reviewSchedule && <RiskReviewSchedule schedule={reviewSchedule} status={risk.status} tr={tr} />}
+                            {reviewSchedule && (
+                                <RiskReviewSchedule
+                                    schedule={reviewSchedule}
+                                    status={risk.status}
+                                    onEdit={permissions.can_edit ? () => startEditing('risk-review-interval') : null}
+                                    tr={tr}
+                                />
+                            )}
                         </section>
                     </>
                 )}

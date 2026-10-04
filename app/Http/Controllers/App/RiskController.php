@@ -18,6 +18,7 @@ use App\Services\Risk\RiskTreatmentService;
 use App\Services\Risk\RiskWikiKnowledgeService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -98,8 +99,6 @@ class RiskController extends Controller
             'visible_count' => $this->access->visibleRisks($user)->count(),
             'filters' => ['search' => $search, 'status' => $status],
             'statuses' => Risk::STATUSES,
-            'review_intervals' => Risk::REVIEW_INTERVALS,
-            'treatment_strategies' => Risk::TREATMENT_STRATEGIES,
             'has_areas' => $hasAreas,
             // Trenger oppmerksomhet, over the same visible set as the register — never the whole
             // customer. Only a role with «Alle» may have it described as the whole picture.
@@ -360,7 +359,7 @@ class RiskController extends Controller
             'status' => ['required', 'string', Rule::in(Risk::STATUSES)],
             'review_interval_months' => ['sometimes', 'nullable', 'integer', Rule::in(Risk::REVIEW_INTERVALS)],
             'treatment_strategy' => ['sometimes', 'nullable', 'string', Rule::in(Risk::TREATMENT_STRATEGIES)],
-        ]);
+        ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
     }
 
     /** @return array<string, mixed> */

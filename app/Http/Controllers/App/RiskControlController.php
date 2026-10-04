@@ -9,6 +9,7 @@ use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskControlService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -34,7 +35,7 @@ class RiskControlController extends Controller
 
         $validated = $request->validate([
             'quality_item_id' => ['required', 'integer'],
-        ]);
+        ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
 
         $this->controls->link($user, $risk, (int) $validated['quality_item_id']);
 

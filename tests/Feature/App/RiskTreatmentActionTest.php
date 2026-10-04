@@ -141,6 +141,43 @@ class RiskTreatmentActionTest extends TestCase
         $this->assertSame(0, RiskTreatmentAction::query()->count());
     }
 
+    public function test_a_missing_field_is_refused_in_the_users_language(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr, 'Lønnsfeil');
+        $editor = $this->member($customer);
+        $this->grant($customer, $editor, self::RISK_EDITOR, [$hr]);
+
+        $this->actingAs($editor)->post($this->url($risk), ['title' => 'Innfør kontroll', 'due_at' => '2026-11-01'])
+            ->assertSessionHasErrors(['owner_user_id' => 'Ansvarlig må fylles ut.']);
+        $this->actingAs($editor)->post($this->url($risk), ['owner_user_id' => $editor->id, 'due_at' => '2026-11-01'])
+            ->assertSessionHasErrors(['title' => 'Hva skal gjøres må fylles ut.']);
+    }
+
+    public function test_editing_an_open_action_without_a_result_keeps_the_earlier_one(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr, 'Lønnsfeil');
+        $editor = $this->member($customer);
+        $this->grant($customer, $editor, self::RISK_EDITOR, [$hr]);
+        $action = $this->action($risk, $editor, 'Innfør kontroll', '2026-11-01', completed: true);
+        $action->update(['outcome_note' => 'Første forsøk feilet.']);
+
+        $this->actingAs($editor)->post("{$this->url($risk)}/{$action->id}/reopen")->assertRedirect();
+        // The open action's form has no result field and sends none.
+        $this->actingAs($editor)->patch("{$this->url($risk)}/{$action->id}", [
+            'title' => 'Innfør kontroll, nytt forsøk',
+            'owner_user_id' => $editor->id,
+            'due_at' => '2026-12-01',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $action->refresh();
+        $this->assertSame('Innfør kontroll, nytt forsøk', $action->title);
+        $this->assertSame('Første forsøk feilet.', $action->outcome_note);
+    }
+
     public function test_overdue_is_open_past_the_deadline_day_only(): void
     {
         Carbon::setTestNow('2026-10-04 23:30:00');

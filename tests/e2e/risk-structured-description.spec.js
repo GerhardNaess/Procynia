@@ -68,10 +68,10 @@ test('the assessment history keeps the risk description it was made against', as
     const riskUrl = page.url();
 
     // Hva er risikoen → hvor alvorlig → hva gjør vi med den → hvor hører den hjemme.
-    const order = ['Risikobeskrivelse', 'Risikovurdering', 'Behandling', 'Tiltak', 'Kontroller som håndterer risikoen', 'Risikobeslutning', 'Kontekst', 'Kunnskap delt til Wiki'];
+    const order = ['Risikobeskrivelse', 'Risikovurdering', 'Behandling', 'Tiltak', 'Kontroller som håndterer risikoen', 'Aksept av restrisiko', 'Kontekst', 'Kunnskap delt til Wiki'];
     const headings = (await page.locator('main h2').allTextContents()).map((text) => text.trim()).filter((text) => order.includes(text));
     expect(headings).toEqual(order.filter((name) => headings.includes(name)));
-    expect(headings).toEqual(expect.arrayContaining(['Risikobeskrivelse', 'Risikovurdering', 'Behandling', 'Tiltak', 'Risikobeslutning']));
+    expect(headings).toEqual(expect.arrayContaining(['Risikobeskrivelse', 'Risikovurdering', 'Behandling', 'Tiltak', 'Aksept av restrisiko']));
 
     const registerRow = () => page.locator('tbody tr', { hasText: riskTitle });
     await page.goto('/app/risk');
@@ -90,7 +90,11 @@ test('the assessment history keeps the risk description it was made against', as
     await expect(page.getByText('Vurderingen er registrert.')).toBeVisible();
 
     const assessments = page.locator('section', { has: page.getByRole('heading', { name: 'Risikovurdering', exact: true }) });
-    const snapshot = assessments.locator('div', { has: page.getByText('Vurdert risikobeskrivelse', { exact: true }) }).last();
+    // Unchanged since the assessment: folded, not repeated — but one click away.
+    await expect(assessments.getByText('Uendret siden vurderingen', { exact: false })).toBeVisible();
+    await expect(assessments.getByText('manglende reservestrøm', { exact: true })).toBeHidden();
+    await assessments.getByText('Vurdert risikobeskrivelse', { exact: true }).click();
+    const snapshot = assessments.locator('details, div', { has: page.getByText('Vurdert risikobeskrivelse', { exact: true }) }).last();
     await expect(snapshot.getByText('manglende reservestrøm', { exact: true })).toBeVisible();
     await expect(snapshot.getByText('strømbrudd i datasenteret', { exact: true })).toBeVisible();
 
@@ -112,6 +116,7 @@ test('the assessment history keeps the risk description it was made against', as
     await expect(snapshot.getByText('strømbrudd i datasenteret', { exact: true })).toBeVisible();
     await expect(assessments.getByText('aldrende UPS-batterier')).toHaveCount(0);
     await expect(assessments.getByText('Risikobeskrivelsen er endret etter denne vurderingen.')).toBeVisible();
+    await expect(assessments.getByText('Uendret siden vurderingen', { exact: false })).toHaveCount(0);
 
     await page.screenshot({ path: 'test-results/risk-structured-description.png', fullPage: true });
 });

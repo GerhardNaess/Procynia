@@ -9,6 +9,7 @@ use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -35,7 +36,7 @@ class RiskAcceptanceController extends Controller
             'assessment_id' => ['required', 'integer'],
             'rationale' => ['required', 'string', 'max:5000'],
             'valid_until' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:today'],
-        ]);
+        ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
 
         $this->acceptances->accept(
             $user,

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import ActionDialog from '../../../Components/App/ActionDialog';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import RequiredMark from './RequiredMark';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -40,7 +41,7 @@ export default function RiskWikiKnowledgePanel({ riskId, entries, canCreate, tr 
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{tw.title ?? 'Kunnskap delt til Wiki'}</h2>
                     <p className="mt-1 text-sm text-slate-600">
-                        {tw.description ?? 'Gjenbrukbar læring fra denne risikoen, lagt inn som kilde i Enterprise Wiki. Wiki eier innholdet og styrer gjennomgang og publisering.'}
+                        {tw.description ?? 'Gjenbrukbar læring fra denne risikoen, delt med Enterprise Wiki. Innholdet gjennomgås i Wiki før det publiseres.'}
                     </p>
                 </div>
                 {canCreate && (
@@ -85,14 +86,15 @@ export default function RiskWikiKnowledgePanel({ riskId, entries, canCreate, tr 
                             {tw.help ?? 'Del gjenbrukbar læring – ikke sensitive detaljer om sårbarheter, hendelser eller virksomhetens risikostatus.'}
                         </p>
                         <p className="mt-1 text-sm text-amber-900">
-                            {tw.help_detail ?? 'Ingenting fra risikoen kopieres automatisk. Teksten legges inn som kilde i Enterprise Wiki og går gjennom vanlig gjennomgang før noe publiseres.'}
+                            {tw.help_detail ?? 'Ingenting fra risikoen kopieres automatisk. Teksten gjennomgås i Wiki før noe publiseres.'}
                         </p>
                     </div>
                     <div>
-                        <label htmlFor="risk-wiki-knowledge-title" className={LABEL}>{tw.field_title ?? 'Tittel'}</label>
+                        <label htmlFor="risk-wiki-knowledge-title" className={LABEL}>{tw.field_title ?? 'Tittel'}<RequiredMark /></label>
                         <input
                             id="risk-wiki-knowledge-title"
                             type="text"
+                            aria-required="true"
                             value={form.data.title}
                             onChange={(event) => form.setData('title', event.target.value)}
                             maxLength={255}
@@ -101,10 +103,14 @@ export default function RiskWikiKnowledgePanel({ riskId, entries, canCreate, tr 
                         {form.errors.title && <p className="mt-1 text-sm text-rose-700">{form.errors.title}</p>}
                     </div>
                     <div>
-                        <label htmlFor="risk-wiki-knowledge-markdown" className={LABEL}>{tw.field_markdown ?? 'Kunnskapsinnhold'}</label>
-                        <p className="text-sm text-slate-600">{tw.field_markdown_help ?? 'Skriv med egne ord. Markdown støttes.'}</p>
+                        <label htmlFor="risk-wiki-knowledge-markdown" className={LABEL}>{tw.field_markdown ?? 'Kunnskapsinnhold'}<RequiredMark /></label>
+                        <p id="risk-wiki-knowledge-markdown-hint" className="text-sm text-slate-600">
+                            {tw.field_markdown_help ?? 'Skriv med egne ord, slik at andre kan bruke læringen.'}
+                        </p>
                         <textarea
                             id="risk-wiki-knowledge-markdown"
+                            aria-required="true"
+                            aria-describedby="risk-wiki-knowledge-markdown-hint"
                             value={form.data.markdown}
                             onChange={(event) => form.setData('markdown', event.target.value)}
                             rows={10}

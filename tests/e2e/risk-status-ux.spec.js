@@ -50,7 +50,10 @@ test('status, acceptance warning and Behandling → Endre explain themselves', a
     await page.locator('#risk-title').fill(riskTitle);
     await fillRiskDescription(page);
     await page.locator('#risk-area').selectOption({ label: areaName });
-    await expect(page.locator('#risk-status-hint')).toContainText('Settes manuelt');
+    // Ny risiko is about what the risk is; status, behandlingsvalg and intervall come later.
+    await expect(page.locator('#risk-status')).toHaveCount(0);
+    await expect(page.locator('#risk-treatment-strategy')).toHaveCount(0);
+    await expect(page.locator('#risk-review-interval')).toHaveCount(0);
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/risk\/risks\/\d+$/);
 
@@ -71,7 +74,7 @@ test('status, acceptance warning and Behandling → Endre explain themselves', a
     await page.getByRole('button', { name: 'Lagre vurdering' }).click();
     await expect(page.getByText('Vurderingen er registrert.')).toBeVisible();
 
-    const decision = page.locator('section', { has: page.getByRole('heading', { name: 'Risikobeslutning', exact: true }) });
+    const decision = page.locator('section', { has: page.getByRole('heading', { name: 'Aksept av restrisiko', exact: true }) });
     await decision.getByRole('button', { name: 'Aksepter restrisiko' }).click();
     await page.locator('#risk-acceptance-rationale').fill('Restrisikoen er innenfor det vi tåler.');
     await decision.getByRole('button', { name: 'Aksepter', exact: true }).click();
@@ -86,6 +89,7 @@ test('status, acceptance warning and Behandling → Endre explain themselves', a
     const treatment = page.getByRole('region', { name: 'Behandling' });
     await treatment.getByRole('button', { name: 'Endre' }).click();
     await expect(page.locator('#risk-treatment-strategy')).toBeFocused();
+    await expect(page.locator('#risk-status-hint')).toContainText('Settes manuelt');
     await page.locator('#risk-treatment-strategy').selectOption({ label: 'Akseptere' });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.locator('#risk-treatment-strategy')).toHaveCount(0);

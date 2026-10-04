@@ -8,6 +8,7 @@ use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Risk\RiskValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -48,7 +49,7 @@ class RiskAssessmentController extends Controller
             'residual_likelihood' => ['nullable', 'integer', Rule::in($criteria['likelihood']), 'required_with:residual_consequence'],
             'residual_consequence' => ['nullable', 'integer', Rule::in($criteria['consequence']), 'required_with:residual_likelihood'],
             'rationale' => ['required', 'string', 'max:2000'],
-        ]);
+        ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
 
         RiskAssessment::query()->create([
             'customer_id' => (int) $risk->customer_id,

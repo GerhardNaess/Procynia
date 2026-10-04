@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import RequiredMark from './RequiredMark';
 import { RISK_LEVEL_TONES, previewLevel } from './riskLevel';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -15,7 +16,7 @@ const formatDate = (iso) => (iso ? new Date(iso).toLocaleString('nb-NO') : '—'
  * Assessments are never edited; «Ny vurdering» adds the next one, and is offered only when the
  * server said this person holds risk.assess for the risk's area.
  *
- * `hasCurrentAcceptance` is the server's current acceptance (Risikobeslutning). An acceptance belongs
+ * `hasCurrentAcceptance` is the server's current acceptance (Aksept av restrisiko). An acceptance belongs
  * to one assessment, so the form says before saving that a new one makes it historical.
  */
 export default function RiskAssessmentPanel({ riskId, assessments, criteria, canAssess, hasCurrentAcceptance = false, tr }) {
@@ -29,7 +30,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{ta.heading ?? 'Risikovurdering'}</h2>
                     <p className="mt-1 text-sm text-slate-600">
-                        {ta.status_note ?? 'Hvor alvorlig risikoen er. Siste vurdering gjelder; status endres ikke av en vurdering.'}
+                        {ta.status_note ?? 'Hvor alvorlig risikoen er. Siste vurdering gjelder.'}
                     </p>
                 </div>
                 {canAssess && ! creating && (
@@ -78,7 +79,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
                     <div className="mt-6 rounded-2xl border border-dashed border-slate-300 p-6">
                         <p className="text-base font-semibold text-slate-900">{ta.none_title ?? 'Risikoen er ikke vurdert ennå'}</p>
                         <p className="mt-1 text-sm text-slate-600">
-                            {ta.none_hint ?? 'Når noen med rett til å vurdere registrerer en vurdering, vises den her.'}
+                            {ta.none_hint ?? 'Vurder sannsynlighet og konsekvens for å se hvor alvorlig risikoen er.'}
                         </p>
                     </div>
                 )
@@ -157,6 +158,10 @@ function AssessmentDetails({ assessment, ta, tr, compact = false }) {
  * What was assessed: årsak, hendelse and konsekvens as they read when the assessment was registered,
  * from the assessment's own snapshot. Older assessments have none, and say so rather than borrow
  * today's text.
+ *
+ * When the risk still reads exactly as assessed, repeating the same three parts under every
+ * assessment adds nothing, so the snapshot is folded behind «Uendret siden vurderingen» — still one
+ * click away. Once the description has changed, the snapshot is shown open with the notice.
  */
 function AssessedDescription({ description, ta, tr }) {
     if (! description) {
@@ -174,31 +179,46 @@ function AssessedDescription({ description, ta, tr }) {
         { field: 'consequence', label: ts.field_consequence ?? 'Konsekvens' },
     ];
 
+    const heading = ta.assessed_description ?? 'Vurdert risikobeskrivelse';
+    const snapshot = (
+        <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
+            {parts.map(({ field, label }) => (
+                <div key={field} className="contents">
+                    <dt className="text-sm text-slate-600">{label}</dt>
+                    <dd className="whitespace-pre-line text-base leading-6 text-slate-800">{description[field]}</dd>
+                </div>
+            ))}
+        </dl>
+    );
+
+    if (! description.changed_since) {
+        return (
+            <details>
+                <summary className="cursor-pointer text-sm text-slate-600">
+                    <span className="font-semibold text-slate-700">{heading}</span>
+                    {' · '}{ta.assessed_description_unchanged ?? 'Uendret siden vurderingen'}
+                </summary>
+                {snapshot}
+            </details>
+        );
+    }
+
     return (
         <div>
-            <span className="text-sm font-semibold text-slate-700">{ta.assessed_description ?? 'Vurdert risikobeskrivelse'}</span>
-            <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
-                {parts.map(({ field, label }) => (
-                    <div key={field} className="contents">
-                        <dt className="text-sm text-slate-600">{label}</dt>
-                        <dd className="whitespace-pre-line text-base leading-6 text-slate-800">{description[field]}</dd>
-                    </div>
-                ))}
-            </dl>
-            {description.changed_since && (
-                <p className="mt-1 text-sm text-amber-700">
-                    {ta.assessed_description_changed ?? 'Risikobeskrivelsen er endret etter denne vurderingen.'}
-                </p>
-            )}
+            <span className="text-sm font-semibold text-slate-700">{heading}</span>
+            <p className="mt-1 text-sm text-amber-700">
+                {ta.assessed_description_changed ?? 'Risikobeskrivelsen er endret etter denne vurderingen.'}
+            </p>
+            {snapshot}
         </div>
     );
 }
 
-function ScaleSelect({ id, label, value, onChange, values, labels, error, ta }) {
+function ScaleSelect({ id, label, value, onChange, values, labels, error, required = false, ta }) {
     return (
         <div>
-            <label htmlFor={id} className={LABEL}>{label}</label>
-            <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`mt-1 ${INPUT}`}>
+            <label htmlFor={id} className={LABEL}>{label}{required && <RequiredMark />}</label>
+            <select id={id} value={value} onChange={(event) => onChange(event.target.value)} aria-required={required || undefined} className={`mt-1 ${INPUT}`}>
                 <option value="">{ta.choose ?? 'Velg'}</option>
                 {values.map((step) => (
                     <option key={step} value={String(step)}>{step} – {labels[step] ?? step}</option>
@@ -285,6 +305,7 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
                         values={likelihoods}
                         labels={likelihoodLabels}
                         error={form.errors.inherent_likelihood}
+                        required
                         ta={ta}
                     />
                     <ScaleSelect
@@ -295,6 +316,7 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
                         values={consequences}
                         labels={consequenceLabels}
                         error={form.errors.inherent_consequence}
+                        required
                         ta={ta}
                     />
                 </div>
@@ -324,6 +346,7 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
                             values={likelihoods}
                             labels={likelihoodLabels}
                             error={form.errors.residual_likelihood}
+                            required
                             ta={ta}
                         />
                         <ScaleSelect
@@ -334,6 +357,7 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
                             values={consequences}
                             labels={consequenceLabels}
                             error={form.errors.residual_consequence}
+                            required
                             ta={ta}
                         />
                     </div>
@@ -342,17 +366,20 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
             )}
 
             <div>
-                <label htmlFor="assessment-rationale" className={LABEL}>{ta.field_rationale ?? 'Kort begrunnelse'}</label>
+                <label htmlFor="assessment-rationale" className={LABEL}>{ta.field_rationale ?? 'Kort begrunnelse'}<RequiredMark /></label>
                 <p className="text-sm text-slate-600">{ta.field_rationale_hint ?? 'Hva bygger vurderingen på?'}</p>
                 <textarea
                     id="assessment-rationale"
                     rows={3}
+                    aria-required="true"
                     value={form.data.rationale}
                     onChange={(event) => form.setData('rationale', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
                 {form.errors.rationale && <p className="mt-1 text-sm text-rose-600">{form.errors.rationale}</p>}
             </div>
+
+            <p className="text-sm text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
 
             <div className="flex flex-wrap items-center gap-3">
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>

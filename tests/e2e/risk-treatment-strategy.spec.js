@@ -67,15 +67,15 @@ test('choosing a treatment strategy never stands in for formal acceptance', asyn
     // Akseptere — a direction, not an acceptance.
     await page.getByRole('button', { name: 'Rediger' }).click();
     await page.locator('#risk-treatment-strategy').selectOption({ label: 'Akseptere' });
-    await expect(page.getByText('Valget registrerer ikke aksept.', { exact: false })).toBeVisible();
+    await expect(page.getByText('«Akseptere» er bare retningen.', { exact: false })).toBeVisible();
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.locator('#risk-treatment-strategy')).toHaveCount(0);
 
     await expect(treatment).toContainText('Akseptere');
-    await expect(treatment).toContainText('Restrisikoen er ikke formelt akseptert før en med rett til å akseptere risiko har registrert beslutningen under Risikobeslutning.');
+    await expect(treatment).toContainText('Restrisikoen er ikke akseptert før beslutningen er registrert under Aksept av restrisiko.');
     await expect(treatment).not.toContainText('formelt akseptert —');
 
-    const decision = page.locator('section', { has: page.getByRole('heading', { name: 'Risikobeslutning', exact: true }) });
+    const decision = page.locator('section', { has: page.getByRole('heading', { name: 'Aksept av restrisiko', exact: true }) });
     await expect(decision).toContainText('Risikoen er ikke vurdert ennå.');
     await expect(decision.getByRole('button', { name: 'Aksepter restrisiko' })).toHaveCount(0);
     await page.screenshot({ path: 'test-results/risk-treatment-accept.png', fullPage: true });
