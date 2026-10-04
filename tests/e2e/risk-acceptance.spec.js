@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Acceptance of residual risk, end to end: a risk assessed with residual risk is accepted, the
@@ -8,7 +11,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * Permissions, the latest-assessment rule and tenancy are owned by RiskAcceptanceTest.
  */
 test('residual risk is accepted, revoked and accepted again', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Drift ${suffix}`;
     const roleName = `E2E Risikobeslutning ${suffix}`;
     const riskTitle = `E2E Strømbrudd i datasenter ${suffix}`;

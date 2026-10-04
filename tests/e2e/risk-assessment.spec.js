@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Risikovurdering, end to end: a role that may assess but not edit lets its holder register an
@@ -8,7 +11,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * while the earlier one stays in the history.
  */
 test('a fagperson with risk.assess but not risk.edit assesses a risk and keeps its history', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Drift ${suffix}`;
     const roleName = `E2E Risikovurderer ${suffix}`;
     const riskTitle = `E2E Serverbrann ${suffix}`;

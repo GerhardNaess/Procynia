@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
+import { cleanUpRiskE2eData, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * System Owner with no role reaching a fagområde is not told to ask System Owner: the empty
@@ -7,7 +11,6 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * register opens. Nothing is granted implicitly — the role is what lets them in.
  */
 test('system owner goes from the empty register to Tilganger and back with access', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Eget område ${suffix}`;
     const roleName = `E2E Egen risikorolle ${suffix}`;
 

@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Risiko → håndteres av → Kontroll, end to end: Risiko is reached from the rail, an existing
@@ -8,7 +11,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * control is still in Kvalitet afterwards. Permissions and tenancy are owned by RiskControlLinkTest.
  */
 test('a risk is linked to an existing Kvalitet control and unlinked again', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Lønn ${suffix}`;
     const roleName = `E2E Risiko og kontroll ${suffix}`;
     const riskTitle = `E2E Feil lønnsutbetaling ${suffix}`;

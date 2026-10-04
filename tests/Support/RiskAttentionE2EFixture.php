@@ -8,7 +8,6 @@ use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Models\RiskTreatmentAction;
 use App\Models\User;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -16,14 +15,12 @@ use Illuminate\Support\Facades\DB;
  * (autoload-dev only) — invoked via `php artisan tinker --execute=...` from the Playwright spec,
  * mirroring the Wiki E2E fixtures.
  *
- * Everything it creates carries the run's six-character suffix, and cleanup only ever matches
- * the exact names this fixture produces, in the E2E customer — never other customer data.
+ * Everything it creates carries the run's six-character suffix and follows the name templates
+ * RiskE2EFixture cleans up, like the data the other Risk specs create through the UI.
  */
 class RiskAttentionE2EFixture
 {
     private const SYSTEM_OWNER_EMAIL = 'e2e.systemowner@procynia.test';
-
-    private const SUFFIX_PATTERN = '[A-Z0-9]{6}';
 
     public static function seed(string $suffix, string $password): string
     {
@@ -66,38 +63,6 @@ class RiskAttentionE2EFixture
         });
 
         return $email;
-    }
-
-    /**
-     * Removes what seed() created for one suffix, or — with no suffix — whatever earlier runs of
-     * this spec left behind. Idempotent, and safe after a seed that stopped halfway.
-     */
-    public static function cleanup(?string $suffix = null): void
-    {
-        $customerId = self::customerId();
-        $suffixRegex = $suffix === null ? self::SUFFIX_PATTERN : preg_quote(strtoupper($suffix));
-
-        DB::transaction(function () use ($customerId, $suffixRegex): void {
-            $areaIds = BusinessArea::query()
-                ->where('customer_id', $customerId)
-                ->where('name', '~', "^E2E (Oppmerksomhet|Skjult område) {$suffixRegex}$")
-                ->pluck('id');
-
-            // risks.business_area_id restricts, so the risks go first. Deleting a risk row cascades
-            // in the database to its assessments, acceptances, treatment actions, controls and
-            // process/activity context — the immutable history models are never deleted one by one.
-            Risk::query()->where('customer_id', $customerId)->whereIn('business_area_id', $areaIds)->delete();
-
-            // Role permissions, area grants and user-role links cascade from the role.
-            self::matching(CustomerRole::query(), $customerId, 'name', "^E2E Oppmerksomhet {$suffixRegex}$")->delete();
-            BusinessArea::query()->whereIn('id', $areaIds)->delete();
-            self::matching(User::query(), $customerId, 'email', '^e2e\.attention\.'.strtolower($suffixRegex).'@procynia\.test$')->delete();
-        });
-    }
-
-    private static function matching(Builder $query, int $customerId, string $column, string $regex): Builder
-    {
-        return $query->where('customer_id', $customerId)->where($column, '~', $regex);
     }
 
     private static function email(string $suffix): string

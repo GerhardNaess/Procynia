@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Risiko → Kontekst, end to end: a risk is linked to a whole Kvalitet process and to an activity in
@@ -9,7 +12,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * RiskQualityContextLinkTest.
  */
 test('a risk is linked to a Kvalitet process and activity, shown as context, and unlinked', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Kontekst ${suffix}`;
     const roleName = `E2E Risiko og kontekst ${suffix}`;
     const riskTitle = `E2E Feil i godkjenning ${suffix}`;

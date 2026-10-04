@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Risiko, end to end: System Owner names a fagområde and a role that reaches it in
@@ -8,7 +11,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * risk. System Owner alone reads no risks — the implicit full grant carries no area.
  */
 test('a role with a fagområde lets its holder register and read risks there', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Beredskap ${suffix}`;
     const roleName = `E2E Risikoansvarlig ${suffix}`;
     const riskTitle = `E2E Strømbrudd ${suffix}`;

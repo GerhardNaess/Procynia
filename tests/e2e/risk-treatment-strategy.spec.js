@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Behandlingsvalg, end to end: a user with risk.edit (and no risk.accept) chooses «Redusere», sees
@@ -8,7 +11,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * formally accepted. Validation, permissions and tenancy are owned by RiskTreatmentStrategyTest.
  */
 test('choosing a treatment strategy never stands in for formal acceptance', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Lønn ${suffix}`;
     const roleName = `E2E Risikobehandling ${suffix}`;
     const riskTitle = `E2E Feil lønnsutbetaling ${suffix}`;

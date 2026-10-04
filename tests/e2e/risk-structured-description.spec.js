@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Strukturert risikobeskrivelse, end to end: a new risk is described as årsak → hendelse →
@@ -9,7 +12,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * access are owned by RiskStructuredDescriptionTest.
  */
 test('the assessment history keeps the risk description it was made against', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Drift ${suffix}`;
     const roleName = `E2E Risikobeskrivelse ${suffix}`;
     const riskTitle = `E2E Datasenter ${suffix}`;

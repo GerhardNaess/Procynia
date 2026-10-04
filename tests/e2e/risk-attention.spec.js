@@ -1,26 +1,12 @@
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
-
-const execAsync = promisify(exec);
+import { cleanUpRiskE2eData, riskE2eSuffix, tinker } from './helpers/risk.js';
 
 const FIXTURE = '\\Tests\\Support\\RiskAttentionE2EFixture';
-const cwd = new URL('../..', import.meta.url).pathname;
-const tinker = (php) => execAsync(`docker compose exec -T app php artisan tinker --execute="${php}"`, { cwd });
-
-const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
+const suffix = riskE2eSuffix();
 const password = 'E2eUser123!';
 
-// Earlier runs that never reached afterEach (a killed process) are swept first; every run then
-// removes its own suffix, whether the test passed, failed or the seed stopped halfway.
-test.beforeAll(async () => {
-    await tinker(`${FIXTURE}::cleanup();`);
-});
-
-test.afterEach(async () => {
-    await tinker(`${FIXTURE}::cleanup('${suffix}');`);
-});
+cleanUpRiskE2eData(suffix);
 
 /**
  * «Trenger oppmerksomhet» on the register, end to end. A fresh user with one fagområde, so the

@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Tiltak on a risk, end to end: a new action with a responsible person and a deadline, edited,
@@ -8,7 +11,6 @@ import { fillRiskDescription } from './helpers/risk.js';
  * RiskTreatmentActionTest.
  */
 test('a risk gets an action that is edited, completed and reopened', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Lønn ${suffix}`;
     const roleName = `E2E Risiko og tiltak ${suffix}`;
     const riskTitle = `E2E Feil lønnsutbetaling ${suffix}`;

@@ -2,9 +2,12 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
-import { fillRiskDescription } from './helpers/risk.js';
+import { cleanUpRiskE2eData, fillRiskDescription, riskE2eSuffix } from './helpers/risk.js';
 
 const execAsync = promisify(exec);
+
+const suffix = riskE2eSuffix();
+cleanUpRiskE2eData(suffix);
 
 /**
  * Periodisk vurdering, end to end: an assessed risk gets a quarterly interval, the page shows the
@@ -12,7 +15,6 @@ const execAsync = promisify(exec);
  * next review forward. Date rules, permissions and tenancy are owned by RiskReviewScheduleTest.
  */
 test('a quarterly interval shows the next review, and a new assessment moves it', async ({ page }) => {
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Drift ${suffix}`;
     const roleName = `E2E Risikogjennomgang ${suffix}`;
     const riskTitle = `E2E Svikt i backup ${suffix}`;
