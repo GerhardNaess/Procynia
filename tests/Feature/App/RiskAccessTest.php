@@ -2,13 +2,13 @@
 
 namespace Tests\Feature\App;
 
+use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Risk;
-use App\Models\RiskAccessArea;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -19,7 +19,7 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Risiko, gated twice: by the customer's own roles (what) and by tilgangsområder (which).
+ * Risiko, gated twice: by the customer's own roles (what) and by fagområder (where).
  *
  * What these tests defend:
  *
@@ -29,6 +29,8 @@ use Tests\TestCase;
  *    and a role that edits another never add up to editing the first.
  *  - System Owner reaches the module and administers areas, but reads no risk without a role that
  *    reaches its area.
+ *  - «Alle» is a wildcard resolved at read time: it reaches areas created after it was set, and it
+ *    is never stored as links. It pairs with permissions exactly like an explicit area does.
  *  - Area administration lives in Kundemiljø → Tilganger, System Owner only, tenant-scoped.
  */
 class RiskAccessTest extends TestCase
@@ -153,8 +155,8 @@ class RiskAccessTest extends TestCase
         // Moving the HR risk into Økonomi needs edit there too — which no role gives.
         $this->actingAs($user)
             ->patch("/app/risk/risks/{$hrRisk->id}", $this->payload($finance))
-            ->assertSessionHasErrors('risk_access_area_id');
-        $this->assertDatabaseHas('risks', ['id' => $hrRisk->id, 'risk_access_area_id' => $hr->id]);
+            ->assertSessionHasErrors('business_area_id');
+        $this->assertDatabaseHas('risks', ['id' => $hrRisk->id, 'business_area_id' => $hr->id]);
 
         // Delete is its own permission.
         $this->actingAs($user)->delete("/app/risk/risks/{$hrRisk->id}")->assertForbidden();
@@ -182,12 +184,12 @@ class RiskAccessTest extends TestCase
         $this->assertNotContains($outsider->id, $ownerIds);
 
         // Reading Økonomi is not creating there.
-        $this->actingAs($user)->post('/app/risk/risks', $this->payload($finance))->assertSessionHasErrors('risk_access_area_id');
+        $this->actingAs($user)->post('/app/risk/risks', $this->payload($finance))->assertSessionHasErrors('business_area_id');
 
         // Another tenant's area, or a made-up one, gets the same answer.
         ['customer' => $other] = $this->context();
         $foreign = $this->area($other, 'HR');
-        $this->actingAs($user)->post('/app/risk/risks', $this->payload($foreign))->assertSessionHasErrors('risk_access_area_id');
+        $this->actingAs($user)->post('/app/risk/risks', $this->payload($foreign))->assertSessionHasErrors('business_area_id');
 
         // An owner who could not open the risk.
         $this->actingAs($user)
@@ -202,7 +204,7 @@ class RiskAccessTest extends TestCase
 
         $this->assertDatabaseHas('risks', [
             'customer_id' => $customer->id,
-            'risk_access_area_id' => $hr->id,
+            'business_area_id' => $hr->id,
             'title' => 'Rekruttering',
             'owner_user_id' => $hrReader->id,
             'created_by' => $user->id,
@@ -249,13 +251,13 @@ class RiskAccessTest extends TestCase
         $this->assertFalse($props['permissions']['can_create']);
         // Pointed at Tilganger to give a role the area — which is not the same as seeing it.
         $this->assertTrue($props['access_setup']['customer_has_areas']);
-        $this->assertStringEndsWith('?tab=permissions#risk-access-areas', $props['access_setup']['manage_url']);
+        $this->assertStringEndsWith('?tab=permissions#business-areas', $props['access_setup']['manage_url']);
         $this->actingAs($owner)->get("/app/risk/risks/{$risk->id}")->assertNotFound();
 
         // The way in is a role, which System Owner may give themselves.
         $role = $this->role($customer, [CustomerPermissionCatalog::RISK_VIEW]);
         $this->actingAs($owner)
-            ->patch("/app/customer-environment/roles/{$role->id}", ['risk_access_area_ids' => [$hr->id]])
+            ->patch("/app/customer-environment/roles/{$role->id}", ['business_area_ids' => [$hr->id]])
             ->assertRedirect();
         // Assigning it is Rediger bruker's job, which allows it on one's own account; attached
         // directly here because that flow is not what this test is about.
@@ -296,64 +298,225 @@ class RiskAccessTest extends TestCase
         $member = $this->member($customer);
 
         $this->actingAs($member)
-            ->post('/app/customer-environment/risk-access-areas', ['name' => 'Beredskap'])
+            ->post('/app/customer-environment/business-areas', ['name' => 'Beredskap'])
             ->assertForbidden();
 
         $this->actingAs($owner)
-            ->post('/app/customer-environment/risk-access-areas', ['name' => 'Beredskap', 'description' => 'Kriser'])
+            ->post('/app/customer-environment/business-areas', ['name' => 'Beredskap', 'description' => 'Kriser'])
             ->assertRedirect();
-        $area = RiskAccessArea::query()->where('customer_id', $customer->id)->where('name', 'Beredskap')->firstOrFail();
+        $area = BusinessArea::query()->where('customer_id', $customer->id)->where('name', 'Beredskap')->firstOrFail();
 
         $this->actingAs($owner)
-            ->post('/app/customer-environment/risk-access-areas', ['name' => 'beredskap'])
+            ->post('/app/customer-environment/business-areas', ['name' => 'beredskap'])
             ->assertSessionHasErrors('name');
 
         // A role is created with risk permissions and the area in one save.
         $this->actingAs($owner)->post('/app/customer-environment/roles', [
             'name' => 'Beredskapsleder',
             'permissions' => [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::RISK_EDIT],
-            'risk_access_area_ids' => [$area->id],
+            'business_area_ids' => [$area->id],
         ])->assertRedirect();
         $role = CustomerRole::query()->where('customer_id', $customer->id)->where('name', 'Beredskapsleder')->firstOrFail();
-        $this->assertSame([$area->id], $role->riskAccessAreas()->pluck('risk_access_areas.id')->all());
+        $this->assertSame([$area->id], $role->businessAreas()->pluck('business_areas.id')->all());
 
         // Another tenant's area is dropped, never stored.
         ['customer' => $other] = $this->context();
         $foreign = $this->area($other, 'Beredskap');
         $this->actingAs($owner)
-            ->patch("/app/customer-environment/roles/{$role->id}", ['risk_access_area_ids' => [$area->id, $foreign->id]])
+            ->patch("/app/customer-environment/roles/{$role->id}", ['business_area_ids' => [$area->id, $foreign->id]])
             ->assertRedirect();
-        $this->assertSame([$area->id], $role->riskAccessAreas()->pluck('risk_access_areas.id')->all());
+        $this->assertSame([$area->id], $role->businessAreas()->pluck('business_areas.id')->all());
 
         // Toggling a permission checkbox does not touch the role's areas.
         $this->actingAs($owner)
             ->patch("/app/customer-environment/roles/{$role->id}", ['permissions' => [CustomerPermissionCatalog::RISK_VIEW]])
             ->assertRedirect();
-        $this->assertSame([$area->id], $role->riskAccessAreas()->pluck('risk_access_areas.id')->all());
+        $this->assertSame([$area->id], $role->businessAreas()->pluck('business_areas.id')->all());
 
         $props = $this->actingAs($owner)->get('/app/customer-environment?tab=permissions')->assertOk()->viewData('page')['props'];
         $customerRoles = $props['customerRoles'];
         $this->assertContains('risk', array_column($customerRoles['domains'], 'key'));
-        $this->assertSame(['Beredskap'], array_column($customerRoles['risk_access_areas'], 'name'));
-        $this->assertArrayNotHasKey('risk_count', $customerRoles['risk_access_areas'][0]);
+        $this->assertSame(['Beredskap'], array_column($customerRoles['business_areas'], 'name'));
+        $this->assertArrayNotHasKey('risk_count', $customerRoles['business_areas'][0]);
         $roleRow = collect($customerRoles['roles'])->firstWhere('id', $role->id);
-        $this->assertSame([$area->id], $roleRow['risk_access_area_ids']);
+        $this->assertSame([$area->id], $roleRow['business_area_ids']);
 
         // Another tenant's area is not found, not forbidden.
         $this->actingAs($owner)
-            ->patch("/app/customer-environment/risk-access-areas/{$foreign->id}", ['name' => 'Kapret'])
+            ->patch("/app/customer-environment/business-areas/{$foreign->id}", ['name' => 'Kapret'])
             ->assertNotFound();
 
         // An area holding risks is not deleted; an empty one is, and takes its role links along.
         $this->risk($customer, $area, 'Brann');
-        $this->actingAs($owner)->delete("/app/customer-environment/risk-access-areas/{$area->id}")->assertRedirect();
-        $this->assertDatabaseHas('risk_access_areas', ['id' => $area->id]);
+        $this->actingAs($owner)->delete("/app/customer-environment/business-areas/{$area->id}")->assertRedirect();
+        $this->assertDatabaseHas('business_areas', ['id' => $area->id]);
 
         $empty = $this->area($customer, 'HR');
-        $role->syncRiskAccessAreas([$area->id, $empty->id]);
-        $this->actingAs($owner)->delete("/app/customer-environment/risk-access-areas/{$empty->id}")->assertRedirect();
-        $this->assertDatabaseMissing('risk_access_areas', ['id' => $empty->id]);
-        $this->assertDatabaseMissing('customer_role_risk_access_areas', ['risk_access_area_id' => $empty->id]);
+        $role->syncBusinessAreas(false, [$area->id, $empty->id]);
+        $this->actingAs($owner)->delete("/app/customer-environment/business-areas/{$empty->id}")->assertRedirect();
+        $this->assertDatabaseMissing('business_areas', ['id' => $empty->id]);
+        $this->assertDatabaseMissing('customer_role_business_areas', ['business_area_id' => $empty->id]);
+    }
+
+    public function test_a_role_with_beredskap_sees_only_beredskap(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $beredskap = $this->area($customer, 'Beredskap');
+        $hr = $this->area($customer, 'HR');
+        $flood = $this->risk($customer, $beredskap, 'Flom');
+        $this->risk($customer, $hr, 'Sykefravær');
+
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [CustomerPermissionCatalog::RISK_VIEW], [$beredskap]);
+
+        $props = $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertSame([$flood->id], array_column($props['risks'], 'id'));
+        $this->assertSame(1, $props['visible_count']);
+    }
+
+    public function test_alle_reaches_every_area_including_one_created_later(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $beredskap = $this->area($customer, 'Beredskap');
+        $hr = $this->area($customer, 'HR');
+        $flood = $this->risk($customer, $beredskap, 'Flom');
+        $absence = $this->risk($customer, $hr, 'Sykefravær');
+
+        $user = $this->member($customer);
+        $role = $this->grantAll($customer, $user, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::RISK_CREATE]);
+
+        // «Alle» is the flag alone, never a snapshot of today's areas as links.
+        $this->assertTrue($role->fresh()->all_business_areas);
+        $this->assertSame(0, DB::table('customer_role_business_areas')->where('customer_role_id', $role->id)->count());
+
+        $props = $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertEqualsCanonicalizing([$flood->id, $absence->id], array_column($props['risks'], 'id'));
+        $this->assertSame(['Beredskap', 'HR'], array_column($props['area_options'], 'name'));
+
+        // An area created afterwards is reached without touching the role.
+        $finance = $this->area($customer, 'Økonomi');
+        $budget = $this->risk($customer, $finance, 'Budsjettsprekk');
+
+        $props = $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertEqualsCanonicalizing([$flood->id, $absence->id, $budget->id], array_column($props['risks'], 'id'));
+        $this->assertSame(3, $props['visible_count']);
+        $this->assertSame(['Beredskap', 'HR', 'Økonomi'], array_column($props['area_options'], 'name'));
+        $this->actingAs($user)->get("/app/risk/risks/{$budget->id}")->assertOk();
+        $this->actingAs($user)->post('/app/risk/risks', $this->payload($finance, 'Valutarisiko'))->assertRedirect();
+
+        // Another tenant's areas are not part of «Alle».
+        ['customer' => $other] = $this->context();
+        $foreign = $this->risk($other, $this->area($other, 'Beredskap'), 'Andres flom');
+        $this->actingAs($user)->get("/app/risk/risks/{$foreign->id}")->assertNotFound();
+
+        // A colleague scoped to Beredskap still sees only Beredskap — including after the new area.
+        $colleague = $this->member($customer);
+        $this->grant($customer, $colleague, [CustomerPermissionCatalog::RISK_VIEW], [$beredskap]);
+        $props = $this->actingAs($colleague)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertSame([$flood->id], array_column($props['risks'], 'id'));
+        $this->actingAs($colleague)->get("/app/risk/risks/{$budget->id}")->assertNotFound();
+    }
+
+    public function test_alle_never_combines_with_a_permission_from_another_role(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr, 'Arbeidsmiljø');
+
+        // Role A reads everywhere. Role B may edit, delete and create, but reaches no area.
+        $user = $this->member($customer);
+        $this->grantAll($customer, $user, [CustomerPermissionCatalog::RISK_VIEW]);
+        $this->grant($customer, $user, [
+            CustomerPermissionCatalog::RISK_EDIT,
+            CustomerPermissionCatalog::RISK_DELETE,
+            CustomerPermissionCatalog::RISK_CREATE,
+            CustomerPermissionCatalog::RISK_ASSESS,
+        ]);
+
+        $props = $this->actingAs($user)->get("/app/risk/risks/{$risk->id}")->assertOk()->viewData('page')['props'];
+        $this->assertFalse($props['permissions']['can_edit']);
+        $this->assertFalse($props['permissions']['can_delete']);
+        $this->assertFalse($props['permissions']['can_assess']);
+        $this->actingAs($user)->patch("/app/risk/risks/{$risk->id}", $this->payload($hr, 'Endret'))->assertForbidden();
+        $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")->assertForbidden();
+        $this->actingAs($user)->post('/app/risk/risks', $this->payload($hr))->assertSessionHasErrors('business_area_id');
+
+        // The other way round: «Alle» on a role without risk.view gives no read through another
+        // role's permission either.
+        $reader = $this->member($customer);
+        $this->grantAll($customer, $reader, [CustomerPermissionCatalog::RISK_EDIT]);
+        $this->grant($customer, $reader, [CustomerPermissionCatalog::RISK_VIEW]);
+        $props = $this->actingAs($reader)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertSame([], $props['risks']);
+        $this->actingAs($reader)->get("/app/risk/risks/{$risk->id}")->assertNotFound();
+    }
+
+    public function test_system_owner_sees_all_risks_only_through_an_explicit_role_with_alle(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $beredskap = $this->risk($customer, $this->area($customer, 'Beredskap'), 'Flom');
+        $hr = $this->risk($customer, $this->area($customer, 'HR'), 'Sykefravær');
+
+        // Holding every permission implicitly is not «Alle».
+        $props = $this->actingAs($owner)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertSame([], $props['risks']);
+        $this->assertSame(0, $props['visible_count']);
+        $this->actingAs($owner)->get("/app/risk/risks/{$hr->id}")->assertNotFound();
+
+        // A role with «Alle» but without risk.view does not help either: the implicit permission
+        // and the role's area never pair up.
+        $areasOnly = $this->role($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $areasOnly->syncBusinessAreas(true, []);
+        $owner->customerRoles()->attach($areasOnly->id, ['customer_id' => $customer->id]);
+        $props = $this->actingAs($owner)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertSame([], $props['risks']);
+
+        $this->grantAll($customer, $owner, [CustomerPermissionCatalog::RISK_VIEW]);
+        $props = $this->actingAs($owner)->get('/app/risk')->assertOk()->viewData('page')['props'];
+        $this->assertEqualsCanonicalizing([$beredskap->id, $hr->id], array_column($props['risks'], 'id'));
+        $this->actingAs($owner)->get("/app/risk/risks/{$hr->id}")->assertOk();
+    }
+
+    public function test_tilganger_sets_alle_as_a_flag_and_clears_it_back_to_chosen_areas(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $beredskap = $this->area($customer, 'Beredskap');
+        $this->area($customer, 'HR');
+        $role = $this->role($customer, [CustomerPermissionCatalog::RISK_VIEW], [$beredskap]);
+
+        $this->actingAs($owner)
+            ->patch("/app/customer-environment/roles/{$role->id}", ['all_business_areas' => true, 'business_area_ids' => [$beredskap->id]])
+            ->assertRedirect();
+        $role->refresh();
+        $this->assertTrue($role->all_business_areas);
+        // The explicit links are cleared, so the role carries one answer.
+        $this->assertSame([], $role->businessAreas()->pluck('business_areas.id')->all());
+
+        $props = $this->actingAs($owner)->get('/app/customer-environment?tab=permissions')->assertOk()->viewData('page')['props'];
+        $roleRow = collect($props['customerRoles']['roles'])->firstWhere('id', $role->id);
+        $this->assertTrue($roleRow['all_business_areas']);
+        $this->assertSame([], $roleRow['business_area_ids']);
+        $this->assertSame(['risk'], $props['customerRoles']['area_scoped_domains']);
+
+        // A permission checkbox leaves «Alle» alone.
+        $this->actingAs($owner)
+            ->patch("/app/customer-environment/roles/{$role->id}", ['permissions' => [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::RISK_EDIT]])
+            ->assertRedirect();
+        $this->assertTrue($role->fresh()->all_business_areas);
+
+        $this->actingAs($owner)
+            ->patch("/app/customer-environment/roles/{$role->id}", ['all_business_areas' => false, 'business_area_ids' => [$beredskap->id]])
+            ->assertRedirect();
+        $role->refresh();
+        $this->assertFalse($role->all_business_areas);
+        $this->assertSame([$beredskap->id], $role->businessAreas()->pluck('business_areas.id')->all());
+
+        // Only System Owner may set it.
+        $member = $this->member($customer);
+        $this->actingAs($member)
+            ->patch("/app/customer-environment/roles/{$role->id}", ['all_business_areas' => true])
+            ->assertForbidden();
+        $this->assertFalse($role->fresh()->all_business_areas);
     }
 
     public function test_the_rail_learns_risk_view_from_the_users_roles(): void
@@ -373,7 +536,7 @@ class RiskAccessTest extends TestCase
 
     /**
      * @param  list<string>  $permissionKeys
-     * @param  list<RiskAccessArea>  $areas
+     * @param  list<BusinessArea>  $areas
      */
     private function grant(Customer $customer, User $user, array $permissionKeys, array $areas = []): CustomerRole
     {
@@ -384,8 +547,22 @@ class RiskAccessTest extends TestCase
     }
 
     /**
+     * A role holding the permissions with Fagområder = «Alle», assigned to the user.
+     *
      * @param  list<string>  $permissionKeys
-     * @param  list<RiskAccessArea>  $areas
+     */
+    private function grantAll(Customer $customer, User $user, array $permissionKeys): CustomerRole
+    {
+        $role = $this->role($customer, $permissionKeys);
+        $role->syncBusinessAreas(true, []);
+        $user->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
+
+        return $role;
+    }
+
+    /**
+     * @param  list<string>  $permissionKeys
+     * @param  list<BusinessArea>  $areas
      */
     private function role(Customer $customer, array $permissionKeys, array $areas = []): CustomerRole
     {
@@ -396,33 +573,33 @@ class RiskAccessTest extends TestCase
         ]);
 
         $role->syncPermissions($permissionKeys);
-        $role->syncRiskAccessAreas(array_map(fn (RiskAccessArea $area): int => (int) $area->id, $areas));
+        $role->syncBusinessAreas(false, array_map(fn (BusinessArea $area): int => (int) $area->id, $areas));
 
         return $role;
     }
 
-    private function area(Customer $customer, string $name): RiskAccessArea
+    private function area(Customer $customer, string $name): BusinessArea
     {
-        return RiskAccessArea::query()->create(['customer_id' => $customer->id, 'name' => $name]);
+        return BusinessArea::query()->create(['customer_id' => $customer->id, 'name' => $name]);
     }
 
-    private function risk(Customer $customer, RiskAccessArea $area, string $title): Risk
+    private function risk(Customer $customer, BusinessArea $area, string $title): Risk
     {
         return Risk::query()->create([
             'customer_id' => $customer->id,
-            'risk_access_area_id' => $area->id,
+            'business_area_id' => $area->id,
             'title' => $title,
             'status' => Risk::STATUS_IDENTIFIED,
         ]);
     }
 
     /** @return array<string, mixed> */
-    private function payload(RiskAccessArea $area, string $title = 'Ny risiko'): array
+    private function payload(BusinessArea $area, string $title = 'Ny risiko'): array
     {
         return [
             'title' => $title,
             'description' => 'Kort beskrivelse',
-            'risk_access_area_id' => $area->id,
+            'business_area_id' => $area->id,
             'owner_user_id' => null,
             'status' => Risk::STATUS_IDENTIFIED,
         ];

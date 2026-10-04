@@ -2,7 +2,7 @@ import { router, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
 import { rolesInDomain } from './customerRoleMatrix';
-import RiskAccessAreasPanel from './RiskAccessAreasPanel';
+import BusinessAreasPanel from './BusinessAreasPanel';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -22,6 +22,11 @@ function classNames(...values) {
  * presentation alone: the role list below shows every role, and the edit dialog always offers both
  * permission groups, so extending a role into the other domain stays one checkbox away.
  *
+ * Where a role's rights apply is its Fagområder: «Alle» (every area, also ones created later) or
+ * a chosen set. It is one field on the role, shown as a column only in the domains that are scoped
+ * by fagområde today (Risiko), so an administrator reads «what may this role do, and where» on
+ * one row without learning a separate access mechanism.
+ *
  * This panel defines roles; it does not hand them out. Assignment lives on Rediger bruker, where
  * the rest of a person's identity is set, so an administrator answers "what is this person" in one
  * place and on one save.
@@ -31,14 +36,23 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         domains = [],
         roles = [],
         store_url: storeUrl,
-        risk_access_areas: riskAccessAreas = [],
-        risk_access_areas_store_url: riskAccessAreasStoreUrl,
-        risk_domain: riskDomain = 'risk',
+        business_areas: businessAreas = [],
+        business_areas_store_url: businessAreasStoreUrl,
+        area_scoped_domains: areaScopedDomains = [],
     } = customerRoles;
-    const tra = t.risk_areas ?? {};
-    const areaNames = (role) => riskAccessAreas
-        .filter((area) => (role.risk_access_area_ids ?? []).includes(area.id))
-        .map((area) => area.name);
+    const tba = t.business_areas ?? {};
+    const isAreaScoped = (domain) => areaScopedDomains.includes(domain.key);
+    const areaSummary = (role) => {
+        if (role.all_business_areas) {
+            return t.areas_all ?? 'Alle';
+        }
+
+        const names = businessAreas
+            .filter((area) => (role.business_area_ids ?? []).includes(area.id))
+            .map((area) => area.name);
+
+        return names.length > 0 ? names.join(', ') : (t.areas_none ?? 'Ingen');
+    };
 
     const [roleModal, setRoleModal] = useState({ mode: null, role: null });
     const [savingRoleId, setSavingRoleId] = useState(null);
@@ -48,12 +62,13 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         description: '',
         is_active: true,
         permissions: [],
-        risk_access_area_ids: [],
+        all_business_areas: false,
+        business_area_ids: [],
     });
 
     const openCreateRole = () => {
         roleForm.clearErrors();
-        roleForm.setData({ name: '', description: '', is_active: true, permissions: [], risk_access_area_ids: [] });
+        roleForm.setData({ name: '', description: '', is_active: true, permissions: [], all_business_areas: false, business_area_ids: [] });
         setRoleModal({ mode: 'create', role: null });
     };
 
@@ -64,7 +79,8 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
             description: role.description ?? '',
             is_active: role.is_active,
             permissions: [...role.permission_keys],
-            risk_access_area_ids: [...(role.risk_access_area_ids ?? [])],
+            all_business_areas: Boolean(role.all_business_areas),
+            business_area_ids: [...(role.business_area_ids ?? [])],
         });
         setRoleModal({ mode: 'edit', role });
     };
@@ -142,10 +158,10 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
     };
 
     const toggleFormArea = (areaId) => {
-        const current = roleForm.data.risk_access_area_ids ?? [];
+        const current = roleForm.data.business_area_ids ?? [];
 
         roleForm.setData(
-            'risk_access_area_ids',
+            'business_area_ids',
             current.includes(areaId)
                 ? current.filter((id) => id !== areaId)
                 : [...current, areaId],
@@ -205,9 +221,9 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                                 {permission.label}
                                                             </th>
                                                         ))}
-                                                        {domain.key === riskDomain ? (
+                                                        {isAreaScoped(domain) ? (
                                                             <th className="px-3 pb-3 text-left text-sm font-semibold leading-5 text-slate-600">
-                                                                {t.col_risk_areas ?? 'Tilgangsområder'}
+                                                                {t.col_areas ?? 'Fagområder'}
                                                             </th>
                                                         ) : null}
                                                     </tr>
@@ -238,11 +254,16 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                                     </td>
                                                                 );
                                                             })}
-                                                            {domain.key === riskDomain ? (
+                                                            {isAreaScoped(domain) ? (
                                                                 <td className="px-3 py-4 text-base text-slate-700">
-                                                                    {areaNames(role).length > 0
-                                                                        ? areaNames(role).join(', ')
-                                                                        : (t.no_risk_areas_on_role ?? 'Ingen')}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openEditRole(role)}
+                                                                        title={t.areas_edit ?? 'Endre fagområder'}
+                                                                        className="rounded-lg text-left underline decoration-slate-300 underline-offset-4 hover:text-violet-700 hover:decoration-violet-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                                                    >
+                                                                        {areaSummary(role)}
+                                                                    </button>
                                                                 </td>
                                                             ) : null}
                                                         </tr>
@@ -334,12 +355,13 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                 )}
             </div>
 
-            <RiskAccessAreasPanel
-                areas={riskAccessAreas}
+            <BusinessAreasPanel
+                areas={businessAreas}
                 roles={roles}
-                storeUrl={riskAccessAreasStoreUrl}
+                storeUrl={businessAreasStoreUrl}
                 modal={Modal}
-                t={tra}
+                t={tba}
+                tAll={t.areas_all ?? 'Alle'}
             />
 
             <Modal
@@ -425,48 +447,93 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                         );
                                     })}
                                 </div>
-                                {domain.key === riskDomain ? (
-                                    <div className="mt-4 border-t border-slate-200 pt-4">
-                                        <p className="text-base font-semibold text-slate-800">{t.field_risk_areas ?? 'Tilgangsområder for risiko'}</p>
-                                        <p className="mt-1 text-base leading-6 text-slate-600">
-                                            {t.field_risk_areas_hint ?? 'Rettighetene over gjelder bare risikoer i områdene som er valgt her.'}
-                                        </p>
-                                        {riskAccessAreas.length === 0 ? (
-                                            <p className="mt-3 text-base text-slate-500">
-                                                {tra.none_to_choose ?? 'Opprett et tilgangsområde før en rolle kan nå risikoer.'}
-                                            </p>
-                                        ) : (
-                                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                                {riskAccessAreas.map((area) => {
-                                                    const checked = (roleForm.data.risk_access_area_ids ?? []).includes(area.id);
-
-                                                    return (
-                                                        <label
-                                                            key={area.id}
-                                                            className={classNames(
-                                                                'flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-base transition',
-                                                                checked
-                                                                    ? 'border-violet-300 bg-violet-50 text-violet-900'
-                                                                    : 'border-slate-200 text-slate-700 hover:border-slate-300',
-                                                            )}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={checked}
-                                                                onChange={() => toggleFormArea(area.id)}
-                                                                className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300"
-                                                            />
-                                                            {area.name}
-                                                        </label>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : null}
                             </div>
                         ))}
                     </div>
+
+                    <fieldset className="rounded-2xl border border-slate-200 p-4">
+                        <legend className="px-1 text-base font-semibold text-slate-900">{t.field_areas ?? 'Fagområder'}</legend>
+                        <p className="text-base leading-6 text-slate-600">
+                            {t.field_areas_hint ?? 'Fagområder brukes til å bestemme hvilke deler av virksomheten en rolle kan se og arbeide med.'}
+                        </p>
+                        <div className="mt-3 space-y-2">
+                            <label
+                                className={classNames(
+                                    'flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 text-base transition',
+                                    roleForm.data.all_business_areas
+                                        ? 'border-violet-300 bg-violet-50 text-violet-900'
+                                        : 'border-slate-200 text-slate-700 hover:border-slate-300',
+                                )}
+                            >
+                                <input
+                                    type="radio"
+                                    name="customer-role-areas"
+                                    checked={roleForm.data.all_business_areas}
+                                    onChange={() => roleForm.setData('all_business_areas', true)}
+                                    className="mt-1 h-4 w-4 cursor-pointer border-slate-300 text-violet-600 focus:ring-violet-300"
+                                />
+                                <span>
+                                    <span className="block font-semibold">{t.areas_all ?? 'Alle'}</span>
+                                    <span className="block leading-6 text-slate-600">
+                                        {t.areas_all_hint ?? 'Også fagområder som opprettes senere.'}
+                                    </span>
+                                </span>
+                            </label>
+                            <label
+                                className={classNames(
+                                    'flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 text-base transition',
+                                    !roleForm.data.all_business_areas
+                                        ? 'border-violet-300 bg-violet-50 text-violet-900'
+                                        : 'border-slate-200 text-slate-700 hover:border-slate-300',
+                                )}
+                            >
+                                <input
+                                    type="radio"
+                                    name="customer-role-areas"
+                                    checked={!roleForm.data.all_business_areas}
+                                    onChange={() => roleForm.setData('all_business_areas', false)}
+                                    className="mt-1 h-4 w-4 cursor-pointer border-slate-300 text-violet-600 focus:ring-violet-300"
+                                />
+                                <span className="block font-semibold">{t.areas_selected ?? 'Valgte fagområder'}</span>
+                            </label>
+                        </div>
+                        {!roleForm.data.all_business_areas ? (
+                            businessAreas.length === 0 ? (
+                                <p className="mt-3 text-base text-slate-500">
+                                    {tba.none_to_choose ?? 'Ingen fagområder er opprettet ennå.'}
+                                </p>
+                            ) : (
+                                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                    {businessAreas.map((area) => {
+                                        const checked = (roleForm.data.business_area_ids ?? []).includes(area.id);
+
+                                        return (
+                                            <label
+                                                key={area.id}
+                                                className={classNames(
+                                                    'flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-base transition',
+                                                    checked
+                                                        ? 'border-violet-300 bg-violet-50 text-violet-900'
+                                                        : 'border-slate-200 text-slate-700 hover:border-slate-300',
+                                                )}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={() => toggleFormArea(area.id)}
+                                                    className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                                                />
+                                                {area.name}
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            )
+                        ) : null}
+                        <p className="mt-3 text-base leading-6 text-slate-500">
+                            {t.field_areas_scope_note ?? 'Brukes i dag av Risiko.'}
+                        </p>
+                    </fieldset>
 
                     <div className="flex flex-wrap justify-end gap-3">
                         <button

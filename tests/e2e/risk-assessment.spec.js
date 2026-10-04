@@ -15,9 +15,9 @@ test('a fagperson with risk.assess but not risk.edit assesses a risk and keeps i
     await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
 
     await page.goto('/app/customer-environment?tab=permissions');
-    await page.getByRole('button', { name: 'Nytt område' }).click();
-    await page.locator('#risk-area-name').fill(areaName);
-    await page.getByRole('button', { name: 'Lagre område' }).click();
+    await page.getByRole('button', { name: 'Nytt fagområde' }).click();
+    await page.locator('#business-area-name').fill(areaName);
+    await page.getByRole('button', { name: 'Lagre fagområde' }).click();
     await expect(page.locator('tbody tr', { hasText: areaName })).toBeVisible();
 
     await page.getByRole('button', { name: 'Ny rolle' }).click();

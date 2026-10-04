@@ -43,8 +43,9 @@ class CustomerRoleController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'permissions' => ['present', 'array'],
             'permissions.*' => ['string', Rule::in(CustomerPermissionCatalog::all())],
-            'risk_access_area_ids' => ['sometimes', 'array'],
-            'risk_access_area_ids.*' => ['integer'],
+            'all_business_areas' => ['sometimes', 'boolean'],
+            'business_area_ids' => ['sometimes', 'array'],
+            'business_area_ids.*' => ['integer'],
         ]);
 
         $name = trim($validated['name']);
@@ -60,8 +61,11 @@ class CustomerRoleController extends Controller
 
             $role->syncPermissions($validated['permissions']);
 
-            if (array_key_exists('risk_access_area_ids', $validated)) {
-                $role->syncRiskAccessAreas($validated['risk_access_area_ids']);
+            if (array_key_exists('all_business_areas', $validated) || array_key_exists('business_area_ids', $validated)) {
+                $role->syncBusinessAreas(
+                    (bool) ($validated['all_business_areas'] ?? false),
+                    $validated['business_area_ids'] ?? [],
+                );
             }
         });
 
@@ -86,11 +90,13 @@ class CustomerRoleController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'permissions' => ['sometimes', 'present', 'array'],
             'permissions.*' => ['string', Rule::in(CustomerPermissionCatalog::all())],
-            // Which risks the role reaches. Same partial semantics as `permissions`: absent leaves
-            // the set alone, an empty array clears it. Ids of another tenant are dropped by
-            // syncRiskAccessAreas(), never stored.
-            'risk_access_area_ids' => ['sometimes', 'present', 'array'],
-            'risk_access_area_ids.*' => ['integer'],
+            // Where the role's rights apply: «Alle», or the listed fagområder. Same partial
+            // semantics as `permissions`: both absent leaves the scope alone; sending either sets
+            // it as a whole (a missing flag means not «Alle», missing ids mean none). Ids of
+            // another tenant are dropped by syncBusinessAreas(), never stored.
+            'all_business_areas' => ['sometimes', 'boolean'],
+            'business_area_ids' => ['sometimes', 'present', 'array'],
+            'business_area_ids.*' => ['integer'],
         ]);
 
         if (array_key_exists('name', $validated)) {
@@ -121,8 +127,11 @@ class CustomerRoleController extends Controller
                 $customerRole->syncPermissions($validated['permissions']);
             }
 
-            if (array_key_exists('risk_access_area_ids', $validated)) {
-                $customerRole->syncRiskAccessAreas($validated['risk_access_area_ids']);
+            if (array_key_exists('all_business_areas', $validated) || array_key_exists('business_area_ids', $validated)) {
+                $customerRole->syncBusinessAreas(
+                    (bool) ($validated['all_business_areas'] ?? false),
+                    $validated['business_area_ids'] ?? [],
+                );
             }
         });
 

@@ -17,7 +17,7 @@ use Illuminate\Validation\Rule;
  * deleted, and a correction is simply the next one.
  *
  * Access is the risk's. The risk is looked up through RiskAccessService::visibleRisks(), so a risk
- * outside the user's tilgangsområder is a 404 here exactly as on its page. Seeing it is not enough
+ * outside the user's fagområder is a 404 here exactly as on its page. Seeing it is not enough
  * to assess it: that takes risk.assess from a role that reaches the risk's area — the same pair
  * rule as every other risk permission. risk.edit is neither needed nor sufficient.
  */

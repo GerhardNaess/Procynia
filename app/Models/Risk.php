@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * A risk in the customer's risk register.
  *
- * What the risk is, who owns it, which tilgangsområde it belongs to and where it stands. How
+ * What the risk is, who owns it, which fagområde it belongs to and where it stands. How
  * serious it is lives in its assessments — a history of RiskAssessment rows, never fields here —
  * and status says where the risk is in its lifecycle, not how high it is.
  *
@@ -35,7 +35,7 @@ class Risk extends Model
 
     protected $fillable = [
         'customer_id',
-        'risk_access_area_id',
+        'business_area_id',
         'title',
         'description',
         'owner_user_id',
@@ -49,9 +49,10 @@ class Risk extends Model
         return $this->belongsTo(Customer::class);
     }
 
-    public function accessArea(): BelongsTo
+    /** The risk's primary fagområde — the scope that decides who can reach it. */
+    public function businessArea(): BelongsTo
     {
-        return $this->belongsTo(RiskAccessArea::class, 'risk_access_area_id');
+        return $this->belongsTo(BusinessArea::class);
     }
 
     public function owner(): BelongsTo

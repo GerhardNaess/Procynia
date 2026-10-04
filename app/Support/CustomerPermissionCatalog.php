@@ -44,7 +44,7 @@ final class CustomerPermissionCatalog
 
     /*
      * Risiko. Unlike the other domains these say what a role may do, never where: a risk is only
-     * reached through a tilgangsområde the same role carries. See RiskAccessService.
+     * reached through a fagområde the same role reaches. See RiskAccessService.
      */
     public const RISK_VIEW = 'risk.view';
 

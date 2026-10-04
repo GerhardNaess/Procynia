@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
 
 /**
- * System Owner with no role reaching a risk area is not told to ask System Owner: the empty
+ * System Owner with no role reaching a fagområde is not told to ask System Owner: the empty
  * register sends them to Kundemiljø → Tilganger, where they give their own role an area, and the
  * register opens. Nothing is granted implicitly — the role is what lets them in.
  */
@@ -15,17 +15,17 @@ test('system owner goes from the empty register to Tilganger and back with acces
 
     await page.goto('/app/risk');
     await expect(page.getByText('Be System Owner gi')).toHaveCount(0);
-    const cta = page.getByRole('link', { name: /^(Opprett risikoområde|Administrer risikotilgang)$/ });
+    const cta = page.getByRole('link', { name: /^(Opprett fagområde|Administrer risikotilgang)$/ });
     await expect(cta).toBeVisible();
     await page.screenshot({ path: 'test-results/risk-owner-empty.png', fullPage: true });
 
     await cta.click();
-    await page.waitForURL(/\/app\/customer-environment\?tab=permissions#risk-access-areas$/);
-    await expect(page.locator('#risk-access-areas')).toBeInViewport();
+    await page.waitForURL(/\/app\/customer-environment\?tab=permissions#business-areas$/);
+    await expect(page.locator('#business-areas')).toBeInViewport();
 
-    await page.getByRole('button', { name: 'Nytt område' }).click();
-    await page.locator('#risk-area-name').fill(areaName);
-    await page.getByRole('button', { name: 'Lagre område' }).click();
+    await page.getByRole('button', { name: 'Nytt fagområde' }).click();
+    await page.locator('#business-area-name').fill(areaName);
+    await page.getByRole('button', { name: 'Lagre fagområde' }).click();
     await expect(page.locator('tbody tr', { hasText: areaName })).toBeVisible();
 
     await page.getByRole('button', { name: 'Ny rolle' }).click();
@@ -49,7 +49,7 @@ test('system owner goes from the empty register to Tilganger and back with acces
 
     await page.goto('/app/risk');
     await expect(cta).toHaveCount(0);
-    await expect(page.getByText('Du ser risikoene i tilgangsområdene rollene dine gir deg.')).toBeVisible();
+    await expect(page.getByText('Du ser risikoene i fagområdene rollene dine gir deg.')).toBeVisible();
     await expect(page.getByPlaceholder('Søk i tittel og beskrivelse')).toBeVisible();
     await page.screenshot({ path: 'test-results/risk-owner-access.png', fullPage: true });
 

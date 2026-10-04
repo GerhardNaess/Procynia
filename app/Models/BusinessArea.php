@@ -9,12 +9,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * A tilgangsområde for risks — «Beredskap», «HR», «Økonomi» — named by the customer.
+ * A fagområde — «Beredskap», «Informasjonssikkerhet», «HR», «Økonomi» — named by the customer.
  *
- * It decides *which* risks a role reaches; the role's permission keys decide *what* it may do with
- * them. It is never a role of its own. See the create_risk_tables migration.
+ * It says *where* a role's rights apply; the role's permission keys say *what* it may do. It is
+ * never a role of its own, and it is a concept of the customer, not of any one module. Risiko is
+ * so far the only module that scopes by it (every risk has one primary fagområde). A role reaches
+ * an area through an explicit link or through CustomerRole::$all_business_areas («Alle»), which
+ * is never expanded into links. See the generalize_risk_access_areas_to_business_areas migration.
  */
-class RiskAccessArea extends Model
+class BusinessArea extends Model
 {
     protected $fillable = [
         'customer_id',
@@ -27,9 +30,10 @@ class RiskAccessArea extends Model
         return $this->belongsTo(Customer::class);
     }
 
+    /** Roles linked to this area explicitly. Roles with «Alle» reach it without a row here. */
     public function roles(): BelongsToMany
     {
-        return $this->belongsToMany(CustomerRole::class, 'customer_role_risk_access_areas', 'risk_access_area_id', 'customer_role_id')
+        return $this->belongsToMany(CustomerRole::class, 'customer_role_business_areas', 'business_area_id', 'customer_role_id')
             ->withTimestamps();
     }
 

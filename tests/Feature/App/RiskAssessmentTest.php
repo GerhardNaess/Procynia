@@ -2,13 +2,13 @@
 
 namespace Tests\Feature\App;
 
+use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Risk;
-use App\Models\RiskAccessArea;
 use App\Models\RiskAssessment;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -141,7 +141,7 @@ class RiskAssessmentTest extends TestCase
         // Assessing is not rewriting the risk.
         $this->actingAs($assessor)->patch("/app/risk/risks/{$risk->id}", [
             'title' => 'Omskrevet',
-            'risk_access_area_id' => $hr->id,
+            'business_area_id' => $hr->id,
             'status' => Risk::STATUS_IDENTIFIED,
         ])->assertForbidden();
         $this->assertDatabaseHas('risks', ['id' => $risk->id, 'title' => 'Sykefravær']);
@@ -325,7 +325,7 @@ class RiskAssessmentTest extends TestCase
 
     /**
      * @param  list<string>  $permissionKeys
-     * @param  list<RiskAccessArea>  $areas
+     * @param  list<BusinessArea>  $areas
      */
     private function grant(Customer $customer, User $user, array $permissionKeys, array $areas = []): CustomerRole
     {
@@ -337,7 +337,7 @@ class RiskAssessmentTest extends TestCase
 
     /**
      * @param  list<string>  $permissionKeys
-     * @param  list<RiskAccessArea>  $areas
+     * @param  list<BusinessArea>  $areas
      */
     private function role(Customer $customer, array $permissionKeys, array $areas = []): CustomerRole
     {
@@ -348,21 +348,21 @@ class RiskAssessmentTest extends TestCase
         ]);
 
         $role->syncPermissions($permissionKeys);
-        $role->syncRiskAccessAreas(array_map(fn (RiskAccessArea $area): int => (int) $area->id, $areas));
+        $role->syncBusinessAreas(false, array_map(fn (BusinessArea $area): int => (int) $area->id, $areas));
 
         return $role;
     }
 
-    private function area(Customer $customer, string $name): RiskAccessArea
+    private function area(Customer $customer, string $name): BusinessArea
     {
-        return RiskAccessArea::query()->create(['customer_id' => $customer->id, 'name' => $name]);
+        return BusinessArea::query()->create(['customer_id' => $customer->id, 'name' => $name]);
     }
 
-    private function risk(Customer $customer, RiskAccessArea $area, string $title): Risk
+    private function risk(Customer $customer, BusinessArea $area, string $title): Risk
     {
         return Risk::query()->create([
             'customer_id' => $customer->id,
-            'risk_access_area_id' => $area->id,
+            'business_area_id' => $area->id,
             'title' => $title,
             'status' => Risk::STATUS_IDENTIFIED,
         ]);

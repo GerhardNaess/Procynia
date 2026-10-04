@@ -16,7 +16,7 @@ use Illuminate\Http\Request;
  * Linking a risk to an existing Kvalitet control, and removing that link.
  *
  * The risk is looked up through RiskAccessService::visibleRisks(), so a risk outside the user's
- * tilgangsområder is a 404 here exactly as on its page. Changing what handles a risk is editing
+ * fagområder is a 404 here exactly as on its page. Changing what handles a risk is editing
  * the risk: it takes risk.edit in the risk's area. And because the page then shows the control,
  * the person must be able to read controls in Kvalitet as well (RiskControlService).
  */

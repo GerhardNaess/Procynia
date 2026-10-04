@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\Department;
-use App\Models\RiskAccessArea;
 use App\Models\User;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -155,7 +155,7 @@ class CustomerEnvironmentController extends Controller
     {
         $roles = CustomerRole::query()
             ->forCustomer($customerId)
-            ->with(['permissions', 'riskAccessAreas:id'])
+            ->with(['permissions', 'businessAreas:id'])
             ->withCount('users')
             ->orderByDesc('is_active')
             ->orderBy('name')
@@ -166,7 +166,8 @@ class CustomerEnvironmentController extends Controller
                 'description' => $role->description,
                 'is_active' => (bool) $role->is_active,
                 'permission_keys' => $role->permissionKeys(),
-                'risk_access_area_ids' => $role->riskAccessAreas
+                'all_business_areas' => (bool) $role->all_business_areas,
+                'business_area_ids' => $role->all_business_areas ? [] : $role->businessAreas
                     ->pluck('id')
                     ->map(fn (mixed $id): int => (int) $id)
                     ->values()
@@ -191,18 +192,18 @@ class CustomerEnvironmentController extends Controller
             ->values()
             ->all();
 
-        // Tilgangsområder for Risiko: named here, reached through the roles above. Deliberately
-        // without risk counts — the administrator of roles is not thereby a reader of risks.
-        $riskAccessAreas = RiskAccessArea::query()
+        // Fagområder: named here, reached through the roles above. Deliberately without risk
+        // counts — the administrator of roles is not thereby a reader of risks.
+        $businessAreas = BusinessArea::query()
             ->forCustomer($customerId)
             ->orderBy('name')
             ->get()
-            ->map(fn (RiskAccessArea $area): array => [
+            ->map(fn (BusinessArea $area): array => [
                 'id' => (int) $area->id,
                 'name' => $area->name,
                 'description' => $area->description,
-                'update_url' => route('app.customer-environment.risk-access-areas.update', ['riskAccessArea' => $area->id]),
-                'delete_url' => route('app.customer-environment.risk-access-areas.destroy', ['riskAccessArea' => $area->id]),
+                'update_url' => route('app.customer-environment.business-areas.update', ['businessArea' => $area->id]),
+                'delete_url' => route('app.customer-environment.business-areas.destroy', ['businessArea' => $area->id]),
             ])
             ->all();
 
@@ -210,11 +211,11 @@ class CustomerEnvironmentController extends Controller
             'domains' => $domains,
             'roles' => $roles,
             'store_url' => route('app.customer-environment.roles.store'),
-            'risk_access_areas' => $riskAccessAreas,
-            'risk_access_areas_store_url' => route('app.customer-environment.risk-access-areas.store'),
-            // The domain whose roles carry tilgangsområder, so the page knows where to offer them
-            // without hardcoding a key.
-            'risk_domain' => CustomerPermissionCatalog::DOMAIN_RISK,
+            'business_areas' => $businessAreas,
+            'business_areas_store_url' => route('app.customer-environment.business-areas.store'),
+            // The domains whose rights are scoped by fagområde today, so the page shows the
+            // Fagområder column there and nowhere else. Kvalitet and Wiki are not scoped (yet).
+            'area_scoped_domains' => [CustomerPermissionCatalog::DOMAIN_RISK],
         ];
     }
 

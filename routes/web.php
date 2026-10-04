@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\BillingController;
+use App\Http\Controllers\App\BusinessAreaController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\CustomerRoleController;
 use App\Http\Controllers\App\DashboardController;
@@ -14,7 +15,6 @@ use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\QualityController;
-use App\Http\Controllers\App\RiskAccessAreaController;
 use App\Http\Controllers\App\RiskAssessmentController;
 use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
@@ -296,7 +296,7 @@ Route::prefix('app')
         });
         // Risiko. Named under `app.risk.`, which config/procynia_modules.php maps to the `risk`
         // module. Risks are addressed by a plain id and resolved through RiskAccessService, never
-        // by implicit model binding: a risk outside the user's tilgangsområder must be a 404
+        // by implicit model binding: a risk outside the user's fagområder must be a 404
         // exactly like an id that does not exist.
         Route::prefix('/risk')->name('risk.')->group(function (): void {
             Route::get('/', [RiskController::class, 'index'])->name('index');
@@ -324,14 +324,14 @@ Route::prefix('app')
         Route::delete('/customer-environment/roles/{customerRole}', [CustomerRoleController::class, 'destroy'])
             ->name('customer-environment.roles.destroy');
 
-        // Tilgangsområder for Risiko. Named here, attached to roles on the role itself. System
+        // Fagområder. Named here, attached to roles on the role itself (or reached with «Alle»). System
         // Owner only, enforced in the controller — the same gate as the roles beside them.
-        Route::post('/customer-environment/risk-access-areas', [RiskAccessAreaController::class, 'store'])
-            ->name('customer-environment.risk-access-areas.store');
-        Route::patch('/customer-environment/risk-access-areas/{riskAccessArea}', [RiskAccessAreaController::class, 'update'])
-            ->name('customer-environment.risk-access-areas.update');
-        Route::delete('/customer-environment/risk-access-areas/{riskAccessArea}', [RiskAccessAreaController::class, 'destroy'])
-            ->name('customer-environment.risk-access-areas.destroy');
+        Route::post('/customer-environment/business-areas', [BusinessAreaController::class, 'store'])
+            ->name('customer-environment.business-areas.store');
+        Route::patch('/customer-environment/business-areas/{businessArea}', [BusinessAreaController::class, 'update'])
+            ->name('customer-environment.business-areas.update');
+        Route::delete('/customer-environment/business-areas/{businessArea}', [BusinessAreaController::class, 'destroy'])
+            ->name('customer-environment.business-areas.destroy');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');

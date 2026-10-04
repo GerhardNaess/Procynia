@@ -76,7 +76,7 @@ export const APP_MODULES = [
         built: true,
         module: 'risk',
         // RiskController refuses the page without this key. Which risks the person then sees is a
-        // second, server-side question (tilgangsområder) the rail never answers.
+        // second, server-side question (fagområder) the rail never answers.
         permission: 'risk.view',
         label: (m) => m.risk ?? 'Risiko',
         areas: ['risk'],

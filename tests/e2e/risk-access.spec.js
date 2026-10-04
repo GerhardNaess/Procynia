@@ -2,11 +2,11 @@ import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
 
 /**
- * Risiko, end to end: System Owner names a tilgangsområde and a role that reaches it in
+ * Risiko, end to end: System Owner names a fagområde and a role that reaches it in
  * Kundemiljø → Tilganger, hands the role to an ordinary user, and that user registers and reads a
  * risk. System Owner alone reads no risks — the implicit full grant carries no area.
  */
-test('a role with a tilgangsområde lets its holder register and read risks there', async ({ page }) => {
+test('a role with a fagområde lets its holder register and read risks there', async ({ page }) => {
     const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     const areaName = `E2E Beredskap ${suffix}`;
     const roleName = `E2E Risikoansvarlig ${suffix}`;
@@ -18,14 +18,14 @@ test('a role with a tilgangsområde lets its holder register and read risks ther
     await page.goto('/app/risk');
     await expect(page.getByRole('heading', { name: 'Risikoregister' })).toBeVisible();
     // Whether areas exist yet depends on earlier runs; either way System Owner is sent to Tilganger.
-    await expect(page.getByText(/^(Ingen risikoområder er opprettet ennå|Du har ikke tilgang til noen risikoområder ennå)$/)).toBeVisible();
+    await expect(page.getByText(/^(Ingen fagområder er opprettet ennå|Du har ikke tilgang til noen fagområder i Risiko ennå)$/)).toBeVisible();
 
     // Name the area.
     await page.goto('/app/customer-environment?tab=permissions');
-    await expect(page.getByRole('heading', { name: 'Tilgangsområder for risiko' })).toBeVisible();
-    await page.getByRole('button', { name: 'Nytt område' }).click();
-    await page.locator('#risk-area-name').fill(areaName);
-    await page.getByRole('button', { name: 'Lagre område' }).click();
+    await expect(page.getByRole('heading', { name: 'Fagområder', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Nytt fagområde' }).click();
+    await page.locator('#business-area-name').fill(areaName);
+    await page.getByRole('button', { name: 'Lagre fagområde' }).click();
     await expect(page.locator('tbody tr', { hasText: areaName })).toBeVisible();
 
     // A role with Risiko permissions that reaches the area.
@@ -38,6 +38,18 @@ test('a role with a tilgangsområde lets its holder register and read risks ther
 
     // The Risiko table shows the role with its area, and the area lists the role.
     await expect(page.locator('tr', { hasText: roleName }).filter({ hasText: areaName }).first()).toBeVisible();
+
+    // A second role with Fagområder = Alle reads as «Alle» in the Risiko table and is listed on
+    // every area, including the one just created.
+    const allRoleName = `E2E Risikoleser alle ${suffix}`;
+    await page.getByRole('button', { name: 'Ny rolle' }).click();
+    await page.locator('#customer-role-name').fill(allRoleName);
+    await page.getByRole('checkbox', { name: 'Se risikoer', exact: true }).check();
+    await page.getByRole('radio', { name: /^Alle/ }).check();
+    await expect(page.getByRole('checkbox', { name: areaName, exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Lagre rolle' }).click();
+    await expect(page.locator('tr', { hasText: allRoleName }).getByRole('button', { name: 'Alle', exact: true })).toBeVisible();
+    await expect(page.locator('#business-areas tbody tr', { hasText: areaName })).toContainText(`${allRoleName} (Alle)`);
     await page.screenshot({ path: 'test-results/risk-tilganger.png', fullPage: true });
 
     // Hand the role to the ordinary user.

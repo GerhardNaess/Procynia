@@ -10,14 +10,14 @@ const LABEL = 'block text-sm font-semibold text-slate-700';
  * server, which checks them again on save.
  */
 export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, tr }) {
-    const owners = ownersForArea(ownerOptions, form.data.risk_access_area_id);
+    const owners = ownersForArea(ownerOptions, form.data.business_area_id);
 
     const changeArea = (value) => {
         const stillAllowed = ownersForArea(ownerOptions, value).some((owner) => String(owner.id) === String(form.data.owner_user_id));
 
         form.setData((data) => ({
             ...data,
-            risk_access_area_id: value,
+            business_area_id: value,
             owner_user_id: stillAllowed ? data.owner_user_id : '',
         }));
     };
@@ -50,10 +50,10 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
 
             <div className="grid gap-4 md:grid-cols-3">
                 <div>
-                    <label htmlFor="risk-area" className={LABEL}>{tr.field_area ?? 'Tilgangsområde'}</label>
+                    <label htmlFor="risk-area" className={LABEL}>{tr.field_area ?? 'Fagområde'}</label>
                     <select
                         id="risk-area"
-                        value={form.data.risk_access_area_id}
+                        value={form.data.business_area_id}
                         onChange={(event) => changeArea(event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     >
@@ -63,7 +63,7 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                         ))}
                     </select>
                     <p className="mt-1 text-sm text-slate-500">{tr.field_area_hint ?? 'Bestemmer hvem som kan se risikoen.'}</p>
-                    {form.errors.risk_access_area_id && <p className="mt-1 text-sm text-rose-600">{form.errors.risk_access_area_id}</p>}
+                    {form.errors.business_area_id && <p className="mt-1 text-sm text-rose-600">{form.errors.business_area_id}</p>}
                 </div>
 
                 <div>

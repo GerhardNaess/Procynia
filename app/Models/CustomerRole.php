@@ -22,12 +22,14 @@ class CustomerRole extends Model
         'name',
         'description',
         'is_active',
+        'all_business_areas',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'all_business_areas' => 'boolean',
         ];
     }
 
@@ -48,44 +50,53 @@ class CustomerRole extends Model
     }
 
     /**
-     * The tilgangsområder this role reaches in Risiko. Which risks — never what may be done with
-     * them; that is still only the role's permission keys. See RiskAccessService.
+     * The fagområder this role is linked to explicitly. Where its rights apply — never what they
+     * are; that is still only the role's permission keys. Ignored while the role has «Alle»
+     * (all_business_areas), which reaches every current and future area without rows here.
+     * See RiskAccessService.
      */
-    public function riskAccessAreas(): BelongsToMany
+    public function businessAreas(): BelongsToMany
     {
-        return $this->belongsToMany(RiskAccessArea::class, 'customer_role_risk_access_areas', 'customer_role_id', 'risk_access_area_id')
+        return $this->belongsToMany(BusinessArea::class, 'customer_role_business_areas', 'customer_role_id', 'business_area_id')
             ->withPivot('customer_id')
             ->withTimestamps();
     }
 
     /**
-     * Replace the role's tilgangsområder with exactly the given set. Areas that are not the
-     * role's own customer's are dropped rather than stored, so a role can never reach across
-     * tenants however the request was built.
+     * Set where the role's rights apply: «Alle», or exactly the given areas.
+     *
+     * «Alle» is stored as the flag alone and the explicit links are cleared, so the role never
+     * carries two answers and turning «Alle» off later starts from an honest, empty selection.
+     * Areas that are not the role's own customer's are dropped rather than stored, so a role can
+     * never reach across tenants however the request was built.
      *
      * @param  iterable<mixed>  $areaIds
      */
-    public function syncRiskAccessAreas(iterable $areaIds): void
+    public function syncBusinessAreas(bool $all, iterable $areaIds): void
     {
-        $ids = collect($areaIds)
+        $ids = $all ? [] : collect($areaIds)
             ->filter(fn (mixed $id): bool => is_numeric($id))
             ->map(fn (mixed $id): int => (int) $id)
             ->unique()
             ->values()
             ->all();
 
-        $ownIds = $ids === [] ? [] : RiskAccessArea::query()
+        $ownIds = $ids === [] ? [] : BusinessArea::query()
             ->forCustomer((int) $this->customer_id)
             ->whereIn('id', $ids)
             ->pluck('id')
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
 
-        $this->riskAccessAreas()->sync(
+        if ((bool) $this->all_business_areas !== $all) {
+            $this->forceFill(['all_business_areas' => $all])->save();
+        }
+
+        $this->businessAreas()->sync(
             collect($ownIds)->mapWithKeys(fn (int $id): array => [$id => ['customer_id' => $this->customer_id]])->all()
         );
 
-        $this->unsetRelation('riskAccessAreas');
+        $this->unsetRelation('businessAreas');
     }
 
     /**

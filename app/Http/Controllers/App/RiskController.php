@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\BusinessArea;
 use App\Models\Risk;
-use App\Models\RiskAccessArea;
 use App\Models\RiskAssessment;
 use App\Models\User;
 use App\Services\Risk\RiskAccessService;
@@ -25,7 +25,7 @@ use Inertia\Response;
  * Risiko — the risk register.
  *
  * Every read starts from RiskAccessService::visibleRisks(), so a risk outside the user's
- * tilgangsområder never enters a list, a search, a count or a lookup. Asking for one by URL is
+ * fagområder never enters a list, a search, a count or a lookup. Asking for one by URL is
  * a 404, the same answer as for an id that does not exist: the register does not confirm what it
  * will not show.
  *
@@ -48,7 +48,7 @@ class RiskController extends Controller
         $search = trim((string) $request->query('search', ''));
         $status = in_array($request->query('status'), Risk::STATUSES, true) ? (string) $request->query('status') : '';
 
-        $query = $this->access->visibleRisks($user)->with(['accessArea:id,name', 'owner:id,name']);
+        $query = $this->access->visibleRisks($user)->with(['businessArea:id,name', 'owner:id,name']);
 
         if ($search !== '') {
             $needle = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
@@ -94,8 +94,8 @@ class RiskController extends Controller
         }
 
         return [
-            'customer_has_areas' => RiskAccessArea::query()->forCustomer((int) $user->customer_id)->exists(),
-            'manage_url' => route('app.customer-environment.index', ['tab' => 'permissions']).'#risk-access-areas',
+            'customer_has_areas' => BusinessArea::query()->forCustomer((int) $user->customer_id)->exists(),
+            'manage_url' => route('app.customer-environment.index', ['tab' => 'permissions']).'#business-areas',
         ];
     }
 
@@ -103,7 +103,7 @@ class RiskController extends Controller
     {
         $user = $this->authorizedUser();
         $risk = $this->visibleRiskOrFail($user, $riskId);
-        $risk->loadMissing(['accessArea:id,name', 'owner:id,name']);
+        $risk->loadMissing(['businessArea:id,name', 'owner:id,name']);
 
         $canEdit = $this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk);
         // Control information is Kvalitet's, so it is shown only to someone who can read it there.
@@ -144,12 +144,12 @@ class RiskController extends Controller
 
         // The area is the scope the new risk will live in, so the user must be allowed to create
         // in *that* area — not merely hold risk.create somewhere.
-        $this->authorizeArea($user, CustomerPermissionCatalog::RISK_CREATE, (int) $validated['risk_access_area_id']);
+        $this->authorizeArea($user, CustomerPermissionCatalog::RISK_CREATE, (int) $validated['business_area_id']);
         $this->guardOwner($user, $validated);
 
         $risk = Risk::query()->create([
             'customer_id' => (int) $user->customer_id,
-            'risk_access_area_id' => (int) $validated['risk_access_area_id'],
+            'business_area_id' => (int) $validated['business_area_id'],
             'title' => trim($validated['title']),
             'description' => $this->normalizedText($validated['description'] ?? null),
             'owner_user_id' => $validated['owner_user_id'] ?? null,
@@ -171,17 +171,17 @@ class RiskController extends Controller
         abort_unless($this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk), 403);
 
         $validated = $this->validated($request);
-        $targetAreaId = (int) $validated['risk_access_area_id'];
+        $targetAreaId = (int) $validated['business_area_id'];
 
         // Moving a risk changes who can see it, so it takes edit authority on both sides.
-        if ($targetAreaId !== (int) $risk->risk_access_area_id) {
+        if ($targetAreaId !== (int) $risk->business_area_id) {
             $this->authorizeArea($user, CustomerPermissionCatalog::RISK_EDIT, $targetAreaId);
         }
 
         $this->guardOwner($user, $validated);
 
         $risk->fill([
-            'risk_access_area_id' => $targetAreaId,
+            'business_area_id' => $targetAreaId,
             'title' => trim($validated['title']),
             'description' => $this->normalizedText($validated['description'] ?? null),
             'owner_user_id' => $validated['owner_user_id'] ?? null,
@@ -233,7 +233,7 @@ class RiskController extends Controller
     {
         if (! $this->access->canInArea($user, $permissionKey, (int) $user->customer_id, $areaId)) {
             throw ValidationException::withMessages([
-                'risk_access_area_id' => __('procynia.risk.validation.area_not_allowed'),
+                'business_area_id' => __('procynia.risk.validation.area_not_allowed'),
             ]);
         }
     }
@@ -258,7 +258,7 @@ class RiskController extends Controller
             ->find((int) $ownerId);
 
         if ($owner === null
-            || ! $this->access->canInArea($owner, CustomerPermissionCatalog::RISK_VIEW, (int) $user->customer_id, (int) $validated['risk_access_area_id'])) {
+            || ! $this->access->canInArea($owner, CustomerPermissionCatalog::RISK_VIEW, (int) $user->customer_id, (int) $validated['business_area_id'])) {
             throw ValidationException::withMessages([
                 'owner_user_id' => __('procynia.risk.validation.owner_not_allowed'),
             ]);
@@ -271,7 +271,7 @@ class RiskController extends Controller
         return $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
-            'risk_access_area_id' => ['required', 'integer'],
+            'business_area_id' => ['required', 'integer'],
             'owner_user_id' => ['nullable', 'integer'],
             'status' => ['required', 'string', Rule::in(Risk::STATUSES)],
         ]);
@@ -285,8 +285,8 @@ class RiskController extends Controller
             'title' => $risk->title,
             'description' => $risk->description,
             'status' => $risk->status,
-            'risk_access_area_id' => (int) $risk->risk_access_area_id,
-            'area_name' => $risk->accessArea?->name,
+            'business_area_id' => (int) $risk->business_area_id,
+            'area_name' => $risk->businessArea?->name,
             'owner_user_id' => $risk->owner_user_id !== null ? (int) $risk->owner_user_id : null,
             'owner_name' => $risk->owner?->name,
             'updated_at' => $risk->updated_at?->toIso8601String(),
@@ -318,13 +318,13 @@ class RiskController extends Controller
     }
 
     /**
-     * @param  Collection<int, RiskAccessArea>  $areas
+     * @param  Collection<int, BusinessArea>  $areas
      * @return list<array{id: int, name: string}>
      */
     private function areaOptions(Collection $areas): array
     {
         return $areas
-            ->map(fn (RiskAccessArea $area): array => ['id' => (int) $area->id, 'name' => $area->name])
+            ->map(fn (BusinessArea $area): array => ['id' => (int) $area->id, 'name' => $area->name])
             ->values()
             ->all();
     }
@@ -335,7 +335,7 @@ class RiskController extends Controller
      * server checks the same thing again in guardOwner(). Areas the acting user cannot reach are
      * never named here.
      *
-     * @param  Collection<int, RiskAccessArea>  $offeredAreas
+     * @param  Collection<int, BusinessArea>  $offeredAreas
      * @return list<array{id: int, name: string, area_ids: list<int>}>
      */
     private function ownerOptions(User $user, Collection $offeredAreas): array

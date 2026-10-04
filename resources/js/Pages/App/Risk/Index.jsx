@@ -13,7 +13,7 @@ const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 
 /**
  * Risiko — the risk register.
  *
- * Everything on this page is already scoped by the server to the person's tilgangsområder: the
+ * Everything on this page is already scoped by the server to the person's fagområder: the
  * rows, the count and the search. Nothing here filters for access; it only renders what it was
  * given.
  */
@@ -25,7 +25,7 @@ function NoAreasState({ accessSetup, tr }) {
     if (! accessSetup) {
         return (
             <EmptyStateBox
-                title={tr.no_areas_title ?? 'Du har ingen tilgangsområder for risiko ennå'}
+                title={tr.no_areas_title ?? 'Du har ingen fagområder for risiko ennå'}
                 description={tr.no_areas_hint ?? 'Be System Owner gi en av rollene dine tilgang til et område under Kundemiljø → Tilganger.'}
             />
         );
@@ -78,7 +78,7 @@ export default function RiskIndex() {
     const form = useForm({
         title: '',
         description: '',
-        risk_access_area_id: areaOptions.length === 1 ? String(areaOptions[0].id) : '',
+        business_area_id: areaOptions.length === 1 ? String(areaOptions[0].id) : '',
         owner_user_id: '',
         status: statuses[0] ?? 'identified',
     });
@@ -110,11 +110,11 @@ export default function RiskIndex() {
                             {tr.index_heading ?? 'Risikoregister'}
                         </h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
-                            {tr.index_subtitle ?? 'Risikoene dere har ansvar for, samlet med eier, tilgangsområde og status.'}
+                            {tr.index_subtitle ?? 'Risikoene dere har ansvar for, samlet med eier, fagområde og status.'}
                         </p>
                         {hasAreas && (
                             <p className="text-sm text-slate-500">
-                                {tr.scope_note ?? 'Du ser risikoene i tilgangsområdene rollene dine gir deg.'}
+                                {tr.scope_note ?? 'Du ser risikoene i fagområdene rollene dine gir deg.'}
                             </p>
                         )}
                     </div>
@@ -199,7 +199,7 @@ export default function RiskIndex() {
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left text-sm font-semibold text-slate-600">
                                             <th className="pb-3 pr-4">{tr.col_title ?? 'Risiko'}</th>
-                                            <th className="px-4 pb-3">{tr.col_area ?? 'Tilgangsområde'}</th>
+                                            <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
                                             <th className="px-4 pb-3">{tr.col_owner ?? 'Risikoeier'}</th>
                                             <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                         </tr>

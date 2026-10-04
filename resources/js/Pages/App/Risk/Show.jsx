@@ -36,7 +36,7 @@ export default function RiskShow() {
     const form = useForm({
         title: risk.title ?? '',
         description: risk.description ?? '',
-        risk_access_area_id: String(risk.risk_access_area_id ?? ''),
+        business_area_id: String(risk.business_area_id ?? ''),
         owner_user_id: risk.owner_user_id ? String(risk.owner_user_id) : '',
         status: risk.status,
     });
@@ -113,7 +113,7 @@ export default function RiskShow() {
                                 <dd className="mt-1 text-base text-slate-900">{risk.owner_name ?? '—'}</dd>
                             </div>
                             <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.field_area ?? 'Tilgangsområde'}</dt>
+                                <dt className="text-sm font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
                                 <dd className="mt-1 text-base text-slate-900">{risk.area_name}</dd>
                             </div>
                             <div>

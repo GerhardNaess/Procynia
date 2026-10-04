@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\BusinessArea;
 use App\Models\Risk;
-use App\Models\RiskAccessArea;
 use App\Models\User;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -12,16 +12,16 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Tilgangsområder for Risiko, administered in Kundemiljø → Tilganger beside the customer's roles.
+ * The customer's fagområder, administered in Kundemiljø → Tilganger beside the customer's roles.
  *
  * System Owner only, on the same gate as the roles themselves: an area grants nothing until a role
  * carries it, and roles are System Owner's to edit. Which roles reach an area is set on the role
- * (CustomerRoleController), so this surface only names areas.
+ * (CustomerRoleController) — explicitly or with «Alle» — so this surface only names areas.
  *
  * Nothing here reads risk content. The administrator learns that an area is in use when deleting
  * it is refused, and nothing more — no counts, no titles.
  */
-class RiskAccessAreaController extends Controller
+class BusinessAreaController extends Controller
 {
     public function __construct(
         private readonly CustomerContext $customerContext,
@@ -35,7 +35,7 @@ class RiskAccessAreaController extends Controller
         $name = trim($validated['name']);
         $this->guardUniqueName($customerId, $name, null);
 
-        RiskAccessArea::query()->create([
+        BusinessArea::query()->create([
             'customer_id' => $customerId,
             'name' => $name,
             'description' => $this->normalizedDescription($validated['description'] ?? null),
@@ -44,17 +44,17 @@ class RiskAccessAreaController extends Controller
         return $this->backToPermissions();
     }
 
-    public function update(Request $request, RiskAccessArea $riskAccessArea): RedirectResponse
+    public function update(Request $request, BusinessArea $businessArea): RedirectResponse
     {
         $customerId = $this->administrationCustomerId($request);
 
-        abort_unless((int) $riskAccessArea->customer_id === $customerId, 404);
+        abort_unless((int) $businessArea->customer_id === $customerId, 404);
 
         $validated = $this->validated($request);
         $name = trim($validated['name']);
-        $this->guardUniqueName($customerId, $name, (int) $riskAccessArea->id);
+        $this->guardUniqueName($customerId, $name, (int) $businessArea->id);
 
-        $riskAccessArea->fill([
+        $businessArea->fill([
             'name' => $name,
             'description' => $this->normalizedDescription($validated['description'] ?? null),
         ])->save();
@@ -64,19 +64,20 @@ class RiskAccessAreaController extends Controller
 
     /**
      * An area that still holds risks cannot be deleted: the risks would either go with it or be
-     * left in no one's scope, and neither is acceptable. Role links go with the area (FK cascade).
+     * left in no one's scope, and neither is acceptable. When another module starts scoping by
+     * fagområde, its own "in use" check belongs here too. Role links go with the area (FK cascade).
      */
-    public function destroy(Request $request, RiskAccessArea $riskAccessArea): RedirectResponse
+    public function destroy(Request $request, BusinessArea $businessArea): RedirectResponse
     {
         $customerId = $this->administrationCustomerId($request);
 
-        abort_unless((int) $riskAccessArea->customer_id === $customerId, 404);
+        abort_unless((int) $businessArea->customer_id === $customerId, 404);
 
-        if (Risk::query()->where('risk_access_area_id', $riskAccessArea->id)->exists()) {
-            return $this->backToPermissions()->with('error', __('procynia.customer_env.roles.risk_areas.in_use'));
+        if (Risk::query()->where('business_area_id', $businessArea->id)->exists()) {
+            return $this->backToPermissions()->with('error', __('procynia.customer_env.roles.business_areas.in_use'));
         }
 
-        $riskAccessArea->delete();
+        $businessArea->delete();
 
         return $this->backToPermissions();
     }
@@ -110,11 +111,11 @@ class RiskAccessAreaController extends Controller
     {
         if ($name === '') {
             throw ValidationException::withMessages([
-                'name' => __('procynia.customer_env.roles.risk_areas.name_required'),
+                'name' => __('procynia.customer_env.roles.business_areas.name_required'),
             ]);
         }
 
-        $query = RiskAccessArea::query()
+        $query = BusinessArea::query()
             ->forCustomer($customerId)
             ->whereRaw('lower(name) = ?', [mb_strtolower($name)]);
 
@@ -124,7 +125,7 @@ class RiskAccessAreaController extends Controller
 
         if ($query->exists()) {
             throw ValidationException::withMessages([
-                'name' => __('procynia.customer_env.roles.risk_areas.name_taken'),
+                'name' => __('procynia.customer_env.roles.business_areas.name_taken'),
             ]);
         }
     }
