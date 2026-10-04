@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
@@ -13,6 +13,7 @@ import RiskTreatmentPanel from './RiskTreatmentPanel';
 import RiskTreatmentStrategy from './RiskTreatmentStrategy';
 import RiskWikiKnowledgePanel from './RiskWikiKnowledgePanel';
 import RiskDescription from './RiskDescription';
+import { RISK_LEVEL_TONES } from './riskLevel';
 import { RISK_STATUS_TONES } from './riskStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -51,6 +52,32 @@ export default function RiskShow() {
     const tr = translations?.risk ?? {};
     const statusLabels = tr.statuses ?? {};
     const [editing, setEditing] = useState(false);
+    // The field to bring into view when the edit form opens from a section, e.g. Behandling → Endre.
+    const [editFocus, setEditFocus] = useState(null);
+
+    // Status (lifecycle) is shown beside the severity from the latest assessment — residual when it
+    // was assessed, otherwise inherent — so the two are never read as one.
+    const latest = assessments[0] ?? null;
+    const levelLabels = tr.assessment?.levels ?? {};
+    const headerLevel = latest?.residual
+        ? { level: latest.residual.level, template: tr.level_residual ?? 'Restrisiko: :level' }
+        : (latest?.inherent ? { level: latest.inherent.level, template: tr.level_inherent ?? 'Iboende risiko: :level' } : null);
+
+    useEffect(() => {
+        if (! editing || ! editFocus) {
+            return;
+        }
+
+        const field = document.getElementById(editFocus);
+        field?.scrollIntoView({ block: 'center' });
+        field?.focus({ preventScroll: true });
+        setEditFocus(null);
+    }, [editing, editFocus]);
+
+    const startEditing = (fieldId = null) => {
+        setEditFocus(fieldId);
+        setEditing(true);
+    };
 
     const form = useForm({
         title: risk.title ?? '',
@@ -92,15 +119,28 @@ export default function RiskShow() {
                     <div className="space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{risk.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={RISK_STATUS_TONES[risk.status] ?? 'slate'}>
                                 {statusLabels[risk.status] ?? risk.status}
                             </StatusBadge>
+                            {headerLevel ? (
+                                <StatusBadge tone={RISK_LEVEL_TONES[headerLevel.level] ?? 'slate'}>
+                                    {headerLevel.template.replace(':level', levelLabels[headerLevel.level] ?? headerLevel.level)}
+                                </StatusBadge>
+                            ) : (
+                                <StatusBadge tone="slate">
+                                    {(tr.level_residual ?? 'Restrisiko: :level').replace(':level', tr.level_none ?? 'Ikke vurdert')}
+                                </StatusBadge>
+                            )}
                             <StatusBadge tone="slate">{risk.area_name}</StatusBadge>
                         </div>
+                        <p className="text-sm text-slate-600">
+                            {tr.status_hint ?? 'Status sier hvor risikoen er i livsløpet. Risikovurderingen sier hvor alvorlig den er.'}
+                        </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         {permissions.can_edit && ! editing && (
-                            <button type="button" onClick={() => setEditing(true)} className={SECONDARY_ACTION}>
+                            <button type="button" onClick={() => startEditing()} className={SECONDARY_ACTION}>
                                 {tr.edit ?? 'Rediger'}
                             </button>
                         )}
@@ -159,11 +199,19 @@ export default function RiskShow() {
                     assessments={assessments}
                     criteria={riskCriteria}
                     canAssess={Boolean(permissions.can_assess)}
+                    hasCurrentAcceptance={Boolean(riskAcceptance?.current)}
                     tr={tr}
                 />
 
                 {/* The edit form above carries the direction while editing. */}
-                {! editing && <RiskTreatmentStrategy strategy={risk.treatment_strategy} decision={riskAcceptance} tr={tr} />}
+                {! editing && (
+                    <RiskTreatmentStrategy
+                        strategy={risk.treatment_strategy}
+                        decision={riskAcceptance}
+                        onEdit={permissions.can_edit ? () => startEditing('risk-treatment-strategy') : null}
+                        tr={tr}
+                    />
+                )}
 
                 <RiskTreatmentPanel
                     riskId={risk.id}

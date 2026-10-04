@@ -134,12 +134,16 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                         id="risk-status"
                         value={form.data.status}
                         onChange={(event) => form.setData('status', event.target.value)}
+                        aria-describedby="risk-status-hint"
                         className={`mt-1 ${INPUT}`}
                     >
                         {statuses.map((status) => (
                             <option key={status} value={status}>{statusLabels[status] ?? status}</option>
                         ))}
                     </select>
+                    <p id="risk-status-hint" className="mt-1 text-sm text-slate-500">
+                        {tr.field_status_hint ?? 'Hvor risikoen er i livsløpet. Settes manuelt — endres ikke av vurdering, tiltak eller aksept.'}
+                    </p>
                     {form.errors.status && <p className="mt-1 text-sm text-rose-600">{form.errors.status}</p>}
                 </div>
             </div>

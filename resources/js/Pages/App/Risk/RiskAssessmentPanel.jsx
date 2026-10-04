@@ -14,8 +14,11 @@ const formatDate = (iso) => (iso ? new Date(iso).toLocaleString('nb-NO') : '—'
  * The risk's assessment history: the latest one up top, the earlier ones below, newest first.
  * Assessments are never edited; «Ny vurdering» adds the next one, and is offered only when the
  * server said this person holds risk.assess for the risk's area.
+ *
+ * `hasCurrentAcceptance` is the server's current acceptance (Risikobeslutning). An acceptance belongs
+ * to one assessment, so the form says before saving that a new one makes it historical.
  */
-export default function RiskAssessmentPanel({ riskId, assessments, criteria, canAssess, tr }) {
+export default function RiskAssessmentPanel({ riskId, assessments, criteria, canAssess, hasCurrentAcceptance = false, tr }) {
     const ta = tr.assessment ?? {};
     const [creating, setCreating] = useState(false);
     const [latest, ...earlier] = assessments;
@@ -26,7 +29,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{ta.heading ?? 'Risikovurdering'}</h2>
                     <p className="mt-1 text-sm text-slate-600">
-                        {ta.status_note ?? 'Status sier hvor risikoen er i behandlingen. Risikonivået kommer fra siste vurdering.'}
+                        {ta.status_note ?? 'Hvor alvorlig risikoen er. Siste vurdering gjelder; status endres ikke av en vurdering.'}
                     </p>
                 </div>
                 {canAssess && ! creating && (
@@ -40,6 +43,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
                 <AssessmentForm
                     riskId={riskId}
                     criteria={criteria}
+                    supersedesAcceptance={hasCurrentAcceptance}
                     ta={ta}
                     tr={tr}
                     onDone={() => setCreating(false)}
@@ -223,7 +227,7 @@ function Preview({ criteria, likelihood, consequence, ta }) {
     );
 }
 
-function AssessmentForm({ riskId, criteria, ta, tr, onDone }) {
+function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone }) {
     const [withResidual, setWithResidual] = useState(false);
     const form = useForm({
         inherent_likelihood: '',
@@ -261,6 +265,11 @@ function AssessmentForm({ riskId, criteria, ta, tr, onDone }) {
     return (
         <form onSubmit={submit} className="mt-6 space-y-5 rounded-2xl border border-slate-200 p-5">
             <h3 className="text-base font-semibold text-slate-950">{ta.form_heading ?? 'Ny risikovurdering'}</h3>
+            {supersedesAcceptance && (
+                <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    {ta.supersedes_acceptance ?? 'En ny vurdering gjør dagens aksept historisk. Ny restrisiko må eventuelt aksepteres på nytt.'}
+                </p>
+            )}
 
             <fieldset className="space-y-3">
                 <legend className="text-sm font-semibold text-slate-900">
