@@ -1,7 +1,7 @@
 import StatusBadge from '../../../Components/App/StatusBadge';
 
 /** "2026-10-04" as "4. oktober 2026", read as a calendar day so no time zone can shift it. */
-function formatDay(day) {
+export function formatDay(day) {
     if (! day) {
         return null;
     }

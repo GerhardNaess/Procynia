@@ -9,6 +9,7 @@ use App\Models\RiskAssessment;
 use App\Models\User;
 use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
+use App\Services\Risk\RiskAttentionService;
 use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
@@ -49,6 +50,7 @@ class RiskController extends Controller
         private readonly RiskAcceptanceService $acceptances,
         private readonly RiskReviewSchedule $reviewSchedule,
         private readonly RiskStatement $statement,
+        private readonly RiskAttentionService $attention,
     ) {}
 
     public function index(Request $request): Response
@@ -87,6 +89,11 @@ class RiskController extends Controller
             'review_intervals' => Risk::REVIEW_INTERVALS,
             'treatment_strategies' => Risk::TREATMENT_STRATEGIES,
             'has_areas' => $hasAreas,
+            // Trenger oppmerksomhet, over the same visible set as the register — never the whole
+            // customer. Only a role with «Alle» may have it described as the whole picture.
+            'attention' => $hasAreas ? $this->attention->overview($user) + [
+                'scope' => $this->access->reachesAllAreas($user, CustomerPermissionCatalog::RISK_VIEW) ? 'all' : 'areas',
+            ] : null,
             'access_setup' => $hasAreas ? null : $this->accessSetup($user),
             'permissions' => ['can_create' => $creatableAreas->isNotEmpty()],
             'area_options' => $this->areaOptions($creatableAreas),

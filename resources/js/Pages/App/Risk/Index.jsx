@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import RiskAttention from './RiskAttention';
 import RiskForm from './RiskForm';
 import { RISK_STATUS_TONES } from './riskStatus';
 
@@ -63,6 +64,7 @@ export default function RiskIndex() {
         review_intervals: reviewIntervals = [],
         treatment_strategies: treatmentStrategies = [],
         has_areas: hasAreas = false,
+        attention = null,
         access_setup: accessSetup = null,
         permissions = {},
         area_options: areaOptions = [],
@@ -149,6 +151,8 @@ export default function RiskIndex() {
                         />
                     </section>
                 )}
+
+                {hasAreas && attention && <RiskAttention attention={attention} tr={tr} />}
 
                 {! hasAreas ? (
                     <NoAreasState accessSetup={accessSetup} tr={tr} />

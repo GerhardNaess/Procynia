@@ -74,6 +74,22 @@ class RiskAccessService
     }
 
     /**
+     * Whether one of the user's own active roles grants the permission with «Alle». Only then may
+     * a page speak of the customer's whole risk picture; anyone else sees their fagområder only.
+     * Never true for System Owner by virtue of the administrator role.
+     */
+    public function reachesAllAreas(User $user, string $permissionKey): bool
+    {
+        if (! $this->canOpenModule($user) || ! $this->isRiskPermission($permissionKey)) {
+            return false;
+        }
+
+        return $this->rolesGranting((int) $user->customer_id, $permissionKey, (int) $user->id)
+            ->where('cr.all_business_areas', true)
+            ->exists();
+    }
+
+    /**
      * The areas themselves, for forms that let the user choose one.
      *
      * @return Collection<int, BusinessArea>
