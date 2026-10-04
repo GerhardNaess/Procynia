@@ -279,15 +279,28 @@ class EnterpriseWikiPageContentBlockService
     }
 
     /**
+     * The one addressable element of a document with no structured elements (an authored Markdown
+     * source, a PDF, an XLSX). Public so planning binds owned topics to the same identity generation
+     * resolves them against — see EnterpriseWikiMaintainerDecisionService::bindOwnedTopicsToWholeDocument().
+     */
+    public static function wholeDocumentElementKey(int $documentId): string
+    {
+        return 'document-'.$documentId.'-full-text';
+    }
+
+    /**
+     * Carries as much of the text as one generated section is ever given, so every section bound to
+     * this element sees the document it is bound to rather than only its opening lines.
+     *
      * @return array<string, mixed>
      */
     private function wholeDocumentElement(EnterpriseWikiDocument $document): array
     {
         return [
-            'source_element_key' => 'document-'.$document->id.'-full-text',
+            'source_element_key' => self::wholeDocumentElementKey((int) $document->id),
             'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_MANUAL,
             'source_row_key' => null,
-            'reference_text' => mb_substr((string) $document->extracted_text, 0, 1000),
+            'reference_text' => mb_substr((string) $document->extracted_text, 0, EnterpriseWikiPlannedSectionEvidenceResolver::MAX_EVIDENCE_CHARS_PER_SECTION),
             'page_reference' => 'Hele dokumentet',
         ];
     }

@@ -116,6 +116,7 @@ class EnterpriseWikiMaintainerDecisionService
         // its context when it has one, and an entrypoint that starts here (the batch finaliser)
         // builds an identical one.
         $planning ??= EnterpriseWikiPlanningContext::forDocument($customerId, $document);
+        $decision = $this->bindOwnedTopicsToWholeDocument($decision, $planning);
         $indexContext = $planning->wikiIndex;
         $validFigureKeys = $planning->validFigureKeys;
         $validSourceElementKeys = $planning->validSourceElementKeys;
@@ -525,6 +526,75 @@ class EnterpriseWikiMaintainerDecisionService
             'valid_heading_count' => count(json_decode($matches['headings'], true) ?: []),
             'issue_code' => (string) $matches['code'],
         ];
+    }
+
+    /**
+     * A document with no structured elements (an authored Markdown source, a PDF, an XLSX) has
+     * exactly one addressable piece of evidence: the whole text, which generation resolves under
+     * EnterpriseWikiPageContentBlockService::wholeDocumentElementKey(). The planner is shown that
+     * text flat, with no SOURCE ELEMENTS catalog, so whatever keys it writes for an owned topic are
+     * names it made up — typically the document's own headings — and the catalog check cannot catch
+     * them because there is no catalog. Every such topic then resolved to zero elements and the run
+     * failed on planned_section_no_evidence, whatever the document said.
+     *
+     * Binding is therefore the backend's to make, not the model's: each owned topic the planner
+     * claimed evidence for is bound to the one element that exists. Nothing is relaxed downstream — the section still gets only this
+     * document's text as evidence, and an empty document still binds to nothing. A document WITH
+     * elements is returned untouched; there the planner's own keys are the contract.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private function bindOwnedTopicsToWholeDocument(array $decision, EnterpriseWikiPlanningContext $planning): array
+    {
+        if ($planning->elements !== [] || trim($planning->sourceText) === '') {
+            return $decision;
+        }
+
+        $key = EnterpriseWikiPageContentBlockService::wholeDocumentElementKey($planning->documentId);
+        $bind = static function (mixed $entry) use ($key): mixed {
+            if (! is_array($entry) || ! is_array($entry['owned_topics'] ?? null)) {
+                return $entry;
+            }
+
+            $entry['owned_topics'] = array_map(
+                // Only a topic the planner claimed evidence for: an empty key list is the planner saying
+                // the document does not support it, and that stays for the validator to reject. A legacy
+                // plain-string topic already falls back to this element in the resolver.
+                static fn (mixed $topic): mixed => is_array($topic) && self::namesAnyKey($topic)
+                    ? array_merge($topic, ['source_element_keys' => [$key]])
+                    : $topic,
+                $entry['owned_topics'],
+            );
+
+            return $entry;
+        };
+
+        foreach (['source_article', 'source_summary'] as $slot) {
+            if (array_key_exists($slot, $decision)) {
+                $decision[$slot] = $bind($decision[$slot]);
+            }
+        }
+
+        foreach (['concept_pages', 'entity_pages'] as $list) {
+            if (is_array($decision[$list] ?? null)) {
+                $decision[$list] = array_map($bind, $decision[$list]);
+            }
+        }
+
+        return $decision;
+    }
+
+    /** @param array<string, mixed> $topic */
+    private static function namesAnyKey(array $topic): bool
+    {
+        foreach ((array) ($topic['source_element_keys'] ?? []) as $key) {
+            if (is_string($key) && trim($key) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

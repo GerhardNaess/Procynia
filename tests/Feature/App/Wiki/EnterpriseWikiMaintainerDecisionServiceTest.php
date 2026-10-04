@@ -12,6 +12,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPlanningContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -228,7 +229,8 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             'title' => 'ITIL',
             'proposed_slug' => 'itil',
             'reason' => 'Central framework in the source.',
-            'owned_topics' => [['topic' => 'ITIL som rammeverk', 'source_element_keys' => ['paragraph-0']]],
+            // The fixture document has no extracted elements, so its one evidence identity is the whole text.
+            'owned_topics' => [['topic' => 'ITIL som rammeverk', 'source_element_keys' => [EnterpriseWikiPageContentBlockService::wholeDocumentElementKey($document->id)]]],
             'related_page_guidance' => [
                 ['page_title' => 'Masterdata ITIL', 'relationship' => 'Link to the article for source-specific application.'],
             ],
@@ -710,7 +712,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             'title' => 'Incident Logging',
             'proposed_slug' => 'incident-logging',
             'reason' => 'Practice under framework.',
-            'owned_topics' => [['topic' => 'Logging av hendelser', 'source_element_keys' => ['paragraph-0']]],
+            'owned_topics' => [['topic' => 'Logging av hendelser', 'source_element_keys' => [EnterpriseWikiPageContentBlockService::wholeDocumentElementKey($document->id)]]],
         ]];
 
         $demoted = $overfragmented['concept_candidates'][0];

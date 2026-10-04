@@ -37,7 +37,8 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
      */
     public const MAX_ELEMENTS_PER_SECTION = 6;
 
-    private const MAX_EVIDENCE_CHARS_PER_SECTION = 3600;
+    /** Public because the whole-document element of an unstructured source is sized to it. */
+    public const MAX_EVIDENCE_CHARS_PER_SECTION = 3600;
 
     /**
      * Stable document-control labels, not semantic similarity. A maintainer may use ordinary
