@@ -9,6 +9,9 @@ use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Risk;
+use App\Models\RiskAcceptance;
+use App\Models\RiskAssessment;
+use App\Models\RiskTreatmentAction;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -538,6 +541,95 @@ class RiskAccessTest extends TestCase
      * @param  list<string>  $permissionKeys
      * @param  list<BusinessArea>  $areas
      */
+    /**
+     * One matrix over the actions the risk page offers, for the access shapes that matter: the page
+     * only offers what the server allows, and the server refuses the rest on its own — a hidden
+     * button is never the guard.
+     */
+    public function test_every_risk_page_action_is_offered_and_allowed_only_by_the_right_permission_in_the_right_area(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $beredskap = $this->area($customer, 'Beredskap');
+        $view = CustomerPermissionCatalog::RISK_VIEW;
+
+        $actors = [
+            'view only' => fn (User $u) => $this->grant($customer, $u, [$view], [$hr]),
+            'assess without edit' => fn (User $u) => $this->grant($customer, $u, [$view, CustomerPermissionCatalog::RISK_ASSESS], [$hr]),
+            'accept without edit' => fn (User $u) => $this->grant($customer, $u, [$view, CustomerPermissionCatalog::RISK_ACCEPT], [$hr]),
+            'edit in the wrong area' => function (User $u) use ($customer, $hr, $beredskap, $view): void {
+                $this->grant($customer, $u, [$view], [$hr]);
+                $this->grant($customer, $u, [$view, CustomerPermissionCatalog::RISK_EDIT], [$beredskap]);
+            },
+            'edit in the right area' => fn (User $u) => $this->grant($customer, $u, [$view, CustomerPermissionCatalog::RISK_EDIT], [$hr]),
+            'edit with Alle' => fn (User $u) => $this->grantAll($customer, $u, [$view, CustomerPermissionCatalog::RISK_EDIT]),
+        ];
+
+        $expected = [
+            //                         edit   assess accept
+            'view only' => [false, false, false],
+            'assess without edit' => [false, true, false],
+            'accept without edit' => [false, false, true],
+            'edit in the wrong area' => [false, false, false],
+            'edit in the right area' => [true, false, false],
+            'edit with Alle' => [true, false, false],
+        ];
+
+        foreach ($actors as $name => $grant) {
+            [$canEdit, $canAssess, $canAccept] = $expected[$name];
+            $user = $this->member($customer);
+            $grant($user);
+
+            $risk = $this->risk($customer, $hr, "Risiko for {$name}");
+            $risk->update(['cause' => 'Årsak', 'event' => 'Hendelse', 'consequence' => 'Konsekvens']);
+            $assessment = RiskAssessment::query()->create([
+                'customer_id' => $customer->id, 'risk_id' => $risk->id, 'assessed_at' => now(), 'rationale' => 'Vurdert',
+                'criteria_key' => 'standard_5x5_v1', 'inherent_likelihood' => 4, 'inherent_consequence' => 4,
+                'residual_likelihood' => 3, 'residual_consequence' => 2,
+            ]);
+            $action = RiskTreatmentAction::query()->create([
+                'customer_id' => $customer->id, 'risk_id' => $risk->id, 'title' => 'Tiltak', 'owner_user_id' => $user->id,
+                'due_at' => '2099-01-01', 'status' => RiskTreatmentAction::STATUS_OPEN,
+            ]);
+            $base = "/app/risk/risks/{$risk->id}";
+
+            $permissions = $this->actingAs($user)->get($base)->assertOk()->viewData('page')['props']['permissions'];
+            $this->assertSame($canEdit, $permissions['can_edit'], $name);
+            $this->assertSame($canEdit, $permissions['can_manage_actions'], $name);
+            $this->assertSame($canAssess, $permissions['can_assess'], $name);
+            $this->assertSame($canAccept, $permissions['can_accept'], $name);
+            $this->assertFalse($permissions['can_delete'], $name);
+
+            $status = fn (bool $allowed): int => $allowed ? 302 : 403;
+
+            // Rediger — including the vurderingsintervall and behandlingsvalg set from the page.
+            $this->actingAs($user)->patch($base, [
+                'title' => 'Endret', 'cause' => 'Årsak', 'event' => 'Hendelse', 'consequence' => 'Konsekvens',
+                'business_area_id' => $hr->id, 'status' => Risk::STATUS_IDENTIFIED,
+                'review_interval_months' => 12, 'treatment_strategy' => 'reduce',
+            ])->assertStatus($status($canEdit));
+            $this->assertSame($canEdit ? 12 : null, $risk->fresh()->review_interval_months, $name);
+
+            $this->actingAs($user)->post("{$base}/actions", ['title' => 'Nytt', 'owner_user_id' => $user->id, 'due_at' => '2099-02-01'])
+                ->assertStatus($status($canEdit));
+            $this->actingAs($user)->patch("{$base}/actions/{$action->id}", ['title' => 'Endret', 'owner_user_id' => $user->id, 'due_at' => '2099-02-01'])
+                ->assertStatus($status($canEdit));
+            $this->actingAs($user)->post("{$base}/actions/{$action->id}/complete", ['outcome_note' => 'Ferdig'])
+                ->assertStatus($status($canEdit));
+            $this->assertSame($canEdit ? RiskTreatmentAction::STATUS_COMPLETED : RiskTreatmentAction::STATUS_OPEN, $action->fresh()->status, $name);
+
+            $this->actingAs($user)->post("{$base}/acceptances", ['assessment_id' => $assessment->id, 'rationale' => 'Akseptabel'])
+                ->assertStatus($status($canAccept));
+            $this->assertSame($canAccept ? 1 : 0, RiskAcceptance::query()->where('risk_id', $risk->id)->count(), $name);
+
+            $this->actingAs($user)->post("{$base}/assessments", ['inherent_likelihood' => 2, 'inherent_consequence' => 2, 'rationale' => 'Ny'])
+                ->assertStatus($status($canAssess));
+            $this->assertSame($canAssess ? 2 : 1, RiskAssessment::query()->where('risk_id', $risk->id)->count(), $name);
+
+            $this->actingAs($user)->delete($base)->assertForbidden();
+        }
+    }
+
     private function grant(Customer $customer, User $user, array $permissionKeys, array $areas = []): CustomerRole
     {
         $role = $this->role($customer, $permissionKeys, $areas);

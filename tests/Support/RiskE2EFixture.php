@@ -29,12 +29,12 @@ class RiskE2EFixture
 
     private const AREA_NAMES = [
         'E2E Beredskap', 'E2E Drift', 'E2E Eget område', 'E2E Innkjøp', 'E2E Kontekst', 'E2E Lønn',
-        'E2E Oppmerksomhet', 'E2E Skjult område',
+        'E2E Oppmerksomhet', 'E2E Reise', 'E2E Skjult område',
     ];
 
     private const ROLE_NAMES = [
         'E2E Egen risikorolle', 'E2E Risikoansvarlig', 'E2E Risikobehandling', 'E2E Risikobeskrivelse',
-        'E2E Risikobeslutning', 'E2E Risikogjennomgang', 'E2E Risikoleser alle', 'E2E Risiko og kontekst',
+        'E2E Risikobeslutning', 'E2E Risikogjennomgang', 'E2E Risikoleser alle', 'E2E Risikoreise', 'E2E Risiko og kontekst',
         'E2E Risiko og kontroll', 'E2E Risiko og tiltak', 'E2E Risikostatus', 'E2E Risikovurderer', 'E2E Oppmerksomhet',
     ];
 
@@ -42,7 +42,7 @@ class RiskE2EFixture
         'E2E Datasenter', 'E2E Feil i godkjenning', 'E2E Feil lønnsutbetaling', 'E2E Leverandør går konkurs', 'E2E Serverbrann',
         'E2E Strømbrudd i datasenter', 'E2E Strømbrudd', 'E2E Svikt i backup',
         'E2E Høy restrisiko', 'E2E Uten restrisiko', 'E2E Forfalt vurdering', 'E2E Forfalt tiltak',
-        'E2E Rolig', 'E2E Skjult risiko', 'E2E Skjult uten vurdering',
+        'E2E Rolig', 'E2E Skjult risiko', 'E2E Skjult uten vurdering', 'E2E Reise',
     ];
 
     /** Users are only created by the attention spec's seed; the others reuse the seeded E2E users. */
