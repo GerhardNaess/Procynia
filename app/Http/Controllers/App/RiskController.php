@@ -14,7 +14,6 @@ use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
-use App\Services\Risk\RiskStatement;
 use App\Services\Risk\RiskTreatmentService;
 use App\Services\Risk\RiskWikiKnowledgeService;
 use App\Support\CustomerContext;
@@ -50,7 +49,6 @@ class RiskController extends Controller
         private readonly RiskTreatmentService $treatments,
         private readonly RiskAcceptanceService $acceptances,
         private readonly RiskReviewSchedule $reviewSchedule,
-        private readonly RiskStatement $statement,
         private readonly RiskAttentionService $attention,
         private readonly RiskWikiKnowledgeService $wikiKnowledge,
     ) {}
@@ -82,8 +80,20 @@ class RiskController extends Controller
         $creatableAreas = $this->access->areasFor($user, CustomerPermissionCatalog::RISK_CREATE);
         $hasAreas = $this->access->areaIdsFor($user, CustomerPermissionCatalog::RISK_VIEW) !== [];
 
+        $risks = $query->orderBy('risks.title')->get();
+        // Restrisiko per row, from each risk's latest assessment — one query, and only for the ids
+        // the scoped query above already returned.
+        $latest = RiskAssessment::latestForRisks(
+            (int) $user->customer_id,
+            $risks->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),
+        );
+
         return Inertia::render('App/Risk/Index', [
-            'risks' => $query->orderBy('risks.title')->get()->map(fn (Risk $risk): array => $this->riskRow($risk))->all(),
+            'risks' => $risks
+                ->map(fn (Risk $risk): array => $this->riskRow($risk) + [
+                    'residual_level' => $this->residualLevel($latest->get((int) $risk->id)),
+                ])
+                ->all(),
             // Only what the user can see. A total over hidden risks would reveal that they exist.
             'visible_count' => $this->access->visibleRisks($user)->count(),
             'filters' => ['search' => $search, 'status' => $status],
@@ -362,8 +372,6 @@ class RiskController extends Controller
             'cause' => $risk->cause,
             'event' => $risk->event,
             'consequence' => $risk->consequence,
-            // Composed for reading, from the three parts only. Null until all three exist.
-            'statement' => $this->statement->compose($risk->cause, $risk->event, $risk->consequence),
             'has_structured_description' => $risk->hasStructuredDescription(),
             // «Utfyllende informasjon» — supplementary, never the risk description itself.
             'description' => $risk->description,
@@ -405,11 +413,29 @@ class RiskController extends Controller
     }
 
     /**
+     * The register's Restrisiko: the residual level of the latest assessment, the same reading as
+     * Trenger oppmerksomhet. Null when the risk is not assessed or its latest assessment has no
+     * residual — an earlier residual is not carried forward past a newer assessment.
+     */
+    private function residualLevel(?RiskAssessment $latest): ?string
+    {
+        if ($latest === null || ! $latest->hasResidual()) {
+            return null;
+        }
+
+        return $this->scoring->evaluate(
+            $latest->residual_likelihood,
+            $latest->residual_consequence,
+            $latest->criteria_key,
+        )['level'];
+    }
+
+    /**
      * The risk description an assessment was made against, from its own snapshot — never from the
      * risk as it reads today. Null when the assessment has no snapshot: it predates the snapshot or
      * the risk had no structured description then.
      *
-     * @return array{cause: string, event: string, consequence: string, statement: string|null, changed_since: bool}|null
+     * @return array{cause: string, event: string, consequence: string, changed_since: bool}|null
      */
     private function assessedDescription(RiskAssessment $assessment, Risk $risk): ?array
     {
@@ -421,7 +447,6 @@ class RiskController extends Controller
             'cause' => $assessment->risk_cause,
             'event' => $assessment->risk_event,
             'consequence' => $assessment->risk_consequence,
-            'statement' => $this->statement->compose($assessment->risk_cause, $assessment->risk_event, $assessment->risk_consequence),
             'changed_since' => $assessment->risk_cause !== $risk->cause
                 || $assessment->risk_event !== $risk->event
                 || $assessment->risk_consequence !== $risk->consequence,

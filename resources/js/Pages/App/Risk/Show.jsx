@@ -21,6 +21,9 @@ const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
  * One risk. Edit, assess and delete are offered only when the server said this person may do them
  * to a risk in this area; the controllers refuse them otherwise. Status (lifecycle) and risk level
  * (latest assessment) are shown apart on purpose.
+ *
+ * Sections read as: what the risk is → how serious → what is done about it (behandling, tiltak,
+ * kontroller, aksept) → where it belongs (Kvalitet, Wiki).
  */
 export default function RiskShow() {
     const {
@@ -148,7 +151,6 @@ export default function RiskShow() {
                             </dl>
                             {reviewSchedule && <RiskReviewSchedule schedule={reviewSchedule} status={risk.status} tr={tr} />}
                         </section>
-                        <RiskTreatmentStrategy strategy={risk.treatment_strategy} decision={riskAcceptance} tr={tr} />
                     </>
                 )}
 
@@ -160,18 +162,33 @@ export default function RiskShow() {
                     tr={tr}
                 />
 
-                <RiskAcceptancePanel
-                    riskId={risk.id}
-                    decision={riskAcceptance}
-                    canAccept={Boolean(permissions.can_accept)}
-                    tr={tr}
-                />
+                {/* The edit form above carries the direction while editing. */}
+                {! editing && <RiskTreatmentStrategy strategy={risk.treatment_strategy} decision={riskAcceptance} tr={tr} />}
 
                 <RiskTreatmentPanel
                     riskId={risk.id}
                     actions={treatmentActions}
                     ownerOptions={treatmentOwnerOptions}
                     canManage={Boolean(permissions.can_manage_actions)}
+                    tr={tr}
+                />
+
+                {/* null, not empty: the person cannot read controls in Kvalitet, so nothing is said about them. */}
+                {controls !== null && (
+                    <RiskControlsPanel
+                        riskId={risk.id}
+                        controls={controls}
+                        options={controlOptions}
+                        canLink={Boolean(permissions.can_link_controls)}
+                        tr={tr}
+                        qualityStatuses={translations?.quality?.statuses ?? {}}
+                    />
+                )}
+
+                <RiskAcceptancePanel
+                    riskId={risk.id}
+                    decision={riskAcceptance}
+                    canAccept={Boolean(permissions.can_accept)}
                     tr={tr}
                 />
 
@@ -183,18 +200,6 @@ export default function RiskShow() {
                         options={qualityContextOptions}
                         canLink={Boolean(permissions.can_link_context)}
                         tr={tr}
-                    />
-                )}
-
-                {/* null, not empty: the person cannot read controls in Kvalitet, so nothing is said about them. */}
-                {controls !== null && (
-                    <RiskControlsPanel
-                        riskId={risk.id}
-                        controls={controls}
-                        options={controlOptions}
-                        canLink={Boolean(permissions.can_link_controls)}
-                        tr={tr}
-                        qualityStatuses={translations?.quality?.statuses ?? {}}
                     />
                 )}
 

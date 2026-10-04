@@ -6,6 +6,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RiskAttention from './RiskAttention';
 import RiskForm from './RiskForm';
+import { RISK_LEVEL_TONES } from './riskLevel';
 import { RISK_STATUS_TONES } from './riskStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -73,6 +74,7 @@ export default function RiskIndex() {
 
     const tr = translations?.risk ?? {};
     const statusLabels = tr.statuses ?? {};
+    const levelLabels = tr.assessment?.levels ?? {};
     const canCreate = permissions.can_create ?? false;
 
     const [creating, setCreating] = useState(false);
@@ -214,6 +216,7 @@ export default function RiskIndex() {
                                             <th className="pb-3 pr-4">{tr.col_title ?? 'Risiko'}</th>
                                             <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
                                             <th className="px-4 pb-3">{tr.col_owner ?? 'Risikoeier'}</th>
+                                            <th className="px-4 pb-3">{tr.col_residual ?? 'Restrisiko'}</th>
                                             <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                         </tr>
                                     </thead>
@@ -224,8 +227,8 @@ export default function RiskIndex() {
                                                     <Link href={risk.url} className="font-semibold text-violet-700 hover:text-violet-900">
                                                         {risk.title}
                                                     </Link>
-                                                    {risk.statement ? (
-                                                        <p className="mt-0.5 line-clamp-2 max-w-xl text-sm text-slate-500">{risk.statement}</p>
+                                                    {risk.has_structured_description ? (
+                                                        <p className="mt-0.5 line-clamp-2 max-w-xl text-sm text-slate-500">{risk.event}</p>
                                                     ) : (
                                                         <p className="mt-0.5 text-sm text-amber-700">
                                                             {tr.structured?.missing_short ?? 'Mangler årsak, hendelse og konsekvens'}
@@ -234,6 +237,15 @@ export default function RiskIndex() {
                                                 </td>
                                                 <td className="px-4 py-3 text-slate-700">{risk.area_name}</td>
                                                 <td className="px-4 py-3 text-slate-700">{risk.owner_name ?? '—'}</td>
+                                                <td className="px-4 py-3">
+                                                    {risk.residual_level ? (
+                                                        <StatusBadge tone={RISK_LEVEL_TONES[risk.residual_level] ?? 'slate'}>
+                                                            {levelLabels[risk.residual_level] ?? risk.residual_level}
+                                                        </StatusBadge>
+                                                    ) : (
+                                                        <span className="text-sm text-slate-500">{tr.assessment?.residual_none ?? 'Ikke vurdert'}</span>
+                                                    )}
+                                                </td>
                                                 <td className="py-3 pl-4">
                                                     <StatusBadge tone={RISK_STATUS_TONES[risk.status] ?? 'slate'}>
                                                         {statusLabels[risk.status] ?? risk.status}

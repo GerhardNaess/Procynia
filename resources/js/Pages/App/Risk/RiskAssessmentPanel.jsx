@@ -50,7 +50,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
                 <div className="mt-6 space-y-6">
                     <div>
                         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{ta.latest ?? 'Siste vurdering'}</h3>
-                        <AssessmentDetails assessment={latest} ta={ta} />
+                        <AssessmentDetails assessment={latest} ta={ta} tr={tr} />
                     </div>
 
                     {earlier.length > 0 && (
@@ -62,7 +62,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
                             <ol className="mt-3 divide-y divide-slate-100 rounded-2xl border border-slate-200">
                                 {earlier.map((assessment) => (
                                     <li key={assessment.id} className="px-4 py-2">
-                                        <AssessmentDetails assessment={assessment} ta={ta} compact />
+                                        <AssessmentDetails assessment={assessment} ta={ta} tr={tr} compact />
                                     </li>
                                 ))}
                             </ol>
@@ -118,7 +118,7 @@ function Rating({ title, hint, result, ta }) {
     );
 }
 
-function AssessmentDetails({ assessment, ta, compact = false }) {
+function AssessmentDetails({ assessment, ta, tr, compact = false }) {
     const assessor = assessment.assessed_by_name ?? (ta.unknown_assessor ?? 'ukjent bruker');
 
     return (
@@ -144,17 +144,18 @@ function AssessmentDetails({ assessment, ta, compact = false }) {
                 <span className="text-sm font-semibold text-slate-700">{ta.rationale ?? 'Begrunnelse'}</span>
                 <p className="mt-1 whitespace-pre-line text-base leading-6 text-slate-800">{assessment.rationale}</p>
             </div>
-            <AssessedDescription description={assessment.risk_description} ta={ta} />
+            <AssessedDescription description={assessment.risk_description} ta={ta} tr={tr} />
         </div>
     );
 }
 
 /**
- * What was assessed: the risk description as it read when the assessment was registered, from the
- * assessment's own snapshot. Older assessments have none, and say so rather than borrow today's text.
+ * What was assessed: årsak, hendelse and konsekvens as they read when the assessment was registered,
+ * from the assessment's own snapshot. Older assessments have none, and say so rather than borrow
+ * today's text.
  */
-function AssessedDescription({ description, ta }) {
-    if (! description?.statement) {
+function AssessedDescription({ description, ta, tr }) {
+    if (! description) {
         return (
             <p className="text-sm text-slate-500">
                 {ta.assessed_description_missing ?? 'Risikobeskrivelsen ble ikke lagret sammen med denne vurderingen.'}
@@ -162,10 +163,24 @@ function AssessedDescription({ description, ta }) {
         );
     }
 
+    const ts = tr.structured ?? {};
+    const parts = [
+        { field: 'cause', label: ts.field_cause ?? 'Årsak' },
+        { field: 'event', label: ts.field_event ?? 'Hendelse' },
+        { field: 'consequence', label: ts.field_consequence ?? 'Konsekvens' },
+    ];
+
     return (
         <div>
             <span className="text-sm font-semibold text-slate-700">{ta.assessed_description ?? 'Vurdert risikobeskrivelse'}</span>
-            <p className="mt-1 text-base leading-6 text-slate-800">{description.statement}</p>
+            <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
+                {parts.map(({ field, label }) => (
+                    <div key={field} className="contents">
+                        <dt className="text-sm text-slate-600">{label}</dt>
+                        <dd className="whitespace-pre-line text-base leading-6 text-slate-800">{description[field]}</dd>
+                    </div>
+                ))}
+            </dl>
             {description.changed_since && (
                 <p className="mt-1 text-sm text-amber-700">
                     {ta.assessed_description_changed ?? 'Risikobeskrivelsen er endret etter denne vurderingen.'}

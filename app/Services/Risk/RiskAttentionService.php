@@ -85,7 +85,7 @@ class RiskAttentionService
 
         $customerId = (int) $user->customer_id;
         $riskIds = $risks->pluck('id')->map(fn (mixed $id): int => (int) $id)->all();
-        $latest = $this->latestAssessments($customerId, $riskIds);
+        $latest = RiskAssessment::latestForRisks($customerId, $riskIds);
         $expired = $this->expiredAcceptances($customerId, $latest, $today);
         $overdueActions = $this->overdueActions($customerId, $riskIds, $today);
 
@@ -150,25 +150,6 @@ class RiskAttentionService
         }
 
         return $findings;
-    }
-
-    /**
-     * The latest assessment of each of the given risks: newest assessed_at, then highest id — the same
-     * order as Risk::assessments().
-     *
-     * @param  list<int>  $riskIds
-     * @return Collection<int, RiskAssessment>
-     */
-    private function latestAssessments(int $customerId, array $riskIds): Collection
-    {
-        return RiskAssessment::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('risk_id', $riskIds)
-            ->orderByDesc('assessed_at')
-            ->orderByDesc('id')
-            ->get()
-            ->unique('risk_id')
-            ->keyBy(fn (RiskAssessment $assessment): int => (int) $assessment->risk_id);
     }
 
     /**

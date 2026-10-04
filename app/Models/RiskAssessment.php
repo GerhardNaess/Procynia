@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LogicException;
@@ -59,6 +60,30 @@ class RiskAssessment extends Model
         static::deleting(function (): void {
             throw new LogicException('A risk assessment is history and cannot be deleted on its own.');
         });
+    }
+
+    /**
+     * The latest assessment of each of the given risks, keyed by risk id: newest assessed_at, then
+     * highest id — the same order as Risk::assessments(). One query for any number of risks. The
+     * ids must come from risks already reached through RiskAccessService::visibleRisks().
+     *
+     * @param  list<int>  $riskIds
+     * @return Collection<int, self>
+     */
+    public static function latestForRisks(int $customerId, array $riskIds): Collection
+    {
+        if ($riskIds === []) {
+            return new Collection;
+        }
+
+        return static::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('risk_id', $riskIds)
+            ->orderByDesc('assessed_at')
+            ->orderByDesc('id')
+            ->get()
+            ->unique('risk_id')
+            ->keyBy(fn (self $assessment): int => (int) $assessment->risk_id);
     }
 
     public function hasResidual(): bool

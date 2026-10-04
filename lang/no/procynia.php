@@ -2503,6 +2503,7 @@ return [
         'col_title' => 'Risiko',
         'col_area' => 'Fagområde',
         'col_owner' => 'Risikoeier',
+        'col_residual' => 'Restrisiko',
         'col_status' => 'Status',
         'field_title' => 'Tittel',
         'field_description' => 'Utfyllende informasjon',
@@ -2523,9 +2524,6 @@ return [
         'back' => 'Til risikoregisteret',
         'details' => 'Detaljer',
         'no_description' => 'Ingen beskrivelse.',
-        'statement' => [
-            'sentence' => 'På grunn av :cause kan :event skje, noe som kan føre til :consequence.',
-        ],
         'structured' => [
             'heading' => 'Risikobeskrivelse',
             'field_cause' => 'Årsak',

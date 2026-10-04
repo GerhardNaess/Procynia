@@ -33,6 +33,8 @@ use Tests\TestCase;
  *  - A risk the user cannot see is a 404 for assessing, exactly as for reading — within a tenant
  *    and across tenants.
  *  - Score and level are computed, never stored, and residual risk is never half-given.
+ *  - The register's Restrisiko is the latest assessment's residual — never an older one carried
+ *    forward — read in one query for the rows the user may already see.
  */
 class RiskAssessmentTest extends TestCase
 {
@@ -120,6 +122,44 @@ class RiskAssessmentTest extends TestCase
         }
 
         $this->assertDatabaseHas('risk_assessments', ['id' => $first->id, 'inherent_likelihood' => 4]);
+    }
+
+    public function test_the_register_shows_the_residual_level_of_the_latest_assessment(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $drift = $this->area($customer, 'Drift');
+        $hr = $this->area($customer, 'HR');
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [CustomerPermissionCatalog::RISK_VIEW], [$drift]);
+
+        $lowered = $this->risk($customer, $drift, 'A Redusert');
+        $this->record($lowered, now()->subDays(2), [4, 4]);
+        $this->record($lowered, now()->subDay(), [1, 3]);
+
+        // The latest assessment gave no residual: an older one is not carried forward.
+        $reassessed = $this->risk($customer, $drift, 'B Vurdert uten restrisiko');
+        $this->record($reassessed, now()->subDays(2), [4, 4]);
+        $this->record($reassessed, now()->subDay());
+
+        $unassessed = $this->risk($customer, $drift, 'C Ikke vurdert');
+
+        $hidden = $this->risk($customer, $hr, 'D Skjult');
+        $this->record($hidden, now()->subDay(), [4, 4]);
+
+        $rows = collect($this->indexProps($user)['risks'])->keyBy('id');
+
+        $this->assertSame([$lowered->id, $reassessed->id, $unassessed->id], $rows->keys()->all());
+        $this->assertSame('low', $rows[$lowered->id]['residual_level']);
+        $this->assertNull($rows[$reassessed->id]['residual_level']);
+        $this->assertNull($rows[$unassessed->id]['residual_level']);
+
+        // One read of assessments for the register, however many rows it has.
+        $before = $this->assessmentQueriesOnIndex($user);
+        foreach (['E', 'F', 'G'] as $letter) {
+            $this->record($this->risk($customer, $drift, "{$letter} Flere"), now()->subDay(), [2, 3]);
+        }
+        $this->assertSame($before, $this->assessmentQueriesOnIndex($user));
+        $this->assertSame('moderate', collect($this->indexProps($user)['risks'])->firstWhere('title', 'E Flere')['residual_level']);
     }
 
     public function test_risk_assess_works_without_risk_edit_and_edit_does_not_imply_assess(): void
@@ -378,6 +418,40 @@ class RiskAssessmentTest extends TestCase
             'residual_consequence' => $residualConsequence,
             'rationale' => 'Erfaring fra tidligere hendelser.',
         ];
+    }
+
+    /** @param  array{0: int, 1: int}|null  $residual */
+    private function record(Risk $risk, \DateTimeInterface $at, ?array $residual = null): RiskAssessment
+    {
+        return RiskAssessment::query()->create([
+            'customer_id' => $risk->customer_id,
+            'risk_id' => $risk->id,
+            'assessed_at' => $at,
+            'rationale' => 'Registrert i test.',
+            'criteria_key' => 'standard_5x5_v1',
+            'inherent_likelihood' => 4,
+            'inherent_consequence' => 4,
+            'residual_likelihood' => $residual[0] ?? null,
+            'residual_consequence' => $residual[1] ?? null,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function indexProps(User $user): array
+    {
+        return $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
+    }
+
+    private function assessmentQueriesOnIndex(User $user): int
+    {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->indexProps($user);
+        DB::disableQueryLog();
+
+        return collect(DB::getQueryLog())
+            ->filter(fn (array $query): bool => str_contains($query['query'], 'risk_assessments'))
+            ->count();
     }
 
     private function url(Risk $risk): string

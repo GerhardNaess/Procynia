@@ -2502,6 +2502,7 @@ return [
         'col_title' => 'Risk',
         'col_area' => 'Business area',
         'col_owner' => 'Risk owner',
+        'col_residual' => 'Residual risk',
         'col_status' => 'Status',
         'field_title' => 'Title',
         'field_description' => 'Additional information',
@@ -2522,9 +2523,6 @@ return [
         'back' => 'Back to the risk register',
         'details' => 'Details',
         'no_description' => 'No description.',
-        'statement' => [
-            'sentence' => 'Because of :cause, :event may happen, which may lead to :consequence.',
-        ],
         'structured' => [
             'heading' => 'Risk description',
             'field_cause' => 'Cause',

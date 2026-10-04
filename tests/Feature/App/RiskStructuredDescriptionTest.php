@@ -25,7 +25,8 @@ use Tests\TestCase;
  * What these tests defend:
  *
  *  - The three parts are the risk description, required on every create and edit.
- *  - The readable sentence is composed from them on read; nobody types it.
+ *  - They are shown as three parts; no sentence is stitched together from them. The register
+ *    summarises a risk by its hendelse.
  *  - An older risk without them still opens, its free text kept as «Utfyllende informasjon» and
  *    never shown as the description — and it cannot be saved again without the three parts.
  *  - A new assessment keeps the description as it read then, and a later edit of the risk does not
@@ -57,7 +58,7 @@ class RiskStructuredDescriptionTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_a_risk_is_created_with_cause_event_and_consequence_and_shown_as_one_sentence(): void
+    public function test_a_risk_is_created_with_cause_event_and_consequence_and_shown_as_its_parts(): void
     {
         ['customer' => $customer] = $this->context();
         $drift = $this->area($customer, 'Drift');
@@ -77,16 +78,20 @@ class RiskStructuredDescriptionTest extends TestCase
         $this->assertSame('brudd på avtaler og tapt tillit', $risk->consequence);
         $this->assertSame('Avdekket i internrevisjon.', $risk->description);
 
-        // Trailing punctuation in a part does not break the sentence.
-        $expected = 'På grunn av manglende test av gjenoppretting kan tap av kundedata skje, noe som kan føre til brudd på avtaler og tapt tillit.';
-
         $props = $this->showProps($user, $risk);
-        $this->assertSame($expected, $props['risk']['statement']);
+        $this->assertSame('manglende test av gjenoppretting.', $props['risk']['cause']);
+        $this->assertSame('tap av kundedata', $props['risk']['event']);
+        $this->assertSame('brudd på avtaler og tapt tillit', $props['risk']['consequence']);
         $this->assertTrue($props['risk']['has_structured_description']);
         $this->assertSame('Avdekket i internrevisjon.', $props['risk']['description']);
+        // No composed sentence reaches the page.
+        $this->assertArrayNotHasKey('statement', $props['risk']);
 
+        // The register's short description is the hendelse, as written.
         $index = $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
-        $this->assertSame($expected, $index['risks'][0]['statement']);
+        $this->assertSame('tap av kundedata', $index['risks'][0]['event']);
+        $this->assertTrue($index['risks'][0]['has_structured_description']);
+        $this->assertArrayNotHasKey('statement', $index['risks'][0]);
     }
 
     public function test_cause_event_and_consequence_are_required_on_create_and_on_edit(): void
@@ -138,11 +143,12 @@ class RiskStructuredDescriptionTest extends TestCase
         $props = $this->showProps($user, $legacy);
         $this->assertFalse($props['risk']['has_structured_description']);
         // Never a fallback to the free text: the description is missing, and says so.
-        $this->assertNull($props['risk']['statement']);
+        $this->assertNull($props['risk']['event']);
         $this->assertSame('Dette ble avdekket i revisjonen den 30.5.2026.', $props['risk']['description']);
 
         $index = $this->actingAs($user)->get('/app/risk')->assertOk()->viewData('page')['props'];
-        $this->assertNull($index['risks'][0]['statement']);
+        $this->assertFalse($index['risks'][0]['has_structured_description']);
+        $this->assertNull($index['risks'][0]['event']);
 
         // Saving it unchanged is refused until the three parts are given.
         $this->actingAs($user)->patch("/app/risk/risks/{$legacy->id}", [
@@ -182,8 +188,8 @@ class RiskStructuredDescriptionTest extends TestCase
         $this->assertSame('kundene mister tilgang', $assessment->risk_consequence);
 
         $props = $this->showProps($user, $risk);
-        $before = 'På grunn av strømbrudd kan serverne stopper skje, noe som kan føre til kundene mister tilgang.';
-        $this->assertSame($before, $props['assessments'][0]['risk_description']['statement']);
+        $before = ['cause' => 'strømbrudd', 'event' => 'serverne stopper', 'consequence' => 'kundene mister tilgang'];
+        $this->assertSnapshot($before, $props['assessments'][0]['risk_description']);
         $this->assertFalse($props['assessments'][0]['risk_description']['changed_since']);
 
         // The risk is described again afterwards.
@@ -199,11 +205,9 @@ class RiskStructuredDescriptionTest extends TestCase
         $this->assertSame('kundene mister tilgang', $assessment->risk_consequence);
 
         $props = $this->showProps($user, $risk);
-        $this->assertSame(
-            'På grunn av brann i datasenteret kan driften stanser skje, noe som kan føre til lengre nedetid.',
-            $props['risk']['statement'],
-        );
-        $this->assertSame($before, $props['assessments'][0]['risk_description']['statement']);
+        $this->assertSame('brann i datasenteret', $props['risk']['cause']);
+        // History still shows what was assessed then, part by part.
+        $this->assertSnapshot($before, $props['assessments'][0]['risk_description']);
         $this->assertTrue($props['assessments'][0]['risk_description']['changed_since']);
     }
 
@@ -266,6 +270,16 @@ class RiskStructuredDescriptionTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+
+    /**
+     * @param  array{cause: string, event: string, consequence: string}  $expected
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function assertSnapshot(array $expected, array $snapshot): void
+    {
+        $this->assertSame($expected, array_intersect_key($snapshot, $expected));
+        $this->assertArrayNotHasKey('statement', $snapshot);
+    }
 
     /**
      * @param  array<string, mixed>  $changes
