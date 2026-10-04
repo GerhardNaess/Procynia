@@ -376,6 +376,123 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $fixture['run']->fresh()->qa_status);
     }
 
+    /**
+     * Regression: a sentence that paraphrases the source and then adds a plausible but unstated
+     * purpose/effect ("..., slik at avvik fanges opp tidlig") must never end up
+     * as source_based. The source only states the core fact; the added clause defeats the
+     * deterministic verbatim fast path, so the claim — with the clause intact — reaches semantic
+     * verification, and a partially_supported verdict keeps it out of source_based.
+     */
+    public function test_manual_mixed_block_edit_never_stores_an_added_purpose_clause_as_source_based(): void
+    {
+        $fixture = $this->createManualMixedBlockEditFixture();
+        $newMarkdown = 'Kunden medvirker til dokumentert kontroll etter revisjonen, slik at avvik fanges opp tidlig.';
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [[
+                'text' => $newMarkdown,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'excerpt' => $newMarkdown,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                'source_element_keys' => [],
+                'best_practice_reason' => null,
+                'conflict_note' => null,
+            ]]]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (string $claimText, array $sourceElements) use ($newMarkdown): bool {
+                // The whole sentence, added clause included, is what gets verified.
+                $this->assertSame($newMarkdown, $claimText);
+                $this->assertSame(['source-edited-1'], array_column($sourceElements, 'key'));
+
+                return true;
+            })
+            ->andReturn($this->verificationResult(
+                verdict: WikiClaimVerificationAiClient::VERDICT_PARTIALLY_SUPPORTED,
+                supportingSourceElementKeys: ['source-edited-1'],
+                reason: 'Kilden sier ikke hva kontrollen skal oppnå.',
+                unsupportedParts: 'slik at avvik fanges opp tidlig',
+            ));
+
+        $result = $this->service()->applyManualMixedBlockEdit(
+            $fixture['run']->fresh(),
+            $fixture['page']->fresh(),
+            $fixture['version']->fresh(),
+            $fixture['reviewClaim']->fresh(),
+            'block-0002',
+            $newMarkdown,
+            $fixture['actor']->fresh(),
+        );
+
+        $newClaim = EnterpriseWikiClaim::query()->findOrFail($result['new_claim_ids'][0]);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $newClaim->content_origin);
+        $this->assertSame('claim_partially_supported', $newClaim->generation_issue);
+        $this->assertSame('slik at avvik fanges opp tidlig', $newClaim->review_reason);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $newClaim->approval_status);
+        // Rejected because of the added purpose itself, not via an unrelated deterministic marker.
+        $this->assertSame(WikiClaimVerificationAiClient::VERDICT_PARTIALLY_SUPPORTED, $newClaim->review_metadata['verdict']);
+        $this->assertArrayNotHasKey('deterministic_reason', $newClaim->review_metadata);
+        $this->assertFalse(EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $result['page_version_id'])
+            ->where('content_block_key', 'block-0002')
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED)
+            ->exists());
+        $this->assertFalse(EnterpriseWikiCanonicalFact::query()
+            ->whereIn('id', $result['canonical_fact_ids'])
+            ->where('verification_status', EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED)
+            ->exists());
+    }
+
+    /**
+     * The positive counterpart: an ordinary paraphrase of the same source sentence (reordered,
+     * no added purpose, cause or effect) is still verified as supported and becomes source_based.
+     */
+    public function test_manual_mixed_block_edit_still_stores_a_genuine_paraphrase_as_source_based(): void
+    {
+        $fixture = $this->createManualMixedBlockEditFixture();
+        $newMarkdown = 'Etter revisjonen medvirker Kunden til dokumentert kontroll.';
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [[
+                'text' => $newMarkdown,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'excerpt' => $newMarkdown,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                'source_element_keys' => [],
+                'best_practice_reason' => null,
+                'conflict_note' => null,
+            ]]]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['source-edited-1'],
+                reason: 'Omformulering av samme faktum.',
+            ));
+
+        $result = $this->service()->applyManualMixedBlockEdit(
+            $fixture['run']->fresh(),
+            $fixture['page']->fresh(),
+            $fixture['version']->fresh(),
+            $fixture['reviewClaim']->fresh(),
+            'block-0002',
+            $newMarkdown,
+            $fixture['actor']->fresh(),
+        );
+
+        $newClaim = EnterpriseWikiClaim::query()->findOrFail($result['new_claim_ids'][0]);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $newClaim->content_origin);
+        $this->assertNull($newClaim->generation_issue);
+        $this->assertSame(['source-edited-1'], $newClaim->sourceReferences()->pluck('source_element_key')->all());
+    }
+
     public function test_manual_mixed_block_edit_can_change_multiple_blocks_without_copying_their_old_claims(): void
     {
         $fixture = $this->createManualMixedBlockEditFixture();

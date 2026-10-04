@@ -524,6 +524,29 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('kilden beskriver', $developerPrompt);
     }
 
+    /**
+     * source_based means the WHOLE material assertion is supported by the cited elements. A
+     * source_based block is never claim-verified afterwards, so this generation contract is what
+     * stops a plausible but unstated purpose/effect clause from riding along as document-backed
+     * text — while ordinary paraphrase stays explicitly allowed.
+     */
+    public function test_developer_prompt_forbids_adding_unstated_purpose_or_consequence_to_source_based_blocks(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload(pageType: $pageType)));
+
+            $this->assertStringContainsString('the whole material assertion of a source_based block must be supported by the source elements it cites', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('you may rephrase, shorten, reorder, change grammatical form, translate, and combine information those elements state explicitly', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('no added purpose or intended effect', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('no added consequence, outcome, or benefit', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('not even when it is plausible', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('the house style governs wording only; it never licenses adding substance', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('write it as its own separate best_practice block', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('any other inference, explanation, or elaboration does not belong on the page: omit it', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('why it matters only as far as the source itself says so', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
     public function test_developer_prompt_forbids_inventing_parties_or_defaulting_every_obligation_to_the_customer(): void
     {
         $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
@@ -572,6 +595,9 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('never as advice', $developerPrompt);
         $this->assertStringContainsString('procynia anbefaler', $developerPrompt);
         $this->assertStringContainsString('the justification belongs in best_practice_reason', $developerPrompt);
+        // A repaired section is source_based content too — it must not reintroduce unstated additions.
+        $this->assertStringContainsString('the whole material assertion of a source_based block must be supported by the source elements it cites', $developerPrompt);
+        $this->assertStringContainsString('no added purpose or intended effect', $developerPrompt);
     }
 
     /**

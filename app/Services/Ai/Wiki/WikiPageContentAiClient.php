@@ -63,6 +63,22 @@ class WikiPageContentAiClient
 
     private const DEFAULT_EXPECTED_BLOCK_COUNT = 5;
 
+    /**
+     * What source_based means, stated once for every prompt that writes source_based blocks.
+     * A source_based block is never claim-verified afterwards (only best_practice and
+     * unsupported content is — see EnterpriseWikiExtractPageClaimsService::claimCandidateBlocks()),
+     * so this generation contract is the only thing that keeps a plausible but unstated purpose,
+     * cause, consequence or benefit from being presented as document-backed. Rephrasing alone
+     * never needed this rule; the earlier wording only protected meaning, obligations and
+     * parties, and the "finished agreement text" house style was read as licence to round a
+     * sentence off with an inferred effect.
+     */
+    private const SOURCE_BASED_FIDELITY_RULES = [
+        '- The WHOLE material assertion of a source_based block must be supported by the source elements it cites. You may rephrase, shorten, reorder, change grammatical form, translate, and combine information those elements state explicitly.',
+        '- Never add to a source_based block anything its cited elements do not state: no added purpose or intended effect ("so that ...", "in order to ...", "slik at ...", "for å ..."), no added cause or reason, no added consequence, outcome, or benefit, no added requirement, and no added recommendation — not even when it is plausible, generally true, or makes the sentence read better. The house style governs wording only; it never licenses adding substance.',
+        '- When you want to say more than the cited elements state: if it is a genuine obligation, control, or mechanism that closes a gap in the source, write it as its own separate best_practice block under the best_practice rules — never fold it into the source_based sentence. Any other inference, explanation, or elaboration does not belong on the page: omit it.',
+    ];
+
     public function __construct(
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
         private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
@@ -709,6 +725,7 @@ class WikiPageContentAiClient
             '- No mention of AI generation, confidence levels, or approval status',
             '',
             'Every content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. structural is for a pure "Se også"/cross-reference one-liner with no assertion of its own; best_practice requires a concrete obligation, control, or mechanism that goes beyond the source, never a bare heading or reference.',
+            ...self::SOURCE_BASED_FIDELITY_RULES,
             'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and set anchor_text to the exact words in this block\'s markdown the link should sit on. Write no link syntax at all — no [[...]], no slug, no marker: the server inserts the link on those words.',
             'Write every block as finished agreement text, exactly as the rest of the page: a best_practice block states its clause normatively ("skal ...") and never as advice — no "Procynia anbefaler", "det anbefales", "beste praksis tilsier", or any equivalent advisory opener, and no "fordi ..." justification in the text itself. The justification belongs in best_practice_reason.',
             '',
@@ -1042,7 +1059,7 @@ class WikiPageContentAiClient
             'REPAIR RULES (mandatory):',
             '- Return the FULL corrected page as page.blocks, using the exact same block schema as ordinary generation.',
             '- Keep everything from the previously generated page that is already good — do not rewrite or remove content unrelated to the figures listed below.',
-            '- For each figure named in "FIGURES TO REPAIR" below, add (or correct) a source_based block whose source_element_keys includes that figure\'s exact source_element_key, with source_element_types including "image". Write real, specific prose describing what the figure shows and why it matters here — never a vague summary sentence, and never omit it.',
+            '- For each figure named in "FIGURES TO REPAIR" below, add (or correct) a source_based block whose source_element_keys includes that figure\'s exact source_element_key, with source_element_types including "image". Write real, specific prose describing what the figure shows, and why it matters here only as far as the source itself says so — never a vague summary sentence, and never omit it.',
             '- Place the citing block near the figure\'s given section placement when one is given.',
             '- Do not invent visual details the figure\'s description does not support.',
             '',
@@ -1054,6 +1071,7 @@ class WikiPageContentAiClient
             '- No mention of AI generation, confidence levels, or approval status',
             '',
             'Every ordinary content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. Keep every existing block\'s own content_origin unchanged unless you are correcting it.',
+            ...self::SOURCE_BASED_FIDELITY_RULES,
             'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and set anchor_text to the exact words in this block\'s markdown the link should sit on. Write no link syntax at all — no [[...]], no slug, no marker: the server inserts the link on those words.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
@@ -1215,6 +1233,7 @@ class WikiPageContentAiClient
             '- Copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
             '- A source_based block without source_element_keys is invalid. Never mark a block source_based just because it sounds plausible or reads like something the source document would say — only when you can cite the specific source_element_keys it is drawn from.',
             '- Preserve the meaning, the obligations, and the parties/roles exactly as the source states them. Rewriting for flow is expected; changing who owes what, or how binding it is, is not.',
+            ...self::SOURCE_BASED_FIDELITY_RULES,
             '',
             'STRUCTURAL — content with no factual or professional assertion of its own:',
             '- Use structural for the page title, a section heading that introduces a topic without itself stating a claim, a "Se også"/"See also" cross-reference sentence, a plain wikilink-only reference, or other purely navigational/editorial text.',
@@ -1289,7 +1308,7 @@ class WikiPageContentAiClient
         $figureRules = implode("\n", [
             'PLANNED FIGURES:',
             '- "Additional context" may include a "PLANNED FIGURES FOR THIS PAGE" section — figures the maintainer decision assigned to this page specifically, each with a source_element_key, classification, section placement, purpose, required/optional flag, and an optional caption hint.',
-            '- For each figure marked required: you MUST cite its exact source_element_key in a source_based block\'s source_element_keys, with source_element_types including "image". Write real, specific prose for that block describing what the figure shows and why it matters — never replace the figure with a vague summary sentence, and never omit it.',
+            '- For each figure marked required: you MUST cite its exact source_element_key in a source_based block\'s source_element_keys, with source_element_types including "image". Write real, specific prose for that block describing what the figure shows, and why it matters only as far as the source itself says so — never replace the figure with a vague summary sentence, and never omit it.',
             '- For each figure marked optional: cite it the same way when it fits naturally within this page\'s own content responsibility; it is not an error to leave an optional figure out when there is no natural place for it.',
             '- Place the citing block near the figure\'s given section placement — if the block belongs under one of this page\'s own ## sections, put it there, not at the very end of the page.',
             '- Use the figure\'s caption hint (if given) or its existing description to write the citing text — never invent visual details the source description does not support.',

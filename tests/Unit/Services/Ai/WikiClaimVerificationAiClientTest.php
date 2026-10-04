@@ -83,6 +83,23 @@ class WikiClaimVerificationAiClientTest extends TestCase
      * customer's Wiki language — this is the root cause of English explanation text on a
      * Norwegian-locale findings list, fixed here rather than in presentation code.
      */
+    /**
+     * A plausible inference is still not something the source states: an added purpose, cause,
+     * consequence or benefit makes the claim partially_supported — while fluent paraphrase of
+     * stated facts remains equivalent.
+     */
+    public function test_developer_prompt_rejects_an_added_purpose_or_consequence_but_still_accepts_paraphrase(): void
+    {
+        $payload = $this->capturePayload();
+        $prompt = data_get($payload, 'input.0.content.0.text');
+
+        $this->assertStringContainsString('an added purpose, intended effect, cause, consequence, outcome, or benefit that no excerpt', $prompt);
+        $this->assertStringContainsString('even when it is plausible or follows naturally from what the excerpts describe', $prompt);
+        $this->assertStringContainsString('the verdict is "partially_supported" and unsupported_parts names the added part', $prompt);
+        $this->assertStringContainsString('and it adds no purpose, cause, consequence, or benefit of its own', $prompt);
+        $this->assertStringContainsString('different word order or a natural paraphrase/rewording', $prompt);
+    }
+
     public function test_developer_prompt_instructs_norwegian_output_for_reason_fields_by_default(): void
     {
         $payload = $this->capturePayload(languageCode: 'no');

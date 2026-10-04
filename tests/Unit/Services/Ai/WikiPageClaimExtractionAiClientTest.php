@@ -59,6 +59,21 @@ class WikiPageClaimExtractionAiClientTest extends TestCase
         $this->assertSame('Gyldig.', $result['claims'][0]['text']);
     }
 
+    /**
+     * Verification judges claim_text, not the block. A claim that silently dropped an added
+     * purpose/consequence clause would be verified as a shorter, fully supported statement, so
+     * both extraction variants must keep that clause in the claim.
+     */
+    public function test_both_extraction_prompts_keep_purpose_and_consequence_clauses_in_the_claim(): void
+    {
+        foreach ([$this->capturePayload(), $this->captureManualMixedBlockPayload()] as $payload) {
+            $prompt = data_get($payload, 'input.0.content.0.text');
+
+            $this->assertStringContainsString('Keep a purpose, cause, consequence, or benefit clause', $prompt);
+            $this->assertStringContainsString('never drop part of a sentence to make a claim shorter or easier to verify', $prompt);
+        }
+    }
+
     public function test_manual_mixed_block_payload_contract_uses_explicit_origin_schema(): void
     {
         $payload = $this->captureManualMixedBlockPayload();
