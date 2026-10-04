@@ -9,7 +9,8 @@ const LABEL = 'block text-sm font-semibold text-slate-700';
  * person may create (or edit) in, and the owner list follows the chosen area — both come from the
  * server, which checks them again on save.
  */
-export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, tr }) {
+export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, reviewIntervals = [], tr }) {
+    const trReview = tr.review ?? {};
     const owners = ownersForArea(ownerOptions, form.data.business_area_id);
 
     const changeArea = (value) => {
@@ -99,6 +100,25 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                     </select>
                     {form.errors.status && <p className="mt-1 text-sm text-rose-600">{form.errors.status}</p>}
                 </div>
+            </div>
+
+            <div className="md:w-1/3 md:pr-3">
+                <label htmlFor="risk-review-interval" className={LABEL}>{trReview.field_interval ?? 'Vurderingsintervall'}</label>
+                <select
+                    id="risk-review-interval"
+                    value={form.data.review_interval_months}
+                    onChange={(event) => form.setData('review_interval_months', event.target.value)}
+                    className={`mt-1 ${INPUT}`}
+                >
+                    <option value="">{trReview.no_interval ?? 'Ingen fast intervall'}</option>
+                    {reviewIntervals.map((months) => (
+                        <option key={months} value={months}>{trReview.intervals?.[months] ?? months}</option>
+                    ))}
+                </select>
+                <p className="mt-1 text-sm text-slate-500">
+                    {trReview.field_interval_hint ?? 'Hvor ofte risikoen skal vurderes på nytt. Neste vurdering beregnes fra siste risikovurdering.'}
+                </p>
+                {form.errors.review_interval_months && <p className="mt-1 text-sm text-rose-600">{form.errors.review_interval_months}</p>}
             </div>
 
             <div className="flex flex-wrap justify-end gap-3">

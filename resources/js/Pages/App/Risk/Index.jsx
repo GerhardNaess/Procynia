@@ -60,6 +60,7 @@ export default function RiskIndex() {
         visible_count: visibleCount = 0,
         filters = {},
         statuses = [],
+        review_intervals: reviewIntervals = [],
         has_areas: hasAreas = false,
         access_setup: accessSetup = null,
         permissions = {},
@@ -81,6 +82,7 @@ export default function RiskIndex() {
         business_area_id: areaOptions.length === 1 ? String(areaOptions[0].id) : '',
         owner_user_id: '',
         status: statuses[0] ?? 'identified',
+        review_interval_months: '',
     });
 
     const submitSearch = (event) => {
@@ -136,6 +138,7 @@ export default function RiskIndex() {
                             ownerOptions={ownerOptions}
                             statuses={statuses}
                             statusLabels={statusLabels}
+                            reviewIntervals={reviewIntervals}
                             tr={tr}
                         />
                     </section>

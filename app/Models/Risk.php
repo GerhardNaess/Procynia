@@ -33,6 +33,12 @@ class Risk extends Model
         self::STATUS_CLOSED,
     ];
 
+    /**
+     * Allowed review intervals, in calendar months: månedlig, kvartalsvis, halvårlig, årlig. No
+     * interval (null) means no fixed review cycle. See RiskReviewSchedule.
+     */
+    public const REVIEW_INTERVALS = [1, 3, 6, 12];
+
     protected $fillable = [
         'customer_id',
         'business_area_id',
@@ -40,9 +46,17 @@ class Risk extends Model
         'description',
         'owner_user_id',
         'status',
+        'review_interval_months',
         'created_by',
         'updated_by',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'review_interval_months' => 'integer',
+        ];
+    }
 
     public function customer(): BelongsTo
     {

@@ -8,6 +8,7 @@ import RiskAssessmentPanel from './RiskAssessmentPanel';
 import RiskContextPanel from './RiskContextPanel';
 import RiskControlsPanel from './RiskControlsPanel';
 import RiskForm from './RiskForm';
+import RiskReviewSchedule from './RiskReviewSchedule';
 import RiskTreatmentPanel from './RiskTreatmentPanel';
 import { RISK_STATUS_TONES } from './riskStatus';
 
@@ -23,6 +24,7 @@ export default function RiskShow() {
         translations = {},
         risk,
         statuses = [],
+        review_intervals: reviewIntervals = [],
         assessments = [],
         risk_criteria: riskCriteria,
         controls = null,
@@ -32,6 +34,7 @@ export default function RiskShow() {
         treatment_actions: treatmentActions = [],
         treatment_owner_options: treatmentOwnerOptions = [],
         risk_acceptance: riskAcceptance = null,
+        review_schedule: reviewSchedule = null,
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -47,6 +50,7 @@ export default function RiskShow() {
         business_area_id: String(risk.business_area_id ?? ''),
         owner_user_id: risk.owner_user_id ? String(risk.owner_user_id) : '',
         status: risk.status,
+        review_interval_months: risk.review_interval_months ? String(risk.review_interval_months) : '',
     });
 
     const submit = (event) => {
@@ -106,6 +110,7 @@ export default function RiskShow() {
                             ownerOptions={ownerOptions}
                             statuses={statuses}
                             statusLabels={statusLabels}
+                            reviewIntervals={reviewIntervals}
                             tr={tr}
                         />
                     </section>
@@ -131,6 +136,7 @@ export default function RiskShow() {
                                 </dd>
                             </div>
                         </dl>
+                        {reviewSchedule && <RiskReviewSchedule schedule={reviewSchedule} status={risk.status} tr={tr} />}
                     </section>
                 )}
 

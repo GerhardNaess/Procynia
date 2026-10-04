@@ -11,6 +11,7 @@ use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
+use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Services\Risk\RiskTreatmentService;
 use App\Support\CustomerContext;
@@ -45,6 +46,7 @@ class RiskController extends Controller
         private readonly RiskQualityContextService $context,
         private readonly RiskTreatmentService $treatments,
         private readonly RiskAcceptanceService $acceptances,
+        private readonly RiskReviewSchedule $reviewSchedule,
     ) {}
 
     public function index(Request $request): Response
@@ -77,6 +79,7 @@ class RiskController extends Controller
             'visible_count' => $this->access->visibleRisks($user)->count(),
             'filters' => ['search' => $search, 'status' => $status],
             'statuses' => Risk::STATUSES,
+            'review_intervals' => Risk::REVIEW_INTERVALS,
             'has_areas' => $hasAreas,
             'access_setup' => $hasAreas ? null : $this->accessSetup($user),
             'permissions' => ['can_create' => $creatableAreas->isNotEmpty()],
@@ -122,6 +125,10 @@ class RiskController extends Controller
         return Inertia::render('App/Risk/Show', [
             'risk' => $this->riskRow($risk),
             'statuses' => Risk::STATUSES,
+            'review_intervals' => Risk::REVIEW_INTERVALS,
+            // Periodisk vurdering, derived from the latest assessment and the interval. Whoever may
+            // see the risk may see when it is due; changing the interval takes risk.edit.
+            'review_schedule' => $this->reviewSchedule->scheduleFor($risk),
             // The risk was reached through visibleRisks(), and its assessments carry no access of
             // their own — whoever may see the risk sees its whole history.
             'assessments' => $risk->assessments()->with('assessor:id,name')->get()
@@ -171,6 +178,7 @@ class RiskController extends Controller
             'description' => $this->normalizedText($validated['description'] ?? null),
             'owner_user_id' => $validated['owner_user_id'] ?? null,
             'status' => $validated['status'],
+            'review_interval_months' => $validated['review_interval_months'] ?? null,
             'created_by' => $user->id,
             'updated_by' => $user->id,
         ]);
@@ -204,7 +212,14 @@ class RiskController extends Controller
             'owner_user_id' => $validated['owner_user_id'] ?? null,
             'status' => $validated['status'],
             'updated_by' => $user->id,
-        ])->save();
+        ]);
+
+        // Only when sent, so a client that does not know the field never clears the cycle.
+        if (array_key_exists('review_interval_months', $validated)) {
+            $risk->review_interval_months = $validated['review_interval_months'];
+        }
+
+        $risk->save();
 
         // After a move the user may no longer see the risk; the register is the only safe place
         // to land in that case.
@@ -291,6 +306,7 @@ class RiskController extends Controller
             'business_area_id' => ['required', 'integer'],
             'owner_user_id' => ['nullable', 'integer'],
             'status' => ['required', 'string', Rule::in(Risk::STATUSES)],
+            'review_interval_months' => ['sometimes', 'nullable', 'integer', Rule::in(Risk::REVIEW_INTERVALS)],
         ]);
     }
 
@@ -302,6 +318,7 @@ class RiskController extends Controller
             'title' => $risk->title,
             'description' => $risk->description,
             'status' => $risk->status,
+            'review_interval_months' => $risk->review_interval_months,
             'business_area_id' => (int) $risk->business_area_id,
             'area_name' => $risk->businessArea?->name,
             'owner_user_id' => $risk->owner_user_id !== null ? (int) $risk->owner_user_id : null,
