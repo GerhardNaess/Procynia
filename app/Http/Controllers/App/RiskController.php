@@ -85,6 +85,7 @@ class RiskController extends Controller
             'filters' => ['search' => $search, 'status' => $status],
             'statuses' => Risk::STATUSES,
             'review_intervals' => Risk::REVIEW_INTERVALS,
+            'treatment_strategies' => Risk::TREATMENT_STRATEGIES,
             'has_areas' => $hasAreas,
             'access_setup' => $hasAreas ? null : $this->accessSetup($user),
             'permissions' => ['can_create' => $creatableAreas->isNotEmpty()],
@@ -131,6 +132,7 @@ class RiskController extends Controller
             'risk' => $this->riskRow($risk),
             'statuses' => Risk::STATUSES,
             'review_intervals' => Risk::REVIEW_INTERVALS,
+            'treatment_strategies' => Risk::TREATMENT_STRATEGIES,
             // Periodisk vurdering, derived from the latest assessment and the interval. Whoever may
             // see the risk may see when it is due; changing the interval takes risk.edit.
             'review_schedule' => $this->reviewSchedule->scheduleFor($risk),
@@ -187,6 +189,7 @@ class RiskController extends Controller
             'owner_user_id' => $validated['owner_user_id'] ?? null,
             'status' => $validated['status'],
             'review_interval_months' => $validated['review_interval_months'] ?? null,
+            'treatment_strategy' => $validated['treatment_strategy'] ?? null,
             'created_by' => $user->id,
             'updated_by' => $user->id,
         ]);
@@ -228,6 +231,12 @@ class RiskController extends Controller
         // Only when sent, so a client that does not know the field never clears the cycle.
         if (array_key_exists('review_interval_months', $validated)) {
             $risk->review_interval_months = $validated['review_interval_months'];
+        }
+
+        // Same rule. Only the direction is stored: «accept» here is not an acceptance — that takes
+        // risk.accept and RiskAcceptanceService — and «reduce» creates no tiltak.
+        if (array_key_exists('treatment_strategy', $validated)) {
+            $risk->treatment_strategy = $validated['treatment_strategy'];
         }
 
         $risk->save();
@@ -327,6 +336,7 @@ class RiskController extends Controller
             'owner_user_id' => ['nullable', 'integer'],
             'status' => ['required', 'string', Rule::in(Risk::STATUSES)],
             'review_interval_months' => ['sometimes', 'nullable', 'integer', Rule::in(Risk::REVIEW_INTERVALS)],
+            'treatment_strategy' => ['sometimes', 'nullable', 'string', Rule::in(Risk::TREATMENT_STRATEGIES)],
         ]);
     }
 
@@ -346,6 +356,8 @@ class RiskController extends Controller
             'description' => $risk->description,
             'status' => $risk->status,
             'review_interval_months' => $risk->review_interval_months,
+            // Behandlingsvalg; null is «Ikke besluttet ennå».
+            'treatment_strategy' => $risk->treatment_strategy,
             'business_area_id' => (int) $risk->business_area_id,
             'area_name' => $risk->businessArea?->name,
             'owner_user_id' => $risk->owner_user_id !== null ? (int) $risk->owner_user_id : null,

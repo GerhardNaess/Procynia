@@ -10,6 +10,7 @@ import RiskControlsPanel from './RiskControlsPanel';
 import RiskForm from './RiskForm';
 import RiskReviewSchedule from './RiskReviewSchedule';
 import RiskTreatmentPanel from './RiskTreatmentPanel';
+import RiskTreatmentStrategy from './RiskTreatmentStrategy';
 import RiskDescription from './RiskDescription';
 import { RISK_STATUS_TONES } from './riskStatus';
 
@@ -26,6 +27,7 @@ export default function RiskShow() {
         risk,
         statuses = [],
         review_intervals: reviewIntervals = [],
+        treatment_strategies: treatmentStrategies = [],
         assessments = [],
         risk_criteria: riskCriteria,
         controls = null,
@@ -55,6 +57,7 @@ export default function RiskShow() {
         owner_user_id: risk.owner_user_id ? String(risk.owner_user_id) : '',
         status: risk.status,
         review_interval_months: risk.review_interval_months ? String(risk.review_interval_months) : '',
+        treatment_strategy: risk.treatment_strategy ?? '',
     });
 
     const submit = (event) => {
@@ -115,6 +118,7 @@ export default function RiskShow() {
                             statuses={statuses}
                             statusLabels={statusLabels}
                             reviewIntervals={reviewIntervals}
+                            treatmentStrategies={treatmentStrategies}
                             missingStructure={! risk.has_structured_description}
                             tr={tr}
                         />
@@ -142,6 +146,7 @@ export default function RiskShow() {
                             </dl>
                             {reviewSchedule && <RiskReviewSchedule schedule={reviewSchedule} status={risk.status} tr={tr} />}
                         </section>
+                        <RiskTreatmentStrategy strategy={risk.treatment_strategy} decision={riskAcceptance} tr={tr} />
                     </>
                 )}
 

@@ -2563,6 +2563,28 @@ return [
             'overdue' => 'Overdue',
             'closed_note' => 'A closed risk is not reviewed periodically.',
         ],
+        'treatment_strategy' => [
+            'heading' => 'Treatment',
+            'field' => 'Treatment strategy',
+            'field_hint' => 'How the organisation intends to handle the risk. Concrete actions and formal acceptance are recorded separately.',
+            'none' => 'Not decided yet',
+            'not_decided' => 'Treatment has not been decided yet.',
+            'options' => [
+                'avoid' => 'Avoid',
+                'reduce' => 'Reduce',
+                'share' => 'Share / transfer',
+                'accept' => 'Accept',
+            ],
+            'explanations' => [
+                'avoid' => 'Remove the activity or condition that creates the risk.',
+                'reduce' => 'Reduce likelihood or consequence.',
+                'share' => 'Share or transfer part of the risk to another party.',
+                'accept' => 'Retain the risk after an explicit decision.',
+            ],
+            'accept_formal' => 'The residual risk is formally accepted — see Risk decision.',
+            'accept_pending' => 'Planned direction. The residual risk is not formally accepted until someone allowed to accept risk has recorded the decision under Risk decision.',
+            'accept_form_note' => 'This choice does not record acceptance. Formal acceptance of residual risk is recorded separately under Risk decision, by someone allowed to accept risk.',
+        ],
         'assessment' => [
             'heading' => 'Risk assessment',
             'none_title' => 'This risk has not been assessed yet',

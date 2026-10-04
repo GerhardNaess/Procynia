@@ -61,6 +61,7 @@ export default function RiskIndex() {
         filters = {},
         statuses = [],
         review_intervals: reviewIntervals = [],
+        treatment_strategies: treatmentStrategies = [],
         has_areas: hasAreas = false,
         access_setup: accessSetup = null,
         permissions = {},
@@ -86,6 +87,7 @@ export default function RiskIndex() {
         owner_user_id: '',
         status: statuses[0] ?? 'identified',
         review_interval_months: '',
+        treatment_strategy: '',
     });
 
     const submitSearch = (event) => {
@@ -142,6 +144,7 @@ export default function RiskIndex() {
                             statuses={statuses}
                             statusLabels={statusLabels}
                             reviewIntervals={reviewIntervals}
+                            treatmentStrategies={treatmentStrategies}
                             tr={tr}
                         />
                     </section>

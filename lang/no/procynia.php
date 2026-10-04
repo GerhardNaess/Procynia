@@ -2564,6 +2564,28 @@ return [
             'overdue' => 'Forfalt',
             'closed_note' => 'Lukket risiko følges ikke opp periodisk.',
         ],
+        'treatment_strategy' => [
+            'heading' => 'Behandling',
+            'field' => 'Behandlingsvalg',
+            'field_hint' => 'Hvordan virksomheten vil håndtere risikoen. Konkrete tiltak og formell aksept registreres separat.',
+            'none' => 'Ikke besluttet ennå',
+            'not_decided' => 'Behandling er ikke besluttet ennå.',
+            'options' => [
+                'avoid' => 'Unngå',
+                'reduce' => 'Redusere',
+                'share' => 'Dele / overføre',
+                'accept' => 'Akseptere',
+            ],
+            'explanations' => [
+                'avoid' => 'Fjerne aktiviteten eller forholdet som skaper risikoen.',
+                'reduce' => 'Redusere sannsynlighet eller konsekvens.',
+                'share' => 'Dele eller overføre deler av risikoen til en annen part.',
+                'accept' => 'Beholde risikoen etter en eksplisitt beslutning.',
+            ],
+            'accept_formal' => 'Restrisikoen er formelt akseptert — se Risikobeslutning.',
+            'accept_pending' => 'Planlagt retning. Restrisikoen er ikke formelt akseptert før en med rett til å akseptere risiko har registrert beslutningen under Risikobeslutning.',
+            'accept_form_note' => 'Valget registrerer ikke aksept. Formell aksept av restrisiko registreres separat under Risikobeslutning, av en med rett til å akseptere risiko.',
+        ],
         'assessment' => [
             'heading' => 'Risikovurdering',
             'none_title' => 'Risikoen er ikke vurdert ennå',

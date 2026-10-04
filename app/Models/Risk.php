@@ -41,6 +41,26 @@ class Risk extends Model
      */
     public const REVIEW_INTERVALS = [1, 3, 6, 12];
 
+    public const TREATMENT_AVOID = 'avoid';
+
+    public const TREATMENT_REDUCE = 'reduce';
+
+    public const TREATMENT_SHARE = 'share';
+
+    public const TREATMENT_ACCEPT = 'accept';
+
+    /**
+     * Behandlingsvalg: unngå, redusere, dele/overføre, akseptere. No strategy (null) means «Ikke
+     * besluttet ennå». It is the chosen direction only — it creates no tiltak and no acceptance, and
+     * never changes status or assessment. Formal acceptance is RiskAcceptance, under risk.accept.
+     */
+    public const TREATMENT_STRATEGIES = [
+        self::TREATMENT_AVOID,
+        self::TREATMENT_REDUCE,
+        self::TREATMENT_SHARE,
+        self::TREATMENT_ACCEPT,
+    ];
+
     protected $fillable = [
         'customer_id',
         'business_area_id',
@@ -52,6 +72,7 @@ class Risk extends Model
         'owner_user_id',
         'status',
         'review_interval_months',
+        'treatment_strategy',
         'created_by',
         'updated_by',
     ];
