@@ -7,6 +7,7 @@ import RiskAssessmentPanel from './RiskAssessmentPanel';
 import RiskContextPanel from './RiskContextPanel';
 import RiskControlsPanel from './RiskControlsPanel';
 import RiskForm from './RiskForm';
+import RiskTreatmentPanel from './RiskTreatmentPanel';
 import { RISK_STATUS_TONES } from './riskStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -27,6 +28,8 @@ export default function RiskShow() {
         control_options: controlOptions = [],
         quality_context: qualityContext = null,
         quality_context_options: qualityContextOptions = [],
+        treatment_actions: treatmentActions = [],
+        treatment_owner_options: treatmentOwnerOptions = [],
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -134,6 +137,14 @@ export default function RiskShow() {
                     assessments={assessments}
                     criteria={riskCriteria}
                     canAssess={Boolean(permissions.can_assess)}
+                    tr={tr}
+                />
+
+                <RiskTreatmentPanel
+                    riskId={risk.id}
+                    actions={treatmentActions}
+                    ownerOptions={treatmentOwnerOptions}
+                    canManage={Boolean(permissions.can_manage_actions)}
                     tr={tr}
                 />
 

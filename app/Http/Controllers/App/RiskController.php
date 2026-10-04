@@ -11,6 +11,7 @@ use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskScoringPolicy;
+use App\Services\Risk\RiskTreatmentService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -41,6 +42,7 @@ class RiskController extends Controller
         private readonly RiskScoringPolicy $scoring,
         private readonly RiskControlService $controls,
         private readonly RiskQualityContextService $context,
+        private readonly RiskTreatmentService $treatments,
     ) {}
 
     public function index(Request $request): Response
@@ -131,10 +133,14 @@ class RiskController extends Controller
             // Where the risk belongs in Kvalitet, under the same rule: null, not empty, without read access.
             'quality_context' => $canReadControls ? $this->context->linkedContext($risk) : null,
             'quality_context_options' => $canReadControls && $canEdit ? $this->context->contextOptions($risk) : [],
+            // Tiltak carry no access of their own: whoever may see the risk sees them; risk.edit changes them.
+            'treatment_actions' => $this->treatments->actionsFor($risk),
+            'treatment_owner_options' => $canEdit ? $this->treatments->ownerOptions($risk) : [],
             'permissions' => [
                 'can_edit' => $canEdit,
                 'can_link_controls' => $canReadControls && $canEdit,
                 'can_link_context' => $canReadControls && $canEdit,
+                'can_manage_actions' => $canEdit,
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
             ],

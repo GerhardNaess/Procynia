@@ -71,4 +71,10 @@ class Risk extends Model
     {
         return $this->hasMany(RiskControl::class);
     }
+
+    /** Tiltak on this risk. Reached only through the risk; see RiskTreatmentService. */
+    public function treatmentActions(): HasMany
+    {
+        return $this->hasMany(RiskTreatmentAction::class);
+    }
 }

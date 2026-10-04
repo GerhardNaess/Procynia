@@ -18,6 +18,7 @@ use App\Http\Controllers\App\QualityController;
 use App\Http\Controllers\App\RiskAssessmentController;
 use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
+use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
@@ -315,6 +316,11 @@ Route::prefix('app')
             Route::post('/risks/{riskId}/context', [RiskContextController::class, 'store'])->whereNumber('riskId')->name('context.store');
             Route::delete('/risks/{riskId}/context/processes/{processId}', [RiskContextController::class, 'destroyProcess'])->whereNumber(['riskId', 'processId'])->name('context.processes.destroy');
             Route::delete('/risks/{riskId}/context/activities/{linkId}', [RiskContextController::class, 'destroyActivity'])->whereNumber(['riskId', 'linkId'])->name('context.activities.destroy');
+            // Tiltak on a risk. Reached through the risk only; every write takes risk.edit in its area.
+            Route::post('/risks/{riskId}/actions', [RiskTreatmentActionController::class, 'store'])->whereNumber('riskId')->name('actions.store');
+            Route::patch('/risks/{riskId}/actions/{actionId}', [RiskTreatmentActionController::class, 'update'])->whereNumber(['riskId', 'actionId'])->name('actions.update');
+            Route::post('/risks/{riskId}/actions/{actionId}/complete', [RiskTreatmentActionController::class, 'complete'])->whereNumber(['riskId', 'actionId'])->name('actions.complete');
+            Route::post('/risks/{riskId}/actions/{actionId}/reopen', [RiskTreatmentActionController::class, 'reopen'])->whereNumber(['riskId', 'actionId'])->name('actions.reopen');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
