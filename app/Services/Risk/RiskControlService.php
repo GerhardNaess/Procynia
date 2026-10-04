@@ -38,9 +38,10 @@ class RiskControlService
     ) {}
 
     /**
-     * Whether the user may read Kvalitet's controls, by the rules Kvalitet itself applies.
+     * Whether the user may read Kvalitet — its controls, processes and activities — by the rules
+     * Kvalitet itself applies. Shared by every Risiko → Kvalitet link.
      */
-    public function canReadControls(User $user): bool
+    public function canReadQuality(User $user): bool
     {
         $customer = $user->customer;
 

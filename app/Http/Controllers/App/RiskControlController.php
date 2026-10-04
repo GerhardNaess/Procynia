@@ -60,7 +60,7 @@ class RiskControlController extends Controller
         $risk = $this->access->findVisible($user, $riskId) ?? abort(404);
 
         abort_unless($this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk), 403);
-        abort_unless($this->controls->canReadControls($user), 403);
+        abort_unless($this->controls->canReadQuality($user), 403);
 
         return [$user, $risk];
     }

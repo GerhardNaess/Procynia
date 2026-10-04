@@ -16,6 +16,7 @@ use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\QualityController;
 use App\Http\Controllers\App\RiskAssessmentController;
+use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\SupplierController;
@@ -310,6 +311,10 @@ Route::prefix('app')
             // stays in Kvalitet untouched either way.
             Route::post('/risks/{riskId}/controls', [RiskControlController::class, 'store'])->whereNumber('riskId')->name('controls.store');
             Route::delete('/risks/{riskId}/controls/{controlId}', [RiskControlController::class, 'destroy'])->whereNumber(['riskId', 'controlId'])->name('controls.destroy');
+            // Risiko → hører hjemme i → Kvalitet-prosess / -aktivitet. Shown from the risk only.
+            Route::post('/risks/{riskId}/context', [RiskContextController::class, 'store'])->whereNumber('riskId')->name('context.store');
+            Route::delete('/risks/{riskId}/context/processes/{processId}', [RiskContextController::class, 'destroyProcess'])->whereNumber(['riskId', 'processId'])->name('context.processes.destroy');
+            Route::delete('/risks/{riskId}/context/activities/{linkId}', [RiskContextController::class, 'destroyActivity'])->whereNumber(['riskId', 'linkId'])->name('context.activities.destroy');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

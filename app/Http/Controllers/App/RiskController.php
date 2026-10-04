@@ -9,6 +9,7 @@ use App\Models\RiskAssessment;
 use App\Models\User;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskControlService;
+use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -39,6 +40,7 @@ class RiskController extends Controller
         private readonly RiskAccessService $access,
         private readonly RiskScoringPolicy $scoring,
         private readonly RiskControlService $controls,
+        private readonly RiskQualityContextService $context,
     ) {}
 
     public function index(Request $request): Response
@@ -108,7 +110,7 @@ class RiskController extends Controller
         $canEdit = $this->access->can($user, CustomerPermissionCatalog::RISK_EDIT, $risk);
         // Control information is Kvalitet's, so it is shown only to someone who can read it there.
         // Without that, the page says nothing about controls — not even how many are linked.
-        $canReadControls = $this->controls->canReadControls($user);
+        $canReadControls = $this->controls->canReadQuality($user);
         $editableAreas = $canEdit
             ? $this->access->areasFor($user, CustomerPermissionCatalog::RISK_EDIT)
             : new EloquentCollection;
@@ -126,9 +128,13 @@ class RiskController extends Controller
             'risk_criteria' => $this->scoring->criteria(),
             'controls' => $canReadControls ? $this->controls->linkedControls($risk) : null,
             'control_options' => $canReadControls && $canEdit ? $this->controls->controlOptions($risk) : [],
+            // Where the risk belongs in Kvalitet, under the same rule: null, not empty, without read access.
+            'quality_context' => $canReadControls ? $this->context->linkedContext($risk) : null,
+            'quality_context_options' => $canReadControls && $canEdit ? $this->context->contextOptions($risk) : [],
             'permissions' => [
                 'can_edit' => $canEdit,
                 'can_link_controls' => $canReadControls && $canEdit,
+                'can_link_context' => $canReadControls && $canEdit,
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
             ],

@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Customer;
+use App\Models\QualityProcessBlueprint;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\EnterpriseWiki\GraphProjection\GraphProjectionService;
 use App\Services\EnterpriseWiki\GraphProjection\Neo4jGraphProjectionService;
@@ -11,6 +12,7 @@ use App\Services\EnterpriseWiki\GraphQuery\GraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\Neo4jGraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\NullGraphQueryService;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
+use App\Services\Risk\RiskQualityContextService;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
@@ -93,6 +95,15 @@ class AppServiceProvider extends ServiceProvider
         });
         $events->listen(JobQueued::class, static function (JobQueued $event): void {
             EnterpriseWikiQueueReservationTrace::logDispatch($event);
+        });
+
+        // A risk linked to a Kvalitet activity loses the link when the step leaves the working flow,
+        // or the flow goes. Hooked here so Kvalitet's own code never reads or mentions Risiko.
+        QualityProcessBlueprint::saved(static function (QualityProcessBlueprint $blueprint): void {
+            app(RiskQualityContextService::class)->prune((int) $blueprint->quality_item_id, $blueprint);
+        });
+        QualityProcessBlueprint::deleted(static function (QualityProcessBlueprint $blueprint): void {
+            app(RiskQualityContextService::class)->prune((int) $blueprint->quality_item_id, null);
         });
 
         $this->configureTrustedProxies();
