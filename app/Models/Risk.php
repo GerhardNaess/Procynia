@@ -9,7 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * A risk in the customer's risk register.
  *
- * What the risk is, who owns it, which fagområde it belongs to and where it stands. How
+ * What the risk is, who owns it, which fagområde it belongs to and where it stands. What the risk
+ * is, is said by cause → event → consequence (årsak → hendelse → konsekvens); `description` is only
+ * optional supplementary text («Utfyllende informasjon») and never stands in for them. How
  * serious it is lives in its assessments — a history of RiskAssessment rows, never fields here —
  * and status says where the risk is in its lifecycle, not how high it is.
  *
@@ -43,6 +45,9 @@ class Risk extends Model
         'customer_id',
         'business_area_id',
         'title',
+        'cause',
+        'event',
+        'consequence',
         'description',
         'owner_user_id',
         'status',
@@ -56,6 +61,15 @@ class Risk extends Model
         return [
             'review_interval_months' => 'integer',
         ];
+    }
+
+    /**
+     * Whether the risk has its årsak, hendelse and konsekvens. Risks registered before the
+     * structured description existed do not, until someone next edits them.
+     */
+    public function hasStructuredDescription(): bool
+    {
+        return filled($this->cause) && filled($this->event) && filled($this->consequence);
     }
 
     public function customer(): BelongsTo

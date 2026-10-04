@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
+import { fillRiskDescription } from './helpers/risk.js';
 
 const execAsync = promisify(exec);
 
@@ -47,6 +48,7 @@ test('a quarterly interval shows the next review, and a new assessment moves it'
     await page.goto('/app/risk');
     await page.getByRole('button', { name: 'Ny risiko' }).click();
     await page.locator('#risk-title').fill(riskTitle);
+    await fillRiskDescription(page);
     await page.locator('#risk-area').selectOption({ label: areaName });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/risk\/risks\/\d+$/);

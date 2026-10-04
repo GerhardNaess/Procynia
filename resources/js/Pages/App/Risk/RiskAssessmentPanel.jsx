@@ -144,6 +144,33 @@ function AssessmentDetails({ assessment, ta, compact = false }) {
                 <span className="text-sm font-semibold text-slate-700">{ta.rationale ?? 'Begrunnelse'}</span>
                 <p className="mt-1 whitespace-pre-line text-base leading-6 text-slate-800">{assessment.rationale}</p>
             </div>
+            <AssessedDescription description={assessment.risk_description} ta={ta} />
+        </div>
+    );
+}
+
+/**
+ * What was assessed: the risk description as it read when the assessment was registered, from the
+ * assessment's own snapshot. Older assessments have none, and say so rather than borrow today's text.
+ */
+function AssessedDescription({ description, ta }) {
+    if (! description?.statement) {
+        return (
+            <p className="text-sm text-slate-500">
+                {ta.assessed_description_missing ?? 'Risikobeskrivelsen ble ikke lagret sammen med denne vurderingen.'}
+            </p>
+        );
+    }
+
+    return (
+        <div>
+            <span className="text-sm font-semibold text-slate-700">{ta.assessed_description ?? 'Vurdert risikobeskrivelse'}</span>
+            <p className="mt-1 text-base leading-6 text-slate-800">{description.statement}</p>
+            {description.changed_since && (
+                <p className="mt-1 text-sm text-amber-700">
+                    {ta.assessed_description_changed ?? 'Risikobeskrivelsen er endret etter denne vurderingen.'}
+                </p>
+            )}
         </div>
     );
 }

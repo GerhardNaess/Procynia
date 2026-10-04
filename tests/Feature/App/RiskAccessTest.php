@@ -598,6 +598,9 @@ class RiskAccessTest extends TestCase
     {
         return [
             'title' => $title,
+            'cause' => 'manglende rutiner',
+            'event' => 'en hendelse inntreffer',
+            'consequence' => 'virksomheten rammes',
             'description' => 'Kort beskrivelse',
             'business_area_id' => $area->id,
             'owner_user_id' => null,

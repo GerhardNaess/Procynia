@@ -285,6 +285,9 @@ class RiskReviewScheduleTest extends TestCase
     {
         return array_merge([
             'title' => $risk->title,
+            'cause' => $risk->cause,
+            'event' => $risk->event,
+            'consequence' => $risk->consequence,
             'description' => $risk->description,
             'business_area_id' => $risk->business_area_id,
             'owner_user_id' => $risk->owner_user_id,
@@ -336,6 +339,9 @@ class RiskReviewScheduleTest extends TestCase
             'customer_id' => $customer->id,
             'business_area_id' => $area->id,
             'title' => $title,
+            'cause' => 'manglende rutiner',
+            'event' => 'en hendelse inntreffer',
+            'consequence' => 'virksomheten rammes',
             'status' => $status,
             'review_interval_months' => $interval,
         ]);

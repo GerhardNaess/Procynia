@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
+import { fillRiskDescription } from './helpers/risk.js';
 
 /**
  * Risiko → håndteres av → Kontroll, end to end: Risiko is reached from the rail, an existing
@@ -47,6 +48,7 @@ test('a risk is linked to an existing Kvalitet control and unlinked again', asyn
 
     await page.getByRole('button', { name: 'Ny risiko' }).click();
     await page.locator('#risk-title').fill(riskTitle);
+    await fillRiskDescription(page);
     await page.locator('#risk-area').selectOption({ label: areaName });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/risk\/risks\/\d+$/);

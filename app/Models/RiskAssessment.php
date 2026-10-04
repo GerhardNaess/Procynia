@@ -12,6 +12,10 @@ use LogicException;
  * Holds the two values a person gave for inherent risk and, optionally, for residual risk. Score
  * and level are not stored; RiskScoringPolicy computes them from the values and criteria_key.
  *
+ * risk_cause / risk_event / risk_consequence are the risk's description as it read when the
+ * assessment was made, so the assessment still says what was assessed after the risk text changes.
+ * Assessments from before the snapshot existed have none, and none is invented for them.
+ *
  * Has no access rules of its own. Reach it only through a risk from
  * RiskAccessService::visibleRisks().
  */
@@ -25,6 +29,9 @@ class RiskAssessment extends Model
         'assessed_by',
         'assessed_at',
         'rationale',
+        'risk_cause',
+        'risk_event',
+        'risk_consequence',
         'criteria_key',
         'inherent_likelihood',
         'inherent_consequence',

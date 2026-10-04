@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
+import { fillRiskDescription } from './helpers/risk.js';
 
 /**
  * Risikovurdering, end to end: a role that may assess but not edit lets its holder register an
@@ -42,13 +43,14 @@ test('a fagperson with risk.assess but not risk.edit assesses a risk and keeps i
     await page.goto('/app/risk');
     await page.getByRole('button', { name: 'Ny risiko' }).click();
     await page.locator('#risk-title').fill(riskTitle);
+    await fillRiskDescription(page);
     await page.locator('#risk-area').selectOption({ label: areaName });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/risk\/risks\/\d+$/);
 
     // No risk.edit: the risk itself cannot be rewritten, but it can be assessed.
     await expect(page.getByRole('button', { name: 'Rediger' })).toHaveCount(0);
-    await expect(page.getByText('Risikoen er ikke vurdert ennå')).toBeVisible();
+    await expect(page.getByText('Risikoen er ikke vurdert ennå', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Ny vurdering' }).click();
     await page.locator('#assessment-inherent-likelihood').selectOption('4');

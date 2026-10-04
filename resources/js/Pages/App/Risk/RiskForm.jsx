@@ -4,13 +4,23 @@ import { ownersForArea } from './riskOwners';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-sm font-semibold text-slate-700';
 
+// Årsak → hendelse → konsekvens: the risk description itself. The readable sentence is composed
+// from these on the server; nobody types it.
+const DESCRIPTION_PARTS = [
+    { field: 'cause', label: 'Årsak', hint: 'Hva kan gjøre hendelsen mulig?' },
+    { field: 'event', label: 'Hendelse', hint: 'Hva kan skje?' },
+    { field: 'consequence', label: 'Konsekvens', hint: 'Hva kan virksomheten bli påvirket av?' },
+];
+
 /**
  * The fields of a risk, shared by Ny risiko and Rediger. The area list holds only the areas the
  * person may create (or edit) in, and the owner list follows the chosen area — both come from the
- * server, which checks them again on save.
+ * server, which checks them again on save. `missingStructure` marks an older risk that has no
+ * årsak/hendelse/konsekvens yet: it must get them before it can be saved again.
  */
-export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, reviewIntervals = [], tr }) {
+export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerOptions, statuses, statusLabels, reviewIntervals = [], missingStructure = false, tr }) {
     const trReview = tr.review ?? {};
+    const ts = tr.structured ?? {};
     const owners = ownersForArea(ownerOptions, form.data.business_area_id);
 
     const changeArea = (value) => {
@@ -37,11 +47,40 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                 {form.errors.title && <p className="mt-1 text-sm text-rose-600">{form.errors.title}</p>}
             </div>
 
+            <fieldset className="space-y-4 rounded-2xl border border-slate-200 p-4">
+                <legend className="px-1 text-base font-semibold text-slate-950">{ts.heading ?? 'Risikobeskrivelse'}</legend>
+                {missingStructure && (
+                    <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        {ts.missing_form_note ?? 'Denne risikoen ble registrert før strukturert risikobeskrivelse. Fyll ut årsak, hendelse og konsekvens for å lagre. Tidligere tekst ligger urørt under Utfyllende informasjon.'}
+                    </p>
+                )}
+                {DESCRIPTION_PARTS.map(({ field, label, hint }) => (
+                    <div key={field}>
+                        <label htmlFor={`risk-${field}`} className={LABEL}>{ts[`field_${field}`] ?? label}</label>
+                        <p id={`risk-${field}-hint`} className="text-sm text-slate-600">{ts[`field_${field}_hint`] ?? hint}</p>
+                        <textarea
+                            id={`risk-${field}`}
+                            rows={2}
+                            required
+                            aria-describedby={`risk-${field}-hint`}
+                            value={form.data[field]}
+                            onChange={(event) => form.setData(field, event.target.value)}
+                            className={`mt-1 ${INPUT}`}
+                        />
+                        {form.errors[field] && <p className="mt-1 text-sm text-rose-600">{form.errors[field]}</p>}
+                    </div>
+                ))}
+            </fieldset>
+
             <div>
-                <label htmlFor="risk-description" className={LABEL}>{tr.field_description ?? 'Kort beskrivelse'}</label>
+                <label htmlFor="risk-description" className={LABEL}>{tr.field_description ?? 'Utfyllende informasjon'}</label>
+                <p id="risk-description-hint" className="text-sm text-slate-600">
+                    {tr.field_description_hint ?? 'Valgfritt. Bakgrunn og detaljer — inngår ikke i selve risikobeskrivelsen.'}
+                </p>
                 <textarea
                     id="risk-description"
                     rows={3}
+                    aria-describedby="risk-description-hint"
                     value={form.data.description}
                     onChange={(event) => form.setData('description', event.target.value)}
                     className={`mt-1 ${INPUT}`}

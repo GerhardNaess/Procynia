@@ -78,6 +78,9 @@ export default function RiskIndex() {
 
     const form = useForm({
         title: '',
+        cause: '',
+        event: '',
+        consequence: '',
         description: '',
         business_area_id: areaOptions.length === 1 ? String(areaOptions[0].id) : '',
         owner_user_id: '',
@@ -214,8 +217,12 @@ export default function RiskIndex() {
                                                     <Link href={risk.url} className="font-semibold text-violet-700 hover:text-violet-900">
                                                         {risk.title}
                                                     </Link>
-                                                    {risk.description && (
-                                                        <p className="mt-0.5 line-clamp-2 max-w-xl text-sm text-slate-500">{risk.description}</p>
+                                                    {risk.statement ? (
+                                                        <p className="mt-0.5 line-clamp-2 max-w-xl text-sm text-slate-500">{risk.statement}</p>
+                                                    ) : (
+                                                        <p className="mt-0.5 text-sm text-amber-700">
+                                                            {tr.structured?.missing_short ?? 'Mangler årsak, hendelse og konsekvens'}
+                                                        </p>
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3 text-slate-700">{risk.area_name}</td>

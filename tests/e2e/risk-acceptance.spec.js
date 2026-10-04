@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
+import { fillRiskDescription } from './helpers/risk.js';
 
 /**
  * Acceptance of residual risk, end to end: a risk assessed with residual risk is accepted, the
@@ -43,6 +44,7 @@ test('residual risk is accepted, revoked and accepted again', async ({ page }) =
     await page.goto('/app/risk');
     await page.getByRole('button', { name: 'Ny risiko' }).click();
     await page.locator('#risk-title').fill(riskTitle);
+    await fillRiskDescription(page);
     await page.locator('#risk-area').selectOption({ label: areaName });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/risk\/risks\/\d+$/);

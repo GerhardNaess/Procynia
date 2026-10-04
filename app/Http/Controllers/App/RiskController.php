@@ -13,6 +13,7 @@ use App\Services\Risk\RiskControlService;
 use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
+use App\Services\Risk\RiskStatement;
 use App\Services\Risk\RiskTreatmentService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -47,6 +48,7 @@ class RiskController extends Controller
         private readonly RiskTreatmentService $treatments,
         private readonly RiskAcceptanceService $acceptances,
         private readonly RiskReviewSchedule $reviewSchedule,
+        private readonly RiskStatement $statement,
     ) {}
 
     public function index(Request $request): Response
@@ -61,8 +63,11 @@ class RiskController extends Controller
         if ($search !== '') {
             $needle = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
             $query->where(function ($inner) use ($needle): void {
-                $inner->whereRaw('lower(risks.title) like ?', [$needle])
-                    ->orWhereRaw('lower(coalesce(risks.description, \'\')) like ?', [$needle]);
+                $inner->whereRaw('lower(risks.title) like ?', [$needle]);
+
+                foreach (['cause', 'event', 'consequence', 'description'] as $column) {
+                    $inner->orWhereRaw("lower(coalesce(risks.{$column}, '')) like ?", [$needle]);
+                }
             });
         }
 
@@ -132,7 +137,7 @@ class RiskController extends Controller
             // The risk was reached through visibleRisks(), and its assessments carry no access of
             // their own — whoever may see the risk sees its whole history.
             'assessments' => $risk->assessments()->with('assessor:id,name')->get()
-                ->map(fn (RiskAssessment $assessment): array => $this->assessmentRow($assessment))
+                ->map(fn (RiskAssessment $assessment): array => $this->assessmentRow($assessment, $risk))
                 ->all(),
             // The scale and bands for the form, so the page can show the level before saving
             // without keeping its own copy of the rules.
@@ -175,6 +180,9 @@ class RiskController extends Controller
             'customer_id' => (int) $user->customer_id,
             'business_area_id' => (int) $validated['business_area_id'],
             'title' => trim($validated['title']),
+            'cause' => trim($validated['cause']),
+            'event' => trim($validated['event']),
+            'consequence' => trim($validated['consequence']),
             'description' => $this->normalizedText($validated['description'] ?? null),
             'owner_user_id' => $validated['owner_user_id'] ?? null,
             'status' => $validated['status'],
@@ -208,6 +216,9 @@ class RiskController extends Controller
         $risk->fill([
             'business_area_id' => $targetAreaId,
             'title' => trim($validated['title']),
+            'cause' => trim($validated['cause']),
+            'event' => trim($validated['event']),
+            'consequence' => trim($validated['consequence']),
             'description' => $this->normalizedText($validated['description'] ?? null),
             'owner_user_id' => $validated['owner_user_id'] ?? null,
             'status' => $validated['status'],
@@ -297,11 +308,20 @@ class RiskController extends Controller
         }
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Årsak, hendelse and konsekvens are required on every save, edits included: an older risk
+     * without them opens as before, but cannot be saved again until they are filled in.
+     * `description` is the optional «Utfyllende informasjon».
+     *
+     * @return array<string, mixed>
+     */
     private function validated(Request $request): array
     {
         return $request->validate([
             'title' => ['required', 'string', 'max:255'],
+            'cause' => ['required', 'string', 'max:1000'],
+            'event' => ['required', 'string', 'max:1000'],
+            'consequence' => ['required', 'string', 'max:1000'],
             'description' => ['nullable', 'string', 'max:5000'],
             'business_area_id' => ['required', 'integer'],
             'owner_user_id' => ['nullable', 'integer'],
@@ -316,6 +336,13 @@ class RiskController extends Controller
         return [
             'id' => (int) $risk->id,
             'title' => $risk->title,
+            'cause' => $risk->cause,
+            'event' => $risk->event,
+            'consequence' => $risk->consequence,
+            // Composed for reading, from the three parts only. Null until all three exist.
+            'statement' => $this->statement->compose($risk->cause, $risk->event, $risk->consequence),
+            'has_structured_description' => $risk->hasStructuredDescription(),
+            // «Utfyllende informasjon» — supplementary, never the risk description itself.
             'description' => $risk->description,
             'status' => $risk->status,
             'review_interval_months' => $risk->review_interval_months,
@@ -329,13 +356,14 @@ class RiskController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function assessmentRow(RiskAssessment $assessment): array
+    private function assessmentRow(RiskAssessment $assessment, Risk $risk): array
     {
         return [
             'id' => (int) $assessment->id,
             'assessed_at' => $assessment->assessed_at?->toIso8601String(),
             'assessed_by_name' => $assessment->assessor?->name,
             'rationale' => $assessment->rationale,
+            'risk_description' => $this->assessedDescription($assessment, $risk),
             'inherent' => $this->scoring->evaluate(
                 $assessment->inherent_likelihood,
                 $assessment->inherent_consequence,
@@ -348,6 +376,30 @@ class RiskController extends Controller
                     $assessment->criteria_key,
                 )
                 : null,
+        ];
+    }
+
+    /**
+     * The risk description an assessment was made against, from its own snapshot — never from the
+     * risk as it reads today. Null when the assessment has no snapshot: it predates the snapshot or
+     * the risk had no structured description then.
+     *
+     * @return array{cause: string, event: string, consequence: string, statement: string|null, changed_since: bool}|null
+     */
+    private function assessedDescription(RiskAssessment $assessment, Risk $risk): ?array
+    {
+        if (blank($assessment->risk_cause) || blank($assessment->risk_event) || blank($assessment->risk_consequence)) {
+            return null;
+        }
+
+        return [
+            'cause' => $assessment->risk_cause,
+            'event' => $assessment->risk_event,
+            'consequence' => $assessment->risk_consequence,
+            'statement' => $this->statement->compose($assessment->risk_cause, $assessment->risk_event, $assessment->risk_consequence),
+            'changed_since' => $assessment->risk_cause !== $risk->cause
+                || $assessment->risk_event !== $risk->event
+                || $assessment->risk_consequence !== $risk->consequence,
         ];
     }
 

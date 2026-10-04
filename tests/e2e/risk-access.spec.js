@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, USER, loginAs } from './helpers/auth.js';
+import { fillRiskDescription } from './helpers/risk.js';
 
 /**
  * Risiko, end to end: System Owner names a fagområde and a role that reaches it in
@@ -69,6 +70,7 @@ test('a role with a fagområde lets its holder register and read risks there', a
     await expect(page.getByRole('link', { name: 'Risiko' }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Ny risiko' }).click();
     await page.locator('#risk-title').fill(riskTitle);
+    await fillRiskDescription(page);
     await page.locator('#risk-description').fill('Langvarig strømbrudd på hovedkontoret.');
     await page.locator('#risk-area').selectOption({ label: areaName });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();

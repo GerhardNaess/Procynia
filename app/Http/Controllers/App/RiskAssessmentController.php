@@ -56,6 +56,10 @@ class RiskAssessmentController extends Controller
             'assessed_by' => $user->id,
             'assessed_at' => now(),
             'rationale' => trim($validated['rationale']),
+            // What was assessed, as the risk read at this moment. A later edit of the risk leaves it.
+            'risk_cause' => $risk->cause,
+            'risk_event' => $risk->event,
+            'risk_consequence' => $risk->consequence,
             'criteria_key' => $this->scoring->currentCriteriaKey(),
             'inherent_likelihood' => (int) $validated['inherent_likelihood'],
             'inherent_consequence' => (int) $validated['inherent_consequence'],

@@ -10,6 +10,7 @@ import RiskControlsPanel from './RiskControlsPanel';
 import RiskForm from './RiskForm';
 import RiskReviewSchedule from './RiskReviewSchedule';
 import RiskTreatmentPanel from './RiskTreatmentPanel';
+import RiskDescription from './RiskDescription';
 import { RISK_STATUS_TONES } from './riskStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -46,6 +47,9 @@ export default function RiskShow() {
 
     const form = useForm({
         title: risk.title ?? '',
+        cause: risk.cause ?? '',
+        event: risk.event ?? '',
+        consequence: risk.consequence ?? '',
         description: risk.description ?? '',
         business_area_id: String(risk.business_area_id ?? ''),
         owner_user_id: risk.owner_user_id ? String(risk.owner_user_id) : '',
@@ -111,33 +115,34 @@ export default function RiskShow() {
                             statuses={statuses}
                             statusLabels={statusLabels}
                             reviewIntervals={reviewIntervals}
+                            missingStructure={! risk.has_structured_description}
                             tr={tr}
                         />
                     </section>
                 ) : (
-                    <section className={CARD}>
-                        <h2 className="text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
-                        <p className="mt-3 whitespace-pre-line text-base leading-6 text-slate-700">
-                            {risk.description || (tr.no_description ?? 'Ingen beskrivelse.')}
-                        </p>
-                        <dl className="mt-6 grid gap-4 sm:grid-cols-3">
-                            <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.field_owner ?? 'Risikoeier'}</dt>
-                                <dd className="mt-1 text-base text-slate-900">{risk.owner_name ?? '—'}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
-                                <dd className="mt-1 text-base text-slate-900">{risk.area_name}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
-                                <dd className="mt-1 text-base text-slate-900">
-                                    {risk.updated_at ? new Date(risk.updated_at).toLocaleString('nb-NO') : '—'}
-                                </dd>
-                            </div>
-                        </dl>
-                        {reviewSchedule && <RiskReviewSchedule schedule={reviewSchedule} status={risk.status} tr={tr} />}
-                    </section>
+                    <>
+                        <RiskDescription risk={risk} tr={tr} />
+                        <section className={CARD}>
+                            <h2 className="text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
+                            <dl className="mt-4 grid gap-4 sm:grid-cols-3">
+                                <div>
+                                    <dt className="text-sm font-semibold text-slate-600">{tr.field_owner ?? 'Risikoeier'}</dt>
+                                    <dd className="mt-1 text-base text-slate-900">{risk.owner_name ?? '—'}</dd>
+                                </div>
+                                <div>
+                                    <dt className="text-sm font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
+                                    <dd className="mt-1 text-base text-slate-900">{risk.area_name}</dd>
+                                </div>
+                                <div>
+                                    <dt className="text-sm font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
+                                    <dd className="mt-1 text-base text-slate-900">
+                                        {risk.updated_at ? new Date(risk.updated_at).toLocaleString('nb-NO') : '—'}
+                                    </dd>
+                                </div>
+                            </dl>
+                            {reviewSchedule && <RiskReviewSchedule schedule={reviewSchedule} status={risk.status} tr={tr} />}
+                        </section>
+                    </>
                 )}
 
                 <RiskAssessmentPanel
