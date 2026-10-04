@@ -27,13 +27,13 @@ describe('the rail shows the whole planned product structure', () => {
         );
     });
 
-    test('exactly four are built, and they are the four that have pages', () => {
+    test('exactly five are built, and they are the five that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk'],
         );
     });
 

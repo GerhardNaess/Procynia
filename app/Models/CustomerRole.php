@@ -48,6 +48,47 @@ class CustomerRole extends Model
     }
 
     /**
+     * The tilgangsområder this role reaches in Risiko. Which risks — never what may be done with
+     * them; that is still only the role's permission keys. See RiskAccessService.
+     */
+    public function riskAccessAreas(): BelongsToMany
+    {
+        return $this->belongsToMany(RiskAccessArea::class, 'customer_role_risk_access_areas', 'customer_role_id', 'risk_access_area_id')
+            ->withPivot('customer_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Replace the role's tilgangsområder with exactly the given set. Areas that are not the
+     * role's own customer's are dropped rather than stored, so a role can never reach across
+     * tenants however the request was built.
+     *
+     * @param  iterable<mixed>  $areaIds
+     */
+    public function syncRiskAccessAreas(iterable $areaIds): void
+    {
+        $ids = collect($areaIds)
+            ->filter(fn (mixed $id): bool => is_numeric($id))
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $ownIds = $ids === [] ? [] : RiskAccessArea::query()
+            ->forCustomer((int) $this->customer_id)
+            ->whereIn('id', $ids)
+            ->pluck('id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+
+        $this->riskAccessAreas()->sync(
+            collect($ownIds)->mapWithKeys(fn (int $id): array => [$id => ['customer_id' => $this->customer_id]])->all()
+        );
+
+        $this->unsetRelation('riskAccessAreas');
+    }
+
+    /**
      * The permission keys this role grants, with keys the running code no longer knows filtered out.
      *
      * @return list<string>

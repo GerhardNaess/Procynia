@@ -43,6 +43,8 @@ class CustomerRoleController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'permissions' => ['present', 'array'],
             'permissions.*' => ['string', Rule::in(CustomerPermissionCatalog::all())],
+            'risk_access_area_ids' => ['sometimes', 'array'],
+            'risk_access_area_ids.*' => ['integer'],
         ]);
 
         $name = trim($validated['name']);
@@ -57,6 +59,10 @@ class CustomerRoleController extends Controller
             ]);
 
             $role->syncPermissions($validated['permissions']);
+
+            if (array_key_exists('risk_access_area_ids', $validated)) {
+                $role->syncRiskAccessAreas($validated['risk_access_area_ids']);
+            }
         });
 
         return $this->backToPermissions();
@@ -80,6 +86,11 @@ class CustomerRoleController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'permissions' => ['sometimes', 'present', 'array'],
             'permissions.*' => ['string', Rule::in(CustomerPermissionCatalog::all())],
+            // Which risks the role reaches. Same partial semantics as `permissions`: absent leaves
+            // the set alone, an empty array clears it. Ids of another tenant are dropped by
+            // syncRiskAccessAreas(), never stored.
+            'risk_access_area_ids' => ['sometimes', 'present', 'array'],
+            'risk_access_area_ids.*' => ['integer'],
         ]);
 
         if (array_key_exists('name', $validated)) {
@@ -108,6 +119,10 @@ class CustomerRoleController extends Controller
 
             if (array_key_exists('permissions', $validated)) {
                 $customerRole->syncPermissions($validated['permissions']);
+            }
+
+            if (array_key_exists('risk_access_area_ids', $validated)) {
+                $customerRole->syncRiskAccessAreas($validated['risk_access_area_ids']);
             }
         });
 

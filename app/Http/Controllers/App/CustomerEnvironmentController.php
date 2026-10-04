@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\Department;
+use App\Models\RiskAccessArea;
 use App\Models\User;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -154,7 +155,7 @@ class CustomerEnvironmentController extends Controller
     {
         $roles = CustomerRole::query()
             ->forCustomer($customerId)
-            ->with('permissions')
+            ->with(['permissions', 'riskAccessAreas:id'])
             ->withCount('users')
             ->orderByDesc('is_active')
             ->orderBy('name')
@@ -165,6 +166,11 @@ class CustomerEnvironmentController extends Controller
                 'description' => $role->description,
                 'is_active' => (bool) $role->is_active,
                 'permission_keys' => $role->permissionKeys(),
+                'risk_access_area_ids' => $role->riskAccessAreas
+                    ->pluck('id')
+                    ->map(fn (mixed $id): int => (int) $id)
+                    ->values()
+                    ->all(),
                 'user_count' => (int) $role->users_count,
                 'update_url' => route('app.customer-environment.roles.update', ['customerRole' => $role->id]),
                 'delete_url' => route('app.customer-environment.roles.destroy', ['customerRole' => $role->id]),
@@ -185,10 +191,30 @@ class CustomerEnvironmentController extends Controller
             ->values()
             ->all();
 
+        // Tilgangsområder for Risiko: named here, reached through the roles above. Deliberately
+        // without risk counts — the administrator of roles is not thereby a reader of risks.
+        $riskAccessAreas = RiskAccessArea::query()
+            ->forCustomer($customerId)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (RiskAccessArea $area): array => [
+                'id' => (int) $area->id,
+                'name' => $area->name,
+                'description' => $area->description,
+                'update_url' => route('app.customer-environment.risk-access-areas.update', ['riskAccessArea' => $area->id]),
+                'delete_url' => route('app.customer-environment.risk-access-areas.destroy', ['riskAccessArea' => $area->id]),
+            ])
+            ->all();
+
         return [
             'domains' => $domains,
             'roles' => $roles,
             'store_url' => route('app.customer-environment.roles.store'),
+            'risk_access_areas' => $riskAccessAreas,
+            'risk_access_areas_store_url' => route('app.customer-environment.risk-access-areas.store'),
+            // The domain whose roles carry tilgangsområder, so the page knows where to offer them
+            // without hardcoding a key.
+            'risk_domain' => CustomerPermissionCatalog::DOMAIN_RISK,
         ];
     }
 

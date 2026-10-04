@@ -18,6 +18,8 @@ final class CustomerPermissionCatalog
 
     public const DOMAIN_WIKI = 'wiki';
 
+    public const DOMAIN_RISK = 'risk';
+
     public const QUALITY_VIEW = 'quality.view';
 
     public const QUALITY_CREATE = 'quality.create';
@@ -39,6 +41,18 @@ final class CustomerPermissionCatalog
     public const WIKI_DELETE = 'wiki.delete';
 
     public const WIKI_SOURCE_MANAGE = 'wiki.source.manage';
+
+    /*
+     * Risiko. Unlike the other domains these say what a role may do, never where: a risk is only
+     * reached through a tilgangsområde the same role carries. See RiskAccessService.
+     */
+    public const RISK_VIEW = 'risk.view';
+
+    public const RISK_CREATE = 'risk.create';
+
+    public const RISK_EDIT = 'risk.edit';
+
+    public const RISK_DELETE = 'risk.delete';
 
     /**
      * Permission keys grouped by the domain they govern, in the order they should be presented.
@@ -62,6 +76,12 @@ final class CustomerPermissionCatalog
                 self::WIKI_APPROVE,
                 self::WIKI_DELETE,
                 self::WIKI_SOURCE_MANAGE,
+            ],
+            self::DOMAIN_RISK => [
+                self::RISK_VIEW,
+                self::RISK_CREATE,
+                self::RISK_EDIT,
+                self::RISK_DELETE,
             ],
         ];
     }

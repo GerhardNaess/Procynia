@@ -258,6 +258,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'quality';
         }
 
+        if (pathname.startsWith('/app/risk')) {
+            return 'risk';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }

@@ -87,6 +87,7 @@ return [
         'app.suppliers.' => 'tender',
         'app.ai.' => 'tender',
         'app.quality.' => 'quality',
+        'app.risk.' => 'risk',
     ],
 
 ];

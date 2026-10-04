@@ -134,6 +134,8 @@ class HandleInertiaRequests extends Middleware
                 // whose every string belongs to it, so naming them individually would only
                 // repeat the lang file.
                 'quality' => __('procynia.quality'),
+                // Risiko, shared as a block for the same reason as Kvalitet.
+                'risk' => __('procynia.risk'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
                 'customer_env' => __('procynia.customer_env'),

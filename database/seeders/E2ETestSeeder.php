@@ -156,6 +156,10 @@ class E2ETestSeeder extends Seeder
         );
 
         $this->seedQualityProcessFlows($customer, $systemOwner);
+
+        // Risiko is reached through GRC. Without it the routes redirect to Hjem and the risk spec
+        // would test nothing. Areas, roles and risks are created by the spec itself, through the UI.
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'grc', $systemOwner);
     }
 
     /**

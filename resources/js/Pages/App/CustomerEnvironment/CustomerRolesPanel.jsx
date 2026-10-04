@@ -2,6 +2,7 @@ import { router, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
 import { rolesInDomain } from './customerRoleMatrix';
+import RiskAccessAreasPanel from './RiskAccessAreasPanel';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -26,7 +27,18 @@ function classNames(...values) {
  * place and on one save.
  */
 export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {} }) {
-    const { domains = [], roles = [], store_url: storeUrl } = customerRoles;
+    const {
+        domains = [],
+        roles = [],
+        store_url: storeUrl,
+        risk_access_areas: riskAccessAreas = [],
+        risk_access_areas_store_url: riskAccessAreasStoreUrl,
+        risk_domain: riskDomain = 'risk',
+    } = customerRoles;
+    const tra = t.risk_areas ?? {};
+    const areaNames = (role) => riskAccessAreas
+        .filter((area) => (role.risk_access_area_ids ?? []).includes(area.id))
+        .map((area) => area.name);
 
     const [roleModal, setRoleModal] = useState({ mode: null, role: null });
     const [savingRoleId, setSavingRoleId] = useState(null);
@@ -36,11 +48,12 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         description: '',
         is_active: true,
         permissions: [],
+        risk_access_area_ids: [],
     });
 
     const openCreateRole = () => {
         roleForm.clearErrors();
-        roleForm.setData({ name: '', description: '', is_active: true, permissions: [] });
+        roleForm.setData({ name: '', description: '', is_active: true, permissions: [], risk_access_area_ids: [] });
         setRoleModal({ mode: 'create', role: null });
     };
 
@@ -51,6 +64,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
             description: role.description ?? '',
             is_active: role.is_active,
             permissions: [...role.permission_keys],
+            risk_access_area_ids: [...(role.risk_access_area_ids ?? [])],
         });
         setRoleModal({ mode: 'edit', role });
     };
@@ -127,6 +141,17 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         );
     };
 
+    const toggleFormArea = (areaId) => {
+        const current = roleForm.data.risk_access_area_ids ?? [];
+
+        roleForm.setData(
+            'risk_access_area_ids',
+            current.includes(areaId)
+                ? current.filter((id) => id !== areaId)
+                : [...current, areaId],
+        );
+    };
+
     return (
         <>
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -180,6 +205,11 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                                 {permission.label}
                                                             </th>
                                                         ))}
+                                                        {domain.key === riskDomain ? (
+                                                            <th className="px-3 pb-3 text-left text-sm font-semibold leading-5 text-slate-600">
+                                                                {t.col_risk_areas ?? 'Tilgangsområder'}
+                                                            </th>
+                                                        ) : null}
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
@@ -208,6 +238,13 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                                                     </td>
                                                                 );
                                                             })}
+                                                            {domain.key === riskDomain ? (
+                                                                <td className="px-3 py-4 text-base text-slate-700">
+                                                                    {areaNames(role).length > 0
+                                                                        ? areaNames(role).join(', ')
+                                                                        : (t.no_risk_areas_on_role ?? 'Ingen')}
+                                                                </td>
+                                                            ) : null}
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -297,6 +334,14 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                 )}
             </div>
 
+            <RiskAccessAreasPanel
+                areas={riskAccessAreas}
+                roles={roles}
+                storeUrl={riskAccessAreasStoreUrl}
+                modal={Modal}
+                t={tra}
+            />
+
             <Modal
                 isOpen={roleModal.mode !== null}
                 title={roleModal.mode === 'edit' ? (t.modal_edit_title ?? 'Rediger rolle') : (t.modal_create_title ?? 'Ny rolle')}
@@ -380,6 +425,45 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                                         );
                                     })}
                                 </div>
+                                {domain.key === riskDomain ? (
+                                    <div className="mt-4 border-t border-slate-200 pt-4">
+                                        <p className="text-base font-semibold text-slate-800">{t.field_risk_areas ?? 'Tilgangsområder for risiko'}</p>
+                                        <p className="mt-1 text-base leading-6 text-slate-600">
+                                            {t.field_risk_areas_hint ?? 'Rettighetene over gjelder bare risikoer i områdene som er valgt her.'}
+                                        </p>
+                                        {riskAccessAreas.length === 0 ? (
+                                            <p className="mt-3 text-base text-slate-500">
+                                                {tra.none_to_choose ?? 'Opprett et tilgangsområde før en rolle kan nå risikoer.'}
+                                            </p>
+                                        ) : (
+                                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                                {riskAccessAreas.map((area) => {
+                                                    const checked = (roleForm.data.risk_access_area_ids ?? []).includes(area.id);
+
+                                                    return (
+                                                        <label
+                                                            key={area.id}
+                                                            className={classNames(
+                                                                'flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-base transition',
+                                                                checked
+                                                                    ? 'border-violet-300 bg-violet-50 text-violet-900'
+                                                                    : 'border-slate-200 text-slate-700 hover:border-slate-300',
+                                                            )}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                onChange={() => toggleFormArea(area.id)}
+                                                                className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                                                            />
+                                                            {area.name}
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : null}
                             </div>
                         ))}
                     </div>

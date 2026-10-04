@@ -13,8 +13,8 @@
  * decided here. A module is reachable only when it is both built and entitled.
  *
  * Keeping them apart is what makes the GRC case behave. GRC grants `quality`, `risk` and
- * `audit_compliance`; only `quality` has pages, so buying GRC lights up Kvalitet and leaves Risiko
- * and Revisjon & Compliance exactly as planned as they were. An entitlement can never conjure a
+ * `audit_compliance`; only `quality` and `risk` have pages, so buying GRC lights up Kvalitet and
+ * Risiko and leaves Revisjon & Compliance exactly as planned as it was. An entitlement can never conjure a
  * destination that does not exist.
  *
  * `module: null` means the entry is not something a customer buys — Hjem is the app itself, and
@@ -70,7 +70,17 @@ export const APP_MODULES = [
         label: (m) => m.quality ?? 'Kvalitet',
         areas: ['quality'],
     },
-    { key: 'risk', built: false, module: 'risk', label: (m) => m.risk ?? 'Risiko' },
+    {
+        key: 'risk',
+        href: '/app/risk',
+        built: true,
+        module: 'risk',
+        // RiskController refuses the page without this key. Which risks the person then sees is a
+        // second, server-side question (tilgangsområder) the rail never answers.
+        permission: 'risk.view',
+        label: (m) => m.risk ?? 'Risiko',
+        areas: ['risk'],
+    },
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
