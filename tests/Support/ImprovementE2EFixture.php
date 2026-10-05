@@ -4,6 +4,8 @@ namespace Tests\Support;
 
 use App\Models\BusinessArea;
 use App\Models\CustomerRole;
+use App\Models\ImprovementAction;
+use App\Models\ImprovementActionStatusChange;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseActivity;
 use App\Models\ImprovementCaseProcess;
@@ -68,9 +70,10 @@ class ImprovementE2EFixture
 
     /**
      * For the access spec: two areas, a role that only reads the first handed to the E2E user, an
-     * open case and a case under arbeid in the readable area, and one case in the hidden area.
+     * open case and a case under arbeid in the readable area, and one case in the hidden area. The
+     * open case has one tiltak under arbeid, owned by the reader — owning it gives no edit right.
      *
-     * @return array{visible_id: int, in_progress_id: int, hidden_id: int}
+     * @return array{visible_id: int, in_progress_id: int, hidden_id: int, action_title: string}
      */
     public static function seedViewOnly(string $suffix): array
     {
@@ -112,14 +115,37 @@ class ImprovementE2EFixture
             ]);
             $inProgress->forceFill(['status' => ImprovementCase::STATUS_IN_PROGRESS])->save();
 
-            return ['visible_id' => (int) $visible->id, 'in_progress_id' => (int) $inProgress->id, 'hidden_id' => (int) $secret->id];
+            // A tiltak under arbeid, the way the lifecycle would have put it there.
+            $action = ImprovementAction::query()->create([
+                'customer_id' => $customerId,
+                'improvement_case_id' => $visible->id,
+                'title' => $name('Oppdater rutinen'),
+                'owner_user_id' => $user->id,
+                'due_date' => now()->addMonth()->toDateString(),
+            ]);
+            ImprovementActionStatusChange::query()->create([
+                'customer_id' => $customerId,
+                'improvement_action_id' => $action->id,
+                'from_status' => ImprovementAction::STATUS_PLANNED,
+                'to_status' => ImprovementAction::STATUS_IN_PROGRESS,
+                'changed_by_user_id' => $user->id,
+                'changed_at' => now(),
+            ]);
+            $action->forceFill(['status' => ImprovementAction::STATUS_IN_PROGRESS])->save();
+
+            return [
+                'visible_id' => (int) $visible->id,
+                'in_progress_id' => (int) $inProgress->id,
+                'hidden_id' => (int) $secret->id,
+                'action_title' => $action->title,
+            ];
         });
     }
 
     /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{areas: int, roles: int, cases: int, status_changes: int, processes: int, activities: int}
+     * @return array{areas: int, roles: int, cases: int, status_changes: int, actions: int, action_status_changes: int, processes: int, activities: int}
      */
     public static function remaining(string $suffix): array
     {
@@ -130,11 +156,15 @@ class ImprovementE2EFixture
             ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds))
             ->pluck('id');
 
+        $actionIds = ImprovementAction::query()->whereIn('improvement_case_id', $caseIds)->pluck('id');
+
         return [
             'areas' => $areaIds->count(),
             'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'cases' => $caseIds->count(),
             'status_changes' => ImprovementCaseStatusChange::query()->whereIn('improvement_case_id', $caseIds)->count(),
+            'actions' => $actionIds->count(),
+            'action_status_changes' => ImprovementActionStatusChange::query()->whereIn('improvement_action_id', $actionIds)->count(),
             'processes' => ImprovementCaseProcess::query()->whereIn('improvement_case_id', $caseIds)->count(),
             'activities' => ImprovementCaseActivity::query()->whereIn('improvement_case_id', $caseIds)->count(),
         ];
@@ -157,8 +187,8 @@ class ImprovementE2EFixture
 
             // A case is the run's when its title carries the marker, or when it lives in one of the
             // run's areas — a spec may retitle it, but it cannot leave an area no one else uses. A
-            // bulk delete, past the model: history rows and Kvalitet links go with the case through
-            // the database cascade. Kvalitet's processes are never touched.
+            // bulk delete, past the model: history rows, tiltak with their history and Kvalitet links
+            // go with the case through the database cascade. Kvalitet's processes are never touched.
             $sweepOnly(ImprovementCase::query()->where('customer_id', $customerId)
                 ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds)))
                 ->delete();

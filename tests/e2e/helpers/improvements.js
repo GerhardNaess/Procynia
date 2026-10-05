@@ -44,7 +44,7 @@ export function cleanUpImprovementE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await improvementFixture(`remaining('${suffix}')`)).toEqual({
-            areas: 0, roles: 0, cases: 0, status_changes: 0, processes: 0, activities: 0,
+            areas: 0, roles: 0, cases: 0, status_changes: 0, actions: 0, action_status_changes: 0, processes: 0, activities: 0,
         });
     });
 }
