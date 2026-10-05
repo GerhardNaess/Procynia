@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { IMPROVEMENT_HELP_PAGES, improvementHelp } from './improvementHelp.js';
-import { describeHistoryEntry, descriptionHint, formatDay } from './improvementStatus.js';
+import { ACTION_STATUS_TONES, cancellationReason, describeActionHistoryEntry, describeHistoryEntry, descriptionHint, formatDay } from './improvementStatus.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -66,5 +66,46 @@ describe('improvementStatus', () => {
     test('a day is shown as dd.mm.yyyy, or the fallback', () => {
         assert.equal(formatDay('2026-12-31'), '31.12.2026');
         assert.equal(formatDay(null, 'Ingen frist'), 'Ingen frist');
+    });
+});
+
+describe('Tiltak on the case page', () => {
+    test('the case page shows Årsak og bakgrunn and Tiltak, in that order, before Behandling', () => {
+        const code = source('./Show.jsx');
+        const cause = code.indexOf('<ImprovementCause');
+        const actions = code.indexOf('<ImprovementActions');
+        const handling = code.indexOf('improvement-handling-heading');
+
+        assert.ok(cause > 0 && cause < actions && actions < handling);
+    });
+
+    test('the tiltak form asks for title, description, owner and frist only — never a status', () => {
+        const code = source('./ImprovementActionForm.jsx');
+        const ids = [...code.matchAll(/id="(improvement-action-[a-z-]+)"/g)].map((match) => match[1]).filter((id) => ! id.endsWith('-hint'));
+
+        assert.deepEqual(ids, ['improvement-action-title', 'improvement-action-description', 'improvement-action-owner', 'improvement-action-due-date']);
+        assert.doesNotMatch(code, /setData\('status'|data\.status/);
+    });
+
+    test('every tiltak status has a badge tone', () => {
+        assert.deepEqual(Object.keys(ACTION_STATUS_TONES), ['planned', 'in_progress', 'completed', 'cancelled']);
+    });
+
+    test('a tiltak history entry reads as a sentence, with a former user when the author is gone', () => {
+        assert.equal(describeActionHistoryEntry({ to_status: 'in_progress', changed_by_name: 'Ola' }), 'Startet av Ola');
+        assert.equal(describeActionHistoryEntry({ to_status: 'completed', changed_by_name: 'Kari' }), 'Fullført av Kari');
+        assert.equal(describeActionHistoryEntry({ to_status: 'planned', changed_by_name: null }), 'Gjenåpnet av en tidligere bruker');
+        assert.equal(
+            describeActionHistoryEntry({ to_status: 'cancelled', changed_by_name: 'Ola' }, { actions: { history: { cancelled: 'Cancelled by :name' } } }),
+            'Cancelled by Ola',
+        );
+    });
+
+    test('the cancellation reason comes from the latest history entry, and only while cancelled', () => {
+        const history = [{ to_status: 'cancelled', note: 'Dekkes av et annet tiltak.' }, { to_status: 'in_progress', note: null }];
+
+        assert.equal(cancellationReason({ status: 'cancelled', history }), 'Dekkes av et annet tiltak.');
+        assert.equal(cancellationReason({ status: 'planned', history: [{ to_status: 'planned', note: 'Igjen' }, ...history] }), null);
+        assert.equal(cancellationReason({ status: 'cancelled', history: [] }), null);
     });
 });

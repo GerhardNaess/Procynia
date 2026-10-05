@@ -72,3 +72,44 @@ export function describeHistoryEntry(entry, tr = {}) {
 
     return template.replace(':name', entry.changed_by_name ?? (tr.unknown_user ?? 'en tidligere bruker'));
 }
+
+export const ACTION_STATUS_TONES = {
+    planned: 'blue',
+    in_progress: 'amber',
+    completed: 'emerald',
+    cancelled: 'slate',
+};
+
+/**
+ * One tiltak history entry as a sentence: «Startet av Kari», «Fullført av Ola», «Gjenåpnet av …».
+ *
+ * @param {{to_status: string, changed_by_name: string|null}} entry
+ * @param {object} tr  translations.improvements
+ */
+export function describeActionHistoryEntry(entry, tr = {}) {
+    const fallbacks = {
+        in_progress: 'Startet av :name',
+        completed: 'Fullført av :name',
+        cancelled: 'Avbrutt av :name',
+        planned: 'Gjenåpnet av :name',
+    };
+    const template = tr.actions?.history?.[entry.to_status] ?? fallbacks[entry.to_status] ?? ':name';
+
+    return template.replace(':name', entry.changed_by_name ?? (tr.unknown_user ?? 'en tidligere bruker'));
+}
+
+/**
+ * Why a cancelled tiltak was cancelled: the note of its latest change, which is the cancellation
+ * itself. Not stored on the tiltak — the history is the only record of it.
+ *
+ * @param {{status: string, history: Array<{to_status: string, note: string|null}>}} action  history newest first
+ */
+export function cancellationReason(action) {
+    if (action?.status !== 'cancelled') {
+        return null;
+    }
+
+    const latest = (action.history ?? [])[0];
+
+    return latest?.to_status === 'cancelled' ? latest.note : null;
+}

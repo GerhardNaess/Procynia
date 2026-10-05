@@ -5,6 +5,8 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import KpiContextPanel from '../Objectives/KpiContextPanel';
+import ImprovementActions from './ImprovementActions';
+import ImprovementCause from './ImprovementCause';
 import ImprovementForm from './ImprovementForm';
 import ImprovementHistory from './ImprovementHistory';
 import { ImprovementCancelForm, ImprovementCloseForm, ImprovementReopenForm } from './ImprovementStatusForms';
@@ -19,7 +21,8 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
  * One avvik or forbedring. Every action is offered only when the server said this person may do it
  * to a case in this area; the controller refuses it otherwise. An open case can be edited, started,
  * closed or cancelled; one under arbeid edited, closed or cancelled; an ended one only reopened.
- * Status never moves through Rediger.
+ * Status never moves through Rediger. Årsak og bakgrunn and Tiltak sit between what the case is and
+ * how it is handled; a case with tiltak still to be done is refused closing by the server.
  */
 export default function ImprovementShow() {
     const {
@@ -31,6 +34,8 @@ export default function ImprovementShow() {
         types = [],
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
+        actions = [],
+        action_owner_options: actionOwnerOptions = [],
         quality_context: qualityContext = null,
         quality_context_options: qualityContextOptions = [],
         today = '',
@@ -146,6 +151,23 @@ export default function ImprovementShow() {
                         <p className="mt-3 whitespace-pre-line break-words text-base leading-7 text-slate-800">{item.description}</p>
                     </section>
                 )}
+
+                <ImprovementCause
+                    caseId={item.id}
+                    type={item.type}
+                    text={item.cause_analysis}
+                    canEdit={Boolean(permissions.can_edit_cause)}
+                    tr={tr}
+                />
+
+                <ImprovementActions
+                    caseId={item.id}
+                    actions={actions}
+                    canManage={Boolean(permissions.can_manage_actions)}
+                    ownerOptions={actionOwnerOptions}
+                    locale={locale}
+                    tr={tr}
+                />
 
                 <section className={CARD} aria-labelledby="improvement-handling-heading" data-testid="improvement-handling">
                     <h2 id="improvement-handling-heading" className="text-xl font-semibold text-slate-950">{tr.handling_heading ?? 'Behandling'}</h2>
