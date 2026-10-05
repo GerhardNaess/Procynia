@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import ObjectiveAttention from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
 import { indicatorLabel } from './kpiStatus';
 import { OBJECTIVE_STATUS_TONES, formatTargetDate } from './objectiveStatus';
@@ -60,6 +61,7 @@ export default function ObjectivesIndex() {
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
+        attention = null,
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
@@ -139,6 +141,8 @@ export default function ObjectivesIndex() {
                 {! hasAreas ? (
                     <NoAreasState accessSetup={accessSetup} tr={tr} />
                 ) : (
+                    <>
+                    {attention && <ObjectiveAttention attention={attention} tr={tr} />}
                     <section className={CARD}>
                         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-3">
                             <div className="min-w-[16rem] flex-1">
@@ -249,6 +253,7 @@ export default function ObjectivesIndex() {
                             </div>
                         )}
                     </section>
+                    </>
                 )}
             </div>
         </CustomerAppLayout>

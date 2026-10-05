@@ -183,6 +183,104 @@ class ObjectiveE2EFixture
     }
 
     /**
+     * For the attention spec: two areas and two fresh users, both named and mailed with the run's
+     * marker, so nothing an earlier spec left on the shared E2E users can move a count.
+     *
+     *  - the planner reads, edits, measures and deletes objectives in the first area only;
+     *  - the reader reads objectives in the second area only, and holds objective.edit in the first
+     *    through another role — a permission and an area that must never combine. The second area
+     *    has one calm objective of its own.
+     *
+     * @return array{area_name: string, planner_name: string, planner_email: string, reader_email: string, reader_objective: string}
+     */
+    public static function seedAttention(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = fn (string $label): string => self::PREFIX.' '.strtoupper($suffix).' '.$label;
+        $person = fn (string $label, string $mailbox): User => User::query()->create([
+            'name' => $name($label),
+            'email' => 'e2e.mal.'.strtolower($suffix).'.'.$mailbox.'@procynia.test',
+            'password' => bcrypt($password),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customerId,
+            'is_active' => true,
+        ]);
+
+        return DB::transaction(function () use ($customerId, $name, $person): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Oppfølging')]);
+            $other = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Annet område')]);
+
+            $plannerRole = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Planlegger'), 'is_active' => true]);
+            $plannerRole->syncPermissions([
+                CustomerPermissionCatalog::OBJECTIVE_VIEW,
+                CustomerPermissionCatalog::OBJECTIVE_EDIT,
+                CustomerPermissionCatalog::OBJECTIVE_MEASURE,
+                CustomerPermissionCatalog::OBJECTIVE_DELETE,
+            ]);
+            $plannerRole->syncBusinessAreas(false, [$area->id]);
+            $planner = $person('Planlegger', 'planlegger');
+            $planner->customerRoles()->attach($plannerRole->id, ['customer_id' => $customerId]);
+
+            $readerRole = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Leser annet område'), 'is_active' => true]);
+            $readerRole->syncPermissions([CustomerPermissionCatalog::OBJECTIVE_VIEW]);
+            $readerRole->syncBusinessAreas(false, [$other->id]);
+            $editorRole = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Redigerer uten lesing'), 'is_active' => true]);
+            $editorRole->syncPermissions([CustomerPermissionCatalog::OBJECTIVE_EDIT]);
+            $editorRole->syncBusinessAreas(false, [$area->id]);
+            $reader = $person('Leser', 'leser');
+            $reader->customerRoles()->attach($readerRole->id, ['customer_id' => $customerId]);
+            $reader->customerRoles()->attach($editorRole->id, ['customer_id' => $customerId]);
+
+            $calm = Objective::query()->create([
+                'customer_id' => $customerId,
+                'business_area_id' => $other->id,
+                'title' => $name('Rolig mål'),
+                'owner_user_id' => $reader->id,
+            ]);
+
+            return [
+                'area_name' => $area->name,
+                'planner_name' => $planner->name,
+                'planner_email' => $planner->email,
+                'reader_email' => $reader->email,
+                'reader_objective' => $calm->title,
+            ];
+        });
+    }
+
+    /**
+     * Moves the creation of a run's objective and its KPIs back to the first day of the month the
+     * given number of months ago, and lets the KPIs report with no grace days — so the attention
+     * spec has old periods that are expected and past their deadline, without waiting for them.
+     */
+    public static function backdate(string $suffix, string $objectiveTitle, int $months): void
+    {
+        $objective = Objective::query()
+            ->where('customer_id', self::customerId())
+            ->where('title', $objectiveTitle)
+            ->where('title', 'like', self::PREFIX.' '.strtoupper($suffix).' %')
+            ->firstOrFail();
+        $createdAt = now()->subMonthsNoOverflow($months)->startOfMonth();
+
+        DB::table('objectives')->where('id', $objective->id)->update(['created_at' => $createdAt]);
+        DB::table('kpis')->where('objective_id', $objective->id)->update(['created_at' => $createdAt, 'reporting_grace_days' => 0]);
+    }
+
+    /**
+     * Leaves a run's objective without an owner, as when the owner's user is deleted
+     * (owner_user_id is nullOnDelete). Past the model, like the deletion itself.
+     */
+    public static function removeOwner(string $suffix, string $objectiveTitle): void
+    {
+        DB::table('objectives')
+            ->where('customer_id', self::customerId())
+            ->where('title', $objectiveTitle)
+            ->where('title', 'like', self::PREFIX.' '.strtoupper($suffix).' %')
+            ->update(['owner_user_id' => null]);
+    }
+
+    /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
      * @return array{areas: int, roles: int, users: int, objectives: int, kpis: int, kpi_processes: int, kpi_activities: int, kpi_measurements: int, kpi_status_changes: int, objective_status_changes: int}

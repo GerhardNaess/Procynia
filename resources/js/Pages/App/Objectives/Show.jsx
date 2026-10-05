@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { ObjectiveAttentionNote } from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
 import ObjectiveHistory from './ObjectiveHistory';
 import ObjectiveKpis from './ObjectiveKpis';
@@ -30,6 +31,7 @@ export default function ObjectiveShow() {
         kpi_form_options: kpiFormOptions = null,
         kpi_indicator: kpiIndicator = null,
         affected_processes: affectedProcesses = null,
+        attention = null,
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
@@ -115,6 +117,8 @@ export default function ObjectiveShow() {
                         )}
                     </div>
                 </header>
+
+                <ObjectiveAttentionNote attention={attention} tr={tr} />
 
                 {panel === 'close' && (
                     <ObjectiveCloseForm

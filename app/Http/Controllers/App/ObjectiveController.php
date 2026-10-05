@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Objectives\KpiMeasurementResolver;
 use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\ObjectiveAccessService;
+use App\Services\Objectives\ObjectiveAttentionService;
 use App\Services\Objectives\ObjectiveLifecycleService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -45,6 +46,7 @@ class ObjectiveController extends Controller
         private readonly KpiPresenter $kpiPresenter,
         private readonly KpiMeasurementResolver $measurementResolver,
         private readonly KpiQualityContextService $qualityContext,
+        private readonly ObjectiveAttentionService $attention,
     ) {}
 
     public function index(Request $request): Response
@@ -107,6 +109,12 @@ class ObjectiveController extends Controller
             'statuses' => Objective::STATUSES,
             'filter_area_options' => $this->areaOptions($viewAreas),
             'has_areas' => $viewAreaIds !== [],
+            // Trenger oppmerksomhet, over the same visible set as the list — never the whole
+            // customer, and unaffected by the search and filters. Only a role with «Alle» may have
+            // it described as the whole picture.
+            'attention' => $viewAreaIds !== [] ? $this->attention->overview($user) + [
+                'scope' => $this->access->reachesAllAreas($user, CustomerPermissionCatalog::OBJECTIVE_VIEW) ? 'all' : 'areas',
+            ] : null,
             'access_setup' => $viewAreaIds !== [] ? null : $this->accessSetup($user),
             'permissions' => ['can_create' => $editableAreas->isNotEmpty()],
             'area_options' => $this->areaOptions($editableAreas),
@@ -141,6 +149,9 @@ class ObjectiveController extends Controller
             // The KPIs come with the objective: whoever may read it reads them, nothing more.
             'kpis' => $kpis->map(fn (Kpi $kpi): array => $this->kpiPresenter->row($kpi, $latest[(int) $kpi->id] ?? null))->all(),
             'kpi_indicator' => $this->kpiPresenter->indicator($kpis, $latest),
+            // A short note when the objective or its KPIs need attention; the panel lives on the
+            // overview. Null when there is nothing to say, and always for a closed objective.
+            'attention' => $this->attention->forObjective($objective),
             'kpi_form_options' => $canEdit && $active ? $this->kpiPresenter->formOptions($objective) : null,
             // Berørte prosesser, derived live from what the active KPIs measure. null, not empty,
             // without Kvalitet read: then nothing is said about processes at all.
