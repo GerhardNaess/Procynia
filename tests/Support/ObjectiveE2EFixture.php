@@ -137,6 +137,36 @@ class ObjectiveE2EFixture
     }
 
     /**
+     * For the readability spec: one area and a role that does everything in Mål og KPI there and
+     * reads Kvalitet, handed to the E2E user — so every panel the module has can be opened.
+     *
+     * @return array{area_name: string}
+     */
+    public static function seedJourney(string $suffix): array
+    {
+        $customerId = self::customerId();
+        $user = User::query()->where('email', self::USER_EMAIL)->firstOrFail();
+        $name = fn (string $label): string => self::PREFIX.' '.strtoupper($suffix).' '.$label;
+
+        return DB::transaction(function () use ($customerId, $user, $name): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Reiseområde')]);
+
+            $role = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Alt i Mål og KPI'), 'is_active' => true]);
+            $role->syncPermissions([
+                CustomerPermissionCatalog::OBJECTIVE_VIEW,
+                CustomerPermissionCatalog::OBJECTIVE_EDIT,
+                CustomerPermissionCatalog::OBJECTIVE_MEASURE,
+                CustomerPermissionCatalog::OBJECTIVE_DELETE,
+                CustomerPermissionCatalog::QUALITY_VIEW,
+            ]);
+            $role->syncBusinessAreas(false, [$area->id]);
+            $user->customerRoles()->attach($role->id, ['customer_id' => $customerId]);
+
+            return ['area_name' => $area->name];
+        });
+    }
+
+    /**
      * For the process/activity spec: one area; a role for the E2E user that reads, edits and deletes
      * objectives there and reads Kvalitet; and a fresh user — named and mailed with the run's marker
      * — whose only role reads objectives in the same area and nothing in Kvalitet. Kvalitet's own
