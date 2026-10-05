@@ -1,13 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { USER, loginAs } from './helpers/auth.js';
 import { cleanUpObjectiveE2eData, objectiveE2eName, objectiveE2eSuffix } from './helpers/objectives.js';
+import { DESKTOP, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
 import { tinker } from './helpers/risk.js';
 
 const suffix = objectiveE2eSuffix();
 cleanUpObjectiveE2eData(suffix);
-
-const DESKTOP = { width: 1440, height: 900 };
-const PHONE = { width: 390, height: 844 };
 
 test.afterAll(async () => {
     const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::remaining('${suffix}'));`);
@@ -18,6 +16,9 @@ test.afterAll(async () => {
     });
 });
 
+/** Checks the page at desktop and phone width; screenshots named objective-readability-<name>-<width>. */
+const expectReadable = (page, name) => expectReadableAt(page, 'objective-readability', name);
+
 async function fixture(call) {
     const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::${call});`);
     const match = stdout.match(/\{.*\}|null/);
@@ -27,88 +28,6 @@ async function fixture(call) {
     }
 
     return JSON.parse(match[0]);
-}
-
-/**
- * Every piece of visible text in the page's own content (and an open help panel) set below 16 px.
- * The shared header and module menu are not Mål og KPI's and are left out.
- */
-async function textBelow16px(page) {
-    return page.evaluate(() => {
-        const roots = [document.querySelector('main'), ...document.querySelectorAll('[role="dialog"]')].filter(Boolean);
-        const found = [];
-
-        for (const root of roots) {
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-
-            while (walker.nextNode()) {
-                const text = walker.currentNode.textContent.trim();
-                const element = walker.currentNode.parentElement;
-
-                if (! text || ! element || element.closest('[aria-hidden="true"], .sr-only, option')) {
-                    continue;
-                }
-
-                const rect = element.getBoundingClientRect();
-
-                if (rect.width === 0 && rect.height === 0) {
-                    continue;
-                }
-
-                const size = parseFloat(getComputedStyle(element).fontSize);
-
-                if (size < 16) {
-                    found.push(`${size}px «${text.slice(0, 60)}»`);
-                }
-            }
-        }
-
-        return found;
-    });
-}
-
-/**
- * Whether the whole page scrolls sideways, and if so what reaches past the window. Wide tables may
- * scroll inside their own box, but nothing — not even a screen-reader label — may widen the page.
- */
-async function sidewaysOverflow(page) {
-    return page.evaluate(() => {
-        if (document.documentElement.scrollWidth <= window.innerWidth + 1) {
-            return [];
-        }
-
-        return [`page is ${document.documentElement.scrollWidth}px wide`, ...[...document.querySelectorAll('main *')]
-            .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
-            .slice(-5)
-            .map((element) => `${element.tagName.toLowerCase()}.${String(element.className).split(' ').slice(0, 4).join('.')}`)];
-    });
-}
-
-/** Checks the page at desktop and phone width, and leaves it at desktop width. */
-async function expectReadable(page, name) {
-    for (const [label, size] of [['desktop', DESKTOP], ['phone', PHONE]]) {
-        await page.setViewportSize(size);
-        expect(await textBelow16px(page), `${name} (${label})`).toEqual([]);
-        expect(await sidewaysOverflow(page), `${name} (${label}) scrolls sideways`).toEqual([]);
-        await page.screenshot({ path: `test-results/objective-readability-${name}-${label}.png`, fullPage: true });
-    }
-
-    await page.setViewportSize(DESKTOP);
-}
-
-/** Opens the page's help, checks it has the expected sections and is readable, and closes it. */
-async function expectPageHelp(page, title, sectionTitles) {
-    await page.getByRole('button', { name: 'Hjelp', exact: true }).click();
-    const panel = page.getByRole('dialog', { name: title });
-    await expect(panel).toBeVisible();
-
-    for (const sectionTitle of sectionTitles) {
-        await expect(panel.getByRole('heading', { name: sectionTitle, exact: true })).toBeVisible();
-    }
-
-    expect(await textBelow16px(page), `help «${title}»`).toEqual([]);
-    await page.keyboard.press('Escape');
-    await expect(panel).toHaveCount(0);
 }
 
 /**
