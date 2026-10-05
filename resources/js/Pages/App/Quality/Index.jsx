@@ -46,9 +46,6 @@ const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-sm font-semibold text-slate-700';
 const ROW_DESTRUCTIVE = `ml-auto inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
-const TAB_ACTIVE = 'inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700';
-
-const TABS = ['overview', 'processes', 'controls', 'tools'];
 
 export default function QualityIndex() {
     const {
@@ -98,8 +95,6 @@ export default function QualityIndex() {
                 {activeTab === 'overview' && (
                     <TypeCounts counts={typeCounts} types={qualityTypes} labels={tq.types_plural ?? {}} />
                 )}
-
-                <Tabs activeTab={activeTab} tq={tq} />
 
                 {activeTab === 'overview' && <AttentionPanel findings={attention} tq={tq} />}
 
@@ -250,26 +245,6 @@ function AttentionFinding({ finding, ta }) {
     );
 }
 
-function Tabs({ activeTab, tq }) {
-    return (
-        <nav className="flex flex-wrap gap-2">
-            {TABS.map((tab) => (
-                <Link
-                    key={tab}
-                    href={`/app/quality?tab=${tab}`}
-                    className={
-                        tab === activeTab
-                            ? TAB_ACTIVE
-                            : SECONDARY_ACTION
-                    }
-                >
-                    {tq[`tab_${tab}`] ?? tab}
-                </Link>
-            ))}
-        </nav>
-    );
-}
-
 function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }) {
     const table = tq.table ?? {};
 
@@ -285,7 +260,7 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tq.items_heading ?? 'Styrende dokumenter'}</h2>
-            <div className="mt-4 overflow-x-auto">
+            <div className="relative mt-4 overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-base">
                     <thead className="text-sm uppercase tracking-wide text-slate-500">
                         <tr>
@@ -374,7 +349,7 @@ function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
             <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
                 {tr.help ?? 'Alle kontroller i kvalitetssystemet, og hvilke prosessaktiviteter de brukes i.'}
             </p>
-            <div className="mt-4 overflow-x-auto">
+            <div className="relative mt-4 overflow-x-auto">
                 <table className="w-full min-w-[820px] text-left text-base">
                     <thead className="text-sm uppercase tracking-wide text-slate-500">
                         <tr>

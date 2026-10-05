@@ -257,3 +257,57 @@ describe('the navigation hierarchy is the same shape in every module', () => {
         assert.match(row, /disabledHint=\{aiCaseNavigationHint\}/);
     });
 });
+
+/**
+ * The navigation contract: the rail picks the workspace and module (level 1), the header names the
+ * module's main areas (level 2), and a row on the page exists only for a real level below the
+ * active area (level 3) — Live søk / Varsler / Watch lists under Kunngjøringer, Dokument / Flyt on a
+ * process. The same choices are never offered twice on one page.
+ */
+describe('one navigation choice is rendered in one place', () => {
+    const quality = readFileSync(join(here, '..', 'Pages', 'App', 'Quality', 'Index.jsx'), 'utf8');
+    const qualityItem = readFileSync(join(here, '..', 'Pages', 'App', 'Quality', 'Item.jsx'), 'utf8');
+
+    test('Kvalitet\'s four main areas live in the header only', () => {
+        const areas = block('if (activeMainArea === \'quality\') {', '];');
+
+        for (const tab of ['overview', 'processes', 'controls', 'tools']) {
+            assert.match(areas, new RegExp(`key: 'quality-${tab}'`), tab);
+        }
+
+        // The page used to draw the same four as a strip of its own, from before the header had them.
+        assert.ok(! quality.includes('function Tabs('), 'Kvalitet must not render its own copy of the header areas');
+        assert.ok(! quality.includes('<nav'), 'Kvalitet\'s index has no level below its main areas');
+        assert.ok(! /\/app\/quality\?tab=\$\{/.test(quality), 'no tab links built on the page');
+    });
+
+    test('a process keeps Dokument / Flyt, a real level below Prosesser', () => {
+        assert.match(qualityItem, /function DetailTabs\(/);
+        assert.match(qualityItem, /\['document', td\.tab_document/);
+        assert.match(qualityItem, /\['flow', td\.tab_flow/);
+    });
+
+    test('an item page lights the main area its type belongs to, not its own ?tab=', () => {
+        const resolver = block('const qualityTab = (() => {', '})();');
+
+        assert.match(resolver, /pathname\.startsWith\('\/app\/quality\/items\/'\)/);
+        assert.match(resolver, /type === 'process' \? 'processes' : \(type === 'control' \? 'controls' : 'overview'\)/);
+    });
+
+    test('Kunngjøringer keeps its own level below the header — Live søk, Varsler, Watch lists', () => {
+        const procurements = block('const secondaryNavigation = (() => {', 'if (activeMainArea === \'worklist\')');
+
+        assert.match(procurements, /key: 'live'/);
+        assert.match(procurements, /key: 'alerts'/);
+        assert.match(procurements, /key: 'watch-profiles'/);
+        assert.match(layout, /data-testid="page-navigation"/);
+    });
+
+    test('Risiko, Mål og KPI and Avvik og forbedringer have one main area, so no header row is made up for them', () => {
+        const secondary = block('const secondaryNavigation = (() => {', 'return [];\n    })();');
+
+        for (const area of ['risk', 'objectives', 'improvements']) {
+            assert.ok(! secondary.includes(`activeMainArea === '${area}'`), area);
+        }
+    });
+});

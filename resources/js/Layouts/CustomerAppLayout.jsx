@@ -162,7 +162,18 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
     const wikiTab = searchParams.get('tab') ?? 'pages';
-    const qualityTab = searchParams.get('tab') ?? 'overview';
+    // Which of Kvalitet's main areas the page is in. The index carries it in `?tab=`; an item page
+    // uses `?tab=` for its own level below (Dokument / Flyt), so there the area follows the item's
+    // type — a process belongs under Prosesser, a control under Kontroller, the rest under Oversikt.
+    const qualityTab = (() => {
+        if (pathname.startsWith('/app/quality/items/')) {
+            const type = page.props.item?.quality_type;
+
+            return type === 'process' ? 'processes' : (type === 'control' ? 'controls' : 'overview');
+        }
+
+        return searchParams.get('tab') ?? 'overview';
+    })();
     const currentAiCaseId = page.props.case?.id ?? null;
     const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
         ? String(page.props.analysisCases[0].id)

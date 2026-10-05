@@ -433,3 +433,101 @@ test('no visible text in the rail or the app shell is below 16 px', async ({ pag
         expect(small, `${size.width}px`).toEqual([]);
     }
 });
+
+/**
+ * The navigation contract, in a browser: the rail picks workspace and module, the header names the
+ * module's main areas, and a row on the page exists only for a real level below the active area.
+ * Anbud → Kunngjøringer → Live søk / Varsler / Watch lists is the reference; Kvalitet used to draw
+ * its header areas a second time on the page, and these hold that it no longer does.
+ */
+test.describe('one choice, one place', () => {
+    const QUALITY_AREAS = ['Oversikt', 'Prosesser', 'Kontroller', 'Verktøy'];
+
+    const expectQualityHierarchy = async (page, area) => {
+        const rail = page.getByTestId('module-sidebar');
+
+        await expect(page.getByTestId('module-governance')).toHaveAttribute('data-active', 'true');
+        await expect(rail.locator('[aria-current="page"]')).toHaveText('Kvalitet');
+        expect(await labels(page.getByTestId('module-navigation').locator('a, span'))).toEqual(QUALITY_AREAS);
+        await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText(area);
+    };
+
+    const expectNoCopyOnThePage = async (page) => {
+        // Each main area is offered once — in the header — and nowhere in the page content.
+        for (const label of QUALITY_AREAS) {
+            await expect(page.getByRole('link', { name: label, exact: true }), label).toHaveCount(1);
+        }
+        await expect(page.locator('main nav')).toHaveCount(0);
+        await expect(page.locator('main a[href*="/app/quality?tab="]')).toHaveCount(0);
+        await expect(page.getByTestId('page-navigation')).toHaveCount(0);
+    };
+
+    test('Styring → Kvalitet → each main area: lit at every level, offered once', async ({ page }) => {
+        for (const [tab, area] of [['overview', 'Oversikt'], ['processes', 'Prosesser'], ['controls', 'Kontroller'], ['tools', 'Verktøy']]) {
+            await page.goto(`/app/quality?tab=${tab}`);
+            await expectQualityHierarchy(page, area);
+            await expectNoCopyOnThePage(page);
+        }
+
+        // The page starts with its own title, not with another row of the same choices.
+        await page.goto('/app/quality?tab=processes');
+        await expect(page.locator('main > :not([data-testid="page-navigation"])').first().locator('h1')).toHaveText('Kvalitet');
+    });
+
+    test('a process page stays under Prosesser, and keeps its own Dokument / Flyt level', async ({ page }) => {
+        const { stdout } = await tinker('echo \\App\\Models\\QualityItem::where(\'title\', \'E2E liten prosess\')->value(\'id\');');
+        const id = stdout.trim().split('\n').pop();
+
+        for (const url of [`/app/quality/items/${id}`, `/app/quality/items/${id}?tab=flow`]) {
+            await page.goto(url);
+            await expectQualityHierarchy(page, 'Prosesser');
+        }
+
+        await page.goto(`/app/quality/items/${id}`);
+        await expect(page.locator('main nav').getByRole('link')).toHaveText(['Dokument', 'Flyt']);
+    });
+
+    test('Anbud → Kunngjøringer → Varsler: three levels, each with its own meaning', async ({ page }) => {
+        await page.goto('/app/notices?tab=alerts');
+
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Anbud');
+        await expect(page.getByTestId('module-governance')).toHaveAttribute('data-active', 'false');
+        await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kunngjøringer');
+        await expect(page.getByTestId('page-navigation').locator('a, span')).toHaveText(['Live søk', 'Varsler', 'Watch lists']);
+        await expect(page.getByTestId('page-navigation').locator('[aria-current="page"]')).toHaveText('Varsler');
+
+        // None of the local choices is in the header, and none of the header's is local.
+        const header = await labels(page.getByTestId('module-navigation').locator('a, span'));
+        for (const local of ['Live søk', 'Varsler', 'Watch lists']) {
+            expect(header).not.toContain(local);
+        }
+    });
+
+    test('Risiko, Mål og KPI and Avvik og forbedringer get no made-up header row', async ({ page }) => {
+        await page.context().clearCookies();
+        await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
+
+        for (const [url, current] of [['/app/risk', 'Risiko'], ['/app/objectives', 'Mål og KPI'], ['/app/improvements', 'Avvik og forbedringer']]) {
+            await page.goto(url);
+            await expect(page.getByTestId('module-governance'), url).toHaveAttribute('data-active', 'true');
+            await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]'), url).toHaveText(current);
+            await expect(page.getByTestId('module-navigation'), url).toHaveCount(0);
+            await expect(page.getByTestId('page-navigation'), url).toHaveCount(0);
+        }
+    });
+
+    test('on a phone the same levels show once each, and nothing scrolls sideways', async ({ page }) => {
+        await page.setViewportSize(PHONE);
+
+        await page.goto('/app/quality?tab=processes');
+        await expectQualityHierarchy(page, 'Prosesser');
+        await expectNoCopyOnThePage(page);
+        expect(await sidewaysOverflow(page)).toEqual([]);
+        await page.screenshot({ path: 'test-results/navigation-quality-processes-phone.png', fullPage: true });
+
+        await page.goto('/app/notices?tab=alerts');
+        await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kunngjøringer');
+        await expect(page.getByTestId('page-navigation').locator('[aria-current="page"]')).toHaveText('Varsler');
+        expect(await sidewaysOverflow(page)).toEqual([]);
+    });
+});
