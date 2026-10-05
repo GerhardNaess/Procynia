@@ -22,8 +22,11 @@ function linkedChoice(option) {
  * the server sent `context` — which it does only to someone who can read Kvalitet. Names are
  * Kvalitet's, read live. Endre kobling works one process at a time: tick the whole process and/or
  * its activities; clearing every box removes the process from the KPI. Kvalitet never shows this.
+ *
+ * Avvik og forbedringer links a case to Kvalitet the same way and reuses this panel with its own
+ * strings (tr.context) and its own `idPrefix` for element ids and test ids.
  */
-export default function KpiContextPanel({ baseUrl, context, options, canLink, tr }) {
+export default function KpiContextPanel({ baseUrl, context, options, canLink, tr, idPrefix = 'kpi-context' }) {
     const tc = tr.context ?? {};
     const [editing, setEditing] = useState(false);
     const [processId, setProcessId] = useState('');
@@ -56,10 +59,10 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
     };
 
     return (
-        <section className={CARD} aria-labelledby="kpi-context-heading" data-testid="kpi-context">
+        <section className={CARD} aria-labelledby={`${idPrefix}-heading`} data-testid={idPrefix}>
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h2 id="kpi-context-heading" className="text-lg font-semibold text-slate-950">{tc.title ?? 'Prosess og aktivitet'}</h2>
+                    <h2 id={`${idPrefix}-heading`} className="text-lg font-semibold text-slate-950">{tc.title ?? 'Prosess og aktivitet'}</h2>
                     <p className="mt-1 text-base text-slate-600">
                         {tc.description ?? 'Hva KPI-en måler i virksomheten. Navnene hentes fra Kvalitet.'}
                     </p>
@@ -76,9 +79,9 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                     ) : (
                         <>
                             <div>
-                                <label htmlFor="kpi-context-process" className={LABEL}>{tc.choose_process ?? 'Prosess'}</label>
+                                <label htmlFor={`${idPrefix}-process`} className={LABEL}>{tc.choose_process ?? 'Prosess'}</label>
                                 <select
-                                    id="kpi-context-process"
+                                    id={`${idPrefix}-process`}
                                     value={processId}
                                     onChange={(event) => choose(event.target.value)}
                                     className={`mt-1 ${INPUT}`}
@@ -142,7 +145,7 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
                     {context.map((process) => (
-                        <li key={process.id} className="space-y-2 py-3" data-testid="kpi-context-process">
+                        <li key={process.id} className="space-y-2 py-3" data-testid={`${idPrefix}-process`}>
                             <div>
                                 <p className="text-base font-semibold text-slate-600">{tc.process_heading ?? 'Prosess'}</p>
                                 <a href={process.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">

@@ -266,6 +266,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'objectives';
         }
 
+        if (pathname.startsWith('/app/improvements')) {
+            return 'improvements';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }

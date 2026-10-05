@@ -21,19 +21,19 @@ describe('the rail shows the whole planned product structure', () => {
             APP_MODULES.map((module) => module.key),
             [
                 'home', 'wiki', 'tenders', 'quality',
-                'risk', 'objectives', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
+                'risk', 'objectives', 'improvements', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
         );
     });
 
-    test('exactly six are built, and they are the six that have pages', () => {
+    test('exactly seven are built, and they are the seven that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements'],
         );
     });
 
@@ -225,5 +225,31 @@ describe('Mål og KPI is on the rail once it has pages', () => {
     test('/app/objectives is what puts the rail on Mål og KPI', () => {
         assert.match(layout, /if \(pathname\.startsWith\('\/app\/objectives'\)\) \{\s*\n\s*return 'objectives';/);
         assert.equal(activeModuleKey('objectives'), 'objectives');
+    });
+});
+
+describe('Avvik og forbedringer is on the rail once it has pages', () => {
+    const improvements = APP_MODULES.find((module) => module.key === 'improvements');
+
+    test('it has its own icon on the rail', () => {
+        assert.match(sidebar, /\n    improvements: 'M/);
+    });
+
+    test('it is its own module, gated by improvement.view', () => {
+        assert.equal(improvements.module, 'improvements');
+        assert.equal(improvements.permission, 'improvement.view');
+        assert.equal(improvements.built, true);
+        assert.equal(improvements.label({}), 'Avvik og forbedringer');
+    });
+
+    test('it is a link only with both the module and the permission, and hidden without the permission', () => {
+        assert.equal(moduleAvailability(improvements, ['improvements'], ['improvement.view']), 'active');
+        assert.equal(moduleAvailability(improvements, [], ['improvement.view']), 'not_ordered');
+        assert.equal(moduleAvailability(improvements, ['improvements'], ['objective.view']), 'not_permitted');
+    });
+
+    test('/app/improvements is what puts the rail on Avvik og forbedringer', () => {
+        assert.match(layout, /if \(pathname\.startsWith\('\/app\/improvements'\)\) \{\s*\n\s*return 'improvements';/);
+        assert.equal(activeModuleKey('improvements'), 'improvements');
     });
 });

@@ -92,6 +92,17 @@ export const APP_MODULES = [
         label: (m) => m.objectives ?? 'Mål og KPI',
         areas: ['objectives'],
     },
+    {
+        key: 'improvements',
+        href: '/app/improvements',
+        built: true,
+        module: 'improvements',
+        // ImprovementCaseController refuses the page without this key. Which cases the person then
+        // sees is a second, server-side question (fagområder) the rail never answers.
+        permission: 'improvement.view',
+        label: (m) => m.improvements ?? 'Avvik og forbedringer',
+        areas: ['improvements'],
+    },
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
