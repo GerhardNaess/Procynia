@@ -13,6 +13,7 @@ use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\KpiController;
+use App\Http\Controllers\App\KpiMeasurementController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\ObjectiveController;
@@ -351,6 +352,9 @@ Route::prefix('app')
             // Avslutt / Gjenåpne: the only ways a KPI's status changes. Each writes an immutable history row.
             Route::post('/{objectiveId}/kpis/{kpiId}/retire', [KpiController::class, 'retire'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.retire');
             Route::post('/{objectiveId}/kpis/{kpiId}/reopen', [KpiController::class, 'reopen'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.reopen');
+            // Measurements: registered (a correction is a new one) and withdrawn — never edited or deleted.
+            Route::post('/{objectiveId}/kpis/{kpiId}/measurements', [KpiMeasurementController::class, 'store'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.measurements.store');
+            Route::post('/{objectiveId}/kpis/{kpiId}/measurements/{measurementId}/withdraw', [KpiMeasurementController::class, 'withdraw'])->whereNumber(['objectiveId', 'kpiId', 'measurementId'])->name('kpis.measurements.withdraw');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

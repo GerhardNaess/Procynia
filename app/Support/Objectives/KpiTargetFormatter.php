@@ -24,10 +24,13 @@ final class KpiTargetFormatter
 
     public function __construct(private readonly ?string $locale = null) {}
 
-    /** The målverdi with its unit. */
-    public function target(Kpi $kpi): string
+    /**
+     * The målverdi with its unit — the KPI's own, or another one in the same unit, such as the
+     * snapshot a measurement was registered against.
+     */
+    public function target(Kpi $kpi, ?KpiTarget $target = null): string
     {
-        $target = $kpi->target();
+        $target ??= $kpi->target();
 
         if ($target->isInterval() && $target->min->isEqualTo($target->max)) {
             return '='.self::NBSP.$this->withUnit($kpi, $this->number($target->min), $target->min);

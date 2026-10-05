@@ -391,7 +391,7 @@ class KpiTest extends TestCase
 
         $this->grant($customer, $owner, [CustomerPermissionCatalog::OBJECTIVE_VIEW], [$hr]);
         $props = $this->actingAs($owner)->get($this->kpiUrl($kpi))->assertOk()->viewData('page')['props'];
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false, 'can_measure' => false], $props['permissions']);
     }
 
     public function test_another_customers_kpi_can_never_be_read_or_changed(): void
@@ -642,7 +642,8 @@ class KpiTest extends TestCase
             ->values()
             ->all();
         $this->assertSame([
-            'app.objectives.kpis.destroy', 'app.objectives.kpis.reopen', 'app.objectives.kpis.retire',
+            'app.objectives.kpis.destroy', 'app.objectives.kpis.measurements.store', 'app.objectives.kpis.measurements.withdraw',
+            'app.objectives.kpis.reopen', 'app.objectives.kpis.retire',
             'app.objectives.kpis.show', 'app.objectives.kpis.store', 'app.objectives.kpis.update',
         ], $kpiRoutes);
 
@@ -654,7 +655,7 @@ class KpiTest extends TestCase
     // Pages
     // ---------------------------------------------------------------------
 
-    public function test_the_objective_page_lists_its_kpis_with_formatted_targets_and_nothing_measured(): void
+    public function test_the_objective_page_lists_its_kpis_with_formatted_targets_and_not_measured(): void
     {
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
@@ -684,10 +685,10 @@ class KpiTest extends TestCase
         $this->assertSame($user->name, $rows['Oppetid']['responsible_name']);
         $this->assertTrue($rows['Oppetid']['responsible_is_fallback']);
 
-        // Nothing measured is pretended.
-        foreach (['value', 'last_value', 'target_status', 'next_period'] as $absent) {
-            $this->assertArrayNotHasKey($absent, $rows['Oppetid']);
-        }
+        // Nothing measured yet, and nothing pretended.
+        $this->assertNull($rows['Oppetid']['latest_value_display']);
+        $this->assertSame('not_measured', $rows['Oppetid']['result']);
+        $this->assertSame(['on_target' => 0, 'total' => 4], $props['kpi_indicator']);
 
         $this->assertTrue($props['permissions']['can_create_kpi']);
         $this->assertSame(Kpi::UNITS, $props['kpi_form_options']['units']);
@@ -704,7 +705,7 @@ class KpiTest extends TestCase
 
         $props = $this->actingAs($editor)->get($this->kpiUrl($kpi))->assertOk()->viewData('page')['props'];
         $this->assertSame('App/Objectives/KpiShow', $this->actingAs($editor)->get($this->kpiUrl($kpi))->viewData('page')['component']);
-        $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false, 'can_measure' => false], $props['permissions']);
         $this->assertSame('Mål', $props['objective']['title']);
         $this->assertSame('1 %', str_replace("\u{00A0}", ' ', $props['kpi']['tolerance_display']));
         $this->assertSame('7 dager etter at perioden er slutt', $props['kpi']['deadline_display']);
@@ -712,7 +713,7 @@ class KpiTest extends TestCase
         $this->assertNotNull($props['form_options']);
 
         $props = $this->actingAs($reader)->get($this->kpiUrl($kpi))->assertOk()->viewData('page')['props'];
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false, 'can_measure' => false], $props['permissions']);
         $this->assertNull($props['form_options']);
 
         $objectiveProps = $this->actingAs($reader)->get("/app/objectives/{$objective->id}")->viewData('page')['props'];
@@ -727,7 +728,7 @@ class KpiTest extends TestCase
 
         $kpi->forceFill(['status' => Kpi::STATUS_RETIRED])->save();
         $props = $this->actingAs($editor)->get($this->kpiUrl($kpi))->viewData('page')['props'];
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false, 'can_measure' => false], $props['permissions']);
     }
 
     // ---------------------------------------------------------------------

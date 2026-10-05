@@ -162,6 +162,15 @@ class ObjectiveAccessService
         return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_EDIT, $objective);
     }
 
+    /**
+     * Registering and withdrawing measurements. Its own permission: objective.edit does not imply
+     * it, and it does not imply objective.edit.
+     */
+    public function canMeasure(User $user, Objective $objective): bool
+    {
+        return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_MEASURE, $objective);
+    }
+
     public function canDelete(User $user, Objective $objective): bool
     {
         return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_DELETE, $objective);

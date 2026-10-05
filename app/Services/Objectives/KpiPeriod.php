@@ -27,6 +27,15 @@ final class KpiPeriod
         return $day->greaterThanOrEqualTo($this->start) && $day->lessThanOrEqualTo($this->end);
     }
 
+    /**
+     * The period's dates as one key — what a measurement's periodKey() is matched against. Dates,
+     * not the frequency key, so a day and a stored range compare the same way.
+     */
+    public function rangeKey(): string
+    {
+        return $this->start->format('Y-m-d').'|'.$this->end->format('Y-m-d');
+    }
+
     public function equals(self $other): bool
     {
         return $this->frequency === $other->frequency && $this->key === $other->key;

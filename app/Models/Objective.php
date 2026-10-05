@@ -84,12 +84,14 @@ class Objective extends Model
 
     /**
      * Whether the objective may be deleted at all, before any permission is considered. Deleting is
-     * for an objective registered by mistake; once KPIs and their measurement history exist, an
-     * objective that carries history is closed instead, and this is where that is refused.
+     * for an objective registered by mistake. KPIs alone do not stop it; once any of its KPIs has a
+     * measurement — withdrawn or not — the objective carries history and is closed instead.
      */
     public function isDeletable(): bool
     {
-        return true;
+        return ! $this->exists || ! KpiMeasurement::query()
+            ->whereIn('kpi_id', Kpi::query()->where('objective_id', $this->id)->select('id'))
+            ->exists();
     }
 
     public function customer(): BelongsTo

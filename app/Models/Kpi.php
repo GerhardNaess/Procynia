@@ -23,6 +23,9 @@ use InvalidArgumentException;
  * Status is not a form field. Every KPI starts active and changes only through KpiLifecycleService
  * (Avslutt / Gjenåpne), which writes each change to statusChanges().
  *
+ * Once a measurement exists the KPI cannot be deleted (it is retired instead) and its unit,
+ * unit label and currency code are fixed (UNIT_DEFINITION).
+ *
  * The rules a KPI must keep — a target with at least one bound, min <= max, tolerance >= 0, a
  * currency code exactly for currency, a unit label only for counts and numbers, grace days >= 0 and
  * an objective of the same customer — are checked here before the row is written, and again by
@@ -80,6 +83,13 @@ class Kpi extends Model
 
     public const DEFAULT_CURRENCY_CODE = 'NOK';
 
+    /**
+     * What a measured number means. Locked once a measurement exists, or the history would change
+     * meaning: 98 would read as a different thing. The target and tolerance stay editable — each
+     * measurement keeps a snapshot of them.
+     */
+    public const UNIT_DEFINITION = ['unit', 'unit_label', 'currency_code'];
+
     /** @var array<string, mixed> */
     protected $attributes = [
         'status' => self::STATUS_ACTIVE,
@@ -129,12 +139,21 @@ class Kpi extends Model
 
     /**
      * Whether the KPI may be deleted at all, before any permission is considered. Deleting is for a
-     * KPI registered by mistake. When measurements exist, this is where a KPI with measurement
-     * history is refused — it is retired instead.
+     * KPI registered by mistake: once any measurement exists — a withdrawn one included, it is still
+     * history — the KPI is retired instead.
      */
     public function isDeletable(): bool
     {
-        return true;
+        return ! $this->hasMeasurementHistory();
+    }
+
+    /**
+     * Whether any measurement was ever registered, withdrawn or not. From then on the KPI cannot be
+     * deleted and what its numbers mean (UNIT_DEFINITION) cannot change.
+     */
+    public function hasMeasurementHistory(): bool
+    {
+        return $this->exists && KpiMeasurement::query()->where('kpi_id', $this->id)->exists();
     }
 
     public function target(): KpiTarget
@@ -164,6 +183,12 @@ class Kpi extends Model
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    /** Every registered measurement, corrections and withdrawals included. */
+    public function measurements(): HasMany
+    {
+        return $this->hasMany(KpiMeasurement::class);
     }
 
     /** Every retirement and reopening, newest first. */
@@ -206,6 +231,10 @@ class Kpi extends Model
             $this->target();
         } catch (InvalidArgumentException $exception) {
             throw new DomainException($exception->getMessage(), 0, $exception);
+        }
+
+        if ($this->exists && $this->isDirty(self::UNIT_DEFINITION) && $this->hasMeasurementHistory()) {
+            throw new DomainException('The unit of a KPI with measurements cannot change.');
         }
 
         // The customer boundary, explicitly: a KPI lives under an objective of its own customer.

@@ -30,7 +30,9 @@ use Inertia\Response;
  *
  *  - read: objective.view in the objective's area
  *  - create, change, retire, reopen: objective.edit there, while the objective is active
- *  - delete: objective.delete there, for a KPI registered by mistake (Kpi::isDeletable())
+ *  - delete: objective.delete there, for a KPI registered by mistake (Kpi::isDeletable()): never
+ *    once it has a measurement, withdrawn or not — then it is retired
+ *  - measurements: KpiMeasurementController, with objective.measure
  *
  * Status changes only through retire() and reopen(), never through update().
  */
@@ -53,9 +55,15 @@ class KpiController extends Controller
         $objective = $kpi->objective;
 
         $canEdit = $this->access->canEdit($user, $objective) && $objective->isActive();
+        // Measuring is its own permission, and only an active KPI under an active objective takes it.
+        $canMeasure = $this->access->canMeasure($user, $objective) && $objective->isActive() && $kpi->isActive();
+        $measurements = $kpi->measurements()->with(['recordedBy:id,name', 'withdrawnBy:id,name'])->get();
+        $today = now();
 
         return Inertia::render('App/Objectives/KpiShow', [
-            'kpi' => $this->presenter->detail($kpi),
+            'kpi' => $this->presenter->detail($kpi, $measurements, $today),
+            'measurements' => $this->presenter->history($kpi, $measurements, $canMeasure),
+            'measurement_form' => $canMeasure ? $this->presenter->measurementForm($kpi, $measurements, $today) : null,
             'objective' => [
                 'id' => (int) $objective->id,
                 'title' => $objective->title,
@@ -78,7 +86,8 @@ class KpiController extends Controller
                 'can_edit' => $canEdit && $kpi->isActive(),
                 'can_retire' => $canEdit && $kpi->isActive(),
                 'can_reopen' => $canEdit && ! $kpi->isActive(),
-                'can_delete' => $this->access->canDelete($user, $objective) && $kpi->isDeletable(),
+                'can_delete' => $this->access->canDelete($user, $objective) && $measurements->isEmpty(),
+                'can_measure' => $canMeasure,
             ],
             'form_options' => $canEdit ? $this->presenter->formOptions($objective) : null,
         ]);
@@ -123,7 +132,10 @@ class KpiController extends Controller
             return back()->with('error', __('procynia.objectives.kpi.validation.reopen_before_edit'));
         }
 
-        $kpi->fill($this->validated($request, $objective) + ['updated_by' => $user->id])->save();
+        $attributes = $this->validated($request, $objective);
+        $this->guardUnitDefinition($kpi, $attributes);
+
+        $kpi->fill($attributes + ['updated_by' => $user->id])->save();
 
         return back()->with('success', __('procynia.objectives.kpi.flash.updated'));
     }
@@ -173,8 +185,7 @@ class KpiController extends Controller
 
         abort_unless($this->access->canDelete($user, $kpi->objective), 403);
 
-        // The control point for the measurement step: a KPI with measurement history is retired,
-        // never deleted.
+        // A KPI with measurement history is retired, never deleted.
         if (! $kpi->isDeletable()) {
             return back()->with('error', __('procynia.objectives.kpi.validation.not_deletable'));
         }
@@ -304,6 +315,28 @@ class KpiController extends Controller
             'frequency' => $validated['frequency'] ?? null,
             'reporting_grace_days' => (int) $validated['reporting_grace_days'],
         ];
+    }
+
+    /**
+     * Once a measurement exists, what its numbers mean — unit, unit label, currency — is fixed, or
+     * the history would change meaning. The target and tolerance stay editable: each measurement
+     * keeps a snapshot of the ones it was registered against. The model refuses the same.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function guardUnitDefinition(Kpi $kpi, array $attributes): void
+    {
+        $changed = array_filter(
+            Kpi::UNIT_DEFINITION,
+            fn (string $field): bool => ($attributes[$field] ?? null) !== $kpi->getAttribute($field),
+        );
+
+        if ($changed !== [] && $kpi->hasMeasurementHistory()) {
+            throw ValidationException::withMessages(array_fill_keys(
+                array_values($changed),
+                __('procynia.objectives.kpi.validation.unit_locked'),
+            ));
+        }
     }
 
     /**

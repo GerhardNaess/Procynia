@@ -8,6 +8,7 @@ use App\Models\Kpi;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
+use App\Services\Objectives\KpiMeasurementResolver;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Objectives\ObjectiveLifecycleService;
 use App\Support\CustomerContext;
@@ -41,6 +42,7 @@ class ObjectiveController extends Controller
         private readonly ObjectiveAccessService $access,
         private readonly ObjectiveLifecycleService $lifecycle,
         private readonly KpiPresenter $kpiPresenter,
+        private readonly KpiMeasurementResolver $measurementResolver,
     ) {}
 
     public function index(Request $request): Response
@@ -76,14 +78,26 @@ class ObjectiveController extends Controller
 
         $editableAreas = $this->access->editableAreas($user);
 
+        $objectives = $query
+            // Active first; within each group, by title.
+            ->orderByRaw('CASE WHEN objectives.status = ? THEN 0 ELSE 1 END', [Objective::STATUS_ACTIVE])
+            ->orderBy('objectives.title')
+            ->orderBy('objectives.id')
+            ->get();
+
+        // «2 av 3 KPI-er på mål» per row: the KPIs of every listed objective in one query, their
+        // latest measurements in one more. Never a query per objective.
+        $kpisByObjective = Kpi::query()
+            ->whereIn('objective_id', $objectives->modelKeys() ?: [0])
+            ->get(['id', 'objective_id', 'status', 'target_min', 'target_max', 'tolerance'])
+            ->groupBy('objective_id');
+        $latest = $this->measurementResolver->latestForKpis($kpisByObjective->flatten());
+
         return Inertia::render('App/Objectives/Index', [
-            'objectives' => $query
-                // Active first; within each group, by title.
-                ->orderByRaw('CASE WHEN objectives.status = ? THEN 0 ELSE 1 END', [Objective::STATUS_ACTIVE])
-                ->orderBy('objectives.title')
-                ->orderBy('objectives.id')
-                ->get()
-                ->map(fn (Objective $objective): array => $this->objectiveRow($objective))
+            'objectives' => $objectives
+                ->map(fn (Objective $objective): array => $this->objectiveRow($objective) + [
+                    'kpi_indicator' => $this->kpiPresenter->indicator($kpisByObjective->get($objective->id, []), $latest),
+                ])
                 ->all(),
             // Only what the user can see. A total over hidden objectives would reveal that they exist.
             'visible_count' => $this->access->visibleObjectives($user)->count(),
@@ -119,9 +133,12 @@ class ObjectiveController extends Controller
             // The objective (and its owner, the fallback) is already at hand; no query per row.
             ->each(fn (Kpi $kpi) => $kpi->setRelation('objective', $objective));
 
+        $latest = $this->measurementResolver->latestForKpis($kpis);
+
         return Inertia::render('App/Objectives/Show', [
             // The KPIs come with the objective: whoever may read it reads them, nothing more.
-            'kpis' => $kpis->map(fn (Kpi $kpi): array => $this->kpiPresenter->row($kpi))->all(),
+            'kpis' => $kpis->map(fn (Kpi $kpi): array => $this->kpiPresenter->row($kpi, $latest[(int) $kpi->id] ?? null))->all(),
+            'kpi_indicator' => $this->kpiPresenter->indicator($kpis, $latest),
             'kpi_form_options' => $canEdit && $active ? $this->kpiPresenter->formOptions($objective) : null,
             'objective' => $this->objectiveRow($objective) + [
                 // The current closing, from the objective itself — not inferred from the history.

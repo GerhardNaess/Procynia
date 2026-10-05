@@ -26,6 +26,12 @@ use InvalidArgumentException;
  */
 final class KpiPeriods
 {
+    /**
+     * The «frequency» of a measurement taken on one day, for a KPI without a fixed frequency. Not a
+     * KPI frequency: a day period is never scheduled, only registered.
+     */
+    public const DAY = 'day';
+
     /** The period the given day falls in. */
     public function containing(string $frequency, CarbonInterface $date): KpiPeriod
     {
@@ -91,6 +97,44 @@ final class KpiPeriods
         }
 
         return $period;
+    }
+
+    /** One day as a period, for a measurement of a KPI without a fixed frequency. */
+    public function day(CarbonInterface $date): KpiPeriod
+    {
+        $day = CarbonImmutable::instance($date)->startOfDay();
+
+        return $this->period(self::DAY, $day, $day, $day->format('Y-m-d'));
+    }
+
+    /**
+     * The period a stored range is: a day when it starts and ends on the same day, otherwise the
+     * calendar week, month, quarter or year it is exactly. Null for a range that is none of them.
+     */
+    public function fromRange(CarbonInterface $start, CarbonInterface $end): ?KpiPeriod
+    {
+        $start = CarbonImmutable::instance($start)->startOfDay();
+        $end = CarbonImmutable::instance($end)->startOfDay();
+
+        if ($start->equalTo($end)) {
+            return $this->day($start);
+        }
+
+        foreach (Kpi::FREQUENCIES as $frequency) {
+            $period = $this->containing($frequency, $start);
+
+            if ($period->start->equalTo($start) && $period->end->equalTo($end)) {
+                return $period;
+            }
+        }
+
+        return null;
+    }
+
+    /** Whether the period has ended by the given day, so its result can be registered. */
+    public function hasEnded(KpiPeriod $period, CarbonInterface $today): bool
+    {
+        return CarbonImmutable::instance($today)->startOfDay()->greaterThan($period->end);
     }
 
     /** The last day a measurement for the period is on time. */
