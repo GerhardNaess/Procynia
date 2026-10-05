@@ -231,10 +231,12 @@ test('a collapsed rail still shows which module you are in, and what the icons m
     await expect(page.getByTestId('module-wiki')).toHaveAttribute('title', 'Wiki');
     await expect(page.getByTestId('module-quality')).toHaveAttribute('title', 'Kvalitet');
 
-    // Planned modules stay inert and dimmed, and say so on hover.
-    await expect(page.getByTestId('module-risk')).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.getByTestId('module-risk')).toHaveClass(/text-slate-400/);
-    await expect(page.getByTestId('module-risk')).toHaveAttribute('title', /Risiko — /);
+    // Planned modules stay inert and dimmed, and say so on hover. (Risiko is built now; a built
+    // module the person holds no permission in is left off the rail rather than dimmed, so a
+    // module that is still planned is the one to check here.)
+    await expect(page.getByTestId('module-suppliers')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByTestId('module-suppliers')).toHaveClass(/text-slate-400/);
+    await expect(page.getByTestId('module-suppliers')).toHaveAttribute('title', /Leverandører — /);
 
     // Expanding puts the labels back and drops the now-redundant tooltips.
     await page.getByTestId('module-sidebar-toggle').click();
@@ -264,7 +266,9 @@ test('a phone never gets a collapsed rail, and never gets a sideways scrollbar',
 
     await expect(page.getByTestId('module-sidebar-toggle')).toBeHidden();
     await expect(page.getByTestId('module-wiki')).toContainText('Wiki');
-    await expect(page.getByTestId('module-risk')).toContainText('Risiko');
+    // A module every E2E user reaches, rather than Risiko, which this user holds no permission in.
+    await expect(page.getByTestId('module-tenders')).toContainText('Anbud');
+    await expect(page.getByTestId('module-suppliers')).toContainText('Leverandører');
 
     const railWidth = (await page.getByTestId('module-rail').boundingBox()).width;
     expect(railWidth).toBeGreaterThan(200);
