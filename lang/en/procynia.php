@@ -2533,7 +2533,7 @@ return [
                             ['title' => 'Case without owner', 'text' => 'The case has no owner, for example because the person is no longer a user. Choose a new owner.'],
                             ['title' => 'Action without owner', 'text' => 'An action that is not finished has no owner. Choose a new owner on the action.'],
                             ['title' => 'Awaiting effectiveness check', 'text' => 'The action is completed, but nobody has judged whether it worked. Check the effect when you have grounds to judge it.'],
-                            ['title' => 'Action not effective', 'text' => 'The latest judgement says the action did not work. Reopen the action, or add a new action.'],
+                            ['title' => 'Action not effective', 'text' => 'The latest judgement says the action did not work. Reopen the action and keep working on it. If a new action is to replace it, reopen and cancel the old one.'],
                             ['title' => 'How it is counted', 'text' => 'Cases and actions are counted separately. A case or an action with several findings is counted only once.'],
                         ],
                     ],
@@ -2578,7 +2578,7 @@ return [
                         'items' => [
                             ['title' => 'What is an effectiveness check?', 'text' => 'A completed action is not necessarily an action that worked. The effectiveness check is used to judge whether the action actually gave the desired result. A completed action not yet judged shows «Awaiting effectiveness check».'],
                             ['title' => 'Effect confirmed', 'text' => 'The action gave the desired result. Write briefly what the judgement is based on, for example that the error has not occurred again since the change.'],
-                            ['title' => 'Not effective', 'text' => 'The action did not give the desired result. The action stays completed. Reopen the action if more work is needed, or add a new action.'],
+                            ['title' => 'Not effective', 'text' => 'The action did not give the desired result. The action stays completed. The case cannot be closed until the action is followed up: reopen it and keep working, or reopen and cancel it if a new action is to replace it.'],
                             ['title' => 'New judgement', 'text' => 'An action can be judged again, for example when you know more. The newest judgement applies, and earlier judgements are kept. If the action is reopened and completed again, the new completion must be judged again.'],
                             ['title' => 'Effectiveness check and closing', 'text' => 'A case cannot be closed until every completed action has a confirmed effect. Cancelled actions need no effectiveness check.'],
                         ],

@@ -2534,7 +2534,7 @@ return [
                             ['title' => 'Sak mangler ansvarlig', 'text' => 'Saken har ingen ansvarlig, for eksempel fordi personen ikke lenger er bruker. Velg en ny ansvarlig.'],
                             ['title' => 'Tiltak mangler ansvarlig', 'text' => 'Et tiltak som ikke er ferdig, har ingen ansvarlig. Velg en ny ansvarlig på tiltaket.'],
                             ['title' => 'Venter på effektverifisering', 'text' => 'Tiltaket er fullført, men ingen har vurdert om det virket. Verifiser effekten når dere har grunnlag for å vurdere det.'],
-                            ['title' => 'Tiltak ikke effektivt', 'text' => 'Siste vurdering sier at tiltaket ikke virket. Gjenåpne tiltaket, eller legg inn et nytt tiltak.'],
+                            ['title' => 'Tiltak ikke effektivt', 'text' => 'Siste vurdering sier at tiltaket ikke virket. Gjenåpne tiltaket og arbeid videre med det. Skal et nytt tiltak erstatte det, gjenåpner og avbryter dere det gamle.'],
                             ['title' => 'Slik telles det', 'text' => 'Saker og tiltak telles hver for seg. En sak eller et tiltak med flere funn telles bare én gang.'],
                         ],
                     ],
@@ -2579,7 +2579,7 @@ return [
                         'items' => [
                             ['title' => 'Hva er effektverifisering?', 'text' => 'Et fullført tiltak er ikke nødvendigvis et tiltak som virket. Effektverifisering brukes til å vurdere om tiltaket faktisk ga ønsket resultat. Et fullført tiltak som ikke er vurdert ennå, står som «Venter på effektverifisering».'],
                             ['title' => 'Effekt bekreftet', 'text' => 'Tiltaket ga ønsket resultat. Skriv kort hva vurderingen bygger på, for eksempel at feilen ikke har oppstått igjen etter endringen.'],
-                            ['title' => 'Ikke effektivt', 'text' => 'Tiltaket ga ikke ønsket resultat. Tiltaket blir stående som fullført. Gjenåpne tiltaket dersom det må arbeides videre med, eller legg inn et nytt tiltak.'],
+                            ['title' => 'Ikke effektivt', 'text' => 'Tiltaket ga ikke ønsket resultat. Tiltaket blir stående som fullført. Saken kan ikke lukkes før tiltaket er fulgt opp: gjenåpne det og arbeid videre, eller gjenåpne og avbryt det dersom et nytt tiltak skal erstatte det.'],
                             ['title' => 'Ny vurdering', 'text' => 'Et tiltak kan vurderes på nytt, for eksempel når dere vet mer. Den nyeste vurderingen gjelder, og tidligere vurderinger blir stående. Gjenåpnes tiltaket og fullføres igjen, må den nye fullføringen vurderes på nytt.'],
                             ['title' => 'Effektverifisering og lukking', 'text' => 'En sak kan ikke lukkes før alle fullførte tiltak har bekreftet effekt. Avbrutte tiltak trenger ikke effektverifisering.'],
                         ],

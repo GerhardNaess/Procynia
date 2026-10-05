@@ -227,7 +227,8 @@ export default function ImprovementShow() {
                         {item.occurred_at && (
                             <div>
                                 <dt className={TERM}>{tr.field_occurred_at ?? 'Hendelsesdato'}</dt>
-                                <dd className={VALUE}>{formatDay(item.occurred_at)}</dd>
+                                {/* Long, like Registrert beside it. A plain day, read as local midnight. */}
+                                <dd className={VALUE}>{formatLongDate(`${item.occurred_at}T00:00:00`, locale)}</dd>
                             </div>
                         )}
                     </dl>
