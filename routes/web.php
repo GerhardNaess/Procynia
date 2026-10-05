@@ -14,14 +14,15 @@ use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
+use App\Http\Controllers\App\ObjectiveController;
 use App\Http\Controllers\App\QualityController;
 use App\Http\Controllers\App\RiskAcceptanceController;
 use App\Http\Controllers\App\RiskAssessmentController;
 use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
+use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
-use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -328,6 +329,19 @@ Route::prefix('app')
             Route::post('/risks/{riskId}/acceptances/{acceptanceId}/revoke', [RiskAcceptanceController::class, 'revoke'])->whereNumber(['riskId', 'acceptanceId'])->name('acceptances.revoke');
             // Risiko → Enterprise Wiki: what the person wrote becomes an ordinary Wiki source. risk.edit + wiki.source.manage.
             Route::post('/risks/{riskId}/wiki-knowledge', [RiskWikiKnowledgeController::class, 'store'])->whereNumber('riskId')->name('wiki-knowledge.store');
+        });
+        // Mål og KPI. Named under `app.objectives.`, mapped to the `objectives` module. Objectives are
+        // addressed by a plain id and resolved through ObjectiveAccessService, never by implicit
+        // model binding, so one outside the user's fagområder is a 404 like an id that does not exist.
+        Route::prefix('/objectives')->name('objectives.')->group(function (): void {
+            Route::get('/', [ObjectiveController::class, 'index'])->name('index');
+            Route::post('/', [ObjectiveController::class, 'store'])->name('store');
+            Route::get('/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('show');
+            Route::patch('/{objectiveId}', [ObjectiveController::class, 'update'])->whereNumber('objectiveId')->name('update');
+            Route::delete('/{objectiveId}', [ObjectiveController::class, 'destroy'])->whereNumber('objectiveId')->name('destroy');
+            // Lukk mål / Gjenåpne: the only ways status changes. Each writes an immutable history row.
+            Route::post('/{objectiveId}/close', [ObjectiveController::class, 'close'])->whereNumber('objectiveId')->name('close');
+            Route::post('/{objectiveId}/reopen', [ObjectiveController::class, 'reopen'])->whereNumber('objectiveId')->name('reopen');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

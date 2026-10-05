@@ -3,10 +3,12 @@
 namespace App\Services\Objectives;
 
 use App\Models\BusinessArea;
+use App\Models\Objective;
 use App\Models\User;
 use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -28,8 +30,8 @@ use Illuminate\Database\Eloquent\Collection;
  * Owner is never given «Alle» implicitly: objective and KPI data is reached through a role only,
  * exactly as for risks.
  *
- * Every read of objectives or KPIs on a user's behalf must start from the areas this service
- * returns. An objective outside them is absent — not listed, not counted, 404 by URL.
+ * Every read of objectives on a user's behalf starts from visibleObjectives(). An objective outside
+ * the user's areas is absent — not listed, not counted, not searchable and 404 by URL.
  */
 class ObjectiveAccessService
 {
@@ -91,6 +93,64 @@ class ObjectiveAccessService
             ->whereIn('id', $ids === [] ? [0] : $ids)
             ->orderBy('name')
             ->get();
+    }
+
+    /**
+     * Every objective the user may read, and nothing else. The only correct starting point for any
+     * list, search, count or lookup of objectives on a user's behalf.
+     *
+     * @return Builder<Objective>
+     */
+    public function visibleObjectives(User $user): Builder
+    {
+        $areaIds = $this->canOpenModule($user)
+            ? $this->areaIdsFor($user, CustomerPermissionCatalog::OBJECTIVE_VIEW)
+            : [];
+
+        return Objective::query()
+            ->where('objectives.customer_id', (int) $user->customer_id)
+            // An empty scope must match nothing; whereIn([]) would be a footgun to rely on.
+            ->whereIn('objectives.business_area_id', $areaIds === [] ? [0] : $areaIds);
+    }
+
+    public function findVisible(User $user, int $objectiveId): ?Objective
+    {
+        return $this->visibleObjectives($user)->whereKey($objectiveId)->first();
+    }
+
+    /**
+     * Whether the user may do the given thing to this objective, in the area it is in now. The
+     * tenant check is part of the answer, not left to the caller.
+     */
+    public function can(User $user, string $permissionKey, Objective $objective): bool
+    {
+        return $this->canInArea($user, $permissionKey, (int) $objective->customer_id, (int) $objective->business_area_id);
+    }
+
+    public function canView(User $user, Objective $objective): bool
+    {
+        return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_VIEW, $objective);
+    }
+
+    /** Editing covers creating, changing, closing and reopening. Never deleting. */
+    public function canEdit(User $user, Objective $objective): bool
+    {
+        return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_EDIT, $objective);
+    }
+
+    public function canDelete(User $user, Objective $objective): bool
+    {
+        return $this->can($user, CustomerPermissionCatalog::OBJECTIVE_DELETE, $objective);
+    }
+
+    /**
+     * The areas the user may create objectives in, or move an objective into: objective.edit.
+     *
+     * @return Collection<int, BusinessArea>
+     */
+    public function editableAreas(User $user): Collection
+    {
+        return $this->areasFor($user, CustomerPermissionCatalog::OBJECTIVE_EDIT);
     }
 
     /**

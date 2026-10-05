@@ -14,7 +14,7 @@
  *
  * Keeping them apart is what makes the GRC case behave. GRC grants `quality`, `risk` and
  * `audit_compliance`; only `quality` and `risk` have pages, so buying GRC lights up Kvalitet and
- * Risiko and leaves Revisjon & Compliance exactly as planned as it was. An entitlement can never conjure a
+ * Risiko (and Mål og KPI, which it also carries) and leaves Revisjon & Compliance exactly as planned as it was. An entitlement can never conjure a
  * destination that does not exist.
  *
  * `module: null` means the entry is not something a customer buys — Hjem is the app itself, and
@@ -83,13 +83,14 @@ export const APP_MODULES = [
     },
     {
         key: 'objectives',
-        // Planned until its pages exist: the access foundation (objective.* keys, fagområder) is in
-        // place, but there is nothing to land on yet. When it is built, ObjectiveAccessService
-        // refuses the page without this key, so the rail must not offer it either.
-        built: false,
+        href: '/app/objectives',
+        built: true,
         module: 'objectives',
+        // ObjectiveController refuses the page without this key. Which objectives the person then
+        // sees is a second, server-side question (fagområder) the rail never answers.
         permission: 'objective.view',
         label: (m) => m.objectives ?? 'Mål og KPI',
+        areas: ['objectives'],
     },
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },

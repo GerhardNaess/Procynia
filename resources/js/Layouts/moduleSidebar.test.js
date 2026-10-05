@@ -27,13 +27,13 @@ describe('the rail shows the whole planned product structure', () => {
         );
     });
 
-    test('exactly five are built, and they are the five that have pages', () => {
+    test('exactly six are built, and they are the six that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives'],
         );
     });
 
@@ -202,17 +202,28 @@ describe('the rail can be collapsed to icons, on desktop only', () => {
     });
 });
 
-describe('Mål og KPI is on the rail as planned until it has pages', () => {
+describe('Mål og KPI is on the rail once it has pages', () => {
     const objectives = APP_MODULES.find((module) => module.key === 'objectives');
 
-    test('it is its own module, gated by objective.view, with nothing to click yet', () => {
+    test('it has its own icon on the rail', () => {
+        assert.match(sidebar, /\n    objectives: 'M/);
+    });
+
+    test('it is its own module, gated by objective.view', () => {
         assert.equal(objectives.module, 'objectives');
         assert.equal(objectives.permission, 'objective.view');
-        assert.equal(objectives.built, false);
+        assert.equal(objectives.built, true);
         assert.equal(objectives.label({}), 'Mål og KPI');
     });
 
-    test('an entitlement and the permission still leave it planned', () => {
-        assert.equal(moduleAvailability(objectives, ['objectives'], ['objective.view']), 'planned');
+    test('it is a link only with both the module and the permission', () => {
+        assert.equal(moduleAvailability(objectives, ['objectives'], ['objective.view']), 'active');
+        assert.equal(moduleAvailability(objectives, [], ['objective.view']), 'not_ordered');
+        assert.equal(moduleAvailability(objectives, ['objectives'], ['risk.view']), 'not_permitted');
+    });
+
+    test('/app/objectives is what puts the rail on Mål og KPI', () => {
+        assert.match(layout, /if \(pathname\.startsWith\('\/app\/objectives'\)\) \{\s*\n\s*return 'objectives';/);
+        assert.equal(activeModuleKey('objectives'), 'objectives');
     });
 });
