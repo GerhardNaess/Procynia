@@ -113,6 +113,12 @@ class Objective extends Model
         return $this->belongsTo(User::class, 'closed_by_user_id');
     }
 
+    /** How progress towards the objective is measured. A KPI has no fagområde of its own. */
+    public function kpis(): HasMany
+    {
+        return $this->hasMany(Kpi::class);
+    }
+
     /** Every closing and reopening, newest first. */
     public function statusChanges(): HasMany
     {

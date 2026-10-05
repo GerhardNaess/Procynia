@@ -4,6 +4,8 @@ namespace Tests\Support;
 
 use App\Models\BusinessArea;
 use App\Models\CustomerRole;
+use App\Models\Kpi;
+use App\Models\KpiStatusChange;
 use App\Models\Objective;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -16,7 +18,7 @@ use Illuminate\Support\Facades\DB;
  *
  * ONE NAME RULE, NO LIST OF NAMES.
  *
- * Every fagområde, role and objective a spec creates is named «E2E Mål <SUFFIX> <anything>»
+ * Every fagområde, role, objective and KPI a spec creates is named «E2E Mål <SUFFIX> <anything>»
  * (tests/e2e/helpers/objectives.js::objectiveE2eName builds it). Cleanup matches that prefix and
  * nothing else, in the E2E customer only. Unlike the Risk fixture there is no list of exact names to
  * keep in step with the specs, so a spec that invents a new name is still cleaned up — the
@@ -74,6 +76,57 @@ class ObjectiveE2EFixture
     }
 
     /**
+     * For the KPI spec: one area and a role that reads, edits and deletes objectives there, handed to
+     * the E2E user. The spec creates the objective and its KPI itself, through the pages.
+     *
+     * @return array{area_name: string}
+     */
+    public static function seedEditor(string $suffix): array
+    {
+        $customerId = self::customerId();
+        $user = User::query()->where('email', self::USER_EMAIL)->firstOrFail();
+        $name = fn (string $label): string => self::PREFIX.' '.strtoupper($suffix).' '.$label;
+
+        return DB::transaction(function () use ($customerId, $user, $name): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('KPI-område')]);
+
+            $role = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('KPI-ansvarlig'), 'is_active' => true]);
+            $role->syncPermissions([
+                CustomerPermissionCatalog::OBJECTIVE_VIEW,
+                CustomerPermissionCatalog::OBJECTIVE_EDIT,
+                CustomerPermissionCatalog::OBJECTIVE_DELETE,
+            ]);
+            $role->syncBusinessAreas(false, [$area->id]);
+            $user->customerRoles()->attach($role->id, ['customer_id' => $customerId]);
+
+            return ['area_name' => $area->name];
+        });
+    }
+
+    /**
+     * What is left of one run, for checking that cleanup really emptied it.
+     *
+     * @return array{areas: int, roles: int, objectives: int, kpis: int, kpi_status_changes: int}
+     */
+    public static function remaining(string $suffix): array
+    {
+        $customerId = self::customerId();
+        $pattern = '^'.preg_quote(self::PREFIX).' '.preg_quote(strtoupper($suffix)).'( |$)';
+        $objectiveIds = Objective::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->pluck('id');
+        $kpiIds = Kpi::query()->where('customer_id', $customerId)
+            ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('objective_id', $objectiveIds))
+            ->pluck('id');
+
+        return [
+            'areas' => BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
+            'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
+            'objectives' => $objectiveIds->count(),
+            'kpis' => $kpiIds->count(),
+            'kpi_status_changes' => KpiStatusChange::query()->whereIn('kpi_id', $kpiIds)->count(),
+        ];
+    }
+
+    /**
      * Removes what one run created (by its suffix), or — with no suffix — whatever interrupted runs
      * left behind. Idempotent, and safe after a run that stopped halfway.
      */
@@ -87,6 +140,10 @@ class ObjectiveE2EFixture
 
         DB::transaction(function () use ($customerId, $pattern, $sweepOnly): void {
             $areaIds = $sweepOnly(BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->pluck('id');
+
+            // A KPI carrying the marker goes even if a spec put it under someone else's objective;
+            // the rest go with their objectives below, and their history with them.
+            $sweepOnly(Kpi::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
 
             // An objective is the run's when its title carries the marker, or when it lives in one of
             // the run's areas — a spec may retitle it, but it cannot leave an area no one else uses.

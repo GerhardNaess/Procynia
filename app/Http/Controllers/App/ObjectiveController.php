@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\BusinessArea;
+use App\Models\Kpi;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
@@ -11,6 +12,7 @@ use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Objectives\ObjectiveLifecycleService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Objectives\KpiPresenter;
 use App\Support\Objectives\ObjectiveValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,6 +40,7 @@ class ObjectiveController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly ObjectiveAccessService $access,
         private readonly ObjectiveLifecycleService $lifecycle,
+        private readonly KpiPresenter $kpiPresenter,
     ) {}
 
     public function index(Request $request): Response
@@ -106,7 +109,20 @@ class ObjectiveController extends Controller
         // A closed objective is reopened before it is changed, so its fields are not offered.
         $editableAreas = $canEdit && $active ? $this->access->editableAreas($user) : collect();
 
+        $kpis = $objective->kpis()
+            ->with('owner:id,name')
+            // Active first; within each group, by title.
+            ->orderByRaw('CASE WHEN kpis.status = ? THEN 0 ELSE 1 END', [Kpi::STATUS_ACTIVE])
+            ->orderBy('kpis.title')
+            ->orderBy('kpis.id')
+            ->get()
+            // The objective (and its owner, the fallback) is already at hand; no query per row.
+            ->each(fn (Kpi $kpi) => $kpi->setRelation('objective', $objective));
+
         return Inertia::render('App/Objectives/Show', [
+            // The KPIs come with the objective: whoever may read it reads them, nothing more.
+            'kpis' => $kpis->map(fn (Kpi $kpi): array => $this->kpiPresenter->row($kpi))->all(),
+            'kpi_form_options' => $canEdit && $active ? $this->kpiPresenter->formOptions($objective) : null,
             'objective' => $this->objectiveRow($objective) + [
                 // The current closing, from the objective itself — not inferred from the history.
                 'closed_at' => $objective->closed_at?->toIso8601String(),
@@ -131,6 +147,7 @@ class ObjectiveController extends Controller
                 'can_close' => $canEdit && $active,
                 'can_reopen' => $canEdit && ! $active,
                 'can_delete' => $this->access->canDelete($user, $objective) && $objective->isDeletable(),
+                'can_create_kpi' => $canEdit && $active,
             ],
             'area_options' => $this->areaOptions($editableAreas),
             'owner_options' => $canEdit ? $this->ownerOptions($user, $editableAreas) : [],
@@ -188,6 +205,10 @@ class ObjectiveController extends Controller
         // Against the area the objective will be in, so a move cannot keep an owner who would no
         // longer be able to see it.
         $this->guardOwner($user, (int) $validated['owner_user_id'], $targetAreaId);
+
+        if ($targetAreaId !== (int) $objective->business_area_id) {
+            $this->guardKpiOwners($objective, $targetAreaId);
+        }
 
         $objective->fill([
             'business_area_id' => $targetAreaId,
@@ -306,6 +327,26 @@ class ObjectiveController extends Controller
             throw ValidationException::withMessages([
                 'owner_user_id' => __('procynia.objectives.validation.owner_not_allowed'),
             ]);
+        }
+    }
+
+    /**
+     * A KPI takes its fagområde from its objective, so moving the objective moves its KPIs. Their
+     * own owners must be able to read objectives in the new area too, or the move is refused —
+     * the same rule as for the objective's owner, never a silent loss of access.
+     */
+    private function guardKpiOwners(Objective $objective, int $areaId): void
+    {
+        $owners = User::query()
+            ->whereIn('id', $objective->kpis()->whereNotNull('owner_user_id')->select('owner_user_id'))
+            ->get();
+
+        foreach ($owners as $owner) {
+            if (! $this->access->canInArea($owner, CustomerPermissionCatalog::OBJECTIVE_VIEW, (int) $objective->customer_id, $areaId)) {
+                throw ValidationException::withMessages([
+                    'business_area_id' => __('procynia.objectives.validation.kpi_owner_not_allowed'),
+                ]);
+            }
         }
     }
 

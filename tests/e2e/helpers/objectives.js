@@ -9,7 +9,7 @@ export function objectiveE2eSuffix() {
 }
 
 /**
- * The name of anything a Mål og KPI spec creates — fagområde, role or objective. Always use this:
+ * The name of anything a Mål og KPI spec creates — fagområde, role, objective or KPI. Always use this:
  * Tests\Support\ObjectiveE2EFixture cleans up by this prefix and nothing else, so a name built any
  * other way is left behind.
  */
@@ -37,6 +37,21 @@ export function cleanUpObjectiveE2eData(suffix) {
  */
 export async function seedViewOnlyObjectives(suffix) {
     const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::seedViewOnly('${suffix}'));`);
+    const match = stdout.match(/\{.*\}/);
+
+    if (! match) {
+        throw new Error(`Seeding failed: ${stdout}`);
+    }
+
+    return JSON.parse(match[0]);
+}
+
+/**
+ * Gives the E2E user a role that reads, edits and deletes objectives in a fresh area, and returns
+ * the area's name.
+ */
+export async function seedObjectiveEditor(suffix) {
+    const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::seedEditor('${suffix}'));`);
     const match = stdout.match(/\{.*\}/);
 
     if (! match) {

@@ -19,7 +19,13 @@ final class ObjectiveValidationMessages
             'integer' => __('procynia.objectives.validation.rules.choose'),
             'in' => __('procynia.objectives.validation.rules.choose'),
             'string' => __('procynia.objectives.validation.rules.required'),
-            'max' => ['string' => __('procynia.objectives.validation.rules.max_string')],
+            'max' => [
+                'string' => __('procynia.objectives.validation.rules.max_string'),
+                'numeric' => __('procynia.objectives.validation.rules.max_numeric'),
+            ],
+            'min' => ['numeric' => __('procynia.objectives.validation.rules.min_numeric')],
+            'numeric' => __('procynia.objectives.validation.rules.number'),
+            'regex' => __('procynia.objectives.validation.rules.number'),
             'date_format' => __('procynia.objectives.validation.rules.date'),
         ];
     }

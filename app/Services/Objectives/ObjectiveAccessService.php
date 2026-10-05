@@ -3,6 +3,7 @@
 namespace App\Services\Objectives;
 
 use App\Models\BusinessArea;
+use App\Models\Kpi;
 use App\Models\Objective;
 use App\Models\User;
 use App\Services\Permissions\BusinessAreaGrants;
@@ -116,6 +117,29 @@ class ObjectiveAccessService
     public function findVisible(User $user, int $objectiveId): ?Objective
     {
         return $this->visibleObjectives($user)->whereKey($objectiveId)->first();
+    }
+
+    /**
+     * Every KPI the user may read: those whose objective is visible, and nothing else. A KPI has no
+     * fagområde of its own, so there is no second rule here — hide the objective and its KPIs go
+     * with it.
+     *
+     * @return Builder<Kpi>
+     */
+    public function visibleKpis(User $user): Builder
+    {
+        return Kpi::query()
+            ->where('kpis.customer_id', (int) $user->customer_id)
+            ->whereIn('kpis.objective_id', $this->visibleObjectives($user)->select('objectives.id'));
+    }
+
+    /**
+     * A KPI by its objective and its own id, when the user may read the objective. A KPI asked for
+     * under another objective is absent, like one that does not exist.
+     */
+    public function findVisibleKpi(User $user, int $objectiveId, int $kpiId): ?Kpi
+    {
+        return $this->visibleKpis($user)->where('kpis.objective_id', $objectiveId)->whereKey($kpiId)->first();
     }
 
     /**

@@ -824,6 +824,8 @@ class ObjectiveTest extends TestCase
         // No route edits or removes history; only closing and reopening write it.
         $historyRoutes = collect(Route::getRoutes()->getRoutes())
             ->filter(fn ($route): bool => str_starts_with((string) $route->getName(), 'app.objectives.'))
+            // KPI routes have their own guard in KpiTest.
+            ->reject(fn ($route): bool => str_starts_with((string) $route->getName(), 'app.objectives.kpis.'))
             ->map(fn ($route): string => $route->getName())
             ->sort()
             ->values()

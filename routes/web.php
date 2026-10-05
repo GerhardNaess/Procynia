@@ -12,6 +12,7 @@ use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\InfoCenterController;
+use App\Http\Controllers\App\KpiController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\ObjectiveController;
@@ -342,6 +343,14 @@ Route::prefix('app')
             // Lukk mål / Gjenåpne: the only ways status changes. Each writes an immutable history row.
             Route::post('/{objectiveId}/close', [ObjectiveController::class, 'close'])->whereNumber('objectiveId')->name('close');
             Route::post('/{objectiveId}/reopen', [ObjectiveController::class, 'reopen'])->whereNumber('objectiveId')->name('reopen');
+            // KPIs, always under their objective: resolved through the objective, never on their own.
+            Route::post('/{objectiveId}/kpis', [KpiController::class, 'store'])->whereNumber('objectiveId')->name('kpis.store');
+            Route::get('/{objectiveId}/kpis/{kpiId}', [KpiController::class, 'show'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.show');
+            Route::patch('/{objectiveId}/kpis/{kpiId}', [KpiController::class, 'update'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.update');
+            Route::delete('/{objectiveId}/kpis/{kpiId}', [KpiController::class, 'destroy'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.destroy');
+            // Avslutt / Gjenåpne: the only ways a KPI's status changes. Each writes an immutable history row.
+            Route::post('/{objectiveId}/kpis/{kpiId}/retire', [KpiController::class, 'retire'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.retire');
+            Route::post('/{objectiveId}/kpis/{kpiId}/reopen', [KpiController::class, 'reopen'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.reopen');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

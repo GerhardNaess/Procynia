@@ -5,6 +5,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import ObjectiveForm from './ObjectiveForm';
 import ObjectiveHistory from './ObjectiveHistory';
+import ObjectiveKpis from './ObjectiveKpis';
 import { ObjectiveCloseForm, ObjectiveReopenForm } from './ObjectiveStatusForms';
 import { OBJECTIVE_STATUS_TONES, formatLongDate, formatTargetDate } from './objectiveStatus';
 
@@ -25,9 +26,13 @@ export default function ObjectiveShow() {
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
+        kpis = [],
+        kpi_form_options: kpiFormOptions = null,
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
+    // KPI strings, with the objective's shared ones (Lagre, Avbryt) underneath.
+    const tk = { ...tr, ...(tr.kpi ?? {}) };
     const statusLabels = tr.statuses ?? {};
     // Which panel is open: 'edit', 'close', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
@@ -50,7 +55,11 @@ export default function ObjectiveShow() {
     };
 
     const destroy = () => {
-        if (! window.confirm(tr.delete_confirm ?? 'Slett målet? Dette kan ikke angres.')) {
+        const message = kpis.length > 0
+            ? (tr.delete_confirm_with_kpis ?? 'Slett målet og KPI-ene som hører til? Dette kan ikke angres.')
+            : (tr.delete_confirm ?? 'Slett målet? Dette kan ikke angres.');
+
+        if (! window.confirm(message)) {
             return;
         }
 
@@ -163,6 +172,14 @@ export default function ObjectiveShow() {
                         </dl>
                     </section>
                 )}
+
+                <ObjectiveKpis
+                    objective={objective}
+                    kpis={kpis}
+                    formOptions={kpiFormOptions}
+                    canCreate={Boolean(permissions.can_create_kpi)}
+                    tr={tk}
+                />
 
                 <ObjectiveHistory entries={statusHistory} statusLabels={statusLabels} locale={locale} tr={tr} />
             </div>
