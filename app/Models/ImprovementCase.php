@@ -71,6 +71,7 @@ class ImprovementCase extends Model
         'type',
         'title',
         'description',
+        'cause_analysis',
         'owner_user_id',
         'reported_by_user_id',
         'occurred_at',
@@ -115,11 +116,9 @@ class ImprovementCase extends Model
 
     /**
      * Whether the case may be deleted at all, before any permission is considered. Deleting is for
-     * a case registered by mistake that nobody has started on: still open, and no status change
-     * ever written. Once it has been in progress, closed or cancelled — even if it was reopened
-     * since — it carries history and is cancelled instead.
-     *
-     * Anything else that later hangs on a case (tiltak) adds its own condition here.
+     * a case registered by mistake that nobody has started on: still open, no status change ever
+     * written, and no tiltak. Once it has been in progress, closed or cancelled — even if it was
+     * reopened since — or has tiltak, it is cancelled instead.
      */
     public function isDeletable(): bool
     {
@@ -128,7 +127,8 @@ class ImprovementCase extends Model
         }
 
         return $this->status === self::STATUS_OPEN
-            && ! ImprovementCaseStatusChange::query()->where('improvement_case_id', $this->id)->exists();
+            && ! ImprovementCaseStatusChange::query()->where('improvement_case_id', $this->id)->exists()
+            && ! ImprovementAction::query()->where('improvement_case_id', $this->id)->exists();
     }
 
     public function customer(): BelongsTo
@@ -155,6 +155,12 @@ class ImprovementCase extends Model
     public function closedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'closed_by_user_id');
+    }
+
+    /** Tiltak, in the order they were added. */
+    public function actions(): HasMany
+    {
+        return $this->hasMany(ImprovementAction::class)->orderBy('id');
     }
 
     /** Every status change, newest first. */

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
 use PHPUnit\Framework\TestCase;
 
@@ -82,6 +83,30 @@ class ImprovementPageHelpTranslationsTest extends TestCase
         }
     }
 
+    public function test_the_case_help_explains_cause_and_tiltak_by_their_labels(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $strings = $this->improvements($locale);
+            $actions = $strings['actions'];
+            $sectionTitles = array_column($strings['help']['case']['sections'], 'title');
+            $caseTitles = $this->itemTitles($strings['help']['case']);
+
+            $this->assertContains($strings['cause']['heading'], $sectionTitles, "The case help in lang/{$locale} has no «{$strings['cause']['heading']}» section.");
+            $this->assertContains($actions['heading'], $sectionTitles, "The case help in lang/{$locale} has no «{$actions['heading']}» section.");
+
+            foreach (['start', 'complete', 'cancel_action', 'reopen'] as $key) {
+                $this->assertContains($actions[$key], $caseTitles, "The case help in lang/{$locale} does not explain «{$actions[$key]}».");
+            }
+
+            $tiltak = collect($strings['help']['case']['sections'])->firstWhere('title', $actions['heading']);
+            $text = implode(' ', array_column($tiltak['items'], 'text'));
+            $this->assertStringContainsString($actions['completion_label'], $text, "The tiltak help in lang/{$locale} does not name «{$actions['completion_label']}».");
+
+            $this->assertSame(ImprovementAction::STATUSES, array_keys($actions['statuses']));
+            $this->assertSame(['in_progress', 'completed', 'cancelled', 'planned'], array_keys($actions['history']));
+        }
+    }
+
     public function test_the_norwegian_ui_uses_the_agreed_domain_terms(): void
     {
         $no = $this->improvements('no');
@@ -93,6 +118,20 @@ class ImprovementPageHelpTranslationsTest extends TestCase
         $this->assertSame(['Start behandling', 'Gjenåpne', 'Historikk'], [$no['start'], $no['reopen'], $no['history_heading']]);
         $this->assertStringStartsWith('Lukk', $no['close']);
         $this->assertStringStartsWith('Avbryt', $no['cancel_case']);
+
+        $actions = $no['actions'];
+        $this->assertSame('Årsak og bakgrunn', $no['cause']['heading']);
+        $this->assertSame('Beskriv hvorfor avviket oppstod, dersom årsaken er kjent.', $no['cause']['hint_deviation']);
+        $this->assertSame('Beskriv bakgrunnen for forbedringen og hva som bør endres.', $no['cause']['hint_improvement']);
+        $this->assertSame(['planned' => 'Planlagt', 'in_progress' => 'Under arbeid', 'completed' => 'Fullført', 'cancelled' => 'Avbrutt'], $actions['statuses']);
+        $this->assertSame(
+            ['Tiltak', 'Nytt tiltak', 'Ansvarlig', 'Frist', 'Frist passert', 'Mangler ansvarlig', 'Start tiltak', 'Fullfør tiltak', 'Avbryt tiltak', 'Gjenåpne tiltak', 'Hva ble gjort?', 'Historikk'],
+            [$actions['heading'], $actions['create'], $actions['field_owner'], $actions['field_due_date'], $actions['overdue'], $actions['no_owner'], $actions['start'], $actions['complete'], $actions['cancel_action'], $actions['reopen'], $actions['completion_label'], $actions['history_heading']],
+        );
+        $this->assertSame(
+            'Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken lukkes.',
+            $no['validation']['actions_not_finished'],
+        );
     }
 
     /** @return array<string, mixed> */

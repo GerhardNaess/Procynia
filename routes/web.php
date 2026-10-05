@@ -12,6 +12,7 @@ use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\GovernanceController;
 use App\Http\Controllers\App\HomeController;
+use App\Http\Controllers\App\ImprovementActionController;
 use App\Http\Controllers\App\ImprovementCaseContextController;
 use App\Http\Controllers\App\ImprovementCaseController;
 use App\Http\Controllers\App\InfoCenterController;
@@ -382,8 +383,19 @@ Route::prefix('app')
             Route::post('/{caseId}/close', [ImprovementCaseController::class, 'close'])->whereNumber('caseId')->name('close');
             Route::post('/{caseId}/cancel', [ImprovementCaseController::class, 'cancel'])->whereNumber('caseId')->name('cancel');
             Route::post('/{caseId}/reopen', [ImprovementCaseController::class, 'reopen'])->whereNumber('caseId')->name('reopen');
+            // Årsak og bakgrunn: one text, written while the case is open or under arbeid.
+            Route::put('/{caseId}/cause', [ImprovementCaseController::class, 'updateCause'])->whereNumber('caseId')->name('cause.update');
             // Which Kvalitet process and activities the case concerns, one process at a time.
             Route::put('/{caseId}/processes/{processId}', [ImprovementCaseContextController::class, 'update'])->whereNumber(['caseId', 'processId'])->name('context.update');
+            // Tiltak, reached only through their case. Start / Fullfør / Avbryt / Gjenåpne are the only
+            // ways a tiltak's status changes; each writes an immutable history row.
+            Route::post('/{caseId}/actions', [ImprovementActionController::class, 'store'])->whereNumber('caseId')->name('actions.store');
+            Route::patch('/{caseId}/actions/{actionId}', [ImprovementActionController::class, 'update'])->whereNumber(['caseId', 'actionId'])->name('actions.update');
+            Route::delete('/{caseId}/actions/{actionId}', [ImprovementActionController::class, 'destroy'])->whereNumber(['caseId', 'actionId'])->name('actions.destroy');
+            Route::post('/{caseId}/actions/{actionId}/start', [ImprovementActionController::class, 'start'])->whereNumber(['caseId', 'actionId'])->name('actions.start');
+            Route::post('/{caseId}/actions/{actionId}/complete', [ImprovementActionController::class, 'complete'])->whereNumber(['caseId', 'actionId'])->name('actions.complete');
+            Route::post('/{caseId}/actions/{actionId}/cancel', [ImprovementActionController::class, 'cancel'])->whereNumber(['caseId', 'actionId'])->name('actions.cancel');
+            Route::post('/{caseId}/actions/{actionId}/reopen', [ImprovementActionController::class, 'reopen'])->whereNumber(['caseId', 'actionId'])->name('actions.reopen');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

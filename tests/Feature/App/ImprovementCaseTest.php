@@ -937,9 +937,12 @@ class ImprovementCaseTest extends TestCase
             ->values()
             ->all();
         $this->assertSame([
-            'app.improvements.cancel', 'app.improvements.close', 'app.improvements.context.update', 'app.improvements.destroy',
-            'app.improvements.index', 'app.improvements.reopen', 'app.improvements.show', 'app.improvements.start',
-            'app.improvements.store', 'app.improvements.update',
+            'app.improvements.actions.cancel', 'app.improvements.actions.complete', 'app.improvements.actions.destroy',
+            'app.improvements.actions.reopen', 'app.improvements.actions.start', 'app.improvements.actions.store',
+            'app.improvements.actions.update',
+            'app.improvements.cancel', 'app.improvements.cause.update', 'app.improvements.close', 'app.improvements.context.update',
+            'app.improvements.destroy', 'app.improvements.index', 'app.improvements.reopen', 'app.improvements.show',
+            'app.improvements.start', 'app.improvements.store', 'app.improvements.update',
         ], $routes);
     }
 

@@ -6,6 +6,7 @@ use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
+use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -63,6 +64,31 @@ trait CreatesImprovementCaseScenarios
             'description' => 'Beskrivelse av '.$title,
             'owner_user_id' => $owner?->id,
         ]);
+    }
+
+    /**
+     * A tiltak written straight to the database — planned, as every new one is.
+     */
+    private function improvementAction(ImprovementCase $case, string $title, ?User $owner = null, string $dueDate = '2030-01-31'): ImprovementAction
+    {
+        return ImprovementAction::query()->create([
+            'customer_id' => $case->customer_id,
+            'improvement_case_id' => $case->id,
+            'title' => $title,
+            'owner_user_id' => $owner?->id,
+            'due_date' => $dueDate,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function actionPayload(User $owner, string $title = 'Nytt tiltak', string $dueDate = '2030-01-31'): array
+    {
+        return [
+            'title' => $title,
+            'description' => 'Hva tiltaket innebærer.',
+            'owner_user_id' => $owner->id,
+            'due_date' => $dueDate,
+        ];
     }
 
     /**

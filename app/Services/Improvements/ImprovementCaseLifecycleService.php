@@ -2,6 +2,7 @@
 
 namespace App\Services\Improvements;
 
+use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
@@ -12,7 +13,8 @@ use Illuminate\Validation\ValidationException;
  * Start behandling, Lukk, Avbryt and Gjenåpne — the only way a case's status changes.
  *
  *   open → in_progress              start()   no note
- *   open | in_progress → closed     close()   resultat / avsluttende kommentar required
+ *   open | in_progress → closed     close()   resultat / avsluttende kommentar required, and
+ *                                             every tiltak completed or cancelled
  *   open | in_progress → cancelled  cancel()  begrunnelse required
  *   closed | cancelled → open       reopen()  begrunnelse required
  *
@@ -62,6 +64,14 @@ class ImprovementCaseLifecycleService
                 ]);
             }
 
+            // A case is closed once its tiltak are done with. Read inside the case lock: the tiltak
+            // lifecycle takes the same lock first, so none can be reopened or added meanwhile.
+            if ($to === ImprovementCase::STATUS_CLOSED && $this->hasUnfinishedActions($locked)) {
+                throw ValidationException::withMessages([
+                    $errorField => __('procynia.improvements.validation.actions_not_finished'),
+                ]);
+            }
+
             $now = now();
 
             ImprovementCaseStatusChange::query()->create([
@@ -87,6 +97,14 @@ class ImprovementCaseLifecycleService
 
             return $locked;
         });
+    }
+
+    private function hasUnfinishedActions(ImprovementCase $case): bool
+    {
+        return ImprovementAction::query()
+            ->where('improvement_case_id', (int) $case->id)
+            ->whereIn('status', ImprovementAction::ACTIVE_STATUSES)
+            ->exists();
     }
 
     private function required(?string $value, string $field): string

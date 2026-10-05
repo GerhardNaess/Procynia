@@ -4,6 +4,8 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\BusinessArea;
+use App\Models\ImprovementAction;
+use App\Models\ImprovementActionStatusChange;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
@@ -13,6 +15,7 @@ use App\Services\Improvements\ImprovementCaseQualityContextService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Improvements\ImprovementValidationMessages;
+use Carbon\CarbonInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -115,7 +118,10 @@ class ImprovementCaseController extends Controller
     {
         $user = $this->authorizedUser();
         $case = $this->visibleCaseOrFail($user, $caseId);
-        $case->loadMissing(['businessArea:id,name', 'owner:id,name', 'reportedBy:id,name', 'closedBy:id,name']);
+        $case->loadMissing([
+            'businessArea:id,name', 'owner:id,name', 'reportedBy:id,name', 'closedBy:id,name',
+            'actions.owner:id,name', 'actions.completedBy:id,name', 'actions.statusChanges.changedBy:id,name',
+        ]);
 
         $active = $case->isActive();
         $canEdit = $this->access->canEdit($user, $case);
@@ -124,10 +130,14 @@ class ImprovementCaseController extends Controller
         $editableAreas = $canEdit && $active ? $this->access->editableAreas($user) : collect();
         $canReadQuality = $this->qualityContext->canReadQuality($user);
         $canLinkContext = $canEdit && $active && $canReadQuality;
+        // Tiltak are worked while the case is; an ended case is reopened first.
+        $canManageActions = $canEdit && $active;
+        $today = now()->startOfDay();
 
         return Inertia::render('App/Improvements/Show', [
             'case' => $this->caseRow($case) + [
                 'description' => $case->description,
+                'cause_analysis' => $case->cause_analysis,
                 'occurred_at' => $case->occurred_at?->format('Y-m-d'),
                 'reported_by_name' => $case->reportedBy?->name,
                 'created_at' => $case->created_at?->toIso8601String(),
@@ -155,7 +165,17 @@ class ImprovementCaseController extends Controller
                 'can_reopen' => $canClose && ! $active,
                 'can_delete' => $this->access->canDelete($user, $case) && $case->isDeletable(),
                 'can_link_context' => $canLinkContext,
+                'can_edit_cause' => $canEdit && $active,
+                'can_manage_actions' => $canManageActions,
             ],
+            // The case was reached through visibleCases(); its tiltak carry no access of their own.
+            'actions' => $case->actions
+                ->map(fn (ImprovementAction $action): array => $this->actionRow($action, $case, $today, $canManageActions))
+                ->all(),
+            // Who can be responsible for a tiltak: people who can read cases in the case's area.
+            'action_owner_options' => $canManageActions
+                ? $this->access->ownerCandidates($user, [(int) $case->business_area_id])
+                : [],
             'types' => ImprovementCase::TYPES,
             'area_options' => $this->areaOptions($editableAreas),
             'owner_options' => $this->access->ownerCandidates($user, $this->areaIds($editableAreas)),
@@ -164,6 +184,35 @@ class ImprovementCaseController extends Controller
             'quality_context_options' => $canLinkContext ? $this->qualityContext->contextOptions($case) : [],
             'today' => now()->toDateString(),
         ]);
+    }
+
+    /**
+     * Årsak og bakgrunn. improvement.edit in the case's area, while the case is open or under
+     * arbeid; it may be emptied again. Nothing else on the case changes.
+     */
+    public function updateCause(Request $request, int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        abort_unless($this->access->canEdit($user, $case), 403);
+
+        if (! $case->isActive()) {
+            return back()->with('error', __('procynia.improvements.validation.reopen_before_edit'));
+        }
+
+        $validated = $request->validate([
+            'cause_analysis' => ['nullable', 'string', 'max:10000'],
+        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
+
+        $text = trim((string) ($validated['cause_analysis'] ?? ''));
+
+        $case->forceFill([
+            'cause_analysis' => $text !== '' ? $text : null,
+            'updated_by' => $user->id,
+        ])->save();
+
+        return back()->with('success', __('procynia.improvements.cause.flash.updated'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -418,6 +467,51 @@ class ImprovementCaseController extends Controller
             'owner_user_id' => $case->owner_user_id !== null ? (int) $case->owner_user_id : null,
             'owner_name' => $case->owner?->name,
             'url' => route('app.improvements.show', ['caseId' => $case->id]),
+        ];
+    }
+
+    /**
+     * One tiltak as the case page shows it, with its history newest first. Frist passert is
+     * computed here, never stored; «after the case's frist» is only information.
+     *
+     * @return array<string, mixed>
+     */
+    private function actionRow(ImprovementAction $action, ImprovementCase $case, CarbonInterface $today, bool $canManage): array
+    {
+        $active = $action->isActive();
+
+        return [
+            'id' => (int) $action->id,
+            'title' => $action->title,
+            'description' => $action->description,
+            'status' => $action->status,
+            'owner_user_id' => $action->owner_user_id !== null ? (int) $action->owner_user_id : null,
+            'owner_name' => $action->owner?->name,
+            'due_date' => $action->due_date?->format('Y-m-d'),
+            'is_overdue' => $action->isOverdue($today),
+            'is_after_case_due_date' => $active && $case->due_date !== null && $action->due_date !== null && $action->due_date->gt($case->due_date),
+            'completion_note' => $action->completion_note,
+            'completed_at' => $action->completed_at?->toIso8601String(),
+            'completed_by_name' => $action->completedBy?->name,
+            'history' => $action->statusChanges
+                ->map(fn (ImprovementActionStatusChange $change): array => [
+                    'id' => (int) $change->id,
+                    'from_status' => $change->from_status,
+                    'to_status' => $change->to_status,
+                    'note' => $change->note,
+                    'changed_at' => $change->changed_at?->toIso8601String(),
+                    'changed_by_name' => $change->changedBy?->name,
+                ])
+                ->values()
+                ->all(),
+            'permissions' => [
+                'can_edit' => $canManage && $active,
+                'can_start' => $canManage && $action->status === ImprovementAction::STATUS_PLANNED,
+                'can_complete' => $canManage && $active,
+                'can_cancel' => $canManage && $active,
+                'can_reopen' => $canManage && ! $active,
+                'can_delete' => $canManage && $action->status === ImprovementAction::STATUS_PLANNED && $action->statusChanges->isEmpty(),
+            ],
         ];
     }
 
