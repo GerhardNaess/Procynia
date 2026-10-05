@@ -5,11 +5,11 @@ namespace App\Services\Risk;
 use App\Models\BusinessArea;
 use App\Models\Risk;
 use App\Models\User;
+use App\Services\Permissions\BusinessAreaGrants;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\DB;
 
 /**
  * The one place that answers "may this user do this, to risks in which areas?".
@@ -37,11 +37,15 @@ use Illuminate\Support\Facades\DB;
  *
  * Everything that reads risks for a user goes through visibleRisks(). A risk outside the user's
  * areas is not forbidden, it is absent: not listed, not counted, not searchable and 404 by URL.
+ *
+ * The (permission, area) query itself is BusinessAreaGrants, shared with Mål og KPI. What stays here
+ * is what is Risiko's own: which keys count, when the module opens, and what a risk is.
  */
 class RiskAccessService
 {
     public function __construct(
         private readonly CustomerPermissionService $permissions,
+        private readonly BusinessAreaGrants $grants,
     ) {}
 
     /**
@@ -65,12 +69,7 @@ class RiskAccessService
             return [];
         }
 
-        return $this->grantQuery((int) $user->customer_id, $permissionKey, (int) $user->id)
-            ->distinct()
-            ->orderBy('grants.business_area_id')
-            ->pluck('grants.business_area_id')
-            ->map(fn (mixed $id): int => (int) $id)
-            ->all();
+        return $this->grants->areaIdsFor((int) $user->customer_id, (int) $user->id, $permissionKey);
     }
 
     /**
@@ -84,9 +83,7 @@ class RiskAccessService
             return false;
         }
 
-        return $this->rolesGranting((int) $user->customer_id, $permissionKey, (int) $user->id)
-            ->where('cr.all_business_areas', true)
-            ->exists();
+        return $this->grants->reachesAllAreas((int) $user->customer_id, (int) $user->id, $permissionKey);
     }
 
     /**
@@ -152,57 +149,7 @@ class RiskAccessService
      */
     public function viewerAreaIdsByUser(int $customerId): array
     {
-        $byUser = [];
-
-        foreach ($this->grantQuery($customerId, CustomerPermissionCatalog::RISK_VIEW)
-            ->distinct()
-            ->get(['grants.user_id', 'grants.business_area_id']) as $row) {
-            $byUser[(int) $row->user_id][] = (int) $row->business_area_id;
-        }
-
-        return $byUser;
-    }
-
-    /**
-     * Rows of (user_id, business_area_id) where one and the same active role of the customer grants
-     * the permission *and* reaches the area — explicitly, or through «Alle». Both branches start
-     * from that one role, so a permission from one role and an area from another never meet.
-     *
-     * «Alle» is resolved here, at read time, against the customer's areas as they are now: a role
-     * with all_business_areas reaches an area created a minute ago without anyone touching it.
-     *
-     * Every join re-checks customer_id against the role's, the user's and the area's own tenant, so
-     * a stray cross-tenant pivot row grants nothing.
-     */
-    private function grantQuery(int $customerId, string $permissionKey, ?int $userId = null): \Illuminate\Database\Query\Builder
-    {
-        $explicit = $this->rolesGranting($customerId, $permissionKey, $userId)
-            ->join('customer_role_business_areas as crba', 'crba.customer_role_id', '=', 'cr.id')
-            ->join('business_areas as area', 'area.id', '=', 'crba.business_area_id')
-            ->where('cr.all_business_areas', false)
-            ->where('area.customer_id', $customerId)
-            ->select(['cur.user_id', 'area.id as business_area_id']);
-
-        $wildcard = $this->rolesGranting($customerId, $permissionKey, $userId)
-            ->join('business_areas as area', 'area.customer_id', '=', 'cr.customer_id')
-            ->where('cr.all_business_areas', true)
-            ->select(['cur.user_id', 'area.id as business_area_id']);
-
-        return DB::query()->fromSub($explicit->unionAll($wildcard), 'grants');
-    }
-
-    /** (role, user) pairs where an active role of the customer grants the permission. */
-    private function rolesGranting(int $customerId, string $permissionKey, ?int $userId): \Illuminate\Database\Query\Builder
-    {
-        return DB::table('customer_roles as cr')
-            ->join('customer_user_roles as cur', 'cur.customer_role_id', '=', 'cr.id')
-            ->join('customer_role_permissions as crp', 'crp.customer_role_id', '=', 'cr.id')
-            ->join('users as u', 'u.id', '=', 'cur.user_id')
-            ->where('cr.customer_id', $customerId)
-            ->where('cr.is_active', true)
-            ->where('u.customer_id', $customerId)
-            ->where('crp.permission_key', $permissionKey)
-            ->when($userId !== null, fn ($query) => $query->where('cur.user_id', $userId));
+        return $this->grants->areaIdsByUser($customerId, CustomerPermissionCatalog::RISK_VIEW);
     }
 
     private function isRiskPermission(string $permissionKey): bool

@@ -59,11 +59,12 @@ class CustomerModuleEntitlementTest extends TestCase
         $service = app(ModuleEntitlementService::class);
 
         $this->assertSame(['tender'], $service->modulesForPackage('tender'));
-        $this->assertSame(['quality'], $service->modulesForPackage('quality'));
+        // Mål og KPI is a general management area, reached through both Kvalitet and GRC.
+        $this->assertSame(['quality', 'objectives'], $service->modulesForPackage('quality'));
         $this->assertSame(
-            ['quality', 'risk', 'audit_compliance'],
+            ['quality', 'risk', 'objectives', 'audit_compliance'],
             $service->modulesForPackage('grc'),
-            'GRC is the compound package and must carry all three modules.'
+            'GRC is the compound package and must carry all four modules.'
         );
         $this->assertSame([ModuleEntitlementService::MODULE_WIKI_CORE], $service->modulesForPackage('core'));
     }
@@ -117,7 +118,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
         $this->assertSame(
-            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'audit_compliance'],
+            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'objectives', 'audit_compliance'],
             $modules,
         );
     }
@@ -133,6 +134,8 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertSame($modules, array_values(array_unique($modules)));
         $this->assertContains('quality', $modules);
         $this->assertContains('risk', $modules);
+        $this->assertContains('objectives', $modules);
+        $this->assertSame(1, count(array_keys($modules, 'objectives', true)));
     }
 
     public function test_a_package_that_is_not_active_grants_nothing(): void

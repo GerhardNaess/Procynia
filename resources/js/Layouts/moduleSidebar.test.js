@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { APP_MODULES, activeModuleKey } from '../Support/appModules.js';
+import { APP_MODULES, activeModuleKey, moduleAvailability } from '../Support/appModules.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sidebar = readFileSync(join(here, '..', 'Components', 'App', 'ModuleSidebar.jsx'), 'utf8');
@@ -21,7 +21,7 @@ describe('the rail shows the whole planned product structure', () => {
             APP_MODULES.map((module) => module.key),
             [
                 'home', 'wiki', 'tenders', 'quality',
-                'risk', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
+                'risk', 'objectives', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
         );
@@ -199,5 +199,20 @@ describe('the rail can be collapsed to icons, on desktop only', () => {
             assert.ok(file.includes(`'collapse' => '${expected[0]}'`), `${lang} collapse`);
             assert.ok(file.includes(`'expand' => '${expected[1]}'`), `${lang} expand`);
         }
+    });
+});
+
+describe('Mål og KPI is on the rail as planned until it has pages', () => {
+    const objectives = APP_MODULES.find((module) => module.key === 'objectives');
+
+    test('it is its own module, gated by objective.view, with nothing to click yet', () => {
+        assert.equal(objectives.module, 'objectives');
+        assert.equal(objectives.permission, 'objective.view');
+        assert.equal(objectives.built, false);
+        assert.equal(objectives.label({}), 'Mål og KPI');
+    });
+
+    test('an entitlement and the permission still leave it planned', () => {
+        assert.equal(moduleAvailability(objectives, ['objectives'], ['objective.view']), 'planned');
     });
 });

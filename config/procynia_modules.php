@@ -26,6 +26,9 @@ return [
         'tender' => ['sort_order' => 10],
         'quality' => ['sort_order' => 20],
         'risk' => ['sort_order' => 30],
+        // Mål og KPI. A general management area, not a part of Risiko or Kvalitet — which is why it
+        // is its own module, carried by both packages below.
+        'objectives' => ['sort_order' => 35],
         'audit_compliance' => ['sort_order' => 40],
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
@@ -51,7 +54,7 @@ return [
             'mandatory' => false,
             'orderable' => true,
             'sort_order' => 20,
-            'modules' => ['quality'],
+            'modules' => ['quality', 'objectives'],
         ],
 
         // GRC is the compound package: governance, risk and compliance are sold as one, and the
@@ -61,11 +64,10 @@ return [
             'mandatory' => false,
             'orderable' => true,
             'sort_order' => 30,
-            'modules' => ['quality', 'risk', 'audit_compliance'],
+            'modules' => ['quality', 'risk', 'objectives', 'audit_compliance'],
         ],
 
     ],
-
 
     /**
      * Which route names require which technical module, so the guard reads as one list instead of
@@ -88,6 +90,7 @@ return [
         'app.ai.' => 'tender',
         'app.quality.' => 'quality',
         'app.risk.' => 'risk',
+        'app.objectives.' => 'objectives',
     ],
 
 ];

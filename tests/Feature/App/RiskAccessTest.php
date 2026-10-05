@@ -499,7 +499,7 @@ class RiskAccessTest extends TestCase
         $roleRow = collect($props['customerRoles']['roles'])->firstWhere('id', $role->id);
         $this->assertTrue($roleRow['all_business_areas']);
         $this->assertSame([], $roleRow['business_area_ids']);
-        $this->assertSame(['risk'], $props['customerRoles']['area_scoped_domains']);
+        $this->assertSame(['risk', 'objective'], $props['customerRoles']['area_scoped_domains']);
 
         // A permission checkbox leaves «Alle» alone.
         $this->actingAs($owner)

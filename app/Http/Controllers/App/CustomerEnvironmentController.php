@@ -213,9 +213,9 @@ class CustomerEnvironmentController extends Controller
             'store_url' => route('app.customer-environment.roles.store'),
             'business_areas' => $businessAreas,
             'business_areas_store_url' => route('app.customer-environment.business-areas.store'),
-            // The domains whose rights are scoped by fagområde today, so the page shows the
-            // Fagområder column there and nowhere else. Kvalitet and Wiki are not scoped (yet).
-            'area_scoped_domains' => [CustomerPermissionCatalog::DOMAIN_RISK],
+            // The domains whose rights are scoped by fagområde, so the page shows the Fagområder
+            // column there and nowhere else. Kvalitet and Wiki are not scoped (yet).
+            'area_scoped_domains' => CustomerPermissionCatalog::areaScopedDomains(),
         ];
     }
 

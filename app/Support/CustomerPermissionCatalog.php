@@ -20,6 +20,8 @@ final class CustomerPermissionCatalog
 
     public const DOMAIN_RISK = 'risk';
 
+    public const DOMAIN_OBJECTIVE = 'objective';
+
     public const QUALITY_VIEW = 'quality.view';
 
     public const QUALITY_CREATE = 'quality.create';
@@ -66,6 +68,24 @@ final class CustomerPermissionCatalog
 
     public const RISK_DELETE = 'risk.delete';
 
+    /*
+     * Mål og KPI. Area-scoped like Risiko: a role says what, its fagområder say where. An objective
+     * carries the fagområde; a KPI reaches it through its objective. See ObjectiveAccessService.
+     */
+    public const OBJECTIVE_VIEW = 'objective.view';
+
+    /** Creating and changing objectives and their KPIs. */
+    public const OBJECTIVE_EDIT = 'objective.edit';
+
+    /*
+     * Registering, correcting and withdrawing KPI measurements. Separate from objective.edit for
+     * the same reason risk.assess is separate from risk.edit: the person who reports a number need
+     * not be the one who may redefine what is measured.
+     */
+    public const OBJECTIVE_MEASURE = 'objective.measure';
+
+    public const OBJECTIVE_DELETE = 'objective.delete';
+
     /**
      * Permission keys grouped by the domain they govern, in the order they should be presented.
      *
@@ -97,7 +117,35 @@ final class CustomerPermissionCatalog
                 self::RISK_ACCEPT,
                 self::RISK_DELETE,
             ],
+            self::DOMAIN_OBJECTIVE => [
+                self::OBJECTIVE_VIEW,
+                self::OBJECTIVE_EDIT,
+                self::OBJECTIVE_MEASURE,
+                self::OBJECTIVE_DELETE,
+            ],
         ];
+    }
+
+    /**
+     * The domains whose rights are scoped by fagområde: a key of one of these reaches content only
+     * in the areas the same role reaches (BusinessAreaGrants). Kvalitet and Wiki are not scoped.
+     *
+     * @return list<string>
+     */
+    public static function areaScopedDomains(): array
+    {
+        return [self::DOMAIN_RISK, self::DOMAIN_OBJECTIVE];
+    }
+
+    public static function isAreaScoped(string $permissionKey): bool
+    {
+        foreach (self::areaScopedDomains() as $domain) {
+            if (in_array($permissionKey, self::domains()[$domain], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @return list<string> */

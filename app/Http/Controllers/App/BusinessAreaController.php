@@ -4,7 +4,6 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\BusinessArea;
-use App\Models\Risk;
 use App\Models\User;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -18,8 +17,8 @@ use Illuminate\Validation\ValidationException;
  * carries it, and roles are System Owner's to edit. Which roles reach an area is set on the role
  * (CustomerRoleController) — explicitly or with «Alle» — so this surface only names areas.
  *
- * Nothing here reads risk content. The administrator learns that an area is in use when deleting
- * it is refused, and nothing more — no counts, no titles.
+ * Nothing here reads risk or objective content. The administrator learns that an area is in use
+ * when deleting it is refused, and nothing more — no counts, no titles.
  */
 class BusinessAreaController extends Controller
 {
@@ -63,9 +62,10 @@ class BusinessAreaController extends Controller
     }
 
     /**
-     * An area that still holds risks cannot be deleted: the risks would either go with it or be
-     * left in no one's scope, and neither is acceptable. When another module starts scoping by
-     * fagområde, its own "in use" check belongs here too. Role links go with the area (FK cascade).
+     * An area that still holds content — risks today, objectives with Mål og KPI — cannot be
+     * deleted: the content would either go with it or be left in no one's scope, and neither is
+     * acceptable. Which tables count is BusinessArea::SCOPED_CONTENT_TABLES. Role links go with the
+     * area (FK cascade).
      */
     public function destroy(Request $request, BusinessArea $businessArea): RedirectResponse
     {
@@ -73,7 +73,7 @@ class BusinessAreaController extends Controller
 
         abort_unless((int) $businessArea->customer_id === $customerId, 404);
 
-        if (Risk::query()->where('business_area_id', $businessArea->id)->exists()) {
+        if ($businessArea->isInUse()) {
             return $this->backToPermissions()->with('error', __('procynia.customer_env.roles.business_areas.in_use'));
         }
 

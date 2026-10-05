@@ -81,6 +81,16 @@ export const APP_MODULES = [
         label: (m) => m.risk ?? 'Risiko',
         areas: ['risk'],
     },
+    {
+        key: 'objectives',
+        // Planned until its pages exist: the access foundation (objective.* keys, fagområder) is in
+        // place, but there is nothing to land on yet. When it is built, ObjectiveAccessService
+        // refuses the page without this key, so the rail must not offer it either.
+        built: false,
+        module: 'objectives',
+        permission: 'objective.view',
+        label: (m) => m.objectives ?? 'Mål og KPI',
+    },
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
