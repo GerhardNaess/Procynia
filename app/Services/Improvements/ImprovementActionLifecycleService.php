@@ -4,6 +4,7 @@ namespace App\Services\Improvements;
 
 use App\Models\ImprovementAction;
 use App\Models\ImprovementActionStatusChange;
+use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,10 @@ use Illuminate\Validation\ValidationException;
  *   planned | in_progress → cancelled     cancel()    begrunnelse required
  *   completed | cancelled → planned       reopen()    begrunnelse required
  *
+ * And Effektverifisering, which is no status change: verify() judges whether the current completion
+ * of a completed tiltak worked, with a comment, and leaves the tiltak completed either way. Ikke
+ * effektivt does not reopen it — whether to work on is the person's decision (Gjenåpne tiltak).
+ *
  * Two records, as for the case: the tiltak's status and completed_* are its current state (the
  * latest completion only), and ImprovementActionStatusChange rows are the history, never changed. A
  * reopening clears completed_* and completion_note because they describe a completion that no
@@ -32,8 +37,9 @@ use Illuminate\Validation\ValidationException;
  * Tiltak are worked while the case is open or under arbeid. Once the case is closed or cancelled,
  * its tiltak are left as they stood until the case is reopened.
  *
- * Authorization is the caller's (improvement.edit in the case's area). The owner is the caller's to
- * check too (ImprovementCaseAccessService::isValidOwner()). This guards state only.
+ * Authorization is the caller's: improvement.edit in the case's area for everything but verify(),
+ * which takes improvement.close — a decision about the outcome, not the work. The owner is the
+ * caller's to check too (ImprovementCaseAccessService::isValidOwner()). This guards state only.
  */
 class ImprovementActionLifecycleService
 {
@@ -110,6 +116,58 @@ class ImprovementActionLifecycleService
     public function reopen(ImprovementAction $action, User $actor, ?string $reason): ImprovementAction
     {
         return $this->transition($action, $actor, ImprovementAction::ENDED_STATUSES, ImprovementAction::STATUS_PLANNED, $this->required($reason, 'reason'), 'reason');
+    }
+
+    /**
+     * Effektverifisering of the tiltak's current completion: a new, immutable row tied to the status
+     * change that completed it. An earlier judgement of the same completion stays and is no longer
+     * the current one. The tiltak itself is not touched.
+     */
+    public function verify(ImprovementAction $action, User $actor, ?string $result, ?string $note): ImprovementActionVerification
+    {
+        if (! in_array($result, ImprovementActionVerification::RESULTS, true)) {
+            throw ValidationException::withMessages([
+                'result' => __('procynia.improvements.actions.validation.result_required'),
+            ]);
+        }
+
+        $note = trim((string) $note);
+
+        if ($note === '') {
+            throw ValidationException::withMessages([
+                'note' => __('procynia.improvements.actions.validation.verification_note_required'),
+            ]);
+        }
+
+        return DB::transaction(function () use ($action, $actor, $result, $note): ImprovementActionVerification {
+            $locked = $this->lockAction($action, 'result');
+
+            // The completion being judged, read inside the locks: no reopening can come between.
+            $completion = $locked->status === ImprovementAction::STATUS_COMPLETED
+                ? ImprovementActionStatusChange::query()
+                    ->where('improvement_action_id', (int) $locked->id)
+                    ->where('to_status', ImprovementAction::STATUS_COMPLETED)
+                    ->orderByDesc('changed_at')
+                    ->orderByDesc('id')
+                    ->first()
+                : null;
+
+            if ($completion === null) {
+                throw ValidationException::withMessages([
+                    'result' => __('procynia.improvements.actions.validation.verify_not_completed'),
+                ]);
+            }
+
+            return ImprovementActionVerification::query()->create([
+                'customer_id' => (int) $locked->customer_id,
+                'improvement_action_id' => (int) $locked->id,
+                'completion_status_change_id' => (int) $completion->id,
+                'result' => $result,
+                'note' => $note,
+                'verified_by_user_id' => (int) $actor->id,
+                'verified_at' => now(),
+            ]);
+        });
     }
 
     /**

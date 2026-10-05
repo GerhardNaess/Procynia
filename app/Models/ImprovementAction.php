@@ -143,4 +143,13 @@ class ImprovementAction extends Model
     {
         return $this->hasMany(ImprovementActionStatusChange::class)->orderByDesc('changed_at')->orderByDesc('id');
     }
+
+    /**
+     * Every effektverifisering, of this completion and of earlier ones, newest first. Which one is
+     * current is ImprovementActionVerificationResolver's to say.
+     */
+    public function verifications(): HasMany
+    {
+        return $this->hasMany(ImprovementActionVerification::class)->orderByDesc('verified_at')->orderByDesc('id');
+    }
 }

@@ -396,6 +396,8 @@ Route::prefix('app')
             Route::post('/{caseId}/actions/{actionId}/complete', [ImprovementActionController::class, 'complete'])->whereNumber(['caseId', 'actionId'])->name('actions.complete');
             Route::post('/{caseId}/actions/{actionId}/cancel', [ImprovementActionController::class, 'cancel'])->whereNumber(['caseId', 'actionId'])->name('actions.cancel');
             Route::post('/{caseId}/actions/{actionId}/reopen', [ImprovementActionController::class, 'reopen'])->whereNumber(['caseId', 'actionId'])->name('actions.reopen');
+            // Effektverifisering of a completed tiltak: append-only, a new judgement never edits an old one.
+            Route::post('/{caseId}/actions/{actionId}/verify', [ImprovementActionController::class, 'verify'])->whereNumber(['caseId', 'actionId'])->name('actions.verify');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

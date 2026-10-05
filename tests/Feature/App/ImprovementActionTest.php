@@ -526,7 +526,7 @@ class ImprovementActionTest extends TestCase
 
         $permissions = $this->props($user, $case)['actions'][0]['permissions'];
         $this->assertSame(
-            ['can_edit' => false, 'can_start' => false, 'can_complete' => false, 'can_cancel' => false, 'can_reopen' => true, 'can_delete' => false],
+            ['can_verify' => false, 'can_edit' => false, 'can_start' => false, 'can_complete' => false, 'can_cancel' => false, 'can_reopen' => true, 'can_delete' => false],
             $permissions,
         );
     }
@@ -541,8 +541,13 @@ class ImprovementActionTest extends TestCase
         $this->actingAs($user)->post($this->url($case, $done, '/complete'), ['completion_note' => 'Gjort']);
         $open = $this->improvementAction($case, 'Åpent', $user);
 
-        // Avbryt sak is not held back by open tiltak; only Lukk is.
-        $this->actingAs($user)->post("/app/improvements/{$case->id}/cancel", ['reason' => 'Duplikat'])->assertSessionHasNoErrors();
+        // Avbryt sak is held back by an open tiltak, as Lukk is.
+        $this->actingAs($user)->post("/app/improvements/{$case->id}/cancel", ['reason' => 'Duplikat'])
+            ->assertSessionHasErrors(['reason' => 'Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken avsluttes.']);
+        $this->assertSame(ImprovementCase::STATUS_OPEN, $case->fresh()->status);
+
+        // Old data, against today's rules: an ended case still holding a planned tiltak.
+        $case->forceFill(['status' => ImprovementCase::STATUS_CANCELLED, 'closed_at' => now(), 'closing_note' => 'Duplikat'])->save();
         $message = 'Saken er lukket eller avbrutt. Gjenåpne saken før du endrer tiltakene.';
 
         $this->actingAs($user)->post($this->url($case), $this->actionPayload($user))->assertSessionHasErrors(['title' => $message]);
@@ -649,7 +654,7 @@ class ImprovementActionTest extends TestCase
         $editorProps = $this->props($editor, $case);
         $this->assertTrue($editorProps['permissions']['can_manage_actions']);
         $this->assertSame(
-            ['can_edit' => true, 'can_start' => true, 'can_complete' => true, 'can_cancel' => true, 'can_reopen' => false, 'can_delete' => true],
+            ['can_verify' => false, 'can_edit' => true, 'can_start' => true, 'can_complete' => true, 'can_cancel' => true, 'can_reopen' => false, 'can_delete' => true],
             $editorProps['actions'][0]['permissions'],
         );
     }
@@ -859,7 +864,7 @@ class ImprovementActionTest extends TestCase
         ['customer' => $customer] = $this->context();
         $hr = $this->area($customer, 'HR');
         $user = $this->handler($customer, $hr);
-        $message = 'Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken lukkes.';
+        $message = 'Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken avsluttes.';
 
         // No tiltak: closes as before.
         $none = $this->improvementCase($customer, $hr, 'Uten tiltak', $user);
@@ -882,8 +887,9 @@ class ImprovementActionTest extends TestCase
         $this->assertSame(ImprovementCase::STATUS_IN_PROGRESS, $case->fresh()->status);
         $this->assertSame(['in_progress'], ImprovementCaseStatusChange::query()->where('improvement_case_id', $case->id)->pluck('to_status')->all());
 
-        // Completed + cancelled: closes.
+        // Completed (with confirmed effect) + cancelled: closes.
         $this->actingAs($user)->post($this->url($case, $first, '/cancel'), ['reason' => 'Ikke nødvendig']);
+        $this->actingAs($user)->post($this->url($case, $second, '/verify'), ['result' => 'effective', 'note' => 'Virket'])->assertSessionHasNoErrors();
         $this->actingAs($user)->post("/app/improvements/{$case->id}/close", ['closing_note' => 'Ferdig'])
             ->assertSessionHasNoErrors()->assertSessionHas('success', 'Saken er lukket.');
         $this->assertSame(ImprovementCase::STATUS_CLOSED, $case->fresh()->status);
@@ -893,6 +899,7 @@ class ImprovementActionTest extends TestCase
         foreach (['A', 'B'] as $title) {
             $action = $this->improvementAction($allDone, $title, $user);
             $this->actingAs($user)->post($this->url($allDone, $action, '/complete'), ['completion_note' => 'Gjort']);
+            $this->actingAs($user)->post($this->url($allDone, $action, '/verify'), ['result' => 'effective', 'note' => 'Virket']);
         }
         $this->actingAs($user)->post("/app/improvements/{$allDone->id}/close", ['closing_note' => 'Ferdig'])->assertSessionHasNoErrors();
         $this->assertSame(ImprovementCase::STATUS_CLOSED, $allDone->fresh()->status);

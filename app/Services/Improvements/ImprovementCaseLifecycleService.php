@@ -13,10 +13,16 @@ use Illuminate\Validation\ValidationException;
  * Start behandling, Lukk, Avbryt and Gjenåpne — the only way a case's status changes.
  *
  *   open → in_progress              start()   no note
- *   open | in_progress → closed     close()   resultat / avsluttende kommentar required, and
- *                                             every tiltak completed or cancelled
- *   open | in_progress → cancelled  cancel()  begrunnelse required
+ *   open | in_progress → closed     close()   resultat / avsluttende kommentar required, every
+ *                                             tiltak completed or cancelled, and every completed
+ *                                             one with Effekt bekreftet as its current verification
+ *   open | in_progress → cancelled  cancel()  begrunnelse required, and every tiltak completed or
+ *                                             cancelled — but no verification needed: an avbrutt
+ *                                             case ends without a successful conclusion
  *   closed | cancelled → open       reopen()  begrunnelse required
+ *
+ * Neither ending touches a tiltak. Unfinished tiltak are completed or cancelled by the person first,
+ * never by the case.
  *
  * Two records, kept apart on purpose: the case's status and closed_* columns are its current state
  * (the latest ending only), and ImprovementCaseStatusChange rows are the history, never changed.
@@ -30,6 +36,10 @@ use Illuminate\Validation\ValidationException;
  */
 class ImprovementCaseLifecycleService
 {
+    public function __construct(
+        private readonly ImprovementActionVerificationResolver $verifications,
+    ) {}
+
     public function start(ImprovementCase $case, User $actor): ImprovementCase
     {
         return $this->transition($case, $actor, [ImprovementCase::STATUS_OPEN], ImprovementCase::STATUS_IN_PROGRESS, null, 'status');
@@ -64,12 +74,11 @@ class ImprovementCaseLifecycleService
                 ]);
             }
 
-            // A case is closed once its tiltak are done with. Read inside the case lock: the tiltak
-            // lifecycle takes the same lock first, so none can be reopened or added meanwhile.
-            if ($to === ImprovementCase::STATUS_CLOSED && $this->hasUnfinishedActions($locked)) {
-                throw ValidationException::withMessages([
-                    $errorField => __('procynia.improvements.validation.actions_not_finished'),
-                ]);
+            // A case ends once its tiltak are done with. Read inside the case lock: the tiltak
+            // lifecycle (verification included) takes the same lock first, so none can be reopened,
+            // added or judged meanwhile.
+            if (in_array($to, ImprovementCase::ENDED_STATUSES, true)) {
+                $this->guardActionsFinished($locked, $to, $errorField);
             }
 
             $now = now();
@@ -99,12 +108,41 @@ class ImprovementCaseLifecycleService
         });
     }
 
-    private function hasUnfinishedActions(ImprovementCase $case): bool
+    /**
+     * Both endings need every tiltak completed or cancelled. Lukk also needs every completed tiltak
+     * judged Effekt bekreftet in its current verification; a cancelled tiltak needs none.
+     */
+    private function guardActionsFinished(ImprovementCase $case, string $to, string $errorField): void
     {
-        return ImprovementAction::query()
+        $actions = ImprovementAction::query()
             ->where('improvement_case_id', (int) $case->id)
-            ->whereIn('status', ImprovementAction::ACTIVE_STATUSES)
-            ->exists();
+            ->get(['id', 'status']);
+
+        $fail = fn (string $key) => throw ValidationException::withMessages([
+            $errorField => __('procynia.improvements.validation.'.$key),
+        ]);
+
+        if ($actions->contains(fn (ImprovementAction $action): bool => $action->isActive())) {
+            $fail('actions_not_finished');
+        }
+
+        if ($to !== ImprovementCase::STATUS_CLOSED) {
+            return;
+        }
+
+        $current = $this->verifications->forActions($actions);
+        // Keyed by every completed tiltak, so one without a completion row counts as unverified.
+        $judgements = $actions
+            ->filter(fn (ImprovementAction $action): bool => $action->status === ImprovementAction::STATUS_COMPLETED)
+            ->map(fn (ImprovementAction $action) => $current[(int) $action->id]['verification'] ?? null);
+
+        if ($judgements->contains(fn ($verification): bool => $verification === null)) {
+            $fail('actions_not_verified');
+        }
+
+        if ($judgements->contains(fn ($verification): bool => ! $verification->isEffective())) {
+            $fail('actions_not_effective');
+        }
     }
 
     private function required(?string $value, string $field): string

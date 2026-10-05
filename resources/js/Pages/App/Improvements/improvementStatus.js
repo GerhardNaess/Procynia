@@ -73,6 +73,11 @@ export function describeHistoryEntry(entry, tr = {}) {
     return template.replace(':name', entry.changed_by_name ?? (tr.unknown_user ?? 'en tidligere bruker'));
 }
 
+export const VERIFICATION_RESULT_TONES = {
+    effective: 'emerald',
+    not_effective: 'rose',
+};
+
 export const ACTION_STATUS_TONES = {
     planned: 'blue',
     in_progress: 'amber',

@@ -129,9 +129,34 @@ class ImprovementPageHelpTranslationsTest extends TestCase
             [$actions['heading'], $actions['create'], $actions['field_owner'], $actions['field_due_date'], $actions['overdue'], $actions['no_owner'], $actions['start'], $actions['complete'], $actions['cancel_action'], $actions['reopen'], $actions['completion_label'], $actions['history_heading']],
         );
         $this->assertSame(
-            'Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken lukkes.',
+            'Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken avsluttes.',
             $no['validation']['actions_not_finished'],
         );
+
+        $this->assertSame(
+            ['Effektverifisering', 'Venter på effektverifisering', 'Verifiser effekt', 'Resultat', 'Kommentar'],
+            [$actions['verification_heading'], $actions['verification_awaiting'], $actions['verify'], $actions['verification_result_label'], $actions['verification_note_label']],
+        );
+        $this->assertSame(['effective' => 'Effekt bekreftet', 'not_effective' => 'Ikke effektivt'], $actions['verification_results']);
+        $this->assertSame('Effekten er ikke bekreftet. Gjenåpne tiltaket dersom det må arbeides videre med.', $actions['verification_not_effective_hint']);
+        $this->assertSame('Ett eller flere fullførte tiltak er ikke effektverifisert. Verifiser effekten før saken lukkes.', $no['validation']['actions_not_verified']);
+        $this->assertSame('Ett eller flere tiltak er vurdert som ikke effektive. Følg opp tiltakene før saken lukkes.', $no['validation']['actions_not_effective']);
+    }
+
+    public function test_the_case_help_explains_effektverifisering_by_its_labels(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $actions = $this->improvements($locale)['actions'];
+            $section = collect($this->improvements($locale)['help']['case']['sections'])->firstWhere('title', $actions['verification_heading']);
+            $this->assertNotNull($section, "The case help in lang/{$locale} has no «{$actions['verification_heading']}» section.");
+
+            $titles = array_column($section['items'], 'title');
+            foreach ($actions['verification_results'] as $label) {
+                $this->assertContains($label, $titles, "The effektverifisering help in lang/{$locale} does not explain «{$label}».");
+            }
+
+            $this->assertStringContainsString($actions['verification_awaiting'], implode(' ', array_column($section['items'], 'text')));
+        }
     }
 
     /** @return array<string, mixed> */

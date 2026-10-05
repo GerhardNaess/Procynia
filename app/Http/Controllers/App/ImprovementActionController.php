@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\ImprovementAction;
+use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\User;
 use App\Services\Improvements\ImprovementActionLifecycleService;
@@ -12,6 +13,7 @@ use App\Support\CustomerContext;
 use App\Support\Improvements\ImprovementValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -23,8 +25,9 @@ use Illuminate\Validation\ValidationException;
  * outside the user's fagområder, another customer's case, or a tiltak id that is not the case's is
  * the same 404 — nothing says the tiltak exists.
  *
- * Every write takes improvement.edit in the case's area. improvement.close stays a decision about the
- * case itself and is not needed here.
+ * Every write takes improvement.edit in the case's area — except Verifiser effekt, which takes
+ * improvement.close: judging whether a tiltak worked is a decision about the outcome, like closing
+ * the case, not part of doing the work. improvement.edit alone never verifies.
  */
 class ImprovementActionController extends Controller
 {
@@ -131,6 +134,30 @@ class ImprovementActionController extends Controller
         return back()->with('success', __('procynia.improvements.actions.flash.reopened'));
     }
 
+    /**
+     * Verifiser effekt: Effekt bekreftet or Ikke effektivt for the tiltak's current completion, with
+     * a comment either way. improvement.close in the case's area. Ikke effektivt leaves the tiltak
+     * completed and says so; reopening it is the person's own next step.
+     */
+    public function verify(Request $request, int $caseId, int $actionId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->access->findVisible($user, $caseId) ?? abort(404);
+
+        abort_unless($this->access->canClose($user, $case), 403);
+
+        $action = $this->actionOrFail($case, $actionId);
+
+        $validated = $request->validate([
+            'result' => ['required', 'string', Rule::in(ImprovementActionVerification::RESULTS)],
+            'note' => ['required', 'string', 'max:5000'],
+        ], $this->messages(), ImprovementValidationMessages::attributes());
+
+        $verification = $this->lifecycle->verify($action, $user, $validated['result'], $validated['note']);
+
+        return back()->with('success', __('procynia.improvements.actions.flash.'.($verification->isEffective() ? 'verified_effective' : 'verified_not_effective')));
+    }
+
     private function authorizedUser(): User
     {
         $user = $this->customerContext->currentUser();
@@ -200,6 +227,9 @@ class ImprovementActionController extends Controller
         return ImprovementValidationMessages::messages() + [
             'completion_note.required' => __('procynia.improvements.actions.validation.completion_required'),
             'reason.required' => __('procynia.improvements.actions.validation.reason_required'),
+            'result.required' => __('procynia.improvements.actions.validation.result_required'),
+            'result.in' => __('procynia.improvements.actions.validation.result_required'),
+            'note.required' => __('procynia.improvements.actions.validation.verification_note_required'),
         ];
     }
 }

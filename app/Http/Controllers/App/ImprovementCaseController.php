@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\BusinessArea;
 use App\Models\ImprovementAction;
 use App\Models\ImprovementActionStatusChange;
+use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
+use App\Services\Improvements\ImprovementActionVerificationResolver;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseLifecycleService;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
@@ -43,6 +45,7 @@ class ImprovementCaseController extends Controller
         private readonly ImprovementCaseAccessService $access,
         private readonly ImprovementCaseLifecycleService $lifecycle,
         private readonly ImprovementCaseQualityContextService $qualityContext,
+        private readonly ImprovementActionVerificationResolver $verifications,
     ) {}
 
     public function index(Request $request): Response
@@ -121,6 +124,7 @@ class ImprovementCaseController extends Controller
         $case->loadMissing([
             'businessArea:id,name', 'owner:id,name', 'reportedBy:id,name', 'closedBy:id,name',
             'actions.owner:id,name', 'actions.completedBy:id,name', 'actions.statusChanges.changedBy:id,name',
+            'actions.verifications.verifiedBy:id,name',
         ]);
 
         $active = $case->isActive();
@@ -132,6 +136,9 @@ class ImprovementCaseController extends Controller
         $canLinkContext = $canEdit && $active && $canReadQuality;
         // Tiltak are worked while the case is; an ended case is reopened first.
         $canManageActions = $canEdit && $active;
+        // Verifiser effekt is a decision about the outcome: improvement.close, while the case is active.
+        $canVerify = $canClose && $active;
+        $currentVerifications = $this->verifications->forActions($case->actions);
         $today = now()->startOfDay();
 
         return Inertia::render('App/Improvements/Show', [
@@ -170,7 +177,7 @@ class ImprovementCaseController extends Controller
             ],
             // The case was reached through visibleCases(); its tiltak carry no access of their own.
             'actions' => $case->actions
-                ->map(fn (ImprovementAction $action): array => $this->actionRow($action, $case, $today, $canManageActions))
+                ->map(fn (ImprovementAction $action): array => $this->actionRow($action, $case, $today, $canManageActions, $canVerify, $currentVerifications[(int) $action->id] ?? null))
                 ->all(),
             // Who can be responsible for a tiltak: people who can read cases in the case's area.
             'action_owner_options' => $canManageActions
@@ -472,13 +479,22 @@ class ImprovementCaseController extends Controller
 
     /**
      * One tiltak as the case page shows it, with its history newest first. Frist passert is
-     * computed here, never stored; «after the case's frist» is only information.
+     * computed here, never stored, and never while the case is ended — an ended case is no longer
+     * being worked, whatever its tiltak say. «After the case's frist» is only information.
      *
+     * Effektverifisering: for a completed tiltak, the current verification of its current completion
+     * (or none — «Venter på effektverifisering»), and below it every other verification the tiltak
+     * has had, each marked when it judged an earlier completion.
+     *
+     * @param  array{completion: ImprovementActionStatusChange, verification: ?ImprovementActionVerification}|null  $current
      * @return array<string, mixed>
      */
-    private function actionRow(ImprovementAction $action, ImprovementCase $case, CarbonInterface $today, bool $canManage): array
+    private function actionRow(ImprovementAction $action, ImprovementCase $case, CarbonInterface $today, bool $canManage, bool $canVerify, ?array $current): array
     {
         $active = $action->isActive();
+        $completed = $action->status === ImprovementAction::STATUS_COMPLETED;
+        $currentVerification = $current['verification'] ?? null;
+        $completionId = isset($current['completion']) ? (int) $current['completion']->id : null;
 
         return [
             'id' => (int) $action->id,
@@ -488,7 +504,7 @@ class ImprovementCaseController extends Controller
             'owner_user_id' => $action->owner_user_id !== null ? (int) $action->owner_user_id : null,
             'owner_name' => $action->owner?->name,
             'due_date' => $action->due_date?->format('Y-m-d'),
-            'is_overdue' => $action->isOverdue($today),
+            'is_overdue' => $case->isActive() && $action->isOverdue($today),
             'is_after_case_due_date' => $active && $case->due_date !== null && $action->due_date !== null && $action->due_date->gt($case->due_date),
             'completion_note' => $action->completion_note,
             'completed_at' => $action->completed_at?->toIso8601String(),
@@ -504,7 +520,18 @@ class ImprovementCaseController extends Controller
                 ])
                 ->values()
                 ->all(),
+            'verification' => [
+                // Completed and its current completion not yet judged.
+                'awaiting' => $completed && $currentVerification === null,
+                'current' => $currentVerification !== null ? $this->verificationRow($currentVerification, $completionId) : null,
+                'earlier' => $action->verifications
+                    ->reject(fn (ImprovementActionVerification $verification): bool => $currentVerification !== null && (int) $verification->id === (int) $currentVerification->id)
+                    ->map(fn (ImprovementActionVerification $verification): array => $this->verificationRow($verification, $completionId))
+                    ->values()
+                    ->all(),
+            ],
             'permissions' => [
+                'can_verify' => $canVerify && $completed,
                 'can_edit' => $canManage && $active,
                 'can_start' => $canManage && $action->status === ImprovementAction::STATUS_PLANNED,
                 'can_complete' => $canManage && $active,
@@ -512,6 +539,20 @@ class ImprovementCaseController extends Controller
                 'can_reopen' => $canManage && ! $active,
                 'can_delete' => $canManage && $action->status === ImprovementAction::STATUS_PLANNED && $action->statusChanges->isEmpty(),
             ],
+        ];
+    }
+
+    /** @return array{id: int, result: string, note: string, verified_at: ?string, verified_by_name: ?string, earlier_completion: bool} */
+    private function verificationRow(ImprovementActionVerification $verification, ?int $currentCompletionId): array
+    {
+        return [
+            'id' => (int) $verification->id,
+            'result' => $verification->result,
+            'note' => $verification->note,
+            'verified_at' => $verification->verified_at?->toIso8601String(),
+            'verified_by_name' => $verification->verifiedBy?->name,
+            // It judged a completion that was later reopened: history, not the state of the tiltak.
+            'earlier_completion' => (int) $verification->completion_status_change_id !== $currentCompletionId,
         ];
     }
 

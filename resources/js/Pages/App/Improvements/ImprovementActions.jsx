@@ -4,7 +4,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
 import ImprovementActionForm from './ImprovementActionForm';
-import { ACTION_STATUS_TONES, cancellationReason, describeActionHistoryEntry, formatDay, formatLongDate } from './improvementStatus';
+import { ACTION_STATUS_TONES, VERIFICATION_RESULT_TONES, cancellationReason, describeActionHistoryEntry, formatDay, formatLongDate } from './improvementStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -16,13 +16,14 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
  * done — what was actually done. A light list of cards, not a task board.
  *
  * Every button is offered only when the server said so for this tiltak (improvement.edit in the
- * case's area, the case still active, the tiltak in the right state); the server refuses it
- * otherwise. One panel is open at a time, inside the card it belongs to.
+ * case's area, the case still active, the tiltak in the right state; improvement.close for Verifiser
+ * effekt); the server refuses it otherwise. One panel is open at a time, inside the card it belongs
+ * to.
  */
 export default function ImprovementActions({ caseId, actions = [], canManage, ownerOptions = [], locale, tr }) {
     const t = tr.actions ?? {};
     const { errors = {} } = usePage().props;
-    // { id: action id or 'new', kind: 'create' | 'edit' | 'complete' | 'cancel' | 'reopen' }
+    // { id: action id or 'new', kind: 'create' | 'edit' | 'complete' | 'cancel' | 'reopen' | 'verify' }
     const [panel, setPanel] = useState(null);
     const [busy, setBusy] = useState(null);
     const close = () => setPanel(null);
@@ -176,17 +177,153 @@ function ActionTextForm({ id, action, field, heading, intro, label, submit, onDo
     );
 }
 
+/**
+ * Verifiser effekt: Effekt bekreftet or Ikke effektivt, and a comment either way. A new judgement is
+ * a new entry; the earlier ones stay.
+ */
+function VerifyForm({ action, onDone, tr }) {
+    const t = tr.actions ?? {};
+    const results = t.verification_results ?? {};
+    const form = useForm({ result: '', note: '' });
+
+    const send = (event) => {
+        event.preventDefault();
+        form.post(action, { preserveScroll: true, onSuccess: onDone });
+    };
+
+    return (
+        <form onSubmit={send} className="space-y-4" aria-label={t.verify ?? 'Verifiser effekt'}>
+            <h3 className="text-lg font-semibold text-slate-950">{t.verify ?? 'Verifiser effekt'}</h3>
+            <p className="text-base text-slate-600">{t.verify_intro ?? 'Vurder om tiltaket faktisk ga ønsket resultat. En ny vurdering sletter ikke tidligere vurderinger.'}</p>
+            <fieldset>
+                <legend className="text-base font-semibold text-slate-700">{t.verification_result_label ?? 'Resultat'}<RequiredMark /></legend>
+                <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
+                    {['effective', 'not_effective'].map((value) => (
+                        <label key={value} className="inline-flex min-h-10 items-center gap-2 text-base text-slate-900">
+                            <input
+                                type="radio"
+                                name="verification-result"
+                                id={`improvement-action-verify-${value}`}
+                                value={value}
+                                required
+                                checked={form.data.result === value}
+                                onChange={() => form.setData('result', value)}
+                                className="h-5 w-5"
+                            />
+                            {results[value] ?? (value === 'effective' ? 'Effekt bekreftet' : 'Ikke effektivt')}
+                        </label>
+                    ))}
+                </div>
+                {form.errors.result && <p className="mt-1 text-base text-rose-700">{form.errors.result}</p>}
+            </fieldset>
+            <div>
+                <label htmlFor="improvement-action-verify-note" className="block text-base font-semibold text-slate-700">{t.verification_note_label ?? 'Kommentar'}<RequiredMark /></label>
+                <p id="improvement-action-verify-note-hint" className="text-base text-slate-600">{t.verification_note_hint ?? 'Hva bygger vurderingen på?'}</p>
+                <textarea
+                    id="improvement-action-verify-note"
+                    rows={3}
+                    required
+                    aria-required="true"
+                    aria-describedby="improvement-action-verify-note-hint"
+                    value={form.data.note}
+                    onChange={(event) => form.setData('note', event.target.value)}
+                    className={`mt-1 ${INPUT}`}
+                />
+                {form.errors.note && <p className="mt-1 text-base text-rose-700">{form.errors.note}</p>}
+            </div>
+            <div className="flex flex-wrap justify-end gap-3">
+                <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                    {form.processing ? (tr.saving ?? 'Lagrer...') : (t.verify ?? 'Verifiser effekt')}
+                </button>
+            </div>
+        </form>
+    );
+}
+
+/** One judgement: result, comment, when and by whom. */
+function VerificationEntry({ entry, locale, tr, testId }) {
+    const t = tr.actions ?? {};
+    const results = t.verification_results ?? {};
+
+    return (
+        <div data-testid={testId}>
+            <StatusBadge tone={VERIFICATION_RESULT_TONES[entry.result] ?? 'slate'}>{results[entry.result] ?? entry.result}</StatusBadge>
+            <p className="mt-2 whitespace-pre-line break-words text-base text-slate-900">{entry.note}</p>
+            <p className="mt-1 text-base text-slate-600">
+                {(t.verification_summary ?? 'Vurdert :date av :name.')
+                    .replace(':date', formatLongDate(entry.verified_at, locale))
+                    .replace(':name', entry.verified_by_name ?? (tr.unknown_user ?? 'en tidligere bruker'))}
+            </p>
+            {entry.earlier_completion && (
+                <p className="mt-1 text-base text-slate-600">{t.verification_earlier_completion ?? 'Gjaldt en tidligere fullføring.'}</p>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Effektverifisering on the card: for a completed tiltak the current judgement of its current
+ * completion, or «Venter på effektverifisering»; below, every earlier judgement, kept as history.
+ */
+function ActionVerification({ action, locale, tr }) {
+    const t = tr.actions ?? {};
+    const verification = action.verification ?? {};
+    const earlier = verification.earlier ?? [];
+    const completed = action.status === 'completed';
+
+    if (! completed && earlier.length === 0) {
+        return null;
+    }
+
+    return (
+        <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 p-4" data-testid="improvement-action-verification">
+            <p className="text-base font-semibold text-slate-700">{t.verification_heading ?? 'Effektverifisering'}</p>
+            {completed && verification.current && (
+                <>
+                    <VerificationEntry entry={verification.current} locale={locale} tr={tr} testId="improvement-action-verification-current" />
+                    {verification.current.result === 'not_effective' && (
+                        <p className="font-semibold text-base text-rose-800">
+                            {t.verification_not_effective_hint ?? 'Effekten er ikke bekreftet. Gjenåpne tiltaket dersom det må arbeides videre med.'}
+                        </p>
+                    )}
+                </>
+            )}
+            {verification.awaiting && (
+                <div data-testid="improvement-action-verification-awaiting">
+                    <p className="text-base font-semibold text-amber-800">{t.verification_awaiting ?? 'Venter på effektverifisering'}</p>
+                    <p className="text-base text-slate-600">{t.verification_awaiting_hint ?? 'Tiltaket er fullført, men ingen har vurdert om det virket.'}</p>
+                </div>
+            )}
+            {earlier.length > 0 && (
+                <details>
+                    <summary className="inline-flex min-h-10 cursor-pointer items-center text-base font-semibold text-violet-700 hover:text-violet-900">
+                        {(t.verification_earlier_show ?? 'Tidligere vurderinger (:count)').replace(':count', String(earlier.length))}
+                    </summary>
+                    <ol className="mt-2 divide-y divide-slate-100" data-testid="improvement-action-verification-history">
+                        {earlier.map((entry) => (
+                            <li key={entry.id} className="py-3">
+                                <VerificationEntry entry={entry} locale={locale} tr={tr} />
+                            </li>
+                        ))}
+                    </ol>
+                </details>
+            )}
+        </div>
+    );
+}
+
 function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDelete, starting, ownerOptions, locale, tr }) {
     const t = tr.actions ?? {};
     const statusLabels = t.statuses ?? {};
     const can = action.permissions ?? {};
     const who = (name) => name ?? (tr.unknown_user ?? 'en tidligere bruker');
     const reason = cancellationReason(action);
-    const anyAction = can.can_start || can.can_complete || can.can_cancel || can.can_reopen || can.can_edit || can.can_delete;
+    const anyAction = can.can_start || can.can_complete || can.can_verify || can.can_cancel || can.can_reopen || can.can_edit || can.can_delete;
     const url = `${base}/${action.id}`;
 
     return (
-        <li className="rounded-2xl border border-slate-200 p-4" data-testid="improvement-action" aria-labelledby={`improvement-action-${action.id}-title`}>
+        <li id={`improvement-action-${action.id}`} className="scroll-mt-6 rounded-2xl border border-slate-200 p-4" data-testid="improvement-action" aria-labelledby={`improvement-action-${action.id}-title`}>
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <h3 id={`improvement-action-${action.id}-title`} className="min-w-0 break-words text-lg font-semibold text-slate-950">{action.title}</h3>
                 <StatusBadge tone={ACTION_STATUS_TONES[action.status] ?? 'slate'}>{statusLabels[action.status] ?? action.status}</StatusBadge>
@@ -227,6 +364,8 @@ function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDel
                 </div>
             )}
 
+            <ActionVerification action={action} locale={locale} tr={tr} />
+
             {reason && (
                 <div className="mt-3 space-y-1 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <p className="text-base font-semibold text-slate-700">{t.cancelled_reason ?? 'Begrunnelse'}</p>
@@ -241,6 +380,9 @@ function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDel
                     )}
                     {can.can_complete && (
                         <button type="button" onClick={() => openPanel('complete')} className={can.can_start ? SECONDARY_ACTION : PRIMARY_ACTION}>{t.complete ?? 'Fullfør tiltak'}</button>
+                    )}
+                    {can.can_verify && (
+                        <button type="button" onClick={() => openPanel('verify')} className={action.verification?.awaiting ? PRIMARY_ACTION : SECONDARY_ACTION}>{t.verify ?? 'Verifiser effekt'}</button>
                     )}
                     {can.can_edit && (
                         <button type="button" onClick={() => openPanel('edit')} className={SECONDARY_ACTION}>{t.edit ?? 'Rediger'}</button>
@@ -259,6 +401,7 @@ function ActionCard({ action, base, panel, openPanel, closePanel, onStart, onDel
 
             {panel !== null && (
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    {panel === 'verify' && <VerifyForm action={`${url}/verify`} onDone={closePanel} tr={tr} />}
                     {panel === 'edit' && <EditAction action={action} base={base} ownerOptions={ownerOptions} onDone={closePanel} tr={tr} />}
                     {panel === 'complete' && (
                         <ActionTextForm
