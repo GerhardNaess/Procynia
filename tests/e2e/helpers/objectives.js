@@ -75,3 +75,19 @@ export async function seedObjectiveMeasurer(suffix) {
 
     return JSON.parse(match[0]);
 }
+
+/**
+ * Seeds the process/activity scenario: a fresh area, a role for the E2E user that edits objectives
+ * there and reads Kvalitet, and a fresh reader who sees objectives in the area but not Kvalitet.
+ * Returns the area's name and the reader's e-mail.
+ */
+export async function seedObjectiveContext(suffix, readerPassword) {
+    const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::seedContext('${suffix}', '${readerPassword}'));`);
+    const match = stdout.match(/\{.*\}/);
+
+    if (! match) {
+        throw new Error(`Seeding failed: ${stdout}`);
+    }
+
+    return JSON.parse(match[0]);
+}

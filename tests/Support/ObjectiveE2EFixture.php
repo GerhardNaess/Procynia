@@ -5,7 +5,9 @@ namespace Tests\Support;
 use App\Models\BusinessArea;
 use App\Models\CustomerRole;
 use App\Models\Kpi;
+use App\Models\KpiActivity;
 use App\Models\KpiMeasurement;
+use App\Models\KpiProcess;
 use App\Models\KpiStatusChange;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
@@ -135,9 +137,55 @@ class ObjectiveE2EFixture
     }
 
     /**
+     * For the process/activity spec: one area; a role for the E2E user that reads, edits and deletes
+     * objectives there and reads Kvalitet; and a fresh user — named and mailed with the run's marker
+     * — whose only role reads objectives in the same area and nothing in Kvalitet. Kvalitet's own
+     * processes are only read, never created or changed: the spec links to what is already there.
+     *
+     * @return array{area_name: string, reader_email: string}
+     */
+    public static function seedContext(string $suffix, string $readerPassword): array
+    {
+        $customerId = self::customerId();
+        $user = User::query()->where('email', self::USER_EMAIL)->firstOrFail();
+        $name = fn (string $label): string => self::PREFIX.' '.strtoupper($suffix).' '.$label;
+
+        return DB::transaction(function () use ($customerId, $user, $name, $suffix, $readerPassword): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Prosessområde')]);
+
+            $editor = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Prosesskobler'), 'is_active' => true]);
+            $editor->syncPermissions([
+                CustomerPermissionCatalog::OBJECTIVE_VIEW,
+                CustomerPermissionCatalog::OBJECTIVE_EDIT,
+                CustomerPermissionCatalog::OBJECTIVE_DELETE,
+                CustomerPermissionCatalog::QUALITY_VIEW,
+            ]);
+            $editor->syncBusinessAreas(false, [$area->id]);
+            $user->customerRoles()->attach($editor->id, ['customer_id' => $customerId]);
+
+            $readerRole = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Leser uten Kvalitet'), 'is_active' => true]);
+            $readerRole->syncPermissions([CustomerPermissionCatalog::OBJECTIVE_VIEW]);
+            $readerRole->syncBusinessAreas(false, [$area->id]);
+
+            $reader = User::query()->create([
+                'name' => $name('Leser'),
+                'email' => self::readerEmail($suffix),
+                'password' => bcrypt($readerPassword),
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $customerId,
+                'is_active' => true,
+            ]);
+            $reader->customerRoles()->attach($readerRole->id, ['customer_id' => $customerId]);
+
+            return ['area_name' => $area->name, 'reader_email' => $reader->email];
+        });
+    }
+
+    /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{areas: int, roles: int, objectives: int, kpis: int, kpi_measurements: int, kpi_status_changes: int, objective_status_changes: int}
+     * @return array{areas: int, roles: int, users: int, objectives: int, kpis: int, kpi_processes: int, kpi_activities: int, kpi_measurements: int, kpi_status_changes: int, objective_status_changes: int}
      */
     public static function remaining(string $suffix): array
     {
@@ -151,8 +199,11 @@ class ObjectiveE2EFixture
         return [
             'areas' => BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
+            'users' => self::runUsers($customerId, $pattern)->count(),
             'objectives' => $objectiveIds->count(),
             'kpis' => $kpiIds->count(),
+            'kpi_processes' => KpiProcess::query()->whereIn('kpi_id', $kpiIds)->count(),
+            'kpi_activities' => KpiActivity::query()->whereIn('kpi_id', $kpiIds)->count(),
             'kpi_measurements' => KpiMeasurement::query()->whereIn('kpi_id', $kpiIds)->count(),
             'kpi_status_changes' => KpiStatusChange::query()->whereIn('kpi_id', $kpiIds)->count(),
             'objective_status_changes' => ObjectiveStatusChange::query()->whereIn('objective_id', $objectiveIds)->count(),
@@ -176,7 +227,8 @@ class ObjectiveE2EFixture
 
             // A KPI carrying the marker goes even if a spec put it under someone else's objective;
             // the rest go with their objectives below, and their history with them. A bulk delete,
-            // past the models: measurement history goes with its KPI through the database cascade.
+            // past the models: measurement history and process/activity links go with their KPI
+            // through the database cascade. Kvalitet's processes are never touched.
             $sweepOnly(Kpi::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
 
             // An objective is the run's when its title carries the marker, or when it lives in one of
@@ -189,11 +241,28 @@ class ObjectiveE2EFixture
             // cascade from the role.
             $sweepOnly(CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->delete();
 
+            // Users the run seeded carry the marker in both name and address; the shared E2E users never do.
+            $sweepOnly(self::runUsers($customerId, $pattern))->delete();
+
             // An area still holding content the run did not create stays.
             BusinessArea::query()->whereIn('id', $areaIds)->get()
                 ->reject(fn (BusinessArea $area): bool => $area->isInUse())
                 ->each(fn (BusinessArea $area) => $area->delete());
         });
+    }
+
+    /** @return Builder<User> */
+    private static function runUsers(int $customerId, string $pattern): Builder
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->where('name', '~', $pattern)
+            ->where('email', 'like', 'e2e.mal.%@procynia.test');
+    }
+
+    private static function readerEmail(string $suffix): string
+    {
+        return 'e2e.mal.'.strtolower($suffix).'.leser@procynia.test';
     }
 
     private static function customerId(): int

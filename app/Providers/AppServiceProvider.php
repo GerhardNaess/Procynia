@@ -12,7 +12,7 @@ use App\Services\EnterpriseWiki\GraphQuery\GraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\Neo4jGraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\NullGraphQueryService;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
-use App\Services\Risk\RiskQualityContextService;
+use App\Services\Quality\QualityActivityLinkCleanup;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
@@ -97,13 +97,14 @@ class AppServiceProvider extends ServiceProvider
             EnterpriseWikiQueueReservationTrace::logDispatch($event);
         });
 
-        // A risk linked to a Kvalitet activity loses the link when the step leaves the working flow,
-        // or the flow goes. Hooked here so Kvalitet's own code never reads or mentions Risiko.
+        // A risk or a KPI linked to a Kvalitet activity loses the link when the step leaves the
+        // working flow, or the flow goes. Hooked here so Kvalitet's own code never reads or mentions
+        // Risiko or Mål og KPI.
         QualityProcessBlueprint::saved(static function (QualityProcessBlueprint $blueprint): void {
-            app(RiskQualityContextService::class)->prune((int) $blueprint->quality_item_id, $blueprint);
+            app(QualityActivityLinkCleanup::class)->prune((int) $blueprint->quality_item_id, $blueprint);
         });
         QualityProcessBlueprint::deleted(static function (QualityProcessBlueprint $blueprint): void {
-            app(RiskQualityContextService::class)->prune((int) $blueprint->quality_item_id, null);
+            app(QualityActivityLinkCleanup::class)->prune((int) $blueprint->quality_item_id, null);
         });
 
         $this->configureTrustedProxies();

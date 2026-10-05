@@ -29,6 +29,7 @@ export default function ObjectiveShow() {
         kpis = [],
         kpi_form_options: kpiFormOptions = null,
         kpi_indicator: kpiIndicator = null,
+        affected_processes: affectedProcesses = null,
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
@@ -171,6 +172,22 @@ export default function ObjectiveShow() {
                                 </dd>
                             </div>
                         </dl>
+
+                        {/* Derived live from the active KPIs' links; null without Kvalitet read, so nothing shows. */}
+                        {affectedProcesses !== null && affectedProcesses.length > 0 && (
+                            <div className="mt-6" data-testid="objective-affected-processes">
+                                <h2 className="text-sm font-semibold text-slate-600">{tk.context?.affected_heading ?? 'Berørte prosesser'}</h2>
+                                <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                                    {affectedProcesses.map((process) => (
+                                        <li key={process.id}>
+                                            <a href={process.url} className="text-base text-violet-700 hover:text-violet-900">
+                                                {process.code ? `${process.code} · ${process.title}` : process.title}
+                                            </a>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </section>
                 )}
 

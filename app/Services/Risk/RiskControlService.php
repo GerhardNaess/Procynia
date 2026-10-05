@@ -6,9 +6,7 @@ use App\Models\QualityItem;
 use App\Models\Risk;
 use App\Models\RiskControl;
 use App\Models\User;
-use App\Services\Modules\ModuleEntitlementService;
-use App\Services\Permissions\CustomerPermissionService;
-use App\Support\CustomerPermissionCatalog;
+use App\Services\Quality\QualityProcessContextReader;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
 
@@ -33,22 +31,18 @@ use Illuminate\Validation\ValidationException;
 class RiskControlService
 {
     public function __construct(
-        private readonly CustomerPermissionService $permissions,
-        private readonly ModuleEntitlementService $entitlements,
+        private readonly QualityProcessContextReader $quality,
         private readonly RiskQualityContextService $context,
     ) {}
 
     /**
      * Whether the user may read Kvalitet — its controls, processes and activities — by the rules
-     * Kvalitet itself applies. Shared by every Risiko → Kvalitet link.
+     * Kvalitet itself applies (QualityProcessContextReader::canRead). Shared by every Risiko →
+     * Kvalitet link.
      */
     public function canReadQuality(User $user): bool
     {
-        $customer = $user->customer;
-
-        return $customer !== null
-            && $this->entitlements->hasModule($customer, 'quality')
-            && $this->permissions->has($user, CustomerPermissionCatalog::QUALITY_VIEW);
+        return $this->quality->canRead($user);
     }
 
     /**

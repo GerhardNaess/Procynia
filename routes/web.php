@@ -12,6 +12,7 @@ use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\InfoCenterController;
+use App\Http\Controllers\App\KpiContextController;
 use App\Http\Controllers\App\KpiController;
 use App\Http\Controllers\App\KpiMeasurementController;
 use App\Http\Controllers\App\NoticeController;
@@ -353,6 +354,8 @@ Route::prefix('app')
             Route::post('/{objectiveId}/kpis/{kpiId}/retire', [KpiController::class, 'retire'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.retire');
             Route::post('/{objectiveId}/kpis/{kpiId}/reopen', [KpiController::class, 'reopen'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.reopen');
             // Measurements: registered (a correction is a new one) and withdrawn — never edited or deleted.
+            // What the KPI measures in Kvalitet, one process at a time (KpiContextController).
+            Route::put('/{objectiveId}/kpis/{kpiId}/processes/{processId}', [KpiContextController::class, 'update'])->whereNumber(['objectiveId', 'kpiId', 'processId'])->name('kpis.context.update');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements', [KpiMeasurementController::class, 'store'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.measurements.store');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements/{measurementId}/withdraw', [KpiMeasurementController::class, 'withdraw'])->whereNumber(['objectiveId', 'kpiId', 'measurementId'])->name('kpis.measurements.withdraw');
         });

@@ -9,6 +9,7 @@ use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
 use App\Services\Objectives\KpiMeasurementResolver;
+use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Objectives\ObjectiveLifecycleService;
 use App\Support\CustomerContext;
@@ -43,6 +44,7 @@ class ObjectiveController extends Controller
         private readonly ObjectiveLifecycleService $lifecycle,
         private readonly KpiPresenter $kpiPresenter,
         private readonly KpiMeasurementResolver $measurementResolver,
+        private readonly KpiQualityContextService $qualityContext,
     ) {}
 
     public function index(Request $request): Response
@@ -140,6 +142,11 @@ class ObjectiveController extends Controller
             'kpis' => $kpis->map(fn (Kpi $kpi): array => $this->kpiPresenter->row($kpi, $latest[(int) $kpi->id] ?? null))->all(),
             'kpi_indicator' => $this->kpiPresenter->indicator($kpis, $latest),
             'kpi_form_options' => $canEdit && $active ? $this->kpiPresenter->formOptions($objective) : null,
+            // Berørte prosesser, derived live from what the active KPIs measure. null, not empty,
+            // without Kvalitet read: then nothing is said about processes at all.
+            'affected_processes' => $this->qualityContext->canReadQuality($user)
+                ? $this->qualityContext->processesForKpis((int) $objective->customer_id, $kpis->filter(fn (Kpi $kpi): bool => $kpi->isActive()))
+                : null,
             'objective' => $this->objectiveRow($objective) + [
                 // The current closing, from the objective itself — not inferred from the history.
                 'closed_at' => $objective->closed_at?->toIso8601String(),

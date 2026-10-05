@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_COLOURS } from '../../../Support/actionStyles';
+import KpiContextPanel from './KpiContextPanel';
 import KpiForm, { initialKpiData } from './KpiForm';
 import { KpiMeasurementForm, KpiWithdrawForm } from './KpiMeasurementForms';
 import ObjectiveHistory from './ObjectiveHistory';
@@ -171,6 +172,8 @@ export default function KpiShow() {
         status_history: statusHistory = [],
         permissions = {},
         form_options: formOptions = null,
+        quality_context: qualityContext = null,
+        quality_context_options: qualityContextOptions = [],
         locale = 'no',
     } = usePage().props;
 
@@ -311,6 +314,17 @@ export default function KpiShow() {
                             </Detail>
                         </dl>
                     </section>
+                )}
+
+                {/* null, not empty: the person cannot read Kvalitet, so nothing is said about context. */}
+                {qualityContext !== null && (
+                    <KpiContextPanel
+                        baseUrl={baseUrl}
+                        context={qualityContext}
+                        options={qualityContextOptions}
+                        canLink={Boolean(permissions.can_link_context)}
+                        tr={tr}
+                    />
                 )}
 
                 <MeasurementHistory measurements={measurements} baseUrl={baseUrl} locale={locale} tm={tm} />

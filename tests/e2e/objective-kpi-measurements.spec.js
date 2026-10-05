@@ -13,7 +13,7 @@ test.afterAll(async () => {
     const remaining = JSON.parse(stdout.match(/\{.*\}/)[0]);
 
     expect(remaining).toEqual({
-        areas: 0, roles: 0, objectives: 0, kpis: 0, kpi_measurements: 0, kpi_status_changes: 0, objective_status_changes: 0,
+        areas: 0, roles: 0, users: 0, objectives: 0, kpis: 0, kpi_processes: 0, kpi_activities: 0, kpi_measurements: 0, kpi_status_changes: 0, objective_status_changes: 0,
     });
 });
 

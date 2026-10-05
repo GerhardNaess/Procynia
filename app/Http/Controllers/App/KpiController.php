@@ -8,6 +8,7 @@ use App\Models\KpiStatusChange;
 use App\Models\Objective;
 use App\Models\User;
 use App\Services\Objectives\KpiLifecycleService;
+use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Support\CustomerContext;
@@ -33,6 +34,7 @@ use Inertia\Response;
  *  - delete: objective.delete there, for a KPI registered by mistake (Kpi::isDeletable()): never
  *    once it has a measurement, withdrawn or not — then it is retired
  *  - measurements: KpiMeasurementController, with objective.measure
+ *  - process/activity links: KpiContextController, with objective.edit and Kvalitet read
  *
  * Status changes only through retire() and reopen(), never through update().
  */
@@ -45,6 +47,7 @@ class KpiController extends Controller
         private readonly ObjectiveAccessService $access,
         private readonly KpiLifecycleService $lifecycle,
         private readonly KpiPresenter $presenter,
+        private readonly KpiQualityContextService $qualityContext,
     ) {}
 
     public function show(int $objectiveId, int $kpiId): Response
@@ -55,6 +58,8 @@ class KpiController extends Controller
         $objective = $kpi->objective;
 
         $canEdit = $this->access->canEdit($user, $objective) && $objective->isActive();
+        $canReadQuality = $this->qualityContext->canReadQuality($user);
+        $canLinkContext = $canReadQuality && $canEdit && $kpi->isActive();
         // Measuring is its own permission, and only an active KPI under an active objective takes it.
         $canMeasure = $this->access->canMeasure($user, $objective) && $objective->isActive() && $kpi->isActive();
         $measurements = $kpi->measurements()->with(['recordedBy:id,name', 'withdrawnBy:id,name'])->get();
@@ -88,8 +93,12 @@ class KpiController extends Controller
                 'can_reopen' => $canEdit && ! $kpi->isActive(),
                 'can_delete' => $this->access->canDelete($user, $objective) && $measurements->isEmpty(),
                 'can_measure' => $canMeasure,
+                'can_link_context' => $canLinkContext,
             ],
             'form_options' => $canEdit ? $this->presenter->formOptions($objective) : null,
+            // null, not empty: the person cannot read Kvalitet, so nothing is said about context.
+            'quality_context' => $canReadQuality ? $this->qualityContext->linkedContext($kpi) : null,
+            'quality_context_options' => $canLinkContext ? $this->qualityContext->contextOptions($kpi) : [],
         ]);
     }
 
