@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { IMPROVEMENT_HELP_PAGES, improvementHelp } from './improvementHelp.js';
-import { ACTION_STATUS_TONES, cancellationReason, describeActionHistoryEntry, describeHistoryEntry, descriptionHint, formatDay } from './improvementStatus.js';
+import { ACTION_STATUS_TONES, VERIFICATION_RESULT_TONES, actionIndicator, attentionSummary, cancellationReason, describeActionHistoryEntry, describeHistoryEntry, descriptionHint, formatDay } from './improvementStatus.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -107,5 +107,38 @@ describe('Tiltak on the case page', () => {
         assert.equal(cancellationReason({ status: 'cancelled', history }), 'Dekkes av et annet tiltak.');
         assert.equal(cancellationReason({ status: 'planned', history: [{ to_status: 'planned', note: 'Igjen' }, ...history] }), null);
         assert.equal(cancellationReason({ status: 'cancelled', history: [] }), null);
+    });
+});
+
+describe('Effektverifisering and Trenger oppmerksomhet', () => {
+    test('the two results have their own badge tones', () => {
+        assert.deepEqual(Object.keys(VERIFICATION_RESULT_TONES), ['effective', 'not_effective']);
+        assert.notEqual(VERIFICATION_RESULT_TONES.effective, VERIFICATION_RESULT_TONES.not_effective);
+    });
+
+    test('cases and tiltak are counted apart in the headline, never summed', () => {
+        assert.equal(attentionSummary(1, 3), '1 sak og 3 tiltak trenger oppmerksomhet');
+        assert.equal(attentionSummary(2, 0), '2 saker trenger oppmerksomhet');
+        assert.equal(attentionSummary(0, 1), '1 tiltak trenger oppmerksomhet');
+        assert.equal(
+            attentionSummary(1, 2, { cases_one: '1 case', actions_many: ':count actions', summary: ':cases and :actions need attention' }),
+            '1 case and 2 actions need attention',
+        );
+    });
+
+    test('the register indicator names the tiltak and how many are still open', () => {
+        assert.equal(actionIndicator(null), null);
+        assert.equal(actionIndicator({ total: 0, open: 0 }), null);
+        assert.equal(actionIndicator({ total: 3, open: 1 }), '3 tiltak · 1 åpent');
+        assert.equal(actionIndicator({ total: 3, open: 2 }), '3 tiltak · 2 åpne');
+        assert.equal(actionIndicator({ total: 1, open: 0 }), '1 tiltak');
+        assert.equal(actionIndicator({ total: 2, open: 1 }, { total_many: ':count actions', open_one: '1 open' }), '2 actions · 1 open');
+    });
+
+    test('the verification form asks for a result and a comment only', () => {
+        const code = source('./ImprovementActions.jsx');
+        const form = code.slice(code.indexOf('function VerifyForm'), code.indexOf('function VerificationEntry'));
+        assert.deepEqual([...form.matchAll(/useForm\(\{([^}]*)\}\)/g)].map((match) => match[1].trim()), ["result: '', note: ''"]);
+        assert.deepEqual([...form.matchAll(/\['effective', 'not_effective'\]/g)].length, 1);
     });
 });

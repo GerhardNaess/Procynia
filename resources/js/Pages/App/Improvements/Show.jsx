@@ -6,6 +6,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import KpiContextPanel from '../Objectives/KpiContextPanel';
 import ImprovementActions from './ImprovementActions';
+import { ImprovementAttentionNote } from './ImprovementAttention';
 import ImprovementCause from './ImprovementCause';
 import ImprovementForm from './ImprovementForm';
 import ImprovementHistory from './ImprovementHistory';
@@ -35,6 +36,7 @@ export default function ImprovementShow() {
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
         actions = [],
+        attention = null,
         action_owner_options: actionOwnerOptions = [],
         quality_context: qualityContext = null,
         quality_context_options: qualityContextOptions = [],
@@ -127,6 +129,8 @@ export default function ImprovementShow() {
                         </div>
                     </dl>
                 </header>
+
+                <ImprovementAttentionNote attention={attention} tr={tr} />
 
                 {panel === 'edit' ? (
                     <section className={CARD} aria-label={tr.edit ?? 'Rediger'}>

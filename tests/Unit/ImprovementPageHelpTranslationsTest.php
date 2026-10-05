@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
+use App\Services\Improvements\ImprovementAttentionService;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -141,6 +142,23 @@ class ImprovementPageHelpTranslationsTest extends TestCase
         $this->assertSame('Effekten er ikke bekreftet. Gjenåpne tiltaket dersom det må arbeides videre med.', $actions['verification_not_effective_hint']);
         $this->assertSame('Ett eller flere fullførte tiltak er ikke effektverifisert. Verifiser effekten før saken lukkes.', $no['validation']['actions_not_verified']);
         $this->assertSame('Ett eller flere tiltak er vurdert som ikke effektive. Følg opp tiltakene før saken lukkes.', $no['validation']['actions_not_effective']);
+    }
+
+    public function test_the_register_help_explains_exactly_the_attention_categories_that_exist(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $strings = $this->improvements($locale);
+            $this->assertSame(array_keys(ImprovementAttentionService::CATEGORIES), array_keys($strings['attention']['categories']));
+            $this->assertSame(array_keys(ImprovementAttentionService::CATEGORIES), array_keys($strings['attention']['reasons']));
+
+            $section = collect($strings['help']['index']['sections'])->firstWhere('title', $strings['attention']['heading']);
+            $this->assertNotNull($section, "The register help in lang/{$locale} has no «{$strings['attention']['heading']}» section.");
+
+            $titles = array_column($section['items'], 'title');
+            foreach ($strings['attention']['categories'] as $label) {
+                $this->assertContains($label, $titles, "The attention help in lang/{$locale} does not explain «{$label}».");
+            }
+        }
     }
 
     public function test_the_case_help_explains_effektverifisering_by_its_labels(): void

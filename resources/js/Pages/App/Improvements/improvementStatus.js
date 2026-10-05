@@ -118,3 +118,58 @@ export function cancellationReason(action) {
 
     return latest?.to_status === 'cancelled' ? latest.note : null;
 }
+
+const fill = (text, values) => Object.entries(values)
+    .reduce((result, [name, value]) => result.replace(`:${name}`, String(value ?? '')), text ?? '');
+
+/**
+ * The headline of «Trenger oppmerksomhet»: «1 sak og 3 tiltak trenger oppmerksomhet». Cases and
+ * tiltak are counted apart and never added up into one number.
+ *
+ * @param {number} caseTotal
+ * @param {number} actionTotal
+ * @param {object} ta  translations.improvements.attention
+ */
+export function attentionSummary(caseTotal, actionTotal, ta = {}) {
+    const cases = caseTotal === 1
+        ? (ta.cases_one ?? '1 sak')
+        : fill(ta.cases_many ?? ':count saker', { count: caseTotal });
+    const actions = actionTotal === 1
+        ? (ta.actions_one ?? '1 tiltak')
+        : fill(ta.actions_many ?? ':count tiltak', { count: actionTotal });
+
+    if (caseTotal > 0 && actionTotal > 0) {
+        return fill(ta.summary ?? ':cases og :actions trenger oppmerksomhet', { cases, actions });
+    }
+
+    return caseTotal > 0
+        ? fill(ta.summary_cases ?? ':cases trenger oppmerksomhet', { cases })
+        : fill(ta.summary_actions ?? ':actions trenger oppmerksomhet', { actions });
+}
+
+/**
+ * The register's light tiltak indicator: «3 tiltak · 1 åpent», or just «3 tiltak» when none is open.
+ * Open is planned or under arbeid; the server counts it. Null for a case without tiltak.
+ *
+ * @param {{total: number, open: number}|null} summary
+ * @param {object} ti  translations.improvements.action_indicator
+ */
+export function actionIndicator(summary, ti = {}) {
+    if (! summary || summary.total < 1) {
+        return null;
+    }
+
+    const total = summary.total === 1
+        ? (ti.total_one ?? '1 tiltak')
+        : fill(ti.total_many ?? ':count tiltak', { count: summary.total });
+
+    if (summary.open < 1) {
+        return total;
+    }
+
+    const open = summary.open === 1
+        ? (ti.open_one ?? '1 åpent')
+        : fill(ti.open_many ?? ':count åpne', { count: summary.open });
+
+    return `${total} · ${open}`;
+}

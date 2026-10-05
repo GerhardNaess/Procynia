@@ -5,9 +5,10 @@ import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import ImprovementAttention from './ImprovementAttention';
 import ImprovementForm from './ImprovementForm';
 import { improvementHelp } from './improvementHelp';
-import { IMPROVEMENT_STATUS_TONES, IMPROVEMENT_TYPE_TONES, formatDay } from './improvementStatus';
+import { IMPROVEMENT_STATUS_TONES, IMPROVEMENT_TYPE_TONES, actionIndicator, formatDay } from './improvementStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -69,6 +70,7 @@ export default function ImprovementsIndex() {
         statuses = [],
         filter_area_options: filterAreaOptions = [],
         has_areas: hasAreas = false,
+        attention = null,
         access_setup: accessSetup = null,
         permissions = {},
         area_options: areaOptions = [],
@@ -172,6 +174,8 @@ export default function ImprovementsIndex() {
                     </section>
                 )}
 
+                {hasAreas && attention && <ImprovementAttention attention={attention} tr={tr} />}
+
                 {! hasAreas ? (
                     <NoAreasState accessSetup={accessSetup} tr={tr} />
                 ) : (
@@ -253,6 +257,12 @@ export default function ImprovementsIndex() {
                                                 </dd>
                                                 <dt className="font-semibold text-slate-600">{tr.col_due_date ?? 'Frist'}</dt>
                                                 <dd className="text-slate-800"><DueDate item={item} tr={tr} /></dd>
+                                                {item.action_summary && (
+                                                    <>
+                                                        <dt className="font-semibold text-slate-600">{tr.action_indicator?.label ?? 'Tiltak'}</dt>
+                                                        <dd className="text-slate-800" data-testid="improvement-action-indicator">{actionIndicator(item.action_summary, tr.action_indicator)}</dd>
+                                                    </>
+                                                )}
                                             </dl>
                                         </li>
                                     ))}
@@ -278,6 +288,9 @@ export default function ImprovementsIndex() {
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <Link href={item.url} className="font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
+                                                        {item.action_summary && (
+                                                            <p className="mt-0.5 text-slate-600" data-testid="improvement-action-indicator">{actionIndicator(item.action_summary, tr.action_indicator)}</p>
+                                                        )}
                                                     </td>
                                                     <td className="px-4 py-3 text-slate-700">{item.area_name}</td>
                                                     <td className="px-4 py-3 text-slate-700">

@@ -11,6 +11,7 @@ use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
 use App\Services\Improvements\ImprovementActionVerificationResolver;
+use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseLifecycleService;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
@@ -46,6 +47,7 @@ class ImprovementCaseController extends Controller
         private readonly ImprovementCaseLifecycleService $lifecycle,
         private readonly ImprovementCaseQualityContextService $qualityContext,
         private readonly ImprovementActionVerificationResolver $verifications,
+        private readonly ImprovementAttentionService $attention,
     ) {}
 
     public function index(Request $request): Response
@@ -62,7 +64,13 @@ class ImprovementCaseController extends Controller
         $areaId = (int) $request->query('area', 0);
         $areaId = in_array($areaId, $viewAreaIds, true) ? $areaId : 0;
 
-        $query = $this->access->visibleCases($user)->with(['businessArea:id,name', 'owner:id,name']);
+        $query = $this->access->visibleCases($user)
+            ->with(['businessArea:id,name', 'owner:id,name'])
+            // The register's light tiltak indicator, counted in the same query.
+            ->withCount([
+                'actions as action_count',
+                'actions as open_action_count' => fn ($actions) => $actions->whereIn('status', ImprovementAction::ACTIVE_STATUSES),
+            ]);
 
         if ($search !== '') {
             $needle = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
@@ -96,7 +104,15 @@ class ImprovementCaseController extends Controller
         $editableAreas = $this->access->editableAreas($user);
 
         return Inertia::render('App/Improvements/Index', [
-            'cases' => $cases->map(fn (ImprovementCase $case): array => $this->caseRow($case))->all(),
+            'cases' => $cases
+                ->map(fn (ImprovementCase $case): array => $this->caseRow($case) + [
+                    // «3 tiltak · 1 åpent». Open is planned or under arbeid; a completed tiltak awaiting
+                    // its effektverifisering is the attention panel's business, not this count's.
+                    'action_summary' => (int) $case->action_count > 0
+                        ? ['total' => (int) $case->action_count, 'open' => (int) $case->open_action_count]
+                        : null,
+                ])
+                ->all(),
             // Only what the user can see. A total over hidden cases would reveal that they exist.
             'visible_count' => $this->access->visibleCases($user)->count(),
             'filters' => [
@@ -109,6 +125,12 @@ class ImprovementCaseController extends Controller
             'statuses' => ImprovementCase::STATUSES,
             'filter_area_options' => $this->areaOptions($viewAreas),
             'has_areas' => $viewAreaIds !== [],
+            // Trenger oppmerksomhet, over the same visible set as the list — never the whole customer,
+            // and unaffected by the search and filters. Only a role with «Alle» may have it described
+            // as the whole picture.
+            'attention' => $viewAreaIds !== [] ? $this->attention->overview($user) + [
+                'scope' => $this->access->reachesAllAreas($user, CustomerPermissionCatalog::IMPROVEMENT_VIEW) ? 'all' : 'areas',
+            ] : null,
             'access_setup' => $viewAreaIds !== [] ? null : $this->accessSetup($user),
             'permissions' => ['can_create' => $editableAreas->isNotEmpty()],
             'area_options' => $this->areaOptions($editableAreas),
@@ -175,6 +197,9 @@ class ImprovementCaseController extends Controller
                 'can_edit_cause' => $canEdit && $active,
                 'can_manage_actions' => $canManageActions,
             ],
+            // A short note when the case or its tiltak need attention; the panel lives on the register.
+            // Null when there is nothing to say, and always for an ended case.
+            'attention' => $this->attention->forCase($case),
             // The case was reached through visibleCases(); its tiltak carry no access of their own.
             'actions' => $case->actions
                 ->map(fn (ImprovementAction $action): array => $this->actionRow($action, $case, $today, $canManageActions, $canVerify, $currentVerifications[(int) $action->id] ?? null))
