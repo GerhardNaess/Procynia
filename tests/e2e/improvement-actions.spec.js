@@ -47,7 +47,7 @@ test('a tiltak is added, started, completed, reopened and completed again, and h
     await expect(cause.getByRole('heading', { name: 'Årsak og bakgrunn' })).toBeVisible();
     await expect(cause).toContainText('Ikke beskrevet ennå.');
     await expect(actions).toContainText('Ingen tiltak er lagt inn ennå.');
-    await expectPageHelp(page, 'Om saken', ['Status', 'Årsak og bakgrunn', 'Tiltak', 'Lukke, avbryte og gjenåpne', 'Historikk']);
+    await expectPageHelp(page, 'Om saken', ['Status', 'Årsak og bakgrunn', 'Tiltak', 'Effektverifisering', 'Lukke, avbryte og gjenåpne', 'Historikk']);
     await expectReadable(page, '01-new-case');
 
     // Årsak og bakgrunn: the avvik hint, then saved.
@@ -97,7 +97,7 @@ test('a tiltak is added, started, completed, reopened and completed again, and h
     await page.getByTestId('improvement-handling').getByRole('button', { name: 'Lukk sak' }).click();
     await page.locator('#improvement-close-note').fill('Rutinen er erstattet.');
     await page.getByRole('button', { name: 'Lukk sak', exact: true }).last().click();
-    await expect(page.getByText('Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken lukkes.')).toBeVisible();
+    await expect(page.getByText('Saken har tiltak som ikke er ferdig behandlet. Fullfør eller avbryt tiltakene før saken avsluttes.')).toBeVisible();
     await expectReadable(page, '05-close-refused');
     await page.reload();
     await expect(header).toContainText('Åpen');
@@ -125,7 +125,13 @@ test('a tiltak is added, started, completed, reopened and completed again, and h
     await expect(history.locator('li').nth(1)).toContainText('Startet av E2E User');
     await expectReadable(page, '07-action-completed');
 
-    // Now the case closes.
+    // Effekt bekreftet; then the case closes. (The full effektverifisering journey is in
+    // improvement-verification.spec.js.)
+    await card.getByRole('button', { name: 'Verifiser effekt' }).click();
+    await page.locator('#improvement-action-verify-effective').check();
+    await page.locator('#improvement-action-verify-note').fill('Ingen papirversjoner funnet ved neste kontroll.');
+    await card.getByRole('form', { name: 'Verifiser effekt' }).getByRole('button', { name: 'Verifiser effekt' }).click();
+    await expect(page.getByText('Effekten er bekreftet.')).toBeVisible();
     await page.getByTestId('improvement-handling').getByRole('button', { name: 'Lukk sak' }).click();
     await page.locator('#improvement-close-note').fill('Rutinen er erstattet i mottaket.');
     await page.getByRole('button', { name: 'Lukk sak', exact: true }).last().click();
