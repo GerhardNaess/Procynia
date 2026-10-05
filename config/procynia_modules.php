@@ -29,6 +29,9 @@ return [
         // Mål og KPI. A general management area, not a part of Risiko or Kvalitet — which is why it
         // is its own module, carried by both packages below.
         'objectives' => ['sort_order' => 35],
+        // Avvik og forbedringer. Classic quality management, so Kvalitet carries it — and GRC,
+        // which carries Kvalitet. Its own module so the rail and the route guard name it directly.
+        'improvements' => ['sort_order' => 37],
         'audit_compliance' => ['sort_order' => 40],
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
@@ -54,7 +57,7 @@ return [
             'mandatory' => false,
             'orderable' => true,
             'sort_order' => 20,
-            'modules' => ['quality', 'objectives'],
+            'modules' => ['quality', 'objectives', 'improvements'],
         ],
 
         // GRC is the compound package: governance, risk and compliance are sold as one, and the
@@ -64,7 +67,7 @@ return [
             'mandatory' => false,
             'orderable' => true,
             'sort_order' => 30,
-            'modules' => ['quality', 'risk', 'objectives', 'audit_compliance'],
+            'modules' => ['quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
         ],
 
     ],
@@ -91,6 +94,7 @@ return [
         'app.quality.' => 'quality',
         'app.risk.' => 'risk',
         'app.objectives.' => 'objectives',
+        'app.improvements.' => 'improvements',
     ],
 
 ];

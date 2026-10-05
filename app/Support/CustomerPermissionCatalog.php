@@ -22,6 +22,8 @@ final class CustomerPermissionCatalog
 
     public const DOMAIN_OBJECTIVE = 'objective';
 
+    public const DOMAIN_IMPROVEMENT = 'improvement';
+
     public const QUALITY_VIEW = 'quality.view';
 
     public const QUALITY_CREATE = 'quality.create';
@@ -86,6 +88,24 @@ final class CustomerPermissionCatalog
 
     public const OBJECTIVE_DELETE = 'objective.delete';
 
+    /*
+     * Avvik og forbedringer. Area-scoped like Risiko and Mål og KPI: a role says what, its
+     * fagområder say where. One case type carries both avvik and forbedring, so one set of keys
+     * governs both. See ImprovementCaseAccessService.
+     */
+    public const IMPROVEMENT_VIEW = 'improvement.view';
+
+    /** Registering and changing cases, and starting their handling (Start behandling). */
+    public const IMPROVEMENT_EDIT = 'improvement.edit';
+
+    /*
+     * Closing, cancelling and reopening a case. A decision about the case, not an edit of it:
+     * improvement.edit does not imply it, and it does not imply improvement.edit.
+     */
+    public const IMPROVEMENT_CLOSE = 'improvement.close';
+
+    public const IMPROVEMENT_DELETE = 'improvement.delete';
+
     /**
      * Permission keys grouped by the domain they govern, in the order they should be presented.
      *
@@ -123,6 +143,12 @@ final class CustomerPermissionCatalog
                 self::OBJECTIVE_MEASURE,
                 self::OBJECTIVE_DELETE,
             ],
+            self::DOMAIN_IMPROVEMENT => [
+                self::IMPROVEMENT_VIEW,
+                self::IMPROVEMENT_EDIT,
+                self::IMPROVEMENT_CLOSE,
+                self::IMPROVEMENT_DELETE,
+            ],
         ];
     }
 
@@ -134,7 +160,7 @@ final class CustomerPermissionCatalog
      */
     public static function areaScopedDomains(): array
     {
-        return [self::DOMAIN_RISK, self::DOMAIN_OBJECTIVE];
+        return [self::DOMAIN_RISK, self::DOMAIN_OBJECTIVE, self::DOMAIN_IMPROVEMENT];
     }
 
     public static function isAreaScoped(string $permissionKey): bool

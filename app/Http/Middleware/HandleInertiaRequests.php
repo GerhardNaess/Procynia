@@ -138,6 +138,8 @@ class HandleInertiaRequests extends Middleware
                 'risk' => __('procynia.risk'),
                 // Mål og KPI, shared as a block for the same reason.
                 'objectives' => __('procynia.objectives'),
+                // Avvik og forbedringer, shared as a block for the same reason.
+                'improvements' => __('procynia.improvements'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
                 'customer_env' => __('procynia.customer_env'),

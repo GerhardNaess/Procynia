@@ -1,0 +1,444 @@
+<?php
+
+namespace App\Http\Controllers\App;
+
+use App\Http\Controllers\Controller;
+use App\Models\BusinessArea;
+use App\Models\ImprovementCase;
+use App\Models\ImprovementCaseStatusChange;
+use App\Models\User;
+use App\Services\Improvements\ImprovementCaseAccessService;
+use App\Services\Improvements\ImprovementCaseLifecycleService;
+use App\Services\Improvements\ImprovementCaseQualityContextService;
+use App\Support\CustomerContext;
+use App\Support\CustomerPermissionCatalog;
+use App\Support\Improvements\ImprovementValidationMessages;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+use Inertia\Inertia;
+use Inertia\Response;
+
+/**
+ * Avvik og forbedringer — the register, one case, and its lifecycle.
+ *
+ * Every read starts from ImprovementCaseAccessService::visibleCases(), so a case outside the user's
+ * fagområder never enters a list, a search, a count or a lookup. Asking for one by URL is a 404, the
+ * same answer as for an id that does not exist. A user without improvement.view at all gets a 403
+ * on everything, before any id is looked at.
+ *
+ * improvement.edit registers, changes and starts handling; improvement.close closes, cancels and
+ * reopens; improvement.delete deletes a case nobody has started on. Status changes only through the
+ * lifecycle actions, never through store() or update().
+ */
+class ImprovementCaseController extends Controller
+{
+    public function __construct(
+        private readonly CustomerContext $customerContext,
+        private readonly ImprovementCaseAccessService $access,
+        private readonly ImprovementCaseLifecycleService $lifecycle,
+        private readonly ImprovementCaseQualityContextService $qualityContext,
+    ) {}
+
+    public function index(Request $request): Response
+    {
+        $user = $this->authorizedUser();
+
+        $viewAreas = $this->access->visibleAreas($user);
+        $viewAreaIds = $viewAreas->pluck('id')->map(fn (mixed $id): int => (int) $id)->all();
+
+        $search = trim((string) $request->query('search', ''));
+        $type = in_array($request->query('type'), ImprovementCase::TYPES, true) ? (string) $request->query('type') : '';
+        $status = in_array($request->query('status'), ImprovementCase::STATUSES, true) ? (string) $request->query('status') : '';
+        // Only an area the user can read is a filter; anything else is ignored rather than answered.
+        $areaId = (int) $request->query('area', 0);
+        $areaId = in_array($areaId, $viewAreaIds, true) ? $areaId : 0;
+
+        $query = $this->access->visibleCases($user)->with(['businessArea:id,name', 'owner:id,name']);
+
+        if ($search !== '') {
+            $needle = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
+            $query->where(function ($inner) use ($needle): void {
+                $inner->whereRaw('lower(improvement_cases.title) like ?', [$needle])
+                    ->orWhereRaw('lower(improvement_cases.description) like ?', [$needle]);
+            });
+        }
+
+        if ($type !== '') {
+            $query->where('improvement_cases.type', $type);
+        }
+
+        if ($status !== '') {
+            $query->where('improvement_cases.status', $status);
+        }
+
+        if ($areaId !== 0) {
+            $query->where('improvement_cases.business_area_id', $areaId);
+        }
+
+        $cases = $query
+            // Åpen first, then Under arbeid, then the ended ones. Among active cases the nearest
+            // frist comes first and cases without one after; otherwise the newest first.
+            ->orderByRaw('CASE improvement_cases.status WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END', [ImprovementCase::STATUS_OPEN, ImprovementCase::STATUS_IN_PROGRESS])
+            ->orderByRaw('CASE WHEN improvement_cases.status IN (?, ?) THEN improvement_cases.due_date END ASC NULLS LAST', ImprovementCase::ACTIVE_STATUSES)
+            ->orderByDesc('improvement_cases.created_at')
+            ->orderByDesc('improvement_cases.id')
+            ->get();
+
+        $editableAreas = $this->access->editableAreas($user);
+
+        return Inertia::render('App/Improvements/Index', [
+            'cases' => $cases->map(fn (ImprovementCase $case): array => $this->caseRow($case))->all(),
+            // Only what the user can see. A total over hidden cases would reveal that they exist.
+            'visible_count' => $this->access->visibleCases($user)->count(),
+            'filters' => [
+                'search' => $search,
+                'type' => $type,
+                'status' => $status,
+                'area' => $areaId !== 0 ? $areaId : null,
+            ],
+            'types' => ImprovementCase::TYPES,
+            'statuses' => ImprovementCase::STATUSES,
+            'filter_area_options' => $this->areaOptions($viewAreas),
+            'has_areas' => $viewAreaIds !== [],
+            'access_setup' => $viewAreaIds !== [] ? null : $this->accessSetup($user),
+            'permissions' => ['can_create' => $editableAreas->isNotEmpty()],
+            'area_options' => $this->areaOptions($editableAreas),
+            'owner_options' => $this->access->ownerCandidates($user, $this->areaIds($editableAreas)),
+            'today' => now()->toDateString(),
+        ]);
+    }
+
+    public function show(int $caseId): Response
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+        $case->loadMissing(['businessArea:id,name', 'owner:id,name', 'reportedBy:id,name', 'closedBy:id,name']);
+
+        $active = $case->isActive();
+        $canEdit = $this->access->canEdit($user, $case);
+        $canClose = $this->access->canClose($user, $case);
+        // An ended case is reopened before it is changed, so its fields are not offered.
+        $editableAreas = $canEdit && $active ? $this->access->editableAreas($user) : collect();
+        $canReadQuality = $this->qualityContext->canReadQuality($user);
+        $canLinkContext = $canEdit && $active && $canReadQuality;
+
+        return Inertia::render('App/Improvements/Show', [
+            'case' => $this->caseRow($case) + [
+                'description' => $case->description,
+                'occurred_at' => $case->occurred_at?->format('Y-m-d'),
+                'reported_by_name' => $case->reportedBy?->name,
+                'created_at' => $case->created_at?->toIso8601String(),
+                // The current ending, from the case itself — not inferred from the history.
+                'closed_at' => $case->closed_at?->toIso8601String(),
+                'closed_by_name' => $case->closedBy?->name,
+                'closing_note' => $case->closing_note,
+            ],
+            // The case was reached through visibleCases(); its history carries no access of its own.
+            'status_history' => $case->statusChanges()->with('changedBy:id,name')->get()
+                ->map(fn (ImprovementCaseStatusChange $change): array => [
+                    'id' => (int) $change->id,
+                    'from_status' => $change->from_status,
+                    'to_status' => $change->to_status,
+                    'note' => $change->note,
+                    'changed_at' => $change->changed_at?->toIso8601String(),
+                    'changed_by_name' => $change->changedBy?->name,
+                ])
+                ->all(),
+            'permissions' => [
+                'can_edit' => $canEdit && $active,
+                'can_start' => $canEdit && $case->status === ImprovementCase::STATUS_OPEN,
+                'can_close' => $canClose && $active,
+                'can_cancel' => $canClose && $active,
+                'can_reopen' => $canClose && ! $active,
+                'can_delete' => $this->access->canDelete($user, $case) && $case->isDeletable(),
+                'can_link_context' => $canLinkContext,
+            ],
+            'types' => ImprovementCase::TYPES,
+            'area_options' => $this->areaOptions($editableAreas),
+            'owner_options' => $this->access->ownerCandidates($user, $this->areaIds($editableAreas)),
+            // null, not empty: the person cannot read Kvalitet, so nothing is said about context.
+            'quality_context' => $canReadQuality ? $this->qualityContext->linkedContext($case) : null,
+            'quality_context_options' => $canLinkContext ? $this->qualityContext->contextOptions($case) : [],
+            'today' => now()->toDateString(),
+        ]);
+    }
+
+    public function store(Request $request): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $validated = $this->validated($request);
+        $areaId = (int) $validated['business_area_id'];
+
+        // The area is the scope the new case will live in, so the user must be allowed to edit in
+        // *that* area — not merely hold improvement.edit somewhere.
+        $this->authorizeArea($user, $areaId);
+        $this->guardOwner($user, (int) $validated['owner_user_id'], $areaId);
+
+        $case = ImprovementCase::query()->create($this->fields($validated) + [
+            'customer_id' => (int) $user->customer_id,
+            'business_area_id' => $areaId,
+            'reported_by_user_id' => $user->id,
+            'created_by' => $user->id,
+            'updated_by' => $user->id,
+        ]);
+
+        return redirect()
+            ->route('app.improvements.show', ['caseId' => $case->id])
+            ->with('success', __('procynia.improvements.flash.created'));
+    }
+
+    public function update(Request $request, int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        // Edit authority in the area the case is in now.
+        abort_unless($this->access->canEdit($user, $case), 403);
+
+        if (! $case->isActive()) {
+            return back()->with('error', __('procynia.improvements.validation.reopen_before_edit'));
+        }
+
+        $validated = $this->validated($request);
+        $targetAreaId = (int) $validated['business_area_id'];
+
+        // Moving a case changes who can see it, so it takes edit authority on both sides: the old
+        // area above, the new one here.
+        if ($targetAreaId !== (int) $case->business_area_id) {
+            $this->authorizeArea($user, $targetAreaId);
+        }
+
+        // Against the area the case will be in, so a move cannot keep an owner who would no longer
+        // be able to see it.
+        $this->guardOwner($user, (int) $validated['owner_user_id'], $targetAreaId);
+
+        $case->fill($this->fields($validated) + [
+            'business_area_id' => $targetAreaId,
+            'updated_by' => $user->id,
+        ])->save();
+
+        // After a move the user may no longer see the case; the register is the only safe place to
+        // land in that case.
+        if ($this->access->findVisible($user, (int) $case->id) === null) {
+            return redirect()->route('app.improvements.index')->with('success', __('procynia.improvements.flash.updated'));
+        }
+
+        return back()->with('success', __('procynia.improvements.flash.updated'));
+    }
+
+    /** Start behandling: open → in_progress. improvement.edit in the case's area; no note. */
+    public function start(int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        abort_unless($this->access->canEdit($user, $case), 403);
+
+        $this->lifecycle->start($case, $user);
+
+        return back()->with('success', __('procynia.improvements.flash.started'));
+    }
+
+    /** Lukk: the resultat / avsluttende kommentar is the point of closing, so it is required. */
+    public function close(Request $request, int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        abort_unless($this->access->canClose($user, $case), 403);
+
+        $validated = $request->validate([
+            'closing_note' => ['required', 'string', 'max:5000'],
+        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
+
+        $this->lifecycle->close($case, $user, $validated['closing_note']);
+
+        return back()->with('success', __('procynia.improvements.flash.closed'));
+    }
+
+    /** Avbryt: the case will not be handled further. Always says why. */
+    public function cancel(Request $request, int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        abort_unless($this->access->canClose($user, $case), 403);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:5000'],
+        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
+
+        $this->lifecycle->cancel($case, $user, $validated['reason']);
+
+        return back()->with('success', __('procynia.improvements.flash.cancelled'));
+    }
+
+    /** Gjenåpne: undoes an ending, so it always says why. The ending stays in the history. */
+    public function reopen(Request $request, int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        abort_unless($this->access->canClose($user, $case), 403);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:5000'],
+        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
+
+        $this->lifecycle->reopen($case, $user, $validated['reason']);
+
+        return back()->with('success', __('procynia.improvements.flash.reopened'));
+    }
+
+    public function destroy(int $caseId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $case = $this->visibleCaseOrFail($user, $caseId);
+
+        abort_unless($this->access->canDelete($user, $case), 403);
+
+        if (! $case->isDeletable()) {
+            return back()->with('error', __('procynia.improvements.validation.not_deletable'));
+        }
+
+        $case->delete();
+
+        return redirect()->route('app.improvements.index')->with('success', __('procynia.improvements.flash.deleted'));
+    }
+
+    private function authorizedUser(): User
+    {
+        $user = $this->customerContext->currentUser();
+
+        abort_unless($this->access->canOpenModule($user), 403);
+
+        return $user;
+    }
+
+    private function visibleCaseOrFail(User $user, int $caseId): ImprovementCase
+    {
+        return $this->access->findVisible($user, $caseId) ?? abort(404);
+    }
+
+    /**
+     * A 422 rather than a 403 or 404: the area id came from a form, and whether it names an area of
+     * another tenant, an area outside the user's scope or nothing at all, the answer is the same.
+     */
+    private function authorizeArea(User $user, int $areaId): void
+    {
+        if (! $this->access->canInArea($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, (int) $user->customer_id, $areaId)) {
+            throw ValidationException::withMessages([
+                'business_area_id' => __('procynia.improvements.validation.area_not_allowed'),
+            ]);
+        }
+    }
+
+    private function guardOwner(User $user, int $ownerId, int $areaId): void
+    {
+        $owner = User::query()->where('customer_id', (int) $user->customer_id)->find($ownerId);
+
+        if (! $this->access->isValidOwner($owner, (int) $user->customer_id, $areaId)) {
+            throw ValidationException::withMessages([
+                'owner_user_id' => __('procynia.improvements.validation.owner_not_allowed'),
+            ]);
+        }
+    }
+
+    /**
+     * The same fields for registering and editing. Status is not among them: a case is created open
+     * and moves only through the lifecycle actions.
+     *
+     * @return array<string, mixed>
+     */
+    private function validated(Request $request): array
+    {
+        return $request->validate([
+            'type' => ['required', 'string', Rule::in(ImprovementCase::TYPES)],
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['required', 'string', 'max:10000'],
+            'business_area_id' => ['required', 'integer'],
+            'owner_user_id' => ['required', 'integer'],
+            // Hendelsesdato is when something happened, so it cannot lie ahead.
+            'occurred_at' => ['nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'due_date' => ['nullable', 'date_format:Y-m-d'],
+        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
+    }
+
+    /**
+     * The validated form as columns. A forbedring has no Hendelsesdato, whatever the form sent.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function fields(array $validated): array
+    {
+        return [
+            'type' => $validated['type'],
+            'title' => trim($validated['title']),
+            'description' => trim($validated['description']),
+            'owner_user_id' => (int) $validated['owner_user_id'],
+            'occurred_at' => $validated['type'] === ImprovementCase::TYPE_DEVIATION ? ($validated['occurred_at'] ?? null) : null,
+            'due_date' => $validated['due_date'] ?? null,
+        ];
+    }
+
+    /**
+     * Where System Owner goes from an empty register, as in Risiko and Mål og KPI: pointed at
+     * Kundemiljø → Tilganger. It grants no case data.
+     *
+     * @return array{customer_has_areas: bool, manage_url: string}|null
+     */
+    private function accessSetup(User $user): ?array
+    {
+        if (! $user->isSystemOwner()) {
+            return null;
+        }
+
+        return [
+            'customer_has_areas' => BusinessArea::query()->forCustomer((int) $user->customer_id)->exists(),
+            'manage_url' => route('app.customer-environment.index', ['tab' => 'permissions']).'#business-areas',
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function caseRow(ImprovementCase $case): array
+    {
+        return [
+            'id' => (int) $case->id,
+            'type' => $case->type,
+            'title' => $case->title,
+            'status' => $case->status,
+            'due_date' => $case->due_date?->format('Y-m-d'),
+            'is_overdue' => $case->isActive() && $case->due_date !== null && $case->due_date->lt(now()->startOfDay()),
+            'business_area_id' => (int) $case->business_area_id,
+            'area_name' => $case->businessArea?->name,
+            'owner_user_id' => $case->owner_user_id !== null ? (int) $case->owner_user_id : null,
+            'owner_name' => $case->owner?->name,
+            'url' => route('app.improvements.show', ['caseId' => $case->id]),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, BusinessArea>  $areas
+     * @return list<array{id: int, name: string}>
+     */
+    private function areaOptions(Collection $areas): array
+    {
+        return $areas
+            ->map(fn (BusinessArea $area): array => ['id' => (int) $area->id, 'name' => $area->name])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  Collection<int, BusinessArea>  $areas
+     * @return list<int>
+     */
+    private function areaIds(Collection $areas): array
+    {
+        return $areas->pluck('id')->map(fn (mixed $id): int => (int) $id)->values()->all();
+    }
+}

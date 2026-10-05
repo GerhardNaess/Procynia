@@ -97,9 +97,9 @@ class AppServiceProvider extends ServiceProvider
             EnterpriseWikiQueueReservationTrace::logDispatch($event);
         });
 
-        // A risk or a KPI linked to a Kvalitet activity loses the link when the step leaves the
-        // working flow, or the flow goes. Hooked here so Kvalitet's own code never reads or mentions
-        // Risiko or Mål og KPI.
+        // A risk, a KPI or an avvik/forbedring linked to a Kvalitet activity loses the link when the
+        // step leaves the working flow, or the flow goes. Hooked here so Kvalitet's own code never
+        // reads or mentions the modules that link to it.
         QualityProcessBlueprint::saved(static function (QualityProcessBlueprint $blueprint): void {
             app(QualityActivityLinkCleanup::class)->prune((int) $blueprint->quality_item_id, $blueprint);
         });

@@ -59,12 +59,13 @@ class CustomerModuleEntitlementTest extends TestCase
         $service = app(ModuleEntitlementService::class);
 
         $this->assertSame(['tender'], $service->modulesForPackage('tender'));
-        // Mål og KPI is a general management area, reached through both Kvalitet and GRC.
-        $this->assertSame(['quality', 'objectives'], $service->modulesForPackage('quality'));
+        // Mål og KPI is a general management area, and Avvik og forbedringer is quality management;
+        // both are reached through Kvalitet and GRC.
+        $this->assertSame(['quality', 'objectives', 'improvements'], $service->modulesForPackage('quality'));
         $this->assertSame(
-            ['quality', 'risk', 'objectives', 'audit_compliance'],
+            ['quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
             $service->modulesForPackage('grc'),
-            'GRC is the compound package and must carry all four modules.'
+            'GRC is the compound package and must carry all five modules.'
         );
         $this->assertSame([ModuleEntitlementService::MODULE_WIKI_CORE], $service->modulesForPackage('core'));
     }
@@ -118,7 +119,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
         $this->assertSame(
-            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'objectives', 'audit_compliance'],
+            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
             $modules,
         );
     }
@@ -136,6 +137,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertContains('risk', $modules);
         $this->assertContains('objectives', $modules);
         $this->assertSame(1, count(array_keys($modules, 'objectives', true)));
+        $this->assertSame(1, count(array_keys($modules, 'improvements', true)));
     }
 
     public function test_a_package_that_is_not_active_grants_nothing(): void

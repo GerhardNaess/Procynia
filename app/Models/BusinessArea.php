@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\DB;
  *
  * It says *where* a role's rights apply; the role's permission keys say *what* it may do. It is
  * never a role of its own, and it is a concept of the customer, not of any one module. Risiko
- * scopes by it (every risk has one primary fagområde), and so does Mål og KPI (every objective has one).
+ * scopes by it (every risk has one primary fagområde), and so do Mål og KPI (every objective has one)
+ * and Avvik og forbedringer (every case has one).
  * A role reaches an area through an explicit link or through CustomerRole::$all_business_areas
  * («Alle»), which is never expanded into links. See the generalize_risk_access_areas_to_business_areas
  * migration, and BusinessAreaGrants for how a role's areas are resolved.
@@ -29,7 +30,7 @@ class BusinessArea extends Model
      *
      * @var list<string>
      */
-    public const SCOPED_CONTENT_TABLES = ['risks', 'objectives'];
+    public const SCOPED_CONTENT_TABLES = ['risks', 'objectives', 'improvement_cases'];
 
     protected $fillable = [
         'customer_id',
@@ -72,6 +73,11 @@ class BusinessArea extends Model
     public function objectives(): HasMany
     {
         return $this->hasMany(Objective::class);
+    }
+
+    public function improvementCases(): HasMany
+    {
+        return $this->hasMany(ImprovementCase::class);
     }
 
     /** @param  Builder<self>  $query */

@@ -11,6 +11,8 @@ use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\HomeController;
+use App\Http\Controllers\App\ImprovementCaseContextController;
+use App\Http\Controllers\App\ImprovementCaseController;
 use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\KpiContextController;
 use App\Http\Controllers\App\KpiController;
@@ -358,6 +360,24 @@ Route::prefix('app')
             Route::put('/{objectiveId}/kpis/{kpiId}/processes/{processId}', [KpiContextController::class, 'update'])->whereNumber(['objectiveId', 'kpiId', 'processId'])->name('kpis.context.update');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements', [KpiMeasurementController::class, 'store'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.measurements.store');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements/{measurementId}/withdraw', [KpiMeasurementController::class, 'withdraw'])->whereNumber(['objectiveId', 'kpiId', 'measurementId'])->name('kpis.measurements.withdraw');
+        });
+        // Avvik og forbedringer. Named under `app.improvements.`, mapped to the `improvements` module.
+        // Cases are addressed by a plain id and resolved through ImprovementCaseAccessService, never
+        // by implicit model binding, so one outside the user's fagområder is a 404.
+        Route::prefix('/improvements')->name('improvements.')->group(function (): void {
+            Route::get('/', [ImprovementCaseController::class, 'index'])->name('index');
+            Route::post('/', [ImprovementCaseController::class, 'store'])->name('store');
+            Route::get('/{caseId}', [ImprovementCaseController::class, 'show'])->whereNumber('caseId')->name('show');
+            Route::patch('/{caseId}', [ImprovementCaseController::class, 'update'])->whereNumber('caseId')->name('update');
+            Route::delete('/{caseId}', [ImprovementCaseController::class, 'destroy'])->whereNumber('caseId')->name('destroy');
+            // Start behandling / Lukk / Avbryt / Gjenåpne: the only ways status changes. Each writes an
+            // immutable history row; no route edits or removes one.
+            Route::post('/{caseId}/start', [ImprovementCaseController::class, 'start'])->whereNumber('caseId')->name('start');
+            Route::post('/{caseId}/close', [ImprovementCaseController::class, 'close'])->whereNumber('caseId')->name('close');
+            Route::post('/{caseId}/cancel', [ImprovementCaseController::class, 'cancel'])->whereNumber('caseId')->name('cancel');
+            Route::post('/{caseId}/reopen', [ImprovementCaseController::class, 'reopen'])->whereNumber('caseId')->name('reopen');
+            // Which Kvalitet process and activities the case concerns, one process at a time.
+            Route::put('/{caseId}/processes/{processId}', [ImprovementCaseContextController::class, 'update'])->whereNumber(['caseId', 'processId'])->name('context.update');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

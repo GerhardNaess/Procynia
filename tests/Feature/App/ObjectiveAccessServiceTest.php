@@ -54,7 +54,7 @@ class ObjectiveAccessServiceTest extends TestCase
             ['objective.view', 'objective.edit', 'objective.measure', 'objective.delete'],
             CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_OBJECTIVE],
         );
-        $this->assertSame(['risk', 'objective'], CustomerPermissionCatalog::areaScopedDomains());
+        $this->assertSame(['risk', 'objective', 'improvement'], CustomerPermissionCatalog::areaScopedDomains());
 
         foreach (['objective.view', 'objective.measure', 'risk.view', 'risk.accept'] as $key) {
             $this->assertTrue(CustomerPermissionCatalog::isAreaScoped($key), $key);
