@@ -2482,6 +2482,108 @@ return [
         ],
     ],
     'objectives' => [
+        'help' => [
+            'button' => 'Hjelp',
+            'index' => [
+                'title' => 'Om Mål og KPI',
+                'intro' => 'Her samler dere det virksomheten skal oppnå, og hvordan fremdriften måles. Et mål sier hva som skal oppnås. KPI-ene under målet sier hvordan det måles, og målingene viser hvordan det går.',
+                'sections' => [
+                    [
+                        'title' => 'Mål',
+                        'items' => [
+                            ['title' => 'Hva er et mål?', 'text' => 'Noe virksomheten skal oppnå, for eksempel «Stabil drift av kundesystemene». Opprett det med «Nytt mål», og legg til KPI-er på målsiden etterpå.'],
+                            ['title' => 'Fagområde', 'text' => 'Hvert mål hører til ett fagområde. Fagområdet bestemmer hvem som kan se og endre målet. Du ser bare målene i fagområdene rollene dine gir deg.'],
+                            ['title' => 'Ansvarlig', 'text' => 'Personen som følger opp målet. Bare personer som kan se mål i fagområdet kan velges.'],
+                            ['title' => 'Måldato eller løpende', 'text' => 'Måldatoen er når målet skal være nådd. La den stå tom for et løpende mål uten sluttdato, for eksempel et driftsmål som alltid gjelder.'],
+                            ['title' => '«2 av 3 KPI-er på mål»', 'text' => 'En opptelling: hvor mange av målets aktive KPI-er som har siste måling på mål. Det er ikke en samlet score eller en prosent for måloppnåelse.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Trenger oppmerksomhet',
+                        'items' => [
+                            ['title' => 'Hva vises her?', 'text' => 'Aktive mål og KPI-er som bør følges opp nå. Bildet regnes ut på nytt hver gang siden åpnes, og forsvinner når forholdet er rettet. Velg «Vis» på en kategori for å se hvilke det gjelder og hvorfor.'],
+                            ['title' => 'KPI ikke på mål', 'text' => 'Siste måling ligger på «Trenger oppmerksomhet» eller «Utenfor mål» mot KPI-ens målverdi slik den er nå. Åpne KPI-en og følg opp resultatet.'],
+                            ['title' => 'Måling mangler', 'text' => 'En måleperiode er slutt, innrapporteringsfristen er passert, og ingen måling er registrert. Åpne KPI-en og registrer målingen for perioden.'],
+                            ['title' => 'Måldato passert', 'text' => 'Et aktivt mål har passert måldatoen. Lukk målet som Oppnådd, Ikke oppnådd eller Avbrutt, eller sett en ny måldato.'],
+                            ['title' => 'Mål mangler ansvarlig', 'text' => 'Et aktivt mål har ikke lenger ansvarlig, for eksempel fordi brukeren er slettet. Rediger målet og velg en ny ansvarlig.'],
+                            ['title' => 'Slik telles det', 'text' => 'Samme KPI kan vises i flere kategorier, men telles bare én gang i oppsummeringen. Mål og KPI-er telles hver for seg. Lukkede mål og avsluttede KPI-er er ikke med.'],
+                        ],
+                    ],
+                ],
+            ],
+            'objective' => [
+                'title' => 'Om målet',
+                'intro' => 'Målsiden samler målet, KPI-ene som måler det, og historikken når målet lukkes eller gjenåpnes.',
+                'sections' => [
+                    [
+                        'title' => 'Målet',
+                        'items' => [
+                            ['title' => 'Fagområde og ansvarlig', 'text' => 'Fagområdet bestemmer hvem som kan se og endre målet. Ansvarlig er personen som følger det opp. Begge endres med «Rediger».'],
+                            ['title' => 'Måldato eller løpende', 'text' => 'Måldatoen er når målet skal være nådd. Et mål uten måldato er løpende. Når måldatoen er passert og målet fortsatt er aktivt, vises det under «Trenger oppmerksomhet».'],
+                            ['title' => 'Berørte prosesser', 'text' => 'Prosessene i Kvalitet som KPI-ene under målet er koblet til. Listen settes sammen fra KPI-ene og endres på KPI-sidene.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'KPI-er',
+                        'items' => [
+                            ['title' => 'KPI-er under målet', 'text' => 'Hver KPI måler én side av målet, for eksempel oppetid eller antall avvik. Legg til en KPI med «Ny KPI», og åpne den for å registrere målinger.'],
+                            ['title' => '«2 av 3 KPI-er på mål»', 'text' => 'En opptelling av målets aktive KPI-er der siste måling er på mål. Det er ikke en samlet score eller en prosent for måloppnåelse. KPI-er som ikke er målt ennå, teller med i totalen. Avsluttede KPI-er gjør det ikke.'],
+                            ['title' => 'Dagens status', 'text' => 'Statusen i tabellen er siste verdi vurdert mot KPI-ens målverdi slik den er nå: På mål, Trenger oppmerksomhet, Utenfor mål eller Ikke målt.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Lukke og gjenåpne',
+                        'items' => [
+                            ['title' => 'Lukk mål', 'text' => 'Når målet er ferdig, lukker du det som Oppnådd, Ikke oppnådd eller Avbrutt. Utfallet og kommentaren lagres i historikken. KPI-ene under et lukket mål tar ikke imot nye målinger.'],
+                            ['title' => 'Gjenåpne', 'text' => 'Et lukket mål kan gjenåpnes med en begrunnelse. Den tidligere lukkingen blir stående i historikken.'],
+                            ['title' => 'Historikk', 'text' => 'Viser hver lukking og gjenåpning med dato, hvem som gjorde det og kommentaren. Historikken kan ikke endres.'],
+                            ['title' => 'Slette', 'text' => 'Sletting er bare for mål som er registrert ved en feil. Et mål som er ferdig, lukkes i stedet, slik at historikken blir bevart.'],
+                        ],
+                    ],
+                ],
+            ],
+            'kpi' => [
+                'title' => 'Om KPI-en',
+                'intro' => 'KPI-siden viser hva som måles, målverdien, siste resultat og alle målingene som er registrert.',
+                'sections' => [
+                    [
+                        'title' => 'KPI-en',
+                        'items' => [
+                            ['title' => 'Hva måles', 'text' => 'Tittel og beskrivelse sier hva KPI-en måler og hvor tallet hentes fra. Enheten låses når KPI-en har fått målinger, slik at historikken beholder betydningen.'],
+                            ['title' => 'Målverdi', 'text' => 'Fyll inn «Minst» for et minimum (for eksempel minst 98 %), «Høyst» for et maksimum (for eksempel høyst 3 avvik), eller begge for et intervall.'],
+                            ['title' => 'Slingringsmonn', 'text' => 'Hvor langt utenfor målverdien et resultat kan ligge og fortsatt bare trenge oppmerksomhet. Uten slingringsmonn er resultatet enten på mål eller utenfor.'],
+                            ['title' => 'Statusene', 'text' => 'På mål: innenfor målverdien. Trenger oppmerksomhet: utenfor, men innenfor slingringsmonnet. Utenfor mål: lenger unna. Ikke målt: ingen gjeldende måling ennå.'],
+                            ['title' => 'Målefrekvens og innrapporteringsfrist', 'text' => 'Målefrekvensen sier hvor ofte KPI-en skal måles: ukentlig, månedlig, kvartalsvis eller årlig. Innrapporteringsfristen er antall dager etter at en periode er slutt før målingen regnes som manglende. Uten fast frekvens registreres målinger ved behov, og ingen måling regnes som manglende.'],
+                            ['title' => 'Ansvarlig', 'text' => 'KPI-en kan ha sin egen ansvarlig. Uten egen ansvarlig er målets ansvarlige også ansvarlig for KPI-en.'],
+                            ['title' => 'Avslutte og gjenåpne', 'text' => 'Avslutt en KPI som ikke lenger skal måles. Den beholder målingene sine, men tar ikke imot nye. En avsluttet KPI kan gjenåpnes med en begrunnelse. Begge deler lagres i historikken.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Målinger',
+                        'items' => [
+                            ['title' => 'Registrer måling', 'text' => 'Velg periode, skriv inn verdien og eventuelt en kommentar. For en KPI med målefrekvens velger du en periode som er slutt. Uten fast frekvens velger du en dato.'],
+                            ['title' => 'Målinger blir historikk', 'text' => 'En registrert måling redigeres aldri. Målverdien som gjaldt, lagres sammen med verdien, slik at historikken alltid viser hva målet var.'],
+                            ['title' => 'Korrigere en feil verdi', 'text' => 'Registrer en ny måling for samme periode. Den nye blir gjeldende, og den gamle vises som «Erstattet». Kommentar er påkrevd, slik at andre ser hvorfor verdien ble endret.'],
+                            ['title' => 'Trekk tilbake', 'text' => 'Bruk «Trekk tilbake» når en måling ikke skulle vært registrert. Den blir stående som «Tilbaketrukket» og teller ikke lenger. Var den en korrigering, blir verdien før den gjeldende igjen. Ingenting slettes.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Dagens status og Status da',
+                        'items' => [
+                            ['title' => 'Dagens status', 'text' => 'Siste verdi vurdert mot KPI-ens målverdi slik den er nå. Endrer dere målverdien, endres dagens status med en gang.'],
+                            ['title' => 'Status da', 'text' => 'I målehistorikken vurderes hver måling mot målverdien som gjaldt da den ble registrert («Målverdi da»). Derfor kan en gammel måling stå som På mål selv om samme verdi ikke er på mål i dag.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Prosess og aktivitet',
+                        'items' => [
+                            ['title' => 'Hva koblingen viser', 'text' => 'Hvilken prosess, og eventuelt hvilke aktiviteter, KPI-en måler i virksomheten. Prosessene og aktivitetene hentes fra Kvalitet og vises med navnene de har der nå.'],
+                            ['title' => 'Endre kobling', 'text' => 'Velg en prosess, og kryss av for hele prosessen eller enkeltaktiviteter. KPI-en kopierer ikke prosessen. Endres prosessen i Kvalitet, vises endringen her også.'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'attention' => [
             'heading' => 'Trenger oppmerksomhet',
             'scope_areas' => 'Mål og KPI-er i dine fagområder',

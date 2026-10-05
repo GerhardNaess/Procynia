@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import ObjectiveAttention from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
+import { objectiveHelp } from './objectiveHelp';
 import { indicatorLabel } from './kpiStatus';
 import { OBJECTIVE_STATUS_TONES, formatTargetDate } from './objectiveStatus';
 
@@ -118,6 +120,7 @@ export default function ObjectivesIndex() {
                         )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                        <PageHelpButton {...objectiveHelp(tr, 'index')} />
                         {canCreate && ! creating && (
                             <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                                 {tr.create ?? 'Nytt mål'}

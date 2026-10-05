@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_COLOURS } from '../../../Support/actionStyles';
 import KpiContextPanel from './KpiContextPanel';
@@ -9,6 +10,7 @@ import { KpiMeasurementForm, KpiWithdrawForm } from './KpiMeasurementForms';
 import ObjectiveHistory from './ObjectiveHistory';
 import { KpiReopenForm, KpiRetireForm } from './KpiStatusForms';
 import { KPI_RESULT_TONES, KPI_STATUS_TONES, responsibleLabel } from './kpiStatus';
+import { objectiveHelp } from './objectiveHelp';
 import { formatLongDate } from './objectiveStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -225,6 +227,7 @@ export default function KpiShow() {
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                        <PageHelpButton {...objectiveHelp(objectiveTr, 'kpi')} />
                         {permissions.can_measure && measurementForm && panel === null && (
                             <button type="button" onClick={() => setPanel('measure')} className={PRIMARY_ACTION}>{tm.register ?? 'Registrer måling'}</button>
                         )}

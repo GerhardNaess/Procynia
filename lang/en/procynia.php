@@ -2481,6 +2481,108 @@ return [
         ],
     ],
     'objectives' => [
+        'help' => [
+            'button' => 'Help',
+            'index' => [
+                'title' => 'About Objectives and KPIs',
+                'intro' => 'This is where you keep what the organisation is to achieve, and how progress is measured. An objective says what is to be achieved. The KPIs under it say how it is measured, and the measurements show how it is going.',
+                'sections' => [
+                    [
+                        'title' => 'Objectives',
+                        'items' => [
+                            ['title' => 'What is an objective?', 'text' => 'Something the organisation is to achieve, for example «Stable operation of customer systems». Create it with «New objective», then add KPIs on the objective page.'],
+                            ['title' => 'Business area', 'text' => 'Every objective belongs to one business area. The business area decides who can see and change the objective. You only see the objectives in the business areas your roles give you.'],
+                            ['title' => 'Responsible', 'text' => 'The person who follows up the objective. Only people who can see objectives in the business area can be chosen.'],
+                            ['title' => 'Target date or ongoing', 'text' => 'The target date is when the objective is to be reached. Leave it empty for an ongoing objective without an end date, for example an operational objective that always applies.'],
+                            ['title' => '«2 of 3 KPIs on target»', 'text' => 'A count: how many of the objective\'s active KPIs have their latest measurement on target. It is not an overall score or a percentage of achievement.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Needs attention',
+                        'items' => [
+                            ['title' => 'What is shown here?', 'text' => 'Active objectives and KPIs that should be followed up now. The picture is worked out again every time the page opens, and disappears once the cause is fixed. Choose «Show» on a category to see which ones and why.'],
+                            ['title' => 'KPI not on target', 'text' => 'The latest measurement is «Needs attention» or «Off target» against the KPI\'s target as it is now. Open the KPI and follow up the result.'],
+                            ['title' => 'Measurement missing', 'text' => 'A measurement period has ended, the reporting deadline has passed and no measurement is recorded. Open the KPI and record the measurement for the period.'],
+                            ['title' => 'Target date passed', 'text' => 'An active objective is past its target date. Close the objective as Achieved, Not achieved or Cancelled, or set a new target date.'],
+                            ['title' => 'Objective has no one responsible', 'text' => 'An active objective no longer has anyone responsible, for example because the user was deleted. Edit the objective and choose a new responsible person.'],
+                            ['title' => 'How it is counted', 'text' => 'The same KPI can appear in several categories, but is counted only once in the summary. Objectives and KPIs are counted separately. Closed objectives and retired KPIs are not included.'],
+                        ],
+                    ],
+                ],
+            ],
+            'objective' => [
+                'title' => 'About the objective',
+                'intro' => 'The objective page brings together the objective, the KPIs that measure it, and the history of when it was closed or reopened.',
+                'sections' => [
+                    [
+                        'title' => 'The objective',
+                        'items' => [
+                            ['title' => 'Business area and responsible', 'text' => 'The business area decides who can see and change the objective. Responsible is the person who follows it up. Both are changed with «Edit».'],
+                            ['title' => 'Target date or ongoing', 'text' => 'The target date is when the objective is to be reached. An objective without a target date is ongoing. When the target date has passed and the objective is still active, it is shown under «Needs attention».'],
+                            ['title' => 'Affected processes', 'text' => 'The processes in Quality that the KPIs under the objective are linked to. The list is put together from the KPIs and is changed on the KPI pages.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'KPIs',
+                        'items' => [
+                            ['title' => 'KPIs under the objective', 'text' => 'Each KPI measures one side of the objective, for example uptime or the number of deviations. Add a KPI with «New KPI», and open it to record measurements.'],
+                            ['title' => '«2 of 3 KPIs on target»', 'text' => 'A count of the objective\'s active KPIs whose latest measurement is on target. It is not an overall score or a percentage of achievement. KPIs not yet measured count in the total. Retired KPIs do not.'],
+                            ['title' => 'Current status', 'text' => 'The status in the table is the latest value judged against the KPI\'s target as it is now: On target, Needs attention, Off target or Not measured.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Closing and reopening',
+                        'items' => [
+                            ['title' => 'Close objective', 'text' => 'When the objective is done, close it as Achieved, Not achieved or Cancelled. The outcome and comment are kept in the history. The KPIs under a closed objective take no new measurements.'],
+                            ['title' => 'Reopen', 'text' => 'A closed objective can be reopened with a reason. The earlier closing stays in the history.'],
+                            ['title' => 'History', 'text' => 'Shows every closing and reopening with the date, who did it and the comment. The history cannot be changed.'],
+                            ['title' => 'Delete', 'text' => 'Deleting is only for objectives registered by mistake. An objective that is done is closed instead, so its history is kept.'],
+                        ],
+                    ],
+                ],
+            ],
+            'kpi' => [
+                'title' => 'About the KPI',
+                'intro' => 'The KPI page shows what is measured, the target, the latest result and every measurement recorded.',
+                'sections' => [
+                    [
+                        'title' => 'The KPI',
+                        'items' => [
+                            ['title' => 'What is measured', 'text' => 'The title and description say what the KPI measures and where the figure comes from. The unit is locked once the KPI has measurements, so the history keeps its meaning.'],
+                            ['title' => 'Target', 'text' => 'Fill in «At least» for a minimum (for example at least 98 %), «At most» for a maximum (for example at most 3 deviations), or both for a range.'],
+                            ['title' => 'Tolerance', 'text' => 'How far outside the target a result may be and still only need attention. Without a tolerance a result is either on target or off target.'],
+                            ['title' => 'The statuses', 'text' => 'On target: within the target. Needs attention: outside it, but within the tolerance. Off target: further away. Not measured: no current measurement yet.'],
+                            ['title' => 'Measurement frequency and reporting deadline', 'text' => 'The measurement frequency says how often the KPI is to be measured: weekly, monthly, quarterly or yearly. The reporting deadline is the number of days after a period ends before its measurement counts as missing. Without a fixed frequency, measurements are recorded when needed and none counts as missing.'],
+                            ['title' => 'Responsible', 'text' => 'The KPI can have its own responsible person. Without one, the objective\'s responsible person is also responsible for the KPI.'],
+                            ['title' => 'Retiring and reopening', 'text' => 'Retire a KPI that is no longer to be measured. It keeps its measurements but takes no new ones. A retired KPI can be reopened with a reason. Both are kept in the history.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Measurements',
+                        'items' => [
+                            ['title' => 'Record measurement', 'text' => 'Choose the period, enter the value and, if you like, a comment. For a KPI with a measurement frequency you choose a period that has ended. Without a fixed frequency you choose a date.'],
+                            ['title' => 'Measurements become history', 'text' => 'A recorded measurement is never edited. The target that applied is stored with the value, so the history always shows what the target was.'],
+                            ['title' => 'Correcting a wrong value', 'text' => 'Record a new measurement for the same period. The new one becomes current, and the old one is shown as «Superseded». A comment is required, so others can see why the value changed.'],
+                            ['title' => 'Withdraw', 'text' => 'Use «Withdraw» when a measurement should not have been recorded. It stays as «Withdrawn» and no longer counts. If it was a correction, the value before it becomes current again. Nothing is deleted.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Current status and Status then',
+                        'items' => [
+                            ['title' => 'Current status', 'text' => 'The latest value judged against the KPI\'s target as it is now. If you change the target, the current status changes at once.'],
+                            ['title' => 'Status then', 'text' => 'In the measurement history each measurement is judged against the target that applied when it was recorded («Target then»). That is why an old measurement can show On target even though the same value is not on target today.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Process and activity',
+                        'items' => [
+                            ['title' => 'What the link shows', 'text' => 'Which process, and if relevant which activities, the KPI measures in the organisation. Processes and activities come from Quality and are shown with the names they have there now.'],
+                            ['title' => 'Change link', 'text' => 'Choose a process, then tick the whole process or individual activities. The KPI does not copy the process. If the process changes in Quality, the change shows here as well.'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'attention' => [
             'heading' => 'Needs attention',
             'scope_areas' => 'Objectives and KPIs in your business areas',

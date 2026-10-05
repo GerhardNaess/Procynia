@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import { ObjectiveAttentionNote } from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
+import { objectiveHelp } from './objectiveHelp';
 import ObjectiveHistory from './ObjectiveHistory';
 import ObjectiveKpis from './ObjectiveKpis';
 import { ObjectiveCloseForm, ObjectiveReopenForm } from './ObjectiveStatusForms';
@@ -95,6 +97,7 @@ export default function ObjectiveShow() {
                         )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                        <PageHelpButton {...objectiveHelp(tr, 'objective')} />
                         {permissions.can_edit && panel === null && (
                             <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>
                                 {tr.edit ?? 'Rediger'}
