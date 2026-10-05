@@ -55,7 +55,7 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
             >
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div>
-                        <div className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
+                        <div className="text-base font-semibold uppercase tracking-[0.14em] text-slate-600">
                             Hjelp
                         </div>
                         <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-950">
@@ -82,7 +82,7 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
                     {sections.map((section, sectionIndex) => (
                         <div key={sectionIndex} className="space-y-2.5">
                             {section.title ? (
-                                <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                <h3 className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     {section.title}
                                 </h3>
                             ) : null}

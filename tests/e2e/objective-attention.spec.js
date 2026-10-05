@@ -116,7 +116,7 @@ test('the attention panel shows what needs action, and only in the user\'s own f
     await expect(offTargetItems).toHaveCount(1);
     await expect(offTargetItems.first()).toContainText(backupTitle);
     await expect(offTargetItems.first()).toContainText(objectiveTitle);
-    await expect(offTargetItems.first()).toContainText('Siste verdi 98,7 % er under målet ≥ 99,5 %.');
+    await expect(offTargetItems.first()).toContainText('Siste verdi 98,7 % er under målverdien ≥ 99,5 %.');
     await page.screenshot({ path: 'test-results/objective-attention-01-off-target.png', fullPage: true });
 
     // A KPI on its own objective whose old periods are expected and unmeasured. Creation is moved
@@ -131,7 +131,7 @@ test('the attention panel shows what needs action, and only in the user\'s own f
     const missingItems = await openCategory(page, 'measurement_missing');
     await expect(missingItems).toHaveCount(1);
     await expect(missingItems.first()).toContainText(satisfactionTitle);
-    await expect(missingItems.first()).toContainText(/4 måleperioder mangler\. Eldste er [A-ZÆØÅ][a-zæøå]+ \d{4}\./);
+    await expect(missingItems.first()).toContainText(/4 måleperioder mangler\. Eldste er [a-zæøå]+ \d{4}\./);
 
     // Måldato i går.
     const yesterday = new Date();

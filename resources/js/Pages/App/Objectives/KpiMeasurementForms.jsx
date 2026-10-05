@@ -5,7 +5,7 @@ import { existingValueFor } from './kpiStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * Registrer måling. The period is chosen, never typed: an ended calendar period for a KPI with a
@@ -31,13 +31,13 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr }) {
         form.post(`${baseUrl}/measurements`, { preserveScroll: true, onSuccess: onDone });
     };
 
-    const error = (field) => form.errors[field] && <p className="mt-1 text-sm text-rose-600">{form.errors[field]}</p>;
+    const error = (field) => form.errors[field] && <p className="mt-1 text-base text-rose-600">{form.errors[field]}</p>;
 
     return (
         <section className={CARD} aria-labelledby="kpi-measure-heading">
             <h2 id="kpi-measure-heading" className="text-lg font-semibold text-slate-950">{tr.register_heading ?? 'Registrer måling'}</h2>
             <p className="mt-1 text-base text-slate-600">
-                {tr.register_intro ?? 'Målet som gjelder nå lagres sammen med verdien, slik at historikken viser hva målet var.'}
+                {tr.register_intro ?? 'Målverdien som gjelder nå, lagres sammen med verdien, slik at historikken viser hva målverdien var.'}
             </p>
             <form onSubmit={submit} className="mt-4 space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
@@ -92,7 +92,7 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr }) {
                             onChange={(event) => form.setData('value', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        <p id="measurement-value-hint" className="mt-1 text-sm text-slate-500">
+                        <p id="measurement-value-hint" className="mt-1 text-base text-slate-500">
                             {kpi.unit_display} · {tr.detail_target ?? 'Målverdi'} {kpi.target_display}
                         </p>
                         {error('value')}
@@ -110,7 +110,7 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr }) {
                     <label htmlFor="measurement-comment" className={LABEL}>
                         {tr.field_comment ?? 'Kommentar'}{correction && <RequiredMark />}
                     </label>
-                    <p id="measurement-comment-hint" className="text-sm text-slate-600">
+                    <p id="measurement-comment-hint" className="text-base text-slate-600">
                         {correction
                             ? (tr.comment_required_hint ?? 'Påkrevd ved korrigering: forklar hvorfor verdien endres.')
                             : (tr.comment_hint ?? 'Valgfritt.')}
@@ -156,7 +156,7 @@ export function KpiWithdrawForm({ baseUrl, measurement, onDone, tr }) {
             <p className="text-base font-semibold text-slate-900">
                 {tr.withdraw_heading ?? 'Trekk tilbake måling'}: {measurement.period_label}, {measurement.value_display}
             </p>
-            <p className="text-sm text-slate-700">
+            <p className="text-base text-slate-700">
                 {tr.withdraw_intro ?? 'Målingen blir stående i historikken som tilbaketrukket og teller ikke lenger. Dette kan ikke angres.'}
             </p>
             <div>
@@ -170,7 +170,7 @@ export function KpiWithdrawForm({ baseUrl, measurement, onDone, tr }) {
                     onChange={(event) => form.setData('reason', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.reason && <p className="mt-1 text-sm text-rose-600">{form.errors.reason}</p>}
+                {form.errors.reason && <p className="mt-1 text-base text-rose-600">{form.errors.reason}</p>}
             </div>
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>

@@ -23,7 +23,7 @@ export default function ObjectiveHistory({ entries = [], statusLabels = {}, loca
             <ol className="mt-4 divide-y divide-slate-100" data-testid={testId}>
                 {entries.map((entry) => (
                     <li key={entry.id} className="py-3">
-                        <p className="text-sm text-slate-500">{formatLongDate(entry.changed_at, locale)}</p>
+                        <p className="text-base text-slate-500">{formatLongDate(entry.changed_at, locale)}</p>
                         <p className="mt-0.5 text-base font-semibold text-slate-900">
                             {describe ? describe(entry, who(entry)) : entry.to_status === 'active'
                                 ? (tr.history_reopened ?? 'Gjenåpnet av :name').replace(':name', who(entry))

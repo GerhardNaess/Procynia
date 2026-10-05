@@ -81,20 +81,20 @@ export default function ObjectiveShow() {
                     <div className="space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{objective.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
+                            <span className="text-base font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={OBJECTIVE_STATUS_TONES[objective.status] ?? 'slate'}>
                                 {statusLabels[objective.status] ?? objective.status}
                             </StatusBadge>
                         </div>
                         {objective.status !== 'active' && objective.closed_at && (
-                            <p className="text-sm text-slate-600">
+                            <p className="text-base text-slate-600">
                                 {(tr.closed_summary ?? 'Lukket :date av :name.')
                                     .replace(':date', formatLongDate(objective.closed_at, locale))
                                     .replace(':name', objective.closed_by_name ?? (tr.unknown_user ?? 'en tidligere bruker'))}
                             </p>
                         )}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         {permissions.can_edit && panel === null && (
                             <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>
                                 {tr.edit ?? 'Rediger'}
@@ -156,23 +156,23 @@ export default function ObjectiveShow() {
                         <h2 className="mt-6 text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
                         <dl className="mt-4 grid gap-4 sm:grid-cols-4">
                             <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.field_owner ?? 'Ansvarlig'}</dt>
+                                <dt className="text-base font-semibold text-slate-600">{tr.field_owner ?? 'Ansvarlig'}</dt>
                                 <dd className="mt-1 text-base text-slate-900">
                                     {objective.owner_name ?? <span className="text-amber-700">{tr.no_owner ?? 'Mangler ansvarlig'}</span>}
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
+                                <dt className="text-base font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
                                 <dd className="mt-1 text-base text-slate-900">{objective.area_name}</dd>
                             </div>
                             <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.field_target_date ?? 'Måldato'}</dt>
+                                <dt className="text-base font-semibold text-slate-600">{tr.field_target_date ?? 'Måldato'}</dt>
                                 <dd className="mt-1 text-base text-slate-900">{formatTargetDate(objective.target_date, tr.running ?? 'Løpende')}</dd>
                             </div>
                             <div>
-                                <dt className="text-sm font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
+                                <dt className="text-base font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
                                 <dd className="mt-1 text-base text-slate-900">
-                                    {objective.updated_at ? new Date(objective.updated_at).toLocaleString('nb-NO') : '—'}
+                                    {objective.updated_at ? formatLongDate(objective.updated_at, locale) : '—'}
                                 </dd>
                             </div>
                         </dl>
@@ -180,7 +180,7 @@ export default function ObjectiveShow() {
                         {/* Derived live from the active KPIs' links; null without Kvalitet read, so nothing shows. */}
                         {affectedProcesses !== null && affectedProcesses.length > 0 && (
                             <div className="mt-6" data-testid="objective-affected-processes">
-                                <h2 className="text-sm font-semibold text-slate-600">{tk.context?.affected_heading ?? 'Berørte prosesser'}</h2>
+                                <h2 className="text-base font-semibold text-slate-600">{tk.context?.affected_heading ?? 'Berørte prosesser'}</h2>
                                 <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
                                     {affectedProcesses.map((process) => (
                                         <li key={process.id}>

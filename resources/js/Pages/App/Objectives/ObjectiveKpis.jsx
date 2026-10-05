@@ -50,7 +50,7 @@ export default function ObjectiveKpis({ objective, kpis = [], indicator = null, 
             </div>
 
             {objective.status !== 'active' && (
-                <p className="mt-3 text-sm text-slate-600">{tr.objective_closed_note ?? 'KPI-er legges til og endres mens målet er aktivt. Gjenåpne målet for å endre dem.'}</p>
+                <p className="mt-3 text-base text-slate-600">{tr.objective_closed_note ?? 'KPI-er legges til og endres mens målet er aktivt. Gjenåpne målet for å endre dem.'}</p>
             )}
 
             {creating && formOptions && (
@@ -66,12 +66,12 @@ export default function ObjectiveKpis({ objective, kpis = [], indicator = null, 
                 <div className="mt-4 overflow-x-auto">
                     <table className="w-full text-base" data-testid="objective-kpis">
                         <thead>
-                            <tr className="border-b border-slate-200 text-left text-sm font-semibold text-slate-600">
+                            <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
                                 <th className="pb-3 pr-4">{tr.col_title ?? 'KPI'}</th>
                                 <th className="px-4 pb-3">{tr.col_target ?? 'Målverdi'}</th>
                                 <th className="px-4 pb-3">{tr.col_latest ?? 'Siste verdi'}</th>
-                                <th className="px-4 pb-3">{tr.col_result ?? 'Status'}</th>
-                                <th className="px-4 pb-3">{tr.col_frequency ?? 'Frekvens'}</th>
+                                <th className="px-4 pb-3">{tr.col_result ?? 'Dagens status'}</th>
+                                <th className="px-4 pb-3">{tr.col_frequency ?? 'Målefrekvens'}</th>
                                 <th className="pb-3 pl-4">{tr.col_responsible ?? 'Ansvarlig'}</th>
                             </tr>
                         </thead>
@@ -87,13 +87,13 @@ export default function ObjectiveKpis({ objective, kpis = [], indicator = null, 
                                     <td className="whitespace-nowrap px-4 py-3 text-slate-900">{kpi.target_display}</td>
                                     <td className="whitespace-nowrap px-4 py-3 text-slate-900">
                                         {kpi.latest_value_display ?? '—'}
-                                        {kpi.latest_period_label && <span className="block text-sm text-slate-500">{kpi.latest_period_label}</span>}
+                                        {kpi.latest_period_label && <span className="block text-base text-slate-500">{kpi.latest_period_label}</span>}
                                     </td>
                                     <td className="px-4 py-3">
                                         <StatusBadge tone={KPI_RESULT_TONES[kpi.result] ?? 'slate'}>{results[kpi.result] ?? kpi.result}</StatusBadge>
                                     </td>
                                     <td className="px-4 py-3 text-slate-700">
-                                        {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast frekvens')}
+                                        {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast målefrekvens')}
                                     </td>
                                     <td className="py-3 pl-4 text-slate-700">
                                         {responsibleLabel(kpi, tr) ?? <span className="text-amber-700">{tr.no_responsible ?? 'Mangler ansvarlig'}</span>}

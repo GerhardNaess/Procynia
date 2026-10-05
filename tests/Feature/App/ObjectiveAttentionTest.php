@@ -85,7 +85,7 @@ class ObjectiveAttentionTest extends TestCase
         $this->assertSame('kpi', $category['subject']);
         $this->assertSame(['Backup', 'Oppetid'], array_column($category['items'], 'title'));
         $this->assertSame(
-            'Siste verdi 98,7'.self::NBSP.'% er under målet ≥'.self::NBSP.'99,5'.self::NBSP.'%.',
+            'Siste verdi 98,7'.self::NBSP.'% er under målverdien ≥'.self::NBSP.'99,5'.self::NBSP.'%.',
             $category['items'][0]['detail'],
         );
         $this->assertSame('Stabil drift', $category['items'][0]['objective_title']);
@@ -107,7 +107,7 @@ class ObjectiveAttentionTest extends TestCase
         $this->record($kpi, $measurer, '2026-09', '5');
 
         $this->assertSame(
-            'Siste verdi 5'.self::NBSP.'hendelser er over målet ≤'.self::NBSP.'3'.self::NBSP.'hendelser.',
+            'Siste verdi 5'.self::NBSP.'hendelser er over målverdien ≤'.self::NBSP.'3'.self::NBSP.'hendelser.',
             $this->category($this->overview($viewer), ObjectiveAttentionService::KPI_OFF_TARGET)['items'][0]['detail'],
         );
     }
@@ -149,7 +149,7 @@ class ObjectiveAttentionTest extends TestCase
 
         $category = $this->category($this->overview($viewer, '2026-10-08'), ObjectiveAttentionService::MEASUREMENT_MISSING);
         $this->assertSame(1, $category['count']);
-        $this->assertSame('Måling mangler for September 2026.', $category['items'][0]['detail']);
+        $this->assertSame('Måling mangler for september 2026.', $category['items'][0]['detail']);
     }
 
     public function test_several_missing_periods_name_the_count_and_the_oldest(): void
@@ -160,7 +160,7 @@ class ObjectiveAttentionTest extends TestCase
 
         $category = $this->category($this->overview($viewer, '2026-10-08'), ObjectiveAttentionService::MEASUREMENT_MISSING);
 
-        $this->assertSame('4 måleperioder mangler. Eldste er Juni 2026.', $category['items'][0]['detail']);
+        $this->assertSame('4 måleperioder mangler. Eldste er juni 2026.', $category['items'][0]['detail']);
     }
 
     public function test_a_kpi_without_frequency_is_never_missing_a_measurement(): void

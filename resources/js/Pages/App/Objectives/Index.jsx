@@ -114,14 +114,16 @@ export default function ObjectivesIndex() {
                             {tr.index_subtitle ?? 'Det virksomheten skal oppnå, samlet med ansvarlig, fagområde og måldato.'}
                         </p>
                         {hasAreas && (
-                            <p className="text-sm text-slate-500">{tr.scope_note ?? 'Du ser målene i fagområdene rollene dine gir deg.'}</p>
+                            <p className="text-base text-slate-500">{tr.scope_note ?? 'Du ser målene i fagområdene rollene dine gir deg.'}</p>
                         )}
                     </div>
-                    {canCreate && ! creating && (
-                        <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
-                            {tr.create ?? 'Nytt mål'}
-                        </button>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                        {canCreate && ! creating && (
+                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                                {tr.create ?? 'Nytt mål'}
+                            </button>
+                        )}
+                    </div>
                 </header>
 
                 {creating && (
@@ -146,7 +148,7 @@ export default function ObjectivesIndex() {
                     <section className={CARD}>
                         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-3">
                             <div className="min-w-[16rem] flex-1">
-                                <label htmlFor="objective-search" className="block text-sm font-semibold text-slate-700">
+                                <label htmlFor="objective-search" className="block text-base font-semibold text-slate-700">
                                     {tr.search_label ?? 'Søk'}
                                 </label>
                                 <input
@@ -159,7 +161,7 @@ export default function ObjectivesIndex() {
                                 />
                             </div>
                             <div>
-                                <label htmlFor="objective-status-filter" className="block text-sm font-semibold text-slate-700">
+                                <label htmlFor="objective-status-filter" className="block text-base font-semibold text-slate-700">
                                     {tr.status_filter ?? 'Status'}
                                 </label>
                                 <select
@@ -176,7 +178,7 @@ export default function ObjectivesIndex() {
                             </div>
                             {filterAreaOptions.length > 1 && (
                                 <div>
-                                    <label htmlFor="objective-area-filter" className="block text-sm font-semibold text-slate-700">
+                                    <label htmlFor="objective-area-filter" className="block text-base font-semibold text-slate-700">
                                         {tr.area_filter ?? 'Fagområde'}
                                     </label>
                                     <select
@@ -200,7 +202,7 @@ export default function ObjectivesIndex() {
                             )}
                         </form>
 
-                        <p className="mt-4 text-sm text-slate-500">
+                        <p className="mt-4 text-base text-slate-500">
                             {(tr.count ?? ':count mål').replace(':count', String(visibleCount))}
                         </p>
 
@@ -214,7 +216,7 @@ export default function ObjectivesIndex() {
                             <div className="mt-4 overflow-x-auto">
                                 <table className="w-full text-base">
                                     <thead>
-                                        <tr className="border-b border-slate-200 text-left text-sm font-semibold text-slate-600">
+                                        <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
                                             <th className="pb-3 pr-4">{tr.col_title ?? 'Mål'}</th>
                                             <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
                                             <th className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>

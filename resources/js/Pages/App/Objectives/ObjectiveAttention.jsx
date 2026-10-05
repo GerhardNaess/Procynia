@@ -35,7 +35,7 @@ export default function ObjectiveAttention({ attention, tr }) {
 
     return (
         <section aria-labelledby="objective-attention-heading" className={CARD} data-testid="objective-attention">
-            <p className="text-sm font-semibold text-slate-500">{scope}</p>
+            <p className="text-base font-semibold text-slate-500">{scope}</p>
             <h2 id="objective-attention-heading" className="mt-1 text-xl font-semibold text-slate-950">
                 {ta.heading ?? 'Trenger oppmerksomhet'}
             </h2>
@@ -47,7 +47,7 @@ export default function ObjectiveAttention({ attention, tr }) {
             ) : (
                 <>
                     <p className="mt-3 text-2xl font-semibold text-amber-800" data-testid="objective-attention-summary">{summary}</p>
-                    <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                    <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
                         {ta.overlap_hint ?? 'Hvert mål og hver KPI telles én gang, selv om de har flere funn. Lukkede mål og avsluttede KPI-er er ikke med.'}
                     </p>
 
@@ -75,7 +75,7 @@ function AttentionCategory({ category, ta }) {
                     <h3 className="text-base font-semibold text-slate-950">{label}</h3>
                     <button
                         type="button"
-                        className="mt-1 text-sm font-semibold text-violet-700 hover:text-violet-900"
+                        className="mt-1 text-base font-semibold text-violet-700 hover:text-violet-900"
                         aria-expanded={open}
                         aria-controls={listId}
                         onClick={() => setOpen((value) => ! value)}
@@ -89,15 +89,15 @@ function AttentionCategory({ category, ta }) {
                 <ul id={listId} className="mt-3 space-y-2">
                     {category.items.map((item) => (
                         <li key={`${category.subject}-${item.id}`} className="rounded-xl bg-white px-3 py-2" data-testid="objective-attention-item">
-                            <Link href={item.url} className="text-sm font-semibold text-violet-700 hover:text-violet-900">
+                            <Link href={item.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">
                                 {item.title}
                             </Link>
                             {(item.objective_title || item.area_name) && (
-                                <span className="ml-2 text-sm text-slate-500">
+                                <span className="ml-2 text-base text-slate-500">
                                     {[item.objective_title, item.area_name].filter(Boolean).join(' · ')}
                                 </span>
                             )}
-                            <p className="mt-0.5 text-sm text-slate-600">{item.detail}</p>
+                            <p className="mt-0.5 text-base text-slate-600">{item.detail}</p>
                         </li>
                     ))}
                 </ul>
@@ -125,7 +125,7 @@ export function ObjectiveAttentionNote({ attention, tr }) {
             data-testid="objective-attention-note"
         >
             <h2 className="text-base font-semibold text-amber-900">{ta.heading ?? 'Trenger oppmerksomhet'}</h2>
-            <ul className="mt-1 space-y-0.5 text-sm text-slate-800">
+            <ul className="mt-1 space-y-0.5 text-base text-slate-800">
                 {(attention.reasons ?? []).map((reason) => (
                     <li key={reason.key}>{reason.detail}</li>
                 ))}

@@ -41,6 +41,22 @@ final class KpiPeriodFormatter
         };
     }
 
+    /**
+     * The label as it reads inside a sentence: «Måling mangler for juli 2026», «… for uke 40, 2026».
+     * Norwegian writes months and «uke» in lower case; English keeps its capitalised months and
+     * lowers only «week». Quarters, years and days start with a digit and are left as they are.
+     */
+    public function inSentence(KpiPeriod $period): string
+    {
+        $label = $this->label($period);
+
+        if ($this->isEnglish() && $period->frequency !== Kpi::FREQUENCY_WEEKLY) {
+            return $label;
+        }
+
+        return mb_strtolower(mb_substr($label, 0, 1)).mb_substr($label, 1);
+    }
+
     /** A stored range: the period it is, or both dates when it is no calendar period. */
     public function range(CarbonInterface $start, CarbonInterface $end): string
     {

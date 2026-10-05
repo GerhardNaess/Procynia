@@ -723,7 +723,7 @@ class KpiTest extends TestCase
 
         $kpi->forceFill(['frequency' => null, 'tolerance' => null])->save();
         $props = $this->actingAs($editor)->get($this->kpiUrl($kpi))->viewData('page')['props'];
-        $this->assertSame('Ingen fast frist, KPI-en har ingen fast frekvens', $props['kpi']['deadline_display']);
+        $this->assertSame('Ingen fast frist, KPI-en har ingen fast målefrekvens', $props['kpi']['deadline_display']);
         $this->assertNull($props['kpi']['tolerance_display']);
 
         $kpi->forceFill(['status' => Kpi::STATUS_RETIRED])->save();

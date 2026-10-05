@@ -3,7 +3,7 @@ import RequiredMark from '../Risk/RequiredMark';
 import { ownersForArea } from '../Risk/riskOwners';
 
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * The fields of an objective, shared by Nytt mål and Rediger. The area list holds only the areas the
@@ -37,12 +37,12 @@ export default function ObjectiveForm({ form, onSubmit, onCancel, areaOptions, o
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.title && <p className="mt-1 text-sm text-rose-600">{form.errors.title}</p>}
+                {form.errors.title && <p className="mt-1 text-base text-rose-600">{form.errors.title}</p>}
             </div>
 
             <div>
                 <label htmlFor="objective-description" className={LABEL}>{tr.field_description ?? 'Beskrivelse'}</label>
-                <p id="objective-description-hint" className="text-sm text-slate-600">
+                <p id="objective-description-hint" className="text-base text-slate-600">
                     {tr.field_description_hint ?? 'Valgfritt. Hva målet innebærer og hvorfor det er viktig.'}
                 </p>
                 <textarea
@@ -53,7 +53,7 @@ export default function ObjectiveForm({ form, onSubmit, onCancel, areaOptions, o
                     onChange={(event) => form.setData('description', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.description && <p className="mt-1 text-sm text-rose-600">{form.errors.description}</p>}
+                {form.errors.description && <p className="mt-1 text-base text-rose-600">{form.errors.description}</p>}
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -72,8 +72,8 @@ export default function ObjectiveForm({ form, onSubmit, onCancel, areaOptions, o
                             <option key={area.id} value={area.id}>{area.name}</option>
                         ))}
                     </select>
-                    <p className="mt-1 text-sm text-slate-500">{tr.field_area_hint ?? 'Bestemmer hvem som kan se målet.'}</p>
-                    {form.errors.business_area_id && <p className="mt-1 text-sm text-rose-600">{form.errors.business_area_id}</p>}
+                    <p className="mt-1 text-base text-slate-500">{tr.field_area_hint ?? 'Bestemmer hvem som kan se målet.'}</p>
+                    {form.errors.business_area_id && <p className="mt-1 text-base text-rose-600">{form.errors.business_area_id}</p>}
                 </div>
 
                 <div>
@@ -91,10 +91,10 @@ export default function ObjectiveForm({ form, onSubmit, onCancel, areaOptions, o
                             <option key={owner.id} value={owner.id}>{owner.name}</option>
                         ))}
                     </select>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-base text-slate-500">
                         {tr.field_owner_hint ?? 'Bare personer som kan se mål i valgt fagområde kan være ansvarlig.'}
                     </p>
-                    {form.errors.owner_user_id && <p className="mt-1 text-sm text-rose-600">{form.errors.owner_user_id}</p>}
+                    {form.errors.owner_user_id && <p className="mt-1 text-base text-rose-600">{form.errors.owner_user_id}</p>}
                 </div>
 
                 <div>
@@ -107,14 +107,14 @@ export default function ObjectiveForm({ form, onSubmit, onCancel, areaOptions, o
                         onChange={(event) => form.setData('target_date', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    <p id="objective-target-date-hint" className="mt-1 text-sm text-slate-500">
+                    <p id="objective-target-date-hint" className="mt-1 text-base text-slate-500">
                         {tr.field_target_date_hint ?? 'Valgfritt. La stå tom for et løpende mål.'}
                     </p>
-                    {form.errors.target_date && <p className="mt-1 text-sm text-rose-600">{form.errors.target_date}</p>}
+                    {form.errors.target_date && <p className="mt-1 text-base text-rose-600">{form.errors.target_date}</p>}
                 </div>
             </div>
 
-            <p className="text-sm text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
+            <p className="text-base text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
 
             <div className="flex flex-wrap justify-end gap-3">
                 {onCancel && (

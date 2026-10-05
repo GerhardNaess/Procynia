@@ -4,7 +4,7 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles'
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 const processLabel = (item) => (item.code ? `${item.code} · ${item.title}` : item.title);
 const activityLabel = (activity) => (activity.role ? `${activity.label} (${activity.role})` : activity.label);
@@ -60,7 +60,7 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h2 id="kpi-context-heading" className="text-lg font-semibold text-slate-950">{tc.title ?? 'Prosess og aktivitet'}</h2>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-base text-slate-600">
                         {tc.description ?? 'Hva KPI-en måler i virksomheten. Navnene hentes fra Kvalitet.'}
                     </p>
                 </div>
@@ -89,7 +89,7 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                                     ))}
                                 </select>
                                 {form.errors.quality_process_id && (
-                                    <p className="mt-1 text-sm text-rose-700">{form.errors.quality_process_id}</p>
+                                    <p className="mt-1 text-base text-rose-700">{form.errors.quality_process_id}</p>
                                 )}
                             </div>
                             {selected && (
@@ -116,12 +116,12 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                                         </label>
                                     ))}
                                     {selected.activities.length === 0 && (
-                                        <p className="text-sm text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
+                                        <p className="text-base text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
                                     )}
                                     {form.errors.activity_keys && (
-                                        <p className="text-sm text-rose-700">{form.errors.activity_keys}</p>
+                                        <p className="text-base text-rose-700">{form.errors.activity_keys}</p>
                                     )}
-                                    <p className="text-sm text-slate-600">{tc.remove_hint ?? 'Fjern alle avkrysninger for å fjerne prosessen fra KPI-en.'}</p>
+                                    <p className="text-base text-slate-600">{tc.remove_hint ?? 'Fjern alle avkrysninger for å fjerne prosessen fra KPI-en.'}</p>
                                 </fieldset>
                             )}
                         </>
@@ -144,17 +144,17 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                     {context.map((process) => (
                         <li key={process.id} className="space-y-2 py-3" data-testid="kpi-context-process">
                             <div>
-                                <p className="text-sm font-semibold text-slate-600">{tc.process_heading ?? 'Prosess'}</p>
+                                <p className="text-base font-semibold text-slate-600">{tc.process_heading ?? 'Prosess'}</p>
                                 <a href={process.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">
                                     {processLabel(process)}
                                 </a>
                                 {process.whole_process && (
-                                    <p className="text-sm text-slate-600">{tc.whole_process ?? 'Hele prosessen'}</p>
+                                    <p className="text-base text-slate-600">{tc.whole_process ?? 'Hele prosessen'}</p>
                                 )}
                             </div>
                             {process.activities.length > 0 && (
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-600">{tc.activities_heading ?? 'Aktiviteter'}</p>
+                                    <p className="text-base font-semibold text-slate-600">{tc.activities_heading ?? 'Aktiviteter'}</p>
                                     <ul className="mt-1 space-y-1 border-l-2 border-slate-200 pl-4" aria-label={tc.activities_heading ?? 'Aktiviteter'}>
                                         {process.activities.map((activity) => (
                                             <li key={activity.id}>

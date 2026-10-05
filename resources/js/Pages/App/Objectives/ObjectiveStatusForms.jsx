@@ -4,7 +4,7 @@ import RequiredMark from '../Risk/RequiredMark';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * Lukk mål: the outcome is the decision, the comment is optional. The server writes the closing to
@@ -40,11 +40,11 @@ export function ObjectiveCloseForm({ objectiveId, outcomes = [], statusLabels = 
                             </label>
                         ))}
                     </div>
-                    {form.errors.status && <p className="mt-1 text-sm text-rose-600">{form.errors.status}</p>}
+                    {form.errors.status && <p className="mt-1 text-base text-rose-600">{form.errors.status}</p>}
                 </fieldset>
                 <div>
                     <label htmlFor="objective-close-note" className={LABEL}>{tr.close_note_label ?? 'Kommentar'}</label>
-                    <p id="objective-close-note-hint" className="text-sm text-slate-600">
+                    <p id="objective-close-note-hint" className="text-base text-slate-600">
                         {tr.close_note_hint ?? 'Valgfritt.'}
                     </p>
                     <textarea
@@ -55,7 +55,7 @@ export function ObjectiveCloseForm({ objectiveId, outcomes = [], statusLabels = 
                         onChange={(event) => form.setData('note', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.note && <p className="mt-1 text-sm text-rose-600">{form.errors.note}</p>}
+                    {form.errors.note && <p className="mt-1 text-base text-rose-600">{form.errors.note}</p>}
                 </div>
                 <div className="flex flex-wrap justify-end gap-3">
                     <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
@@ -97,7 +97,7 @@ export function ObjectiveReopenForm({ objectiveId, onDone, tr }) {
                         onChange={(event) => form.setData('reason', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.reason && <p className="mt-1 text-sm text-rose-600">{form.errors.reason}</p>}
+                    {form.errors.reason && <p className="mt-1 text-base text-rose-600">{form.errors.reason}</p>}
                 </div>
                 <div className="flex flex-wrap justify-end gap-3">
                     <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>

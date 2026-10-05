@@ -581,7 +581,7 @@ class KpiMeasurementTest extends TestCase
 
         $props = $this->kpiProps($kpi, $user);
         $this->assertTrue($props['kpi']['schedule']['measurement_missing']);
-        $this->assertSame('Juli 2026', $props['kpi']['schedule']['missing_label']);
+        $this->assertSame('juli 2026', $props['kpi']['schedule']['missing_label']);
         $this->assertSame(3, $props['kpi']['schedule']['missing_count']);
         $this->assertSame('3 perioder mangler måling.', $props['kpi']['schedule']['missing_count_display']);
         $this->assertSame('2026-07', $props['measurement_form']['suggested_key']);
@@ -822,7 +822,7 @@ class KpiMeasurementTest extends TestCase
         $this->at('2026-10-06');
         $props = $this->kpiProps($kpi, $user);
         $this->assertTrue($props['kpi']['schedule']['measurement_missing']);
-        $this->assertSame('September 2026', $props['kpi']['schedule']['missing_label']);
+        $this->assertSame('september 2026', $props['kpi']['schedule']['missing_label']);
     }
 
     public function test_the_objective_page_and_the_register_count_active_kpis_on_target(): void

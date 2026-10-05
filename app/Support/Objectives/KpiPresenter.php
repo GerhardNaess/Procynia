@@ -145,7 +145,8 @@ final class KpiPresenter
             'latest_recorded_at' => $latest?->recorded_at?->toIso8601String(),
             'schedule' => [
                 'measurement_missing' => $schedule->measurementMissing(),
-                'missing_label' => $schedule->measurementMissing() ? $periodFormatter->label($schedule->oldestMissing()) : null,
+                // Only ever read inside «Måling mangler for …».
+                'missing_label' => $schedule->measurementMissing() ? $periodFormatter->inSentence($schedule->oldestMissing()) : null,
                 'missing_count' => $schedule->measurementMissing() ? count($schedule->missing) : 0,
                 'missing_count_display' => $schedule->measurementMissing() && count($schedule->missing) > 1
                     ? trans_choice('procynia.objectives.measurement.missing_more', count($schedule->missing), ['count' => count($schedule->missing)])

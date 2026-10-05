@@ -229,7 +229,7 @@ class ObjectiveAttentionService
 
         if ($schedule->measurementMissing()) {
             $count = count($schedule->missing);
-            $period = $periodFormatter->label($schedule->oldestMissing());
+            $period = $periodFormatter->inSentence($schedule->oldestMissing());
 
             $reasons[self::MEASUREMENT_MISSING] = $count === 1
                 ? (string) __('procynia.objectives.attention.reasons.measurement_missing_one', ['period' => $period])

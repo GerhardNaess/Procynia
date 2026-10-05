@@ -2,7 +2,7 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles'
 import RequiredMark from '../Risk/RequiredMark';
 
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * The form data a KPI starts from: its stored values when editing, the defaults when new.
@@ -53,13 +53,13 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
         }));
     };
 
-    const error = (field) => form.errors[field] && <p className="mt-1 text-sm text-rose-600">{form.errors[field]}</p>;
+    const error = (field) => form.errors[field] && <p className="mt-1 text-base text-rose-600">{form.errors[field]}</p>;
 
     return (
         <form onSubmit={onSubmit} className="space-y-4">
             <div>
                 <label htmlFor="kpi-title" className={LABEL}>{tr.field_title ?? 'Tittel'}<RequiredMark /></label>
-                <p id="kpi-title-hint" className="text-sm text-slate-600">
+                <p id="kpi-title-hint" className="text-base text-slate-600">
                     {tr.field_title_hint ?? 'Hva som måles, for eksempel «Oppetid» eller «Alvorlige avvik».'}
                 </p>
                 <input
@@ -77,7 +77,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
 
             <div>
                 <label htmlFor="kpi-description" className={LABEL}>{tr.field_description ?? 'Beskrivelse'}</label>
-                <p id="kpi-description-hint" className="text-sm text-slate-600">
+                <p id="kpi-description-hint" className="text-base text-slate-600">
                     {tr.field_description_hint ?? 'Valgfritt. Hvordan KPI-en måles, og hvor tallet hentes fra.'}
                 </p>
                 <textarea
@@ -110,7 +110,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                         ))}
                     </select>
                     {unitLocked && (
-                        <p id="kpi-unit-locked-hint" className="mt-1 text-sm text-slate-500">
+                        <p id="kpi-unit-locked-hint" className="mt-1 text-base text-slate-500">
                             {tr.unit_locked_hint ?? 'Enheten er låst fordi KPI-en har målinger.'}
                         </p>
                     )}
@@ -129,7 +129,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                             onChange={(event) => form.setData('unit_label', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        <p id="kpi-unit-label-hint" className="mt-1 text-sm text-slate-500">
+                        <p id="kpi-unit-label-hint" className="mt-1 text-base text-slate-500">
                             {tr.field_unit_label_hint ?? 'Valgfritt. For eksempel saker, hendelser eller brukere.'}
                         </p>
                         {error('unit_label')}
@@ -151,7 +151,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                             onChange={(event) => form.setData('currency_code', event.target.value.toUpperCase())}
                             className={`mt-1 ${INPUT}`}
                         />
-                        <p id="kpi-currency-code-hint" className="mt-1 text-sm text-slate-500">
+                        <p id="kpi-currency-code-hint" className="mt-1 text-base text-slate-500">
                             {tr.field_currency_code_hint ?? 'Tre bokstaver, for eksempel NOK.'}
                         </p>
                         {error('currency_code')}
@@ -161,7 +161,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
 
             <fieldset className="rounded-2xl border border-slate-200 p-4">
                 <legend className="px-1 text-base font-semibold text-slate-900">{tr.target_heading ?? 'Målverdi'}</legend>
-                <p className="text-sm text-slate-600">
+                <p className="text-base text-slate-600">
                     {tr.target_hint ?? 'Fyll inn minst én grense. Fyller du inn begge, er målet et intervall.'}
                 </p>
                 <div className="mt-3 grid gap-4 md:grid-cols-3">
@@ -203,21 +203,21 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                         {error('tolerance')}
                     </div>
                 </div>
-                <p id="kpi-tolerance-hint" className="mt-2 text-sm text-slate-500">
+                <p id="kpi-tolerance-hint" className="mt-2 text-base text-slate-500">
                     {tr.field_tolerance_hint ?? 'Valgfritt. Tomt eller 0 betyr at resultatet enten er på mål eller utenfor.'}
                 </p>
             </fieldset>
 
             <div className="grid gap-4 md:grid-cols-3">
                 <div>
-                    <label htmlFor="kpi-frequency" className={LABEL}>{tr.field_frequency ?? 'Frekvens'}</label>
+                    <label htmlFor="kpi-frequency" className={LABEL}>{tr.field_frequency ?? 'Målefrekvens'}</label>
                     <select
                         id="kpi-frequency"
                         value={form.data.frequency}
                         onChange={(event) => form.setData('frequency', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     >
-                        <option value="">{tr.no_frequency ?? 'Ingen fast frekvens'}</option>
+                        <option value="">{tr.no_frequency ?? 'Ingen fast målefrekvens'}</option>
                         {(options.frequencies ?? []).map((frequency) => (
                             <option key={frequency} value={frequency}>{frequencyLabels[frequency] ?? frequency}</option>
                         ))}
@@ -240,7 +240,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                         onChange={(event) => form.setData('reporting_grace_days', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    <p id="kpi-grace-days-hint" className="mt-1 text-sm text-slate-500">
+                    <p id="kpi-grace-days-hint" className="mt-1 text-base text-slate-500">
                         {tr.field_grace_days_hint ?? 'Antall dager etter at en periode er slutt før målingen for perioden regnes som manglende.'}
                     </p>
                     {error('reporting_grace_days')}
@@ -264,7 +264,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                             <option key={owner.id} value={owner.id}>{owner.name}</option>
                         ))}
                     </select>
-                    <p id="kpi-owner-hint" className="mt-1 text-sm text-slate-500">
+                    <p id="kpi-owner-hint" className="mt-1 text-base text-slate-500">
                         {tr.field_owner_hint ?? 'Valgfritt. Uten egen ansvarlig er målets ansvarlige også ansvarlig for KPI-en.'}
                     </p>
                     {error('owner_user_id')}

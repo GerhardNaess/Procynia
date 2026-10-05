@@ -13,12 +13,12 @@ import { formatLongDate } from './objectiveStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 // A row action in a dense table: the warning colours, at the size of a badge.
-const ROW_WARNING_ACTION = `inline-flex items-center whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition ${WARNING_COLOURS}`;
+const ROW_WARNING_ACTION = `inline-flex items-center whitespace-nowrap rounded-full px-3 py-1.5 text-base font-semibold transition ${WARNING_COLOURS}`;
 
 function Detail({ label, children }) {
     return (
         <div>
-            <dt className="text-sm font-semibold text-slate-600">{label}</dt>
+            <dt className="text-base font-semibold text-slate-600">{label}</dt>
             <dd className="mt-1 text-base text-slate-900">{children}</dd>
         </div>
     );
@@ -32,14 +32,14 @@ function NextMeasurement({ kpi, tm }) {
     const schedule = kpi.schedule ?? {};
 
     if (! kpi.frequency) {
-        return tm.no_schedule ?? 'Ingen fast frekvens – registreres ved behov';
+        return tm.no_schedule ?? 'Ingen fast målefrekvens – registreres ved behov';
     }
 
     if (schedule.measurement_missing) {
         return (
             <span className="text-amber-800" data-testid="kpi-measurement-missing">
                 <span className="font-semibold">{(tm.missing ?? 'Måling mangler for :period').replace(':period', schedule.missing_label)}</span>
-                {schedule.missing_count_display && <span className="block text-sm">{schedule.missing_count_display}</span>}
+                {schedule.missing_count_display && <span className="block text-base">{schedule.missing_count_display}</span>}
             </span>
         );
     }
@@ -67,20 +67,22 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm }) {
         <section className={CARD} aria-labelledby="kpi-measurements-heading">
             <h2 id="kpi-measurements-heading" className="text-lg font-semibold text-slate-950">{tm.history_heading ?? 'Målehistorikk'}</h2>
             <p className="mt-1 text-base text-slate-600">
-                {tm.history_intro ?? 'Hver måling vurderes mot målet som gjaldt da den ble registrert. Korrigeringer og tilbaketrekkinger beholdes.'}
+                {tm.history_intro ?? 'Hver måling vurderes mot målverdien som gjaldt da den ble registrert. Korrigeringer og tilbaketrekkinger beholdes.'}
             </p>
 
             {measurements.length === 0 ? (
                 <p className="mt-4 text-base text-slate-500">{tm.history_empty ?? 'Ingen målinger er registrert ennå.'}</p>
             ) : (
-                <div className="mt-4 overflow-x-auto">
+                // relative: the header's screen-reader label is positioned, and would otherwise
+                // escape this scroll box and widen the whole page on a phone.
+                <div className="relative mt-4 overflow-x-auto">
                     <table className="w-full text-base" data-testid="kpi-measurements">
                         <thead>
-                            <tr className="border-b border-slate-200 text-left text-sm font-semibold text-slate-600">
+                            <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
                                 <th className="pb-3 pr-3">{tm.col_period ?? 'Periode'}</th>
                                 <th className="px-3 pb-3">{tm.col_value ?? 'Verdi'}</th>
                                 <th className="px-3 pb-3">{tm.col_result ?? 'Status da'}</th>
-                                <th className="px-3 pb-3">{tm.col_target ?? 'Mål da'}</th>
+                                <th className="px-3 pb-3">{tm.col_target ?? 'Målverdi da'}</th>
                                 <th className="px-3 pb-3">{tm.col_recorded ?? 'Registrert'}</th>
                                 <th className="px-3 pb-3">{tm.col_comment ?? 'Kommentar'}</th>
                                 <th className="pb-3 pl-3"><span className="sr-only">{tm.withdraw ?? 'Trekk tilbake'}</span></th>
@@ -99,10 +101,10 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm }) {
                                                     {row.value_display}
                                                 </span>
                                                 {row.state === 'superseded' && (
-                                                    <StatusBadge tone="slate" className="mt-1 !flex w-fit text-sm">{tm.state_superseded ?? 'Erstattet'}</StatusBadge>
+                                                    <StatusBadge tone="slate" className="mt-1 !flex w-fit">{tm.state_superseded ?? 'Erstattet'}</StatusBadge>
                                                 )}
                                                 {row.state === 'withdrawn' && (
-                                                    <StatusBadge tone="rose" className="mt-1 !flex w-fit text-sm">{tm.state_withdrawn ?? 'Tilbaketrukket'}</StatusBadge>
+                                                    <StatusBadge tone="rose" className="mt-1 !flex w-fit">{tm.state_withdrawn ?? 'Tilbaketrukket'}</StatusBadge>
                                                 )}
                                             </td>
                                             <td className="px-3 py-3">
@@ -111,12 +113,12 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm }) {
                                                 </StatusBadge>
                                             </td>
                                             <td className="whitespace-nowrap px-3 py-3">{row.target_display}</td>
-                                            <td className="px-3 py-3 text-sm">
+                                            <td className="px-3 py-3 text-base">
                                                 {(tm.recorded_by ?? ':date av :name')
                                                     .replace(':date', formatLongDate(row.recorded_at, locale))
                                                     .replace(':name', row.recorded_by_name ?? (tm.unknown_user ?? 'en tidligere bruker'))}
                                             </td>
-                                            <td className="min-w-[10rem] px-3 py-3 text-sm">
+                                            <td className="min-w-[10rem] px-3 py-3 text-base">
                                                 {row.comment && <p className="whitespace-pre-line">{row.comment}</p>}
                                                 {row.state === 'withdrawn' && (
                                                     <p className="mt-1 text-rose-700">
@@ -215,14 +217,14 @@ export default function KpiShow() {
 
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                        <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{tr.col_title ?? 'KPI'}</p>
+                        <p className="text-base font-semibold uppercase tracking-wide text-slate-500">{tr.col_title ?? 'KPI'}</p>
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{kpi.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
+                            <span className="text-base font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={KPI_STATUS_TONES[kpi.status] ?? 'slate'}>{statusLabels[kpi.status] ?? kpi.status}</StatusBadge>
                         </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         {permissions.can_measure && measurementForm && panel === null && (
                             <button type="button" onClick={() => setPanel('measure')} className={PRIMARY_ACTION}>{tm.register ?? 'Registrer måling'}</button>
                         )}
@@ -248,13 +250,13 @@ export default function KpiShow() {
                             {kpi.latest_value_display ? (
                                 <>
                                     <span className="whitespace-nowrap text-2xl font-semibold" data-testid="kpi-latest-value">{kpi.latest_value_display}</span>
-                                    <span className="block text-sm text-slate-500">{kpi.latest_period_label}</span>
+                                    <span className="block text-base text-slate-500">{kpi.latest_period_label}</span>
                                 </>
                             ) : (
                                 <span className="text-slate-500">{tm.not_measured_yet ?? 'Ingen gjeldende måling ennå.'}</span>
                             )}
                         </Detail>
-                        <Detail label={tm.result_now ?? 'Status mot dagens mål'}>
+                        <Detail label={tm.result_now ?? 'Dagens status'}>
                             <span data-testid="kpi-current-result">
                                 <StatusBadge tone={KPI_RESULT_TONES[kpi.result] ?? 'slate'}>{results[kpi.result] ?? kpi.result}</StatusBadge>
                             </span>
@@ -262,8 +264,8 @@ export default function KpiShow() {
                         <Detail label={tr.detail_target ?? 'Målverdi'}>
                             <span className="whitespace-nowrap font-semibold">{kpi.target_display}</span>
                         </Detail>
-                        <Detail label={tr.detail_frequency ?? 'Frekvens'}>
-                            {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast frekvens')}
+                        <Detail label={tr.detail_frequency ?? 'Målefrekvens'}>
+                            {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast målefrekvens')}
                         </Detail>
                         <Detail label={tm.next_period ?? 'Neste måling'}>
                             <NextMeasurement kpi={kpi} tm={tm} />
@@ -310,7 +312,7 @@ export default function KpiShow() {
                             <Detail label={tr.detail_deadline ?? 'Innrapporteringsfrist'}>{kpi.deadline_display}</Detail>
                             <Detail label={tr.detail_objective ?? 'Tilhørende mål'}>
                                 <Link href={objective.url} className="font-semibold text-violet-700 hover:text-violet-900">{objective.title}</Link>
-                                {objective.area_name && <span className="block text-sm text-slate-500">{objective.area_name}</span>}
+                                {objective.area_name && <span className="block text-base text-slate-500">{objective.area_name}</span>}
                             </Detail>
                         </dl>
                     </section>
