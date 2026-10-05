@@ -10,6 +10,7 @@ use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
+use App\Http\Controllers\App\GovernanceController;
 use App\Http\Controllers\App\HomeController;
 use App\Http\Controllers\App\ImprovementCaseContextController;
 use App\Http\Controllers\App\ImprovementCaseController;
@@ -185,6 +186,11 @@ Route::prefix('app')
         // The bid cockpit, unchanged, now under the module it belongs to. It was the home page
         // until Hjem became cross-module, which is why its path moved rather than its content.
         Route::get('/bid-status', [DashboardController::class, 'index'])->name('bid-status');
+
+        // Styring: the landing page of the arbeidsområde that groups Kvalitet, Risiko, Mål og KPI and
+        // Avvik og forbedringer. Deliberately not in route_modules — it belongs to no module, and the
+        // controller answers from the four modules' own entitlement and permission instead.
+        Route::get('/governance', GovernanceController::class)->name('governance');
 
         // Kvalitet. Every route here is named under `app.quality.`, which config/procynia_modules.php
         // maps to the `quality` module — so the write actions are entitlement-gated by the group's

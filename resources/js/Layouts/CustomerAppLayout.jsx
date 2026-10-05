@@ -4,7 +4,7 @@ import ActionDialog from '../Components/App/ActionDialog';
 import ControlHint from '../Components/App/ControlHint';
 import NotificationBell from '../Components/App/NotificationBell';
 import ModuleSidebar from '../Components/App/ModuleSidebar';
-import { activeModuleKey } from '../Support/appModules';
+import { activeModuleKey, activeWorkspaceKey } from '../Support/appModules';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
 
@@ -254,6 +254,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'wiki';
         }
 
+        // Styring's own landing page. Its modules keep their own areas below, so a page inside
+        // Kvalitet is still `quality` — and Styring is lit through appModules.activeWorkspaceKey.
+        if (pathname === '/app/governance') {
+            return 'governance';
+        }
+
         if (pathname.startsWith('/app/quality')) {
             return 'quality';
         }
@@ -290,7 +296,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
      * Kildedokumenter, Kjøringer, Wiki-sider and Grafvisning have to Wiki. Routes, labels and
      * permissions are exactly what they were; only the place they are named has moved.
      */
-    const activeModule = activeModuleKey(activeMainArea);
+    const activeModule = activeMainArea === 'governance' ? 'governance' : activeModuleKey(activeMainArea);
+    const activeWorkspace = activeWorkspaceKey(activeMainArea);
 
     const toggleSidebarCollapsed = () => {
         setSidebarCollapsed((current) => {
@@ -792,7 +799,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                         aria-haspopup="menu"
                                         aria-expanded={isUserMenuOpen}
                                     >
-                                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-700">
+                                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-semibold text-slate-700">
                                             {userInitial}
                                         </span>
                                         <div className="min-w-0">
@@ -821,9 +828,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                         <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
                                             <div className="space-y-1 border-b border-slate-200 px-4 py-4">
                                                 <div className="text-base font-semibold text-slate-950">{userName}</div>
-                                                <div className="break-words text-sm text-slate-600">{userEmail}</div>
+                                                <div className="break-words text-base text-slate-600">{userEmail}</div>
                                                 {userBidRoleLabel ? (
-                                                    <div className="pt-1 text-sm font-medium uppercase tracking-[0.12em] text-slate-600">
+                                                    <div className="pt-1 text-base font-medium text-slate-600">
                                                         {userBidRoleLabel}
                                                     </div>
                                                 ) : null}
@@ -923,6 +930,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 activeModules={activeModules}
                                 permissions={userPermissions}
                                 activeKey={activeModule}
+                                activeWorkspace={activeWorkspace}
                                 collapsed={sidebarCollapsed}
                                 onToggleCollapsed={toggleSidebarCollapsed}
                             />
@@ -945,7 +953,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 disabledHint={aiCaseNavigationHint}
                             />
                             {aiCaseNavigationHint !== '' ? (
-                                <p className="mt-2 px-1 pb-1 text-sm leading-6 text-slate-600">
+                                <p className="mt-2 px-1 pb-1 text-base leading-6 text-slate-600">
                                     {aiCaseNavigationHint}
                                 </p>
                             ) : null}
@@ -983,7 +991,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 </div>
 
                 <footer className="bg-transparent">
-                    <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-sm text-slate-500 sm:px-6 lg:px-8">
+                    <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-base text-slate-500 sm:px-6 lg:px-8">
                         {translations.frontend.customer_footer}
                     </div>
                 </footer>
@@ -1013,14 +1021,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                         type="button"
                         onClick={deleteAllUnreadNotifications}
                         data-testid="notification-delete-unread-confirm"
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-base font-semibold text-white shadow-sm transition hover:bg-rose-700"
                     >
                         Slett varsler
                     </button>
                     <button
                         type="button"
                         onClick={() => setIsDeleteUnreadOpen(false)}
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                     >
                         Avbryt
                     </button>

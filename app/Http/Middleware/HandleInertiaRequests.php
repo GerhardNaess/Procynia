@@ -123,6 +123,7 @@ class HandleInertiaRequests extends Middleware
                     'history' => __('procynia.navigation.history'),
                 ],
                 'home' => __('procynia.home'),
+                'governance' => __('procynia.governance'),
                 'dashboard' => __('procynia.dashboard'),
                 'notices' => __('procynia.notices'),
                 'ai' => __('procynia.ai'),

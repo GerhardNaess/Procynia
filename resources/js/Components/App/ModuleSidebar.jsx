@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { partitionModules } from '../../Support/appModules';
+import { railEntries } from '../../Support/appModules';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -15,6 +15,8 @@ function classNames(...values) {
 const MODULE_ICONS = {
     home: 'M3.5 8.5 10 3.5l6.5 5v7a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-7Z M8 16.5v-4.5h4v4.5',
     tenders: 'M5.5 2.5h6l3.5 3.5v11a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z M11 2.5V6h3.5 M7.5 10.5h5 M7.5 13.5h5',
+    // Styring: a grid of areas — the workspace that holds several modules, not any one of them.
+    governance: 'M4.5 3.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z M12.5 3.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z M4.5 11.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z M12.5 11.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z',
     wiki: 'M4 4.5a1.5 1.5 0 0 1 1.5-1.5H15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5.5A1.5 1.5 0 0 1 4 14.5v-10Z M4 14.5A1.5 1.5 0 0 1 5.5 13H16 M7.5 6.5h5',
     quality: 'M10 2.5 16.5 5v5c0 3.5-2.6 6.2-6.5 7.5C6.1 16.2 3.5 13.5 3.5 10V5L10 2.5Z M7.5 10 9.3 11.8 12.8 8.3',
     risk: 'M10 3 17.5 16.5H2.5L10 3Z M10 8v3.5 M10 14h.01',
@@ -102,6 +104,8 @@ function CollapseIcon({ collapsed }) {
  * What the rail deliberately does not carry is the level below a module. Wiki never put its work
  * areas here, and Anbud nesting its four under "Anbud" made one module look structurally unlike
  * every other. The areas live in the header's module navigation instead, where Wiki's always were.
+ * The one nesting the rail does carry runs the other way — a level above modules: Styring groups
+ * Kvalitet, Risiko, Mål og KPI and Avvik og forbedringer, which are modules in their own right.
  *
  * Collapsing is a desktop-only affordance, and it is done in CSS rather than by branching on a
  * measured viewport. Every label stays in the markup; `lg:sr-only` is what takes it out of the
@@ -110,10 +114,10 @@ function CollapseIcon({ collapsed }) {
  * page and must stay fully legible — it is the only module navigation there — so the collapse
  * control itself is hidden and the collapsed classes simply do not apply.
  */
-export default function ModuleSidebar({ modules = {}, activeModules = [], permissions = [], activeKey = null, collapsed = false, onToggleCollapsed = null }) {
-    // `groups.not_permitted` is deliberately never rendered — a module this person holds no
-    // permission in is not dimmed, it is simply not theirs. See appModules.moduleAvailability.
-    const groups = partitionModules(activeModules, permissions);
+export default function ModuleSidebar({ modules = {}, activeModules = [], permissions = [], activeKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null }) {
+    // A module this person holds no permission in is deliberately never rendered — it is not
+    // dimmed, it is simply not theirs. See appModules.moduleAvailability.
+    const groups = railEntries(activeModules, permissions);
     const plannedHint = modules.planned_hint ?? 'Ikke tilgjengelig ennå';
     const notOrderedHint = modules.not_ordered_hint ?? 'Ikke bestilt — kan bestilles under Abonnement';
     const toggleLabel = collapsed
@@ -136,7 +140,7 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
             <p
                 data-testid={testId}
                 className={classNames(
-                    'mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400',
+                    'mt-5 mb-1 px-3 text-base font-semibold text-slate-500',
                     collapsed ? 'lg:sr-only' : '',
                 )}
             >
@@ -168,6 +172,109 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
         </>
     ));
 
+    const renderLink = (entry, isActive) => {
+        const label = entry.label(modules);
+
+        return (
+            <Link
+                href={entry.href}
+                data-testid={`module-${entry.key}`}
+                aria-current={isActive ? 'page' : undefined}
+                title={collapsed ? label : undefined}
+                className={classNames(
+                    rowClass,
+                    'text-base font-medium transition',
+                    isActive
+                        ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                )}
+            >
+                <ModuleIcon moduleKey={entry.key} />
+                <span className={labelClass}>{label}</span>
+            </Link>
+        );
+    };
+
+    /**
+     * An arbeidsområde and the modules of it this person can open — never the others.
+     *
+     * The workspace row is a link to its own landing page. It carries the pill only there; inside
+     * one of its modules it is marked as the place you are in (violet, semibold, `data-active`)
+     * while the module below carries the pill and `aria-current="page"` — one current page, and a
+     * parent that is plainly the one it belongs to. The children are always listed: there is
+     * nothing to unfold, so nothing can be hidden on a phone.
+     *
+     * Children are indented under a guide line in the full rail and drop their icons there; the
+     * hierarchy comes from position and the line, not from shrinking the text. Collapsed to icons,
+     * the indentation goes and each child is its own icon, as every other module is.
+     */
+    const renderWorkspace = (workspace) => {
+        const label = workspace.label(modules);
+        const onLanding = activeKey === workspace.key;
+        const inside = activeWorkspace === workspace.key && ! onLanding;
+
+        return (
+            <>
+                <Link
+                    href={workspace.href}
+                    data-testid={`module-${workspace.key}`}
+                    data-active={activeWorkspace === workspace.key ? 'true' : 'false'}
+                    aria-current={onLanding ? 'page' : undefined}
+                    title={collapsed ? label : undefined}
+                    className={classNames(
+                        rowClass,
+                        'text-base transition',
+                        onLanding
+                            ? 'bg-violet-50 font-semibold text-violet-700 ring-1 ring-inset ring-violet-200'
+                            : inside
+                                ? 'font-semibold text-violet-700 hover:bg-slate-100'
+                                : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                    )}
+                >
+                    <ModuleIcon moduleKey={workspace.key} />
+                    <span className={labelClass}>{label}</span>
+                </Link>
+
+                <ul
+                    data-testid={`module-${workspace.key}-children`}
+                    className={classNames(
+                        'mt-0.5 ml-[1.375rem] space-y-0.5 border-l border-slate-200 pl-2',
+                        collapsed ? 'lg:ml-0 lg:border-l-0 lg:pl-0' : '',
+                    )}
+                >
+                    {workspace.children.map((child) => {
+                        const isActive = activeKey === child.key;
+                        const childLabel = child.label(modules);
+
+                        return (
+                            <li key={child.key}>
+                                <Link
+                                    href={child.href}
+                                    data-testid={`module-${child.key}`}
+                                    aria-current={isActive ? 'page' : undefined}
+                                    title={collapsed ? childLabel : undefined}
+                                    className={classNames(
+                                        rowClass,
+                                        'text-base font-medium transition',
+                                        isActive
+                                            ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                                    )}
+                                >
+                                    <ModuleIcon
+                                        moduleKey={child.key}
+                                        className={classNames('h-5 w-5 shrink-0', collapsed ? 'hidden lg:block' : 'hidden')}
+                                    />
+                                    <span className={labelClass}>{childLabel}</span>
+                                </Link>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </>
+        );
+    };
+
     return (
         <nav
             data-testid="module-sidebar"
@@ -176,31 +283,11 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
             className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
         >
             <ul className="space-y-0.5">
-                {groups.active.map((module) => {
-                    const isActive = activeKey === module.key;
-                    const label = module.label(modules);
-
-                    return (
-                        <li key={module.key}>
-                            <Link
-                                href={module.href}
-                                data-testid={`module-${module.key}`}
-                                aria-current={isActive ? 'page' : undefined}
-                                title={collapsed ? label : undefined}
-                                className={classNames(
-                                    rowClass,
-                                    'text-base font-medium transition',
-                                    isActive
-                                        ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                )}
-                            >
-                                <ModuleIcon moduleKey={module.key} />
-                                <span className={labelClass}>{label}</span>
-                            </Link>
-                        </li>
-                    );
-                })}
+                {groups.entries.map((entry) => (
+                    <li key={entry.key}>
+                        {entry.children ? renderWorkspace(entry) : renderLink(entry, activeKey === entry.key)}
+                    </li>
+                ))}
             </ul>
 
             {renderUnavailableGroup(groups.not_ordered, {

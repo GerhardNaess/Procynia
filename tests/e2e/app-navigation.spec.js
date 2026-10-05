@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { loginAs, USER } from './helpers/auth.js';
+import { loginAs, SYSTEM_OWNER, USER } from './helpers/auth.js';
+import { DESKTOP, PHONE, sidewaysOverflow } from './helpers/readability.js';
+import { tinker } from './helpers/risk.js';
 
 test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);
@@ -32,8 +34,10 @@ test('Anbud and Wiki have the same navigation shape', async ({ page }) => {
 
     const rail = page.getByTestId('module-sidebar');
 
-    // The rail is a module picker: no module nests a second level inside it.
-    expect(await rail.locator('ul ul').count()).toBe(0);
+    // No module nests its work areas in the rail. The one nested list is Styring's, a level
+    // above modules rather than below one.
+    await expect(rail.locator('ul ul')).toHaveCount(1);
+    await expect(rail.locator('ul ul')).toHaveAttribute('data-testid', 'module-governance-children');
     await expect(rail.locator('[aria-current="page"]')).toHaveText('Anbud');
 
     await expect(page.getByTestId('module-navigation').locator('a, span'))
@@ -166,21 +170,28 @@ test('regular customer user is blocked from the billing page', async ({ page }) 
  * the selected module stays obviously selected, the planned modules stay obviously inert, and a
  * person who can no longer read a label can still find out what an icon is.
  */
-test('the rail lists the modules in product order', async ({ page }) => {
+test('the rail lists the workspaces in product order, with Styring holding what this user can open', async ({ page }) => {
     await page.goto('/app/dashboard');
 
     const rail = page.getByTestId('module-sidebar');
 
-    expect(await labels(rail.locator('ul').first().locator('a')))
-        .toEqual(['Hjem', 'Wiki', 'Anbud', 'Kvalitet']);
+    expect(await labels(rail.locator(':scope > ul').first().locator(':scope > li > a')))
+        .toEqual(['Hjem', 'Wiki', 'Anbud', 'Styring']);
+    // This user holds quality.view and none of the other three, so Styring holds Kvalitet only —
+    // no dimmed or empty rows for the modules the virksomhet has but this person was not given.
+    expect(await labels(page.getByTestId('module-governance-children').locator('a'))).toEqual(['Kvalitet']);
+    for (const hidden of ['module-risk', 'module-objectives', 'module-improvements']) {
+        await expect(page.getByTestId(hidden)).toHaveCount(0);
+    }
 });
 
-test('each of the four available modules is reachable from the rail', async ({ page }) => {
+test('each of the available modules is reachable from the rail', async ({ page }) => {
     await page.goto('/app/dashboard');
 
     for (const [key, label, url] of [
         ['module-wiki', 'Wiki', /\/app\/wiki/],
         ['module-tenders', 'Anbud', /\/app\/notices/],
+        ['module-governance', 'Styring', /\/app\/governance$/],
         ['module-quality', 'Kvalitet', /\/app\/quality/],
         ['module-home', 'Hjem', /\/app\/dashboard/],
     ]) {
@@ -278,4 +289,147 @@ test('a phone never gets a collapsed rail, and never gets a sideways scrollbar',
     );
 
     expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/**
+ * Styring: an arbeidsområde over Kvalitet, Risiko, Mål og KPI and Avvik og forbedringer.
+ *
+ * It is derived from the four modules' own entitlement and permission, so the checks below change
+ * the E2E user's roles (Tests\Support\NavigationE2EFixture) and look at what the rail and the
+ * landing page then offer — never more than the modules themselves would.
+ */
+test.describe('Styring', () => {
+    const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
+
+    test.afterEach(async () => {
+        await tinker(`\\Tests\\Support\\NavigationE2EFixture::cleanup('${suffix}');`);
+    });
+
+    const children = async (page) => labels(page.getByTestId('module-governance-children').locator('a'));
+
+    test('a user given Risiko as well sees both, and the landing page offers the same two', async ({ page }) => {
+        await tinker(`\\Tests\\Support\\NavigationE2EFixture::grant('${suffix}', ['risk.view']);`);
+        await page.goto('/app/governance');
+
+        expect(await children(page)).toEqual(['Kvalitet', 'Risiko']);
+        expect(await labels(page.getByTestId('governance-module-cards').locator('h2'))).toEqual(['Kvalitet', 'Risiko']);
+
+        // Navigation, not a dashboard: no numbers on the cards.
+        const cards = await page.getByTestId('governance-module-cards').innerText();
+        expect(cards).not.toMatch(/\d/);
+
+        await page.getByTestId('governance-module-risk').click();
+        await expect(page).toHaveURL(/\/app\/risk$/);
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Risiko');
+    });
+
+    test('Styring is lit as the workspace, and the module as the page, on index and detail pages alike', async ({ page }) => {
+        const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\NavigationE2EFixture::improvementCase('${suffix}'));`);
+        const { case_id: caseId } = JSON.parse(stdout.match(/\{.*\}/)[0]);
+        const rail = page.getByTestId('module-sidebar');
+
+        for (const [url, current] of [
+            ['/app/quality', 'Kvalitet'],
+            ['/app/quality?tab=processes', 'Kvalitet'],
+            ['/app/improvements', 'Avvik og forbedringer'],
+            [`/app/improvements/${caseId}`, 'Avvik og forbedringer'],
+        ]) {
+            await page.goto(url);
+            await expect(rail.locator('[aria-current="page"]'), url).toHaveCount(1);
+            await expect(rail.locator('[aria-current="page"]'), url).toHaveText(current);
+            await expect(page.getByTestId('module-governance'), url).toHaveAttribute('data-active', 'true');
+            await expect(page.getByTestId('module-governance'), url).toHaveClass(/text-violet-700/);
+        }
+
+        // On its own page Styring is the current page; elsewhere it is not lit at all.
+        await page.goto('/app/governance');
+        await expect(rail.locator('[aria-current="page"]')).toHaveAttribute('data-testid', 'module-governance');
+        await page.goto('/app/wiki');
+        await expect(page.getByTestId('module-governance')).toHaveAttribute('data-active', 'false');
+    });
+
+    test('on a phone Styring and its modules are all there, reachable, and nothing scrolls sideways', async ({ page }) => {
+        await tinker(`\\Tests\\Support\\NavigationE2EFixture::grant('${suffix}', ['objective.view', 'improvement.view']);`);
+        await page.setViewportSize(PHONE);
+        await page.goto('/app/objectives');
+
+        await expect(page.getByTestId('module-governance')).toBeVisible();
+        await expect(page.getByTestId('module-governance')).toHaveAttribute('data-active', 'true');
+        expect(await children(page)).toEqual(['Kvalitet', 'Mål og KPI', 'Avvik og forbedringer']);
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Mål og KPI');
+        expect(await sidewaysOverflow(page)).toEqual([]);
+
+        await page.getByTestId('module-improvements').click();
+        await expect(page).toHaveURL(/\/app\/improvements$/);
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Avvik og forbedringer');
+
+        await page.getByTestId('module-governance').click();
+        await expect(page).toHaveURL(/\/app\/governance$/);
+        expect(await sidewaysOverflow(page)).toEqual([]);
+        await page.screenshot({ path: 'test-results/navigation-governance-phone.png', fullPage: true });
+    });
+});
+
+test('System Owner sees all four under Styring, and they keep their own URLs', async ({ page }) => {
+    await page.context().clearCookies();
+    await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
+    await page.goto('/app/governance');
+
+    expect(await labels(page.getByTestId('module-governance-children').locator('a')))
+        .toEqual(['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer']);
+
+    for (const [key, url] of [
+        ['quality', /\/app\/quality$/],
+        ['risk', /\/app\/risk$/],
+        ['objectives', /\/app\/objectives$/],
+        ['improvements', /\/app\/improvements$/],
+    ]) {
+        await page.goto('/app/governance');
+        await page.getByTestId(`governance-module-${key}`).click();
+        await expect(page).toHaveURL(url);
+    }
+
+    await page.goto('/app/governance');
+    await page.screenshot({ path: 'test-results/navigation-governance-desktop.png', fullPage: true });
+});
+
+test('no visible text in the rail or the app shell is below 16 px', async ({ page }) => {
+    for (const size of [DESKTOP, PHONE]) {
+        await page.setViewportSize(size);
+        await page.goto('/app/quality');
+
+        const small = await page.evaluate(() => {
+            const roots = [document.querySelector('[data-testid="module-rail"]'), document.querySelector('header'), document.querySelector('footer')].filter(Boolean);
+            const found = [];
+
+            for (const root of roots) {
+                const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+
+                while (walker.nextNode()) {
+                    const text = walker.currentNode.textContent.trim();
+                    const element = walker.currentNode.parentElement;
+
+                    if (! text || ! element || element.closest('[aria-hidden="true"], .sr-only')) {
+                        continue;
+                    }
+
+                    const rect = element.getBoundingClientRect();
+
+                    if (rect.width === 0 && rect.height === 0) {
+                        continue;
+                    }
+
+                    const fontSize = parseFloat(getComputedStyle(element).fontSize);
+
+                    if (fontSize < 16) {
+                        found.push(`${fontSize}px «${text.slice(0, 40)}»`);
+                    }
+                }
+            }
+
+            return found;
+        });
+
+        expect(small, `${size.width}px`).toEqual([]);
+    }
 });

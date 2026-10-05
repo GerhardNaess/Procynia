@@ -28,6 +28,9 @@
  * the product, and neither is true of a module the virksomhet owns and simply has not given this
  * person. Entries that declare no `permission` are untouched by this, which is why adding it to
  * one module changes nothing about the others.
+ *
+ * `workspace` puts a module under an arbeidsområde on the rail (see APP_WORKSPACES). It changes
+ * where the module is listed, never whether it is: all three gates above still decide that.
  */
 export const APP_MODULES = [
     {
@@ -63,6 +66,8 @@ export const APP_MODULES = [
         key: 'quality',
         href: '/app/quality',
         built: true,
+        // Reached through Styring, not as a module of its own on the rail. See APP_WORKSPACES.
+        workspace: 'governance',
         module: 'quality',
         // Kvalitet is the first module gated by the customer's own roles. QualityController
         // refuses the page without this key, so the rail must not offer it either.
@@ -74,6 +79,7 @@ export const APP_MODULES = [
         key: 'risk',
         href: '/app/risk',
         built: true,
+        workspace: 'governance',
         module: 'risk',
         // RiskController refuses the page without this key. Which risks the person then sees is a
         // second, server-side question (fagområder) the rail never answers.
@@ -85,6 +91,7 @@ export const APP_MODULES = [
         key: 'objectives',
         href: '/app/objectives',
         built: true,
+        workspace: 'governance',
         module: 'objectives',
         // ObjectiveController refuses the page without this key. Which objectives the person then
         // sees is a second, server-side question (fagområder) the rail never answers.
@@ -96,6 +103,7 @@ export const APP_MODULES = [
         key: 'improvements',
         href: '/app/improvements',
         built: true,
+        workspace: 'governance',
         module: 'improvements',
         // ImprovementCaseController refuses the page without this key. Which cases the person then
         // sees is a second, server-side question (fagområder) the rail never answers.
@@ -163,6 +171,70 @@ export function partitionModules(activeModules = [], permissions = []) {
     }
 
     return groups;
+}
+
+/**
+ * Arbeidsområder: what the rail groups modules under, so it names where a person works rather than
+ * listing every internal module at the top level.
+ *
+ * Styring holds Kvalitet, Risiko, Mål og KPI and Avvik og forbedringer. It is not a module: no
+ * package grants it, no permission gates it, and it owns no data. It is shown exactly when at least
+ * one of its modules is `active` for this person, and it shows only those — so it can never offer
+ * more than the modules themselves already would. A module in the workspace that is not ordered
+ * stays in "Ikke bestilt" with the others; one the person has no permission in stays off the rail.
+ */
+export const APP_WORKSPACES = [
+    {
+        key: 'governance',
+        href: '/app/governance',
+        label: (m) => m.governance ?? 'Styring',
+        areas: ['governance'],
+    },
+];
+
+/**
+ * The rail's top level, in render order: modules and workspaces, each workspace carrying the
+ * modules of its own that are `active`. A workspace takes the place of its first module in the
+ * catalog, which keeps the rail in product order; one with no active module is left out entirely.
+ */
+export function railEntries(activeModules = [], permissions = []) {
+    const groups = partitionModules(activeModules, permissions);
+    const entries = [];
+
+    for (const module of groups.active) {
+        if (! module.workspace) {
+            entries.push(module);
+            continue;
+        }
+
+        let workspace = entries.find((entry) => entry.key === module.workspace);
+
+        if (! workspace) {
+            workspace = { ...APP_WORKSPACES.find((candidate) => candidate.key === module.workspace), children: [] };
+            entries.push(workspace);
+        }
+
+        workspace.children.push(module);
+    }
+
+    return { entries, not_ordered: groups.not_ordered, planned: groups.planned };
+}
+
+/**
+ * Which workspace the current area sits in — its own landing page, or any page of one of its
+ * modules. This is what keeps Styring lit on a detail, create or edit page, not only on an index:
+ * the area is resolved from the path prefix, and the workspace from the area.
+ */
+export function activeWorkspaceKey(activeMainArea) {
+    const own = APP_WORKSPACES.find((workspace) => workspace.areas.includes(activeMainArea));
+
+    if (own) {
+        return own.key;
+    }
+
+    const module = APP_MODULES.find((candidate) => (candidate.areas ?? []).includes(activeMainArea));
+
+    return module?.workspace ?? null;
 }
 
 /**

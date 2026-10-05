@@ -723,6 +723,17 @@ return [
         'previous' => 'Previous',
         'next' => 'Next',
     ],
+    'governance' => [
+        'page_title' => 'Governance',
+        'intro' => 'Governance brings the organisation\'s processes, risks, objectives and improvement work together in one place. Choose the area you want to work in.',
+        'open_module' => 'Open :module',
+        'descriptions' => [
+            'quality' => 'Processes and activities that describe how the organisation works.',
+            'risk' => 'Identify, assess and follow up risk.',
+            'objectives' => 'Set objectives, follow results and see what needs attention.',
+            'improvements' => 'Register, handle and follow up deviations and improvement opportunities.',
+        ],
+    ],
     'home' => [
         'page_title' => 'Home',
         'greeting' => 'Hi, :name',
@@ -834,6 +845,7 @@ return [
             'home' => 'Home',
             'tenders' => 'Tenders',
             'wiki' => 'Wiki',
+            'governance' => 'Governance',
             'quality' => 'Quality',
             'risk' => 'Risk',
             'objectives' => 'Objectives & KPIs',

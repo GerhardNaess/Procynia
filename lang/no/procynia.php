@@ -725,6 +725,17 @@ return [
         'previous' => 'Forrige',
         'next' => 'Neste',
     ],
+    'governance' => [
+        'page_title' => 'Styring',
+        'intro' => 'Styring samler virksomhetens prosesser, risiko, mål og forbedringsarbeid på ett sted. Velg området du vil arbeide med.',
+        'open_module' => 'Åpne :module',
+        'descriptions' => [
+            'quality' => 'Prosesser og aktiviteter som beskriver hvordan virksomheten arbeider.',
+            'risk' => 'Identifiser, vurder og følg opp risiko.',
+            'objectives' => 'Sett mål, følg resultater og se hva som trenger oppmerksomhet.',
+            'improvements' => 'Registrer, behandle og følg opp avvik og forbedringsmuligheter.',
+        ],
+    ],
     'home' => [
         'page_title' => 'Hjem',
         'greeting' => 'Hei, :name',
@@ -836,6 +847,7 @@ return [
             'home' => 'Hjem',
             'tenders' => 'Anbud',
             'wiki' => 'Wiki',
+            'governance' => 'Styring',
             'quality' => 'Kvalitet',
             'risk' => 'Risiko',
             'objectives' => 'Mål og KPI',
