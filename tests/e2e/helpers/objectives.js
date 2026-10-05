@@ -60,3 +60,18 @@ export async function seedObjectiveEditor(suffix) {
 
     return JSON.parse(match[0]);
 }
+
+/**
+ * Gives the E2E user a role that reads, edits, measures and deletes objectives in a fresh area, and
+ * returns the area's name.
+ */
+export async function seedObjectiveMeasurer(suffix) {
+    const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::seedMeasurer('${suffix}'));`);
+    const match = stdout.match(/\{.*\}/);
+
+    if (! match) {
+        throw new Error(`Seeding failed: ${stdout}`);
+    }
+
+    return JSON.parse(match[0]);
+}

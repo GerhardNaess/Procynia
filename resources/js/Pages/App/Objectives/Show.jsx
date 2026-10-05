@@ -28,6 +28,7 @@ export default function ObjectiveShow() {
         owner_options: ownerOptions = [],
         kpis = [],
         kpi_form_options: kpiFormOptions = null,
+        kpi_indicator: kpiIndicator = null,
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
@@ -176,6 +177,8 @@ export default function ObjectiveShow() {
                 <ObjectiveKpis
                     objective={objective}
                     kpis={kpis}
+                    indicator={kpiIndicator}
+                    results={tr.measurement?.results ?? {}}
                     formOptions={kpiFormOptions}
                     canCreate={Boolean(permissions.can_create_kpi)}
                     tr={tk}

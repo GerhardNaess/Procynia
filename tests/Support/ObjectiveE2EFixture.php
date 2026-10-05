@@ -5,8 +5,10 @@ namespace Tests\Support;
 use App\Models\BusinessArea;
 use App\Models\CustomerRole;
 use App\Models\Kpi;
+use App\Models\KpiMeasurement;
 use App\Models\KpiStatusChange;
 use App\Models\Objective;
+use App\Models\ObjectiveStatusChange;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
@@ -104,9 +106,38 @@ class ObjectiveE2EFixture
     }
 
     /**
+     * For the measurement spec: one area and a role that reads, edits, measures and deletes there,
+     * handed to the E2E user. The spec creates the objective, the KPI and the measurements itself.
+     *
+     * @return array{area_name: string}
+     */
+    public static function seedMeasurer(string $suffix): array
+    {
+        $customerId = self::customerId();
+        $user = User::query()->where('email', self::USER_EMAIL)->firstOrFail();
+        $name = fn (string $label): string => self::PREFIX.' '.strtoupper($suffix).' '.$label;
+
+        return DB::transaction(function () use ($customerId, $user, $name): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Måleområde')]);
+
+            $role = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('Måler'), 'is_active' => true]);
+            $role->syncPermissions([
+                CustomerPermissionCatalog::OBJECTIVE_VIEW,
+                CustomerPermissionCatalog::OBJECTIVE_EDIT,
+                CustomerPermissionCatalog::OBJECTIVE_MEASURE,
+                CustomerPermissionCatalog::OBJECTIVE_DELETE,
+            ]);
+            $role->syncBusinessAreas(false, [$area->id]);
+            $user->customerRoles()->attach($role->id, ['customer_id' => $customerId]);
+
+            return ['area_name' => $area->name];
+        });
+    }
+
+    /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{areas: int, roles: int, objectives: int, kpis: int, kpi_status_changes: int}
+     * @return array{areas: int, roles: int, objectives: int, kpis: int, kpi_measurements: int, kpi_status_changes: int, objective_status_changes: int}
      */
     public static function remaining(string $suffix): array
     {
@@ -122,7 +153,9 @@ class ObjectiveE2EFixture
             'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'objectives' => $objectiveIds->count(),
             'kpis' => $kpiIds->count(),
+            'kpi_measurements' => KpiMeasurement::query()->whereIn('kpi_id', $kpiIds)->count(),
             'kpi_status_changes' => KpiStatusChange::query()->whereIn('kpi_id', $kpiIds)->count(),
+            'objective_status_changes' => ObjectiveStatusChange::query()->whereIn('objective_id', $objectiveIds)->count(),
         ];
     }
 
@@ -142,7 +175,8 @@ class ObjectiveE2EFixture
             $areaIds = $sweepOnly(BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->pluck('id');
 
             // A KPI carrying the marker goes even if a spec put it under someone else's objective;
-            // the rest go with their objectives below, and their history with them.
+            // the rest go with their objectives below, and their history with them. A bulk delete,
+            // past the models: measurement history goes with its KPI through the database cascade.
             $sweepOnly(Kpi::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
 
             // An objective is the run's when its title carries the marker, or when it lives in one of

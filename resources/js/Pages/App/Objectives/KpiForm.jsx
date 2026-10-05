@@ -32,8 +32,11 @@ export function initialKpiData(kpi, options = {}) {
  * field that does not belong is emptied, so the server never receives it. The bounds, tolerance
  * and owner are checked again on save. There is no status field: a KPI is created active and
  * leaves that state only by being retired.
+ *
+ * Once the KPI has measurements its unit, unit label and currency are locked (unitLocked): the
+ * fields show what they are but cannot change, and the server refuses a change all the same.
  */
-export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr }) {
+export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, unitLocked = false }) {
     const unitLabels = tr.units ?? {};
     const frequencyLabels = tr.frequencies ?? {};
     const labelledUnits = options.labelled_units ?? ['count', 'number'];
@@ -95,6 +98,8 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr }) 
                         id="kpi-unit"
                         required
                         aria-required="true"
+                        disabled={unitLocked}
+                        aria-describedby={unitLocked ? 'kpi-unit-locked-hint' : undefined}
                         value={form.data.unit}
                         onChange={(event) => changeUnit(event.target.value)}
                         className={`mt-1 ${INPUT}`}
@@ -104,6 +109,11 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr }) 
                             <option key={unit} value={unit}>{unitLabels[unit] ?? unit}</option>
                         ))}
                     </select>
+                    {unitLocked && (
+                        <p id="kpi-unit-locked-hint" className="mt-1 text-sm text-slate-500">
+                            {tr.unit_locked_hint ?? 'Enheten er låst fordi KPI-en har målinger.'}
+                        </p>
+                    )}
                     {error('unit')}
                 </div>
 
@@ -113,6 +123,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr }) 
                         <input
                             id="kpi-unit-label"
                             type="text"
+                            disabled={unitLocked}
                             aria-describedby="kpi-unit-label-hint"
                             value={form.data.unit_label}
                             onChange={(event) => form.setData('unit_label', event.target.value)}
@@ -131,6 +142,7 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr }) 
                         <input
                             id="kpi-currency-code"
                             type="text"
+                            disabled={unitLocked}
                             required
                             aria-required="true"
                             maxLength={3}

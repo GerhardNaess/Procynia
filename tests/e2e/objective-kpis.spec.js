@@ -11,13 +11,15 @@ test.afterAll(async () => {
     const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::remaining('${suffix}'));`);
     const remaining = JSON.parse(stdout.match(/\{.*\}/)[0]);
 
-    expect(remaining).toEqual({ areas: 0, roles: 0, objectives: 0, kpis: 0, kpi_status_changes: 0 });
+    expect(remaining).toEqual({
+        areas: 0, roles: 0, objectives: 0, kpis: 0, kpi_measurements: 0, kpi_status_changes: 0, objective_status_changes: 0,
+    });
 });
 
 /**
  * A KPI, end to end, by an ordinary user with a role for one area: create an objective, give it a
  * KPI, open it, edit it, retire it and reopen it (reading the history), delete it, delete the
- * objective. No measurements exist yet, and the pages show none.
+ * objective. The role has no objective.measure, so no measurement is offered.
  */
 test('a KPI is created under an objective, edited, retired, reopened and deleted', async ({ page }) => {
     test.setTimeout(120_000);
@@ -66,14 +68,17 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await expect(page.getByText('KPI-en er registrert.')).toBeVisible();
     await expect(page.getByRole('heading', { name: kpiTitle, level: 1 })).toBeVisible();
     const details = page.getByTestId('kpi-details');
-    await expect(details).toContainText('≥ 99,5 %');
+    const result = page.getByTestId('kpi-result');
+    await expect(result).toContainText('≥ 99,5 %');
+    await expect(result).toContainText('Månedlig');
+    await expect(result).toContainText('E2E User (målets ansvarlig)');
+    await expect(result).toContainText('Ikke målt');
     await expect(details).toContainText('1 %');
     await expect(details).toContainText('Prosent');
-    await expect(details).toContainText('Månedlig');
     await expect(details).toContainText('7 dager etter at perioden er slutt');
-    await expect(details).toContainText('E2E User (målets ansvarlig)');
     await expect(details).toContainText(objectiveTitle);
-    await expect(page.getByText('Registrer måling')).toHaveCount(0);
+    // This role has no objective.measure.
+    await expect(page.getByRole('button', { name: 'Registrer måling' })).toHaveCount(0);
     await expect(page.getByTestId('kpi-history')).toHaveCount(0);
     await page.screenshot({ path: 'test-results/kpis-02-show.png', fullPage: true });
 
@@ -81,10 +86,9 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await page.goto(objectiveUrl);
     const row = page.getByTestId('objective-kpis').locator('tbody tr', { hasText: kpiTitle });
     await expect(row).toContainText('≥ 99,5 %');
-    await expect(row).toContainText('Prosent');
     await expect(row).toContainText('Månedlig');
     await expect(row).toContainText('E2E User (målets ansvarlig)');
-    await expect(row).toContainText('Aktiv');
+    await expect(row).toContainText('Ikke målt');
     await page.screenshot({ path: 'test-results/kpis-03-objective.png', fullPage: true });
     await row.getByRole('link', { name: kpiTitle }).click();
     await page.waitForURL(kpiUrl);
@@ -101,9 +105,9 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.getByText('KPI-en er oppdatert.')).toBeVisible();
     await expect(page.getByRole('heading', { name: editedKpiTitle, level: 1 })).toBeVisible();
-    await expect(details).toContainText('≤ 3 hendelser');
+    await expect(result).toContainText('≤ 3 hendelser');
     await expect(details).toContainText('Antall (hendelser)');
-    await expect(details).not.toContainText('målets ansvarlig');
+    await expect(result).not.toContainText('målets ansvarlig');
 
     // Avslutt: the decision goes into the history; a retired KPI is reopened, not edited.
     const header = page.locator('header').filter({ has: page.getByRole('heading', { level: 1 }) });

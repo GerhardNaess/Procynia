@@ -4,19 +4,20 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import { SECONDARY_ACTION } from '../../../Support/actionStyles';
 import KpiForm, { initialKpiData } from './KpiForm';
-import { KPI_STATUS_TONES, responsibleLabel } from './kpiStatus';
+import { KPI_RESULT_TONES, KPI_STATUS_TONES, indicatorLabel, responsibleLabel } from './kpiStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
 /**
- * KPI-er on the objective page: what is measured, against which target, how often and by whom.
- * No measured value, target status or next period — there are no measurements yet, and the list
- * shows nothing it cannot back. Ny KPI is offered only when the server says this person may edit
- * the objective and it is active.
+ * KPI-er on the objective page: what is measured, against which target, the latest value and where
+ * it stands against today's target, how often and by whom. Above the list, «2 av 3 KPI-er på mål»
+ * — a count of active KPIs, never a score. Ny KPI is offered only when the server says this person
+ * may edit the objective and it is active.
  */
-export default function ObjectiveKpis({ objective, kpis = [], formOptions = null, canCreate = false, tr }) {
+export default function ObjectiveKpis({ objective, kpis = [], indicator = null, formOptions = null, canCreate = false, tr, results = {} }) {
     const [creating, setCreating] = useState(false);
     const statusLabels = tr.statuses ?? {};
+    const indicatorText = indicatorLabel(indicator, tr);
     const frequencyLabels = tr.frequencies ?? {};
     const form = useForm(initialKpiData(null, formOptions ?? {}));
 
@@ -37,6 +38,9 @@ export default function ObjectiveKpis({ objective, kpis = [], formOptions = null
                 <div>
                     <h2 id="objective-kpis-heading" className="text-lg font-semibold text-slate-950">{tr.section_heading ?? 'KPI-er'}</h2>
                     <p className="mt-1 text-base text-slate-600">{tr.section_intro ?? 'Hvordan fremdriften mot målet måles.'}</p>
+                    {indicatorText && (
+                        <p className="mt-2 text-base font-semibold text-slate-900" data-testid="objective-kpi-indicator">{indicatorText}</p>
+                    )}
                 </div>
                 {canCreate && ! creating && (
                     <button type="button" onClick={() => setCreating(true)} className={SECONDARY_ACTION}>
@@ -65,10 +69,10 @@ export default function ObjectiveKpis({ objective, kpis = [], formOptions = null
                             <tr className="border-b border-slate-200 text-left text-sm font-semibold text-slate-600">
                                 <th className="pb-3 pr-4">{tr.col_title ?? 'KPI'}</th>
                                 <th className="px-4 pb-3">{tr.col_target ?? 'Målverdi'}</th>
-                                <th className="px-4 pb-3">{tr.col_unit ?? 'Enhet'}</th>
+                                <th className="px-4 pb-3">{tr.col_latest ?? 'Siste verdi'}</th>
+                                <th className="px-4 pb-3">{tr.col_result ?? 'Status'}</th>
                                 <th className="px-4 pb-3">{tr.col_frequency ?? 'Frekvens'}</th>
-                                <th className="px-4 pb-3">{tr.col_responsible ?? 'Ansvarlig'}</th>
-                                <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
+                                <th className="pb-3 pl-4">{tr.col_responsible ?? 'Ansvarlig'}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -76,17 +80,23 @@ export default function ObjectiveKpis({ objective, kpis = [], formOptions = null
                                 <tr key={kpi.id}>
                                     <td className="py-3 pr-4">
                                         <Link href={kpi.url} className="font-semibold text-violet-700 hover:text-violet-900">{kpi.title}</Link>
+                                        {kpi.status !== 'active' && (
+                                            <StatusBadge tone={KPI_STATUS_TONES[kpi.status] ?? 'slate'} className="ml-2">{statusLabels[kpi.status] ?? kpi.status}</StatusBadge>
+                                        )}
                                     </td>
                                     <td className="whitespace-nowrap px-4 py-3 text-slate-900">{kpi.target_display}</td>
-                                    <td className="px-4 py-3 text-slate-700">{kpi.unit_display}</td>
+                                    <td className="whitespace-nowrap px-4 py-3 text-slate-900">
+                                        {kpi.latest_value_display ?? '—'}
+                                        {kpi.latest_period_label && <span className="block text-sm text-slate-500">{kpi.latest_period_label}</span>}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <StatusBadge tone={KPI_RESULT_TONES[kpi.result] ?? 'slate'}>{results[kpi.result] ?? kpi.result}</StatusBadge>
+                                    </td>
                                     <td className="px-4 py-3 text-slate-700">
                                         {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast frekvens')}
                                     </td>
-                                    <td className="px-4 py-3 text-slate-700">
+                                    <td className="py-3 pl-4 text-slate-700">
                                         {responsibleLabel(kpi, tr) ?? <span className="text-amber-700">{tr.no_responsible ?? 'Mangler ansvarlig'}</span>}
-                                    </td>
-                                    <td className="py-3 pl-4">
-                                        <StatusBadge tone={KPI_STATUS_TONES[kpi.status] ?? 'slate'}>{statusLabels[kpi.status] ?? kpi.status}</StatusBadge>
                                     </td>
                                 </tr>
                             ))}

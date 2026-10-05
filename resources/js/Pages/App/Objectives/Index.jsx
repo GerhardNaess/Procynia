@@ -5,6 +5,7 @@ import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import ObjectiveForm from './ObjectiveForm';
+import { indicatorLabel } from './kpiStatus';
 import { OBJECTIVE_STATUS_TONES, formatTargetDate } from './objectiveStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -214,6 +215,7 @@ export default function ObjectivesIndex() {
                                             <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
                                             <th className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>
                                             <th className="px-4 pb-3">{tr.col_status ?? 'Status'}</th>
+                                            <th className="px-4 pb-3">{tr.col_kpis ?? 'KPI-er'}</th>
                                             <th className="pb-3 pl-4">{tr.col_target_date ?? 'Måldato'}</th>
                                         </tr>
                                     </thead>
@@ -233,6 +235,9 @@ export default function ObjectivesIndex() {
                                                     <StatusBadge tone={OBJECTIVE_STATUS_TONES[objective.status] ?? 'slate'}>
                                                         {statusLabels[objective.status] ?? objective.status}
                                                     </StatusBadge>
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-700" data-testid="objective-kpi-indicator">
+                                                    {indicatorLabel(objective.kpi_indicator, tr.kpi ?? {}) ?? '—'}
                                                 </td>
                                                 <td className="py-3 pl-4 text-slate-700">
                                                     {formatTargetDate(objective.target_date, tr.running ?? 'Løpende')}
