@@ -45,7 +45,7 @@ export function cleanUpComplianceE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await complianceFixture(`remaining('${suffix}')`)).toEqual({
-            sources: 0, requirements: 0, status_changes: 0, roles: 0, users: 0,
+            sources: 0, requirements: 0, status_changes: 0, assessments: 0, roles: 0, users: 0,
         });
     });
 }

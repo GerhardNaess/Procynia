@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use App\Models\ComplianceAssessment;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceRequirementStatusChange;
 use App\Models\ComplianceSource;
@@ -25,9 +26,10 @@ use Illuminate\Support\Facades\DB;
  * «e2e.krav.» address, and are removed with the run; the shared E2E users are never given a
  * compliance role.
  *
- * Status history is append-only, and the database refuses to delete it while the customer exists.
- * Cleanup is the one place that must remove it anyway, so it switches the history trigger off for
- * its own transaction only — a test-only step, never something the product can do.
+ * Status history and compliance assessments are append-only, and the database refuses to delete
+ * them while the customer exists. Cleanup is the one place that must remove them anyway, so it
+ * switches both history triggers off for its own transaction only — a test-only step, never
+ * something the product can do.
  */
 class ComplianceE2EFixture
 {
@@ -64,8 +66,32 @@ class ComplianceE2EFixture
     }
 
     /**
+     * For the assessment journey: a fresh person whose role gives view, edit and assess — and not
+     * delete. The spec creates the source and the requirement itself, through the pages.
+     *
+     * @return array{name: string, email: string}
+     */
+    public static function seedAssessor(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Vurderer'), 'vurderer');
+            self::role($customerId, $name('Etterlevelsesvurderer'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_EDIT,
+                CustomerPermissionCatalog::COMPLIANCE_ASSESS,
+            ], $person);
+
+            return ['name' => $person->name, 'email' => $person->email];
+        });
+    }
+
+    /**
      * For the access spec: a fresh reader (compliance.view only), a source, an active requirement
-     * and a retired one with its history — retired the way the lifecycle would have done it.
+     * with one compliance assessment, and a retired one with its history — retired the way the
+     * lifecycle would have done it.
      *
      * @return array{reader_email: string, source_label: string, active_id: int, active_title: string, retired_id: int, retired_title: string}
      */
@@ -107,6 +133,21 @@ class ComplianceE2EFixture
             ]);
             $retired->forceFill(['status' => ComplianceRequirement::STATUS_RETIRED])->save();
 
+            // Assessed once, the way ComplianceAssessmentService would have written it.
+            ComplianceAssessment::query()->create([
+                'customer_id' => $customerId,
+                'requirement_id' => $active->id,
+                'result' => ComplianceAssessment::RESULT_PARTIALLY_COMPLIANT,
+                'rationale' => 'Protokollen finnes, men er ikke oppdatert.',
+                'assessed_by_user_id' => $reader->id,
+                'assessed_at' => now(),
+                'requirement_reference' => $active->reference,
+                'requirement_title' => $active->title,
+                'requirement_text' => $active->requirement_text,
+                'source_name' => $source->name,
+                'source_version' => $source->version,
+            ]);
+
             return [
                 'reader_email' => $reader->email,
                 'source_label' => $source->name,
@@ -121,7 +162,7 @@ class ComplianceE2EFixture
     /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{sources: int, requirements: int, status_changes: int, roles: int, users: int}
+     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, roles: int, users: int}
      */
     public static function remaining(string $suffix): array
     {
@@ -136,6 +177,7 @@ class ComplianceE2EFixture
             'sources' => $sourceIds->count(),
             'requirements' => $requirementIds->count(),
             'status_changes' => ComplianceRequirementStatusChange::query()->whereIn('requirement_id', $requirementIds)->count(),
+            'assessments' => ComplianceAssessment::query()->whereIn('requirement_id', $requirementIds)->count(),
             'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'users' => self::runUsers($customerId, $pattern)->count(),
         ];
@@ -159,15 +201,17 @@ class ComplianceE2EFixture
             // Test-only: the history trigger refuses deletes while the customer exists. Off for this
             // transaction's statements only; a failure rolls the switch back with everything else.
             DB::statement('ALTER TABLE compliance_requirement_status_changes DISABLE TRIGGER compliance_requirement_status_changes_immutable');
+            DB::statement('ALTER TABLE compliance_assessments DISABLE TRIGGER compliance_assessments_immutable');
 
             // A requirement is the run's when its title carries the marker, or when it sits under one
             // of the run's sources — a spec may retitle it, but not move it out of a source no one
-            // else uses. History goes with it through the cascade.
+            // else uses. History and assessments go with it through the cascade.
             $sweepOnly(ComplianceRequirement::query()->where('customer_id', $customerId)
                 ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('source_id', $sourceIds)))
                 ->delete();
 
             DB::statement('ALTER TABLE compliance_requirement_status_changes ENABLE TRIGGER compliance_requirement_status_changes_immutable');
+            DB::statement('ALTER TABLE compliance_assessments ENABLE TRIGGER compliance_assessments_immutable');
 
             // A source still holding a requirement the run did not create stays.
             ComplianceSource::query()->whereIn('id', $sourceIds)->whereDoesntHave('requirements')->delete();
