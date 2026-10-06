@@ -3,6 +3,10 @@
 namespace Tests\Support;
 
 use App\Models\ComplianceAssessment;
+use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditProcess;
+use App\Models\ComplianceAuditRequirement;
+use App\Models\ComplianceAuditStatusChange;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceRequirementControl;
 use App\Models\ComplianceRequirementProcess;
@@ -34,10 +38,13 @@ use Illuminate\Support\Facades\DB;
  * The Kvalitet process, control and evidence the Hvordan kravet oppfylles specs link to are
  * seeded here too, named by the same rule, and removed with the run; their links go with them.
  *
- * Status history and compliance assessments are append-only, and the database refuses to delete
- * them while the customer exists. Cleanup is the one place that must remove them anyway, so it
- * switches both history triggers off for its own transaction only — a test-only step, never
- * something the product can do.
+ * Revisjoner follow the same rule: an audit is the run's when its title carries the marker. They
+ * are removed before the requirements, since a requirement in an audit's scope cannot be deleted.
+ *
+ * Status history (requirements and audits) and compliance assessments are append-only, and the
+ * database refuses to delete them while the customer exists. Cleanup is the one place that must
+ * remove them anyway, so it switches the three history triggers off for its own transaction only —
+ * a test-only step, never something the product can do.
  */
 class ComplianceE2EFixture
 {
@@ -302,6 +309,128 @@ class ComplianceE2EFixture
     }
 
     /**
+     * For the Revisjoner journey: a fresh person who may view and audit — and read Kvalitet, but not
+     * edit requirements — a source holding two active requirements, and a Kvalitet process. The spec
+     * creates the audit itself, through the pages.
+     *
+     * @return array{name: string, email: string, source_label: string, first_requirement: string, second_requirement: string, process_title: string}
+     */
+    public static function seedAuditJourney(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Revisjonsansvarlig'), 'revisor');
+            self::role($customerId, $name('Revisor med Kvalitet'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_AUDIT,
+                CustomerPermissionCatalog::QUALITY_VIEW,
+            ], $person);
+
+            $source = ComplianceSource::query()->create([
+                'customer_id' => $customerId,
+                'name' => $name('ISO 27001'),
+                'version' => '2022',
+                'kind' => ComplianceSource::KIND_STANDARD,
+            ]);
+            $requirement = fn (string $title, string $reference) => ComplianceRequirement::query()->create([
+                'customer_id' => $customerId,
+                'source_id' => $source->id,
+                'reference' => $reference,
+                'title' => $title,
+                'requirement_text' => 'Registrert av E2E-fixturen.',
+                'owner_user_id' => $person->id,
+            ]);
+            $first = $requirement($name('Tilgangsstyring'), 'A.5.15');
+            $second = $requirement($name('Tilgangsrettigheter'), 'A.5.18');
+            $process = QualityItem::query()->create([
+                'customer_id' => $customerId,
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => $name('Brukeradministrasjon'),
+                'status' => QualityItem::STATUS_ACTIVE,
+            ]);
+
+            return [
+                'name' => $person->name,
+                'email' => $person->email,
+                'source_label' => $source->name.' ('.$source->version.')',
+                'first_requirement' => $first->title,
+                'second_requirement' => $second->title,
+                'process_title' => $process->title,
+            ];
+        });
+    }
+
+    /**
+     * For the Revisjoner access spec: a fresh reader (compliance.view only, no Kvalitet) and an audit
+     * in progress with a requirement and a Kvalitet process in scope — started the way the lifecycle
+     * would have done it.
+     *
+     * @return array{email: string, audit_id: int, audit_title: string, requirement_title: string, process_id: int, process_title: string}
+     */
+    public static function seedAuditReader(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $reader = self::person($customerId, $suffix, $password, $name('Revisjonsleser'), 'revisjonsleser');
+            self::role($customerId, $name('Leser'), [CustomerPermissionCatalog::COMPLIANCE_VIEW], $reader);
+
+            $source = ComplianceSource::query()->create([
+                'customer_id' => $customerId,
+                'name' => $name('ISO 9001'),
+                'kind' => ComplianceSource::KIND_STANDARD,
+            ]);
+            $requirement = ComplianceRequirement::query()->create([
+                'customer_id' => $customerId,
+                'source_id' => $source->id,
+                'reference' => '9.2',
+                'title' => $name('Internrevisjon'),
+                'requirement_text' => 'Registrert av E2E-fixturen.',
+                'owner_user_id' => $reader->id,
+            ]);
+            $process = QualityItem::query()->create([
+                'customer_id' => $customerId,
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => $name('Skjult prosess'),
+                'status' => QualityItem::STATUS_ACTIVE,
+            ]);
+            $audit = ComplianceAudit::query()->create([
+                'customer_id' => $customerId,
+                'title' => $name('Kvalitetsrevisjon'),
+                'audit_type' => ComplianceAudit::TYPE_EXTERNAL,
+                'responsible_user_id' => $reader->id,
+                'auditor_name' => 'Sertifiseringsorganet AS',
+                'planned_start_date' => now()->toDateString(),
+                'planned_end_date' => now()->addWeek()->toDateString(),
+                'scope_description' => 'Revisjon av kvalitetsstyringssystemet.',
+            ]);
+            ComplianceAuditRequirement::query()->create(['customer_id' => $customerId, 'audit_id' => $audit->id, 'requirement_id' => $requirement->id]);
+            ComplianceAuditProcess::query()->create(['customer_id' => $customerId, 'audit_id' => $audit->id, 'quality_process_id' => $process->id]);
+            ComplianceAuditStatusChange::query()->create([
+                'customer_id' => $customerId,
+                'audit_id' => $audit->id,
+                'from_status' => ComplianceAudit::STATUS_PLANNED,
+                'to_status' => ComplianceAudit::STATUS_IN_PROGRESS,
+                'changed_by_user_id' => $reader->id,
+                'changed_at' => now(),
+            ]);
+            $audit->forceFill(['status' => ComplianceAudit::STATUS_IN_PROGRESS])->save();
+
+            return [
+                'email' => $reader->email,
+                'audit_id' => (int) $audit->id,
+                'audit_title' => $audit->title,
+                'requirement_title' => $requirement->title,
+                'process_id' => (int) $process->id,
+                'process_title' => $process->title,
+            ];
+        });
+    }
+
+    /**
      * The former owner leaves: their account is deleted, and the requirements they owned are left
      * without an owner by the foreign key, the way it happens in the product.
      */
@@ -369,7 +498,7 @@ class ComplianceE2EFixture
     /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, quality_items: int, roles: int, users: int}
+     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, audits: int, audit_status_changes: int, audit_requirements: int, audit_processes: int, quality_items: int, roles: int, users: int}
      */
     public static function remaining(string $suffix): array
     {
@@ -379,6 +508,7 @@ class ComplianceE2EFixture
         $requirementIds = ComplianceRequirement::query()->where('customer_id', $customerId)
             ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('source_id', $sourceIds))
             ->pluck('id');
+        $auditIds = ComplianceAudit::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->pluck('id');
 
         return [
             'sources' => $sourceIds->count(),
@@ -387,6 +517,10 @@ class ComplianceE2EFixture
             'assessments' => ComplianceAssessment::query()->whereIn('requirement_id', $requirementIds)->count(),
             'requirement_processes' => ComplianceRequirementProcess::query()->whereIn('requirement_id', $requirementIds)->count(),
             'requirement_controls' => ComplianceRequirementControl::query()->whereIn('requirement_id', $requirementIds)->count(),
+            'audits' => $auditIds->count(),
+            'audit_status_changes' => ComplianceAuditStatusChange::query()->whereIn('audit_id', $auditIds)->count(),
+            'audit_requirements' => ComplianceAuditRequirement::query()->whereIn('audit_id', $auditIds)->orWhereIn('requirement_id', $requirementIds)->count(),
+            'audit_processes' => ComplianceAuditProcess::query()->whereIn('audit_id', $auditIds)->count(),
             'quality_items' => QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->count(),
             'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'users' => self::runUsers($customerId, $pattern)->count(),
@@ -412,6 +546,11 @@ class ComplianceE2EFixture
             // transaction's statements only; a failure rolls the switch back with everything else.
             DB::statement('ALTER TABLE compliance_requirement_status_changes DISABLE TRIGGER compliance_requirement_status_changes_immutable');
             DB::statement('ALTER TABLE compliance_assessments DISABLE TRIGGER compliance_assessments_immutable');
+            DB::statement('ALTER TABLE compliance_audit_status_changes DISABLE TRIGGER compliance_audit_status_changes_immutable');
+
+            // The run's audits first: their history and scope go with them through the cascade, and a
+            // requirement in an audit's scope could not be deleted otherwise.
+            $sweepOnly(ComplianceAudit::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
 
             // A requirement is the run's when its title carries the marker, or when it sits under one
             // of the run's sources — a spec may retitle it, but not move it out of a source no one
@@ -422,6 +561,7 @@ class ComplianceE2EFixture
 
             DB::statement('ALTER TABLE compliance_requirement_status_changes ENABLE TRIGGER compliance_requirement_status_changes_immutable');
             DB::statement('ALTER TABLE compliance_assessments ENABLE TRIGGER compliance_assessments_immutable');
+            DB::statement('ALTER TABLE compliance_audit_status_changes ENABLE TRIGGER compliance_audit_status_changes_immutable');
 
             // The run's Kvalitet items; details, evidence and any remaining links cascade.
             $sweepOnly(QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();

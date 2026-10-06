@@ -10,7 +10,7 @@ export function complianceE2eSuffix() {
 }
 
 /**
- * The name of anything an Etterlevelse og revisjon spec creates — source, role or requirement.
+ * The name of anything an Etterlevelse og revisjon spec creates — source, role, requirement or audit.
  * Always use this: Tests\Support\ComplianceE2EFixture cleans up by this prefix and nothing else.
  */
 export function complianceE2eName(suffix, label) {
@@ -45,7 +45,8 @@ export function cleanUpComplianceE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await complianceFixture(`remaining('${suffix}')`)).toEqual({
-            sources: 0, requirements: 0, status_changes: 0, assessments: 0, requirement_processes: 0, requirement_controls: 0, quality_items: 0, roles: 0, users: 0,
+            sources: 0, requirements: 0, status_changes: 0, assessments: 0, requirement_processes: 0, requirement_controls: 0,
+            audits: 0, audit_status_changes: 0, audit_requirements: 0, audit_processes: 0, quality_items: 0, roles: 0, users: 0,
         });
     });
 }
