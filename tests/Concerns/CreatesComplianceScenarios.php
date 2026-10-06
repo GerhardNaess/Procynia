@@ -2,6 +2,7 @@
 
 namespace Tests\Concerns;
 
+use App\Models\ComplianceAudit;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\Customer;
@@ -148,6 +149,56 @@ trait CreatesComplianceScenarios
             'requirement_text' => 'Regler for fysisk og logisk tilgang skal etableres.',
             'owner_user_id' => $owner->id,
             'review_interval_months' => $interval,
+        ];
+    }
+
+    /** compliance.view + compliance.audit: plans and runs audits, and nothing else. */
+    private function complianceAuditor(Customer $customer, array $extra = []): User
+    {
+        $user = $this->complianceMember($customer);
+        $this->complianceGrant($customer, $user, [CustomerPermissionCatalog::COMPLIANCE_VIEW, CustomerPermissionCatalog::COMPLIANCE_AUDIT, ...$extra]);
+
+        return $user;
+    }
+
+    /**
+     * An audit as the forms would have registered it — planned — or moved straight to another status
+     * the way the lifecycle leaves it (without history; tests that care about history go through
+     * the lifecycle).
+     */
+    private function complianceAudit(Customer $customer, ?User $responsible, string $title = 'Internrevisjon tilgangsstyring', string $status = ComplianceAudit::STATUS_PLANNED, string $type = ComplianceAudit::TYPE_INTERNAL): ComplianceAudit
+    {
+        $audit = ComplianceAudit::query()->create([
+            'customer_id' => $customer->id,
+            'title' => $title,
+            'audit_type' => $type,
+            'responsible_user_id' => $responsible?->id,
+            'planned_start_date' => '2026-11-01',
+            'planned_end_date' => '2026-11-15',
+            'scope_description' => 'Tilgangsstyring og brukeradministrasjon for IT-avdelingen.',
+        ]);
+
+        if ($status !== ComplianceAudit::STATUS_PLANNED) {
+            $audit->forceFill([
+                'status' => $status,
+                'conclusion' => $status === ComplianceAudit::STATUS_COMPLETED ? 'Ingen vesentlige avvik.' : null,
+            ])->save();
+        }
+
+        return $audit;
+    }
+
+    /** @return array<string, mixed> */
+    private function auditPayload(User $responsible, string $title = 'Internrevisjon tilgangsstyring', string $type = ComplianceAudit::TYPE_INTERNAL): array
+    {
+        return [
+            'title' => $title,
+            'audit_type' => $type,
+            'responsible_user_id' => $responsible->id,
+            'auditor_name' => null,
+            'planned_start_date' => '2026-11-01',
+            'planned_end_date' => '2026-11-15',
+            'scope_description' => 'Intern revisjon av tilgangsstyring og brukeradministrasjon for IT-avdelingen.',
         ];
     }
 }

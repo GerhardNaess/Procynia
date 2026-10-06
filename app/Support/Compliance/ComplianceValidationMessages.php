@@ -16,9 +16,15 @@ final class ComplianceValidationMessages
             'required' => __('procynia.compliance.validation.rules.required'),
             'integer' => __('procynia.compliance.validation.rules.choose'),
             'in' => __('procynia.compliance.validation.rules.choose'),
+            'array' => __('procynia.compliance.validation.rules.choose'),
+            'min' => [
+                'array' => __('procynia.compliance.validation.rules.required'),
+            ],
+            'date_format' => __('procynia.compliance.validation.rules.date'),
             'string' => __('procynia.compliance.validation.rules.required'),
             'max' => [
                 'string' => __('procynia.compliance.validation.rules.max_string'),
+                'array' => __('procynia.compliance.validation.rules.choose'),
             ],
         ];
     }

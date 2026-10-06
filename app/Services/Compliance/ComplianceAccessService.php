@@ -2,6 +2,7 @@
 
 namespace App\Services\Compliance;
 
+use App\Models\ComplianceAudit;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\User;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
  * Customer-wide in v1: a role that grants compliance.view reads every requirement and source of the
  * user's own customer; there is no fagområde. compliance.edit registers and changes them, and
  * retires and reopens requirements; compliance.assess registers etterlevelsesvurderinger;
+ * compliance.audit plans and runs revisjoner — their fields, their scope and their lifecycle;
  * compliance.delete removes what was registered by mistake.
  *
  * SYSTEM OWNER, EXPLICIT GRANT.
@@ -24,7 +26,8 @@ use Illuminate\Database\Eloquent\Builder;
  * CustomerPermissionService gives System Owner none of these keys by virtue of the administrator
  * role. System Owner reaches requirements only through a role of their own, like anyone else.
  *
- * Every read on a user's behalf starts from visibleRequirements() or visibleSources(), which narrow
+ * Every read on a user's behalf starts from visibleRequirements(), visibleSources() or
+ * visibleAudits(), which narrow
  * the data set *before* any lookup. A requirement the user may not read, or one of another
  * customer, is absent — not listed, not counted, not searchable and 404 by URL, the same answer as
  * an id that does not exist.
@@ -75,6 +78,32 @@ class ComplianceAccessService
         return $this->visibleSources($user)->whereKey($sourceId)->first();
     }
 
+    /**
+     * Every audit the user may read, and nothing else. The only correct starting point for any list,
+     * search, count or lookup of audits on a user's behalf.
+     *
+     * @return Builder<ComplianceAudit>
+     */
+    public function visibleAudits(User $user): Builder
+    {
+        return $this->scoped(ComplianceAudit::query(), 'compliance_audits', $user);
+    }
+
+    public function findVisibleAudit(User $user, int $auditId): ?ComplianceAudit
+    {
+        return $this->visibleAudits($user)->whereKey($auditId)->first();
+    }
+
+    /**
+     * Planning and running audits: registering one, changing its fields and scope, and Start,
+     * Fullfør, Avbryt and Gjenåpne. compliance.edit is not enough — maintaining the requirement
+     * register and auditing whether it is met are separate responsibilities.
+     */
+    public function canAudit(User $user): bool
+    {
+        return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::COMPLIANCE_AUDIT);
+    }
+
     /** Registering and changing requirements and sources; Sett som utgått and Gjenåpne. */
     public function canEdit(User $user): bool
     {
@@ -90,7 +119,7 @@ class ComplianceAccessService
         return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::COMPLIANCE_ASSESS);
     }
 
-    /** Deleting a requirement registered by mistake, or a source nothing uses. */
+    /** Deleting a requirement or an audit registered by mistake, or a source nothing uses. */
     public function canDelete(User $user): bool
     {
         return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::COMPLIANCE_DELETE);

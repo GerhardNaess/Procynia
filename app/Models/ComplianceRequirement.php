@@ -81,13 +81,17 @@ class ComplianceRequirement extends Model
 
     /**
      * Whether the requirement may be deleted at all, before any permission is considered. Deleting
-     * is for a requirement registered by mistake: still active, with no status change and no
-     * assessment ever written. Once it has been retired or assessed it has a history, and is
-     * handled through its lifecycle; the database refuses the delete as well.
+     * is for a requirement registered by mistake: still active, with no status change, no
+     * assessment ever written and in no audit's scope. Once it has been retired, assessed or taken
+     * into an audit it has a history, and is handled through its lifecycle; the database refuses
+     * the delete as well.
      */
     public function isDeletable(): bool
     {
-        return $this->isActive() && ! $this->statusChanges()->exists() && ! $this->assessments()->exists();
+        return $this->isActive()
+            && ! $this->statusChanges()->exists()
+            && ! $this->assessments()->exists()
+            && ! ComplianceAuditRequirement::query()->where('requirement_id', $this->id)->exists();
     }
 
     public function source(): BelongsTo

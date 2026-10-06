@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\BusinessAreaController;
+use App\Http\Controllers\App\ComplianceAuditController;
 use App\Http\Controllers\App\ComplianceRequirementController;
 use App\Http\Controllers\App\ComplianceSourceController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
@@ -421,6 +422,23 @@ Route::prefix('app')
             Route::delete('/requirements/{requirementId}/processes/{processId}', [ComplianceRequirementController::class, 'unlinkProcess'])->whereNumber(['requirementId', 'processId'])->name('requirements.processes.destroy');
             Route::post('/requirements/{requirementId}/controls', [ComplianceRequirementController::class, 'linkControl'])->whereNumber('requirementId')->name('requirements.controls.store');
             Route::delete('/requirements/{requirementId}/controls/{controlId}', [ComplianceRequirementController::class, 'unlinkControl'])->whereNumber(['requirementId', 'controlId'])->name('requirements.controls.destroy');
+            // Revisjoner. Planned and run with compliance.audit; status changes only through the lifecycle
+            // actions, each writing an immutable history row.
+            Route::get('/audits', [ComplianceAuditController::class, 'index'])->name('audits.index');
+            Route::post('/audits', [ComplianceAuditController::class, 'store'])->name('audits.store');
+            Route::get('/audits/{auditId}', [ComplianceAuditController::class, 'show'])->whereNumber('auditId')->name('audits.show');
+            Route::patch('/audits/{auditId}', [ComplianceAuditController::class, 'update'])->whereNumber('auditId')->name('audits.update');
+            Route::delete('/audits/{auditId}', [ComplianceAuditController::class, 'destroy'])->whereNumber('auditId')->name('audits.destroy');
+            Route::post('/audits/{auditId}/start', [ComplianceAuditController::class, 'start'])->whereNumber('auditId')->name('audits.start');
+            Route::post('/audits/{auditId}/complete', [ComplianceAuditController::class, 'complete'])->whereNumber('auditId')->name('audits.complete');
+            Route::post('/audits/{auditId}/cancel', [ComplianceAuditController::class, 'cancel'])->whereNumber('auditId')->name('audits.cancel');
+            Route::post('/audits/{auditId}/reopen', [ComplianceAuditController::class, 'reopen'])->whereNumber('auditId')->name('audits.reopen');
+            // Scope as structure: fixed rows. «Fra kravkilde» is a shortcut that writes them, never a rule.
+            Route::post('/audits/{auditId}/requirements', [ComplianceAuditController::class, 'addRequirements'])->whereNumber('auditId')->name('audits.requirements.store');
+            Route::post('/audits/{auditId}/requirements/from-source', [ComplianceAuditController::class, 'addRequirementsFromSource'])->whereNumber('auditId')->name('audits.requirements.from-source');
+            Route::delete('/audits/{auditId}/requirements/{requirementId}', [ComplianceAuditController::class, 'removeRequirement'])->whereNumber(['auditId', 'requirementId'])->name('audits.requirements.destroy');
+            Route::post('/audits/{auditId}/processes', [ComplianceAuditController::class, 'addProcess'])->whereNumber('auditId')->name('audits.processes.store');
+            Route::delete('/audits/{auditId}/processes/{processId}', [ComplianceAuditController::class, 'removeProcess'])->whereNumber(['auditId', 'processId'])->name('audits.processes.destroy');
             // Kravkilder, managed from the Krav register.
             Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
             Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');

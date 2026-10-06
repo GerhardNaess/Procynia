@@ -509,7 +509,7 @@ class ComplianceRequirementTest extends TestCase
         $lifecycle->reopen($handled->fresh(), $manager, 'Gjelder igjen');
         $this->assertFalse($this->actingAs($manager)->get("/app/compliance/requirements/{$handled->id}")->viewData('page')['props']['permissions']['can_delete']);
         $this->actingAs($manager)->delete("/app/compliance/requirements/{$handled->id}")
-            ->assertSessionHas('error', 'Kravet har statushistorikk eller etterlevelsesvurderinger og kan ikke slettes. Sett det som utgått i stedet.');
+            ->assertSessionHas('error', 'Kravet har statushistorikk, etterlevelsesvurderinger eller inngår i en revisjon og kan ikke slettes. Sett det som utgått i stedet.');
         $this->assertNotNull(ComplianceRequirement::query()->find($handled->id));
 
         // Below the domain rule, the database refuses it as well.

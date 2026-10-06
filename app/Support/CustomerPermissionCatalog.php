@@ -118,13 +118,16 @@ final class CustomerPermissionCatalog
     /** Creating and changing requirements and their sources, and retiring and reopening requirements. */
     public const COMPLIANCE_EDIT = 'compliance.edit';
 
-    /** Registering compliance assessments. Reserved for the assessment layer; nothing reads it yet. */
+    /** Registering compliance assessments. compliance.edit does not imply it. */
     public const COMPLIANCE_ASSESS = 'compliance.assess';
 
-    /** Planning and running audits. Reserved for the audit layer; nothing reads it yet. */
+    /**
+     * Planning and running audits: registering them, changing their fields and scope, and their
+     * lifecycle (Start, Fullfør, Avbryt, Gjenåpne). compliance.edit does not imply it.
+     */
     public const COMPLIANCE_AUDIT = 'compliance.audit';
 
-    /** Deleting a requirement registered by mistake, and a source nothing uses. */
+    /** Deleting a requirement or an audit registered by mistake, and a source nothing uses. */
     public const COMPLIANCE_DELETE = 'compliance.delete';
 
     /**
