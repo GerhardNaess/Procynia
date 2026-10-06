@@ -6,6 +6,7 @@ import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../../Support/actionStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
 import { complianceHelp } from '../Requirements/complianceHelp';
+import AuditFindings from './AuditFindings';
 import AuditForm from './AuditForm';
 import AuditHistory from './AuditHistory';
 import { AuditCancelForm, AuditCompleteForm, AuditReopenForm, AuditStartForm } from './AuditLifecycleForms';
@@ -19,8 +20,8 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
 /**
  * One audit, read top to bottom: title and status with the actions the status allows; who is
  * responsible, who audits and when; the scope — the description that governs it, then the
- * requirements and (for someone who can read Kvalitet) the processes it covers; the conclusion; and
- * the status history.
+ * requirements and (for someone who can read Kvalitet) the processes it covers; the findings and
+ * their follow-up in Avvik og forbedringer; the conclusion; and the status history.
  *
  * Every action is offered only when the server said this person may take it now; the controller
  * refuses it otherwise. Status never moves through Rediger, and Rediger shows only the fields the
@@ -34,6 +35,10 @@ export default function ComplianceAuditShow() {
         requirement_options: requirementOptions = null,
         processes = null,
         process_options: processOptions = null,
+        findings = [],
+        finding_options: findingOptions = null,
+        finding_types: findingTypes = [],
+        handoff = null,
         status_history: statusHistory = [],
         permissions = {},
         editable_fields: editableFields = [],
@@ -191,6 +196,16 @@ export default function ComplianceAuditShow() {
                         ta={ta}
                     />
                 )}
+
+                <AuditFindings
+                    audit={audit}
+                    findings={findings}
+                    options={findingOptions}
+                    types={findingTypes}
+                    canRecord={Boolean(permissions.can_record_findings)}
+                    handoff={handoff}
+                    ta={ta}
+                />
 
                 <section className={CARD} aria-labelledby="compliance-audit-conclusion-heading">
                     <h2 id="compliance-audit-conclusion-heading" className="text-xl font-semibold text-slate-950">{ta.conclusion_heading ?? 'Konklusjon'}</h2>

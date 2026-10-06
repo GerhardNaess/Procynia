@@ -129,6 +129,22 @@ class ComplianceAudit extends Model
         return $this->status === self::STATUS_PLANNED && ! $this->statusChanges()->exists();
     }
 
+    /** Findings are recorded, changed and deleted while the audit is under way, and only then. */
+    public function canRecordFindings(): bool
+    {
+        return $this->status === self::STATUS_IN_PROGRESS;
+    }
+
+    /**
+     * A finding can be handed off to Avvik og forbedringer while the audit is under way and after it
+     * is completed — following up is often what happens once the audit is over. Never from a
+     * cancelled audit, which is read-only for good.
+     */
+    public function canHandOffFindings(): bool
+    {
+        return in_array($this->status, [self::STATUS_IN_PROGRESS, self::STATUS_COMPLETED], true);
+    }
+
     public function responsible(): BelongsTo
     {
         return $this->belongsTo(User::class, 'responsible_user_id');
@@ -142,6 +158,12 @@ class ComplianceAudit extends Model
     public function processLinks(): HasMany
     {
         return $this->hasMany(ComplianceAuditProcess::class, 'audit_id');
+    }
+
+    /** In the order they were recorded. */
+    public function findings(): HasMany
+    {
+        return $this->hasMany(ComplianceAuditFinding::class, 'audit_id')->orderBy('id');
     }
 
     /** Newest first. */

@@ -123,3 +123,94 @@ export function filterRequirementOptions(options, query, selected = []) {
 export function requirementLabel(requirement) {
     return requirement.reference ? `${requirement.reference} ${requirement.title}` : requirement.title;
 }
+
+/** The three kinds of finding, in the order the form offers them, each with its badge tone. */
+export const FINDING_TYPE_TONES = {
+    nonconformity: 'rose',
+    observation: 'blue',
+    opportunity: 'violet',
+};
+
+const FINDING_TYPE_FALLBACKS = {
+    nonconformity: 'Avvik',
+    observation: 'Observasjon',
+    opportunity: 'Forbedringsmulighet',
+};
+
+const IMPROVEMENT_TYPE_FALLBACKS = {
+    deviation: 'Avvik',
+    improvement: 'Forbedring',
+};
+
+/**
+ * @param {string} type  'nonconformity' | 'observation' | 'opportunity'
+ * @param {object} ta    translations.compliance.audits
+ */
+export function findingTypeLabel(type, ta = {}) {
+    return ta.findings?.types?.[type] ?? FINDING_TYPE_FALLBACKS[type] ?? type;
+}
+
+/**
+ * The Avvik og forbedringer type a finding is followed up as — decided by the server, shown here.
+ *
+ * @param {string} type  'deviation' | 'improvement'
+ * @param {object} ta    translations.compliance.audits
+ */
+export function improvementTypeLabel(type, ta = {}) {
+    return ta.findings?.improvement_types?.[type] ?? IMPROVEMENT_TYPE_FALLBACKS[type] ?? type;
+}
+
+/**
+ * What the Funn section says about changing findings, by the audit's status: nothing while they can
+ * be recorded; that they are locked but can still be followed up once completed; read-only when
+ * cancelled. A planned audit has no findings yet, which the empty text says.
+ *
+ * @param {string} status
+ * @param {object} ta  translations.compliance.audits
+ */
+export function findingsNotice(status, ta = {}) {
+    if (status === 'completed') {
+        return ta.findings?.locked_completed ?? 'Revisjonen er fullført, og funnene kan ikke endres. Funn som ikke er overført, kan fortsatt følges opp i Avvik og forbedringer.';
+    }
+
+    if (status === 'cancelled') {
+        return ta.findings?.locked_cancelled ?? 'Revisjonen er avbrutt. Funnene kan ikke endres eller følges opp herfra.';
+    }
+
+    return null;
+}
+
+/**
+ * Options split into those in the audit's scope and the rest, each keeping the server's order. An
+ * option without an in_scope flag counts as not in scope.
+ *
+ * @param {Array<{in_scope?: boolean}>} options
+ */
+export function splitByScope(options = []) {
+    return {
+        inScope: options.filter((option) => option.in_scope === true),
+        other: options.filter((option) => option.in_scope !== true),
+    };
+}
+
+/**
+ * A finding's form values: its own fields, and its Kvalitet context only when the server sent it —
+ * for someone who cannot read Kvalitet the form carries no such fields, so nothing is changed.
+ *
+ * @param {object|null} finding  a finding row, or null for a new one
+ */
+export function findingFormData(finding = null) {
+    const data = {
+        finding_type: finding?.finding_type ?? '',
+        title: finding?.title ?? '',
+        description: finding?.description ?? '',
+        requirement_id: finding?.requirement ? String(finding.requirement.id) : '',
+    };
+
+    if (finding === null || 'quality_process' in finding) {
+        data.quality_process_id = finding?.quality_process ? String(finding.quality_process.id) : '';
+        data.control_item_id = finding?.control ? String(finding.control.id) : '';
+    }
+
+    return data;
+}

@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\ComplianceAssessment;
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Services\Compliance\ComplianceAttentionService;
@@ -14,7 +15,8 @@ use PHPUnit\Framework\TestCase;
  * requirement page each have help with sections in both languages, built the same way, and the
  * help names what the pages actually show — the statuses, the source, the owner, the review
  * interval, the status history and compliance assessments — under the labels the pages use. The
- * Revisjoner register and the audit page likewise explain types, statuses, scope and lifecycle. A label renamed without the
+ * Revisjoner register and the audit page likewise explain types, statuses, scope, lifecycle and
+ * findings with their follow-up in Avvik og forbedringer. A label renamed without the
  * help following it fails here. Both languages also carry exactly the same keys.
  * Inputs: None.
  * Returns: None.
@@ -271,10 +273,53 @@ class CompliancePageHelpTranslationsTest extends TestCase
                 $this->assertContains($label, $page, "lang/{$locale}: the audit help does not explain «{$label}».");
             }
 
-            // Findings are announced as a later step on both pages, never described as existing.
+            // Both pages name findings.
             $this->assertMatchesRegularExpression($locale === 'no' ? '/[Ff]unn/' : '/[Ff]indings/', $this->allText($help['audit_index']));
             $this->assertMatchesRegularExpression($locale === 'no' ? '/[Ff]unn/' : '/[Ff]indings/', $this->allText($help['audit']));
         }
+    }
+
+    public function test_the_audit_help_explains_findings_and_their_follow_up_by_their_labels(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $audits = $this->compliance($locale)['audits'];
+            $findings = $audits['findings'];
+            $sections = $this->compliance($locale)['help']['audit']['sections'];
+
+            // A section named like the page section, after scope and before carrying it out — the page's order.
+            $titles = array_column($sections, 'title');
+            $index = array_search($findings['heading'], $titles, true);
+            $this->assertIsInt($index, "lang/{$locale}: the audit help has no «{$findings['heading']}» section.");
+            $this->assertGreaterThan(array_search($audits['scope_heading'], $titles, true), $index);
+            $itemTitles = array_column($sections[$index]['items'], 'title');
+
+            // Every type, the hand-off and the handed-off state, under the labels the page uses.
+            foreach ([...array_values($findings['types']), $findings['hand_off'], $findings['handed_off']] as $label) {
+                $this->assertContains($label, $itemTitles, "lang/{$locale}: the findings help does not explain «{$label}».");
+            }
+        }
+
+        // A finding is not an action; follow-up is in Avvik og forbedringer, explicit, and locks it;
+        // hidden cases and Kvalitet context are not shown.
+        $no = $this->allText(['sections' => [collect($this->compliance('no')['help']['audit']['sections'])->firstWhere('title', 'Funn')]]);
+        foreach (['ingen ansvarlig, frist, status eller tiltak', 'Avvik og forbedringer', 'aldri automatisk', 'låses for godt', 'ikke status, tiltak eller frister', 'tilgang til Kvalitet', 'uten lenke, tittel og status', 'etter at revisjonen er fullført'] as $phrase) {
+            $this->assertStringContainsString($phrase, $no);
+        }
+    }
+
+    public function test_the_finding_labels_cover_exactly_the_types_that_exist(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $findings = $this->compliance($locale)['audits']['findings'];
+
+            $this->assertSame(ComplianceAuditFinding::TYPES, array_keys($findings['types']));
+            $this->assertSame(ComplianceAuditFinding::TYPES, array_keys($findings['type_hints']));
+            $this->assertSame(['deviation', 'improvement'], array_keys($findings['improvement_types']));
+        }
+
+        $no = $this->compliance('no')['audits']['findings'];
+        $this->assertSame(['nonconformity' => 'Avvik', 'observation' => 'Observasjon', 'opportunity' => 'Forbedringsmulighet'], $no['types']);
+        $this->assertSame(['Funn', 'Nytt funn', 'Følg opp i Avvik og forbedringer', 'Overført'], [$no['heading'], $no['create'], $no['hand_off'], $no['handed_off']]);
     }
 
     public function test_the_audit_labels_cover_exactly_the_values_and_transitions_that_exist(): void

@@ -10,6 +10,7 @@ use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
+use App\Services\Compliance\ComplianceAuditFindingHandoffService;
 use App\Services\Improvements\ImprovementActionVerificationResolver;
 use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\Improvements\ImprovementCaseAccessService;
@@ -48,6 +49,7 @@ class ImprovementCaseController extends Controller
         private readonly ImprovementActionVerificationResolver $verifications,
         private readonly ImprovementAttentionService $attention,
         private readonly ImprovementCaseCreator $creator,
+        private readonly ComplianceAuditFindingHandoffService $auditFindings,
     ) {}
 
     public function index(Request $request): Response
@@ -214,6 +216,9 @@ class ImprovementCaseController extends Controller
             // null, not empty: the person cannot read Kvalitet, so nothing is said about context.
             'quality_context' => $canReadQuality ? $this->qualityContext->linkedContext($case) : null,
             'quality_context_options' => $canLinkContext ? $this->qualityContext->contextOptions($case) : [],
+            // «Fra revisjonsfunn i …»: null unless the case came from a finding *and* the person can
+            // read that audit in Etterlevelse og revisjon. Nothing about the audit otherwise.
+            'audit_origin' => $this->auditFindings->provenanceFor($user, $case),
             'today' => now()->toDateString(),
         ]);
     }

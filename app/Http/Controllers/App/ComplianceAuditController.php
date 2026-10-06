@@ -4,13 +4,18 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditStatusChange;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Compliance\ComplianceAuditFindingHandoffService;
+use App\Services\Compliance\ComplianceAuditFindingService;
 use App\Services\Compliance\ComplianceAuditLifecycleService;
 use App\Services\Compliance\ComplianceAuditScopeService;
+use App\Services\Improvements\ImprovementCaseCreator;
 use App\Support\Compliance\ComplianceValidationMessages;
 use App\Support\CustomerContext;
+use App\Support\Improvements\ImprovementValidationMessages;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,8 +40,10 @@ use Inertia\Response;
  * may be shown about processes (Kvalitet read access, never implied by compliance.*) and what may be
  * linked.
  *
- * No findings and no attention yet: an audit is completed with a conclusion, and nothing else is
- * created along with it.
+ * Funn are ComplianceAuditFindingService's: recorded, changed and deleted with compliance.audit
+ * while the audit is in progress. «Følg opp i Avvik og forbedringer» is
+ * ComplianceAuditFindingHandoffService's, and the only way a finding reaches an ImprovementCase —
+ * nothing is created when an audit is completed. No attention yet.
  */
 class ComplianceAuditController extends Controller
 {
@@ -45,6 +52,8 @@ class ComplianceAuditController extends Controller
         private readonly ComplianceAccessService $access,
         private readonly ComplianceAuditLifecycleService $lifecycle,
         private readonly ComplianceAuditScopeService $scope,
+        private readonly ComplianceAuditFindingService $findings,
+        private readonly ComplianceAuditFindingHandoffService $handoff,
     ) {}
 
     public function index(Request $request): Response
@@ -113,6 +122,10 @@ class ComplianceAuditController extends Controller
         $canReadQuality = $this->scope->canReadQuality($user);
         $canManageRequirements = $this->scope->canManageRequirements($user, $audit);
         $canManageProcesses = $this->scope->canManageProcesses($user, $audit);
+        $canRecordFindings = $this->findings->canRecord($user, $audit);
+        $canHandOff = $this->handoff->canHandOff($user, $audit);
+        $findings = $this->findings->rows($user, $audit, $canHandOff);
+        $awaitingHandoff = $canHandOff && collect($findings)->contains(fn (array $finding): bool => ! $finding['handed_off']);
 
         return Inertia::render('App/Compliance/Audits/Show', [
             'audit' => $this->row($audit) + [
@@ -126,6 +139,12 @@ class ComplianceAuditController extends Controller
             // them reaches the page, not even whether there are any.
             'processes' => $canReadQuality ? $this->scope->processes($audit) : null,
             'process_options' => $canManageProcesses ? $this->scope->processOptions($audit) : null,
+            'findings' => $findings,
+            'finding_types' => ComplianceAuditFinding::TYPES,
+            'finding_options' => $canRecordFindings ? $this->findings->options($user, $audit) : null,
+            // What «Følg opp i Avvik og forbedringer» needs from that module — only while there is a
+            // finding left to hand off. The areas are those the person may register cases in.
+            'handoff' => $awaitingHandoff ? $this->handoff->formOptions($user) + ['today' => now()->toDateString()] : null,
             // Reached through visibleAudits(); the history carries no access of its own.
             'status_history' => $audit->statusChanges()->with('changedBy:id,name')->get()
                 ->map(fn (ComplianceAuditStatusChange $change): array => [
@@ -147,6 +166,7 @@ class ComplianceAuditController extends Controller
                 'can_manage_requirements' => $canManageRequirements,
                 // compliance.audit and Kvalitet read access, on a planned or running audit.
                 'can_manage_processes' => $canManageProcesses,
+                'can_record_findings' => $canRecordFindings,
             ],
             'editable_fields' => $canAudit ? $audit->editableFields() : [],
             'types' => ComplianceAudit::TYPES,
@@ -317,6 +337,65 @@ class ComplianceAuditController extends Controller
         return back()->with('success', __('procynia.compliance.audits.flash.process_removed'));
     }
 
+    /** Nytt funn: compliance.audit, audit in progress. */
+    public function storeFinding(Request $request, int $auditId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+
+        $this->findings->create($user, $audit, $this->validatedFinding($request));
+
+        return back()->with('success', __('procynia.compliance.audits.findings.flash.created'));
+    }
+
+    /** Rediger funn: while the audit is in progress and the finding has not been handed off. */
+    public function updateFinding(Request $request, int $auditId, int $findingId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+        $finding = $this->findings->find($audit, $findingId) ?? abort(404);
+
+        $this->findings->update($user, $audit, $finding, $this->validatedFinding($request));
+
+        return back()->with('success', __('procynia.compliance.audits.findings.flash.updated'));
+    }
+
+    /** Slett funn: the same window as Rediger. A handed-off finding is never deleted. */
+    public function destroyFinding(int $auditId, int $findingId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+        $finding = $this->findings->find($audit, $findingId) ?? abort(404);
+
+        $this->findings->delete($user, $audit, $finding);
+
+        return back()->with('success', __('procynia.compliance.audits.findings.flash.deleted'));
+    }
+
+    /**
+     * Følg opp i Avvik og forbedringer. The case's fields follow ImprovementCaseCreator::rules(),
+     * except the type — set by the finding — and Hendelsesdato, which a finding does not have.
+     */
+    public function handOffFinding(Request $request, int $auditId, int $findingId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+        $finding = $this->findings->find($audit, $findingId) ?? abort(404);
+
+        $rules = array_intersect_key(ImprovementCaseCreator::rules(), array_flip(['title', 'description', 'business_area_id', 'owner_user_id', 'due_date']));
+        $validated = $request->validate($rules + [
+            'link_process' => ['boolean'],
+        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
+
+        $this->handoff->handOff($user, $audit, $finding, $validated);
+
+        return back()->with('success', __('procynia.compliance.audits.findings.flash.handed_off'));
+    }
+
     public function destroy(int $auditId): RedirectResponse
     {
         $user = $this->authorizedUser();
@@ -402,6 +481,19 @@ class ComplianceAuditController extends Controller
         }
 
         return $fields;
+    }
+
+    /** @return array<string, mixed> */
+    private function validatedFinding(Request $request): array
+    {
+        return $request->validate([
+            'finding_type' => ['required', 'string', Rule::in(ComplianceAuditFinding::TYPES)],
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['required', 'string', 'max:10000'],
+            'requirement_id' => ['nullable', 'integer'],
+            'quality_process_id' => ['nullable', 'integer'],
+            'control_item_id' => ['nullable', 'integer'],
+        ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
     }
 
     private function requiredReason(Request $request): string

@@ -7,9 +7,15 @@ import {
     AUDIT_STATUS_TONES,
     auditStatusLabel,
     auditTypeLabel,
+    FINDING_TYPE_TONES,
     describeAuditHistoryEntry,
     filterRequirementOptions,
+    findingFormData,
+    findingTypeLabel,
+    findingsNotice,
+    improvementTypeLabel,
     lockedNotice,
+    splitByScope,
     plannedPeriodLabel,
     requirementLabel,
 } from './complianceAudit.js';
@@ -136,8 +142,8 @@ describe('The register', () => {
 describe('The audit page', () => {
     const show = source('./Show.jsx');
 
-    test('reads top to bottom: status, information, scope, requirements, processes, conclusion, history', () => {
-        const order = ['data-testid="compliance-audit-status"', 'compliance-audit-info-heading', 'compliance-audit-scope-heading', '<AuditRequirementScope', '<AuditProcessScope', 'compliance-audit-conclusion-heading', '<AuditHistory'];
+    test('reads top to bottom: status, information, scope, requirements, processes, findings, conclusion, history', () => {
+        const order = ['data-testid="compliance-audit-status"', 'compliance-audit-info-heading', 'compliance-audit-scope-heading', '<AuditRequirementScope', '<AuditProcessScope', '<AuditFindings', 'compliance-audit-conclusion-heading', '<AuditHistory'];
         const positions = order.map((needle) => show.indexOf(needle));
 
         positions.forEach((position, i) => assert.ok(position > -1, `${order[i]} must exist`));
@@ -243,5 +249,148 @@ describe('complianceAudit helpers', () => {
         assert.deepEqual(filterRequirementOptions(options, 'iso tilgang', [2]).map((o) => o.id), [1, 2]);
         assert.equal(requirementLabel(options[0]), 'A.5.15 Tilgangsstyring');
         assert.equal(requirementLabel(options[2]), 'Internt krav om tilgang');
+    });
+});
+
+describe('Funn on the audit page', () => {
+    const findings = source('./AuditFindings.jsx');
+    const card = block(findings, 'function FindingCard', '\n}\n');
+    const form = block(findings, 'function FindingForm', '\n}\n');
+    const handoff = block(findings, 'function HandoffForm', '\n}\n');
+
+    test('the section is fed by the server: findings, options, types, the record permission and the hand-off data', () => {
+        const show = source('./Show.jsx');
+        assert.match(show, /<AuditFindings\n\s+audit=\{audit\}\n\s+findings=\{findings\}\n\s+options=\{findingOptions\}\n\s+types=\{findingTypes\}\n\s+canRecord=\{Boolean\(permissions\.can_record_findings\)\}\n\s+handoff=\{handoff\}/);
+    });
+
+    test('a card shows type, title, description, the optional context and whether it was handed off', () => {
+        for (const needle of ['findingTypeLabel(finding.finding_type, ta)', '{finding.title}', '{finding.description}', 'finding.requirement &&', 'finding.quality_process &&', 'finding.control &&', 'finding.handed_off &&']) {
+            assert.ok(card.includes(needle), needle);
+        }
+    });
+
+    test('the case is linked only when the server sent the link, and its status is never read', () => {
+        assert.match(card, /\{finding\.case_link && \(\n\s+<Link href=\{finding\.case_link\.url\}/);
+        assert.ok(! /case_link\.(status|actions|verification|due_date|is_overdue)|case_status|is_overdue|verification/.test(card), 'no improvement status is mirrored');
+        // A handed-off finding without a readable case still says it was handed off.
+        assert.match(card, /tf\.handed_off_to \?\? 'Overført til Avvik og forbedringer'/);
+    });
+
+    test('Rediger, Slett and the hand-off wait for the server\'s permission on each finding', () => {
+        assert.match(card, /\{perms\.can_hand_off && \(/);
+        assert.match(card, /\{perms\.can_edit && \(/);
+        assert.match(card, /\{perms\.can_delete && \(/);
+        assert.match(findings, /\{canRecord && panel === null && \(/);
+        assert.match(findings, /\{canRecord && panel === 'create' && \(/);
+    });
+
+    test('the form asks for type, title and description — never severity, frist, owner or tiltak', () => {
+        for (const field of ['finding_type', 'title', 'description', 'requirement_id', 'quality_process_id', 'control_item_id']) {
+            assert.ok(form.includes(`'${field}'`), field);
+        }
+        for (const word of ['severity', 'due_date', 'owner', 'action', 'alvorlighet']) {
+            assert.ok(! form.includes(word), word);
+        }
+    });
+
+    test('Kvalitet fields are drawn only when the server sent Kvalitet options', () => {
+        assert.match(form, /const hasQuality = Array\.isArray\(options\?\.processes\) && 'quality_process_id' in form\.data;/);
+        assert.match(form, /\{hasQuality && \(/);
+    });
+
+    test('the hand-off form shows the type, prefills the text, asks for area, owner and frist, and proposes the process visibly', () => {
+        assert.match(handoff, /improvementTypeLabel\(finding\.improvement_type, ta\)/);
+        assert.match(handoff, /title: finding\.title,\n\s+description: finding\.description,\n\s+business_area_id: '',/);
+        assert.ok(! handoff.includes("setData('type'"), 'the type is not a choice');
+        for (const field of ['business_area_id', 'owner_user_id', 'due_date', 'link_process']) {
+            assert.ok(handoff.includes(field), field);
+        }
+        assert.match(handoff, /\{process !== null && \(/);
+        assert.match(handoff, /type="checkbox" checked=\{form\.data\.link_process\}/);
+        // Without an area to register in, the form says so and offers nothing to submit.
+        assert.match(handoff, /\{areaOptions\.length === 0 \? \(/);
+        assert.match(handoff, /data-testid="compliance-handoff-no-areas"/);
+    });
+
+    test('the owner list follows the chosen area', () => {
+        assert.match(handoff, /const owners = ownersForArea\(handoff\?\.owner_options \?\? \[\], form\.data\.business_area_id\);/);
+    });
+
+    test('cards stack and wrap on a phone; nothing below 16 px', () => {
+        assert.ok(findings.includes('divide-y divide-slate-100'));
+        assert.ok((findings.match(/break-words/g) ?? []).length >= 5);
+        assert.match(card, /className="grid gap-3 sm:grid-cols-3"/);
+        assert.match(handoff, /className="grid gap-4 sm:grid-cols-2"/);
+        assert.match(findings, /className="flex flex-wrap gap-2" data-testid="compliance-finding-actions"/);
+        assert.doesNotMatch(findings, /\btext-(xs|sm)\b/);
+    });
+});
+
+describe('Provenance on the case page', () => {
+    const caseShow = source('../../Improvements/Show.jsx');
+
+    test('«Fra revisjonsfunn i …» only when the server sent it', () => {
+        assert.match(caseShow, /audit_origin: auditOrigin = null,/);
+        assert.match(caseShow, /\{auditOrigin && \(/);
+        assert.match(caseShow, /<Link href=\{auditOrigin\.audit_url\}/);
+    });
+
+    test('both languages carry the provenance strings', () => {
+        for (const locale of ['no', 'en']) {
+            assert.match(lang(locale), /'audit_origin' => '/, locale);
+            assert.match(lang(locale), /'audit_origin_finding' => '/, locale);
+        }
+    });
+});
+
+describe('PageHelp explains findings', () => {
+    test('both languages have a findings section in the audit help', () => {
+        assert.match(lang('no'), /'title' => 'Funn',\n\s+'items' => \[/);
+        assert.match(lang('en'), /'title' => 'Findings',\n\s+'items' => \[/);
+        assert.ok(! lang('no').includes('Funn kommer senere'));
+        assert.ok(! lang('en').includes('Findings come later'));
+    });
+});
+
+describe('finding helpers', () => {
+    test('three kinds, each with a label and a tone of its own', () => {
+        assert.deepEqual(Object.keys(FINDING_TYPE_TONES), ['nonconformity', 'observation', 'opportunity']);
+        assert.equal(new Set(Object.values(FINDING_TYPE_TONES)).size, 3);
+        assert.equal(findingTypeLabel('nonconformity'), 'Avvik');
+        assert.equal(findingTypeLabel('observation'), 'Observasjon');
+        assert.equal(findingTypeLabel('opportunity'), 'Forbedringsmulighet');
+        assert.equal(findingTypeLabel('opportunity', { findings: { types: { opportunity: 'Improvement opportunity' } } }), 'Improvement opportunity');
+    });
+
+    test('the case type reads as Avvik or Forbedring', () => {
+        assert.equal(improvementTypeLabel('deviation'), 'Avvik');
+        assert.equal(improvementTypeLabel('improvement'), 'Forbedring');
+    });
+
+    test('findings lock with the audit: nothing said while it runs, locked but followable once completed, read-only when cancelled', () => {
+        assert.equal(findingsNotice('in_progress'), null);
+        assert.equal(findingsNotice('planned'), null);
+        assert.match(findingsNotice('completed'), /kan fortsatt følges opp i Avvik og forbedringer/);
+        assert.match(findingsNotice('cancelled'), /kan ikke endres eller følges opp herfra/);
+    });
+
+    test('options in the audit\'s scope come first, each group keeping the server\'s order', () => {
+        const { inScope, other } = splitByScope([{ id: 1, in_scope: false }, { id: 2, in_scope: true }, { id: 3 }, { id: 4, in_scope: true }]);
+        assert.deepEqual(inScope.map((o) => o.id), [2, 4]);
+        assert.deepEqual(other.map((o) => o.id), [1, 3]);
+    });
+
+    test('a new finding\'s form starts empty, with the Kvalitet fields', () => {
+        assert.deepEqual(findingFormData(), { finding_type: '', title: '', description: '', requirement_id: '', quality_process_id: '', control_item_id: '' });
+    });
+
+    test('an edited finding\'s form carries Kvalitet fields only when the server sent its Kvalitet context', () => {
+        const base = { finding_type: 'observation', title: 'T', description: 'D', requirement: { id: 7 } };
+
+        assert.deepEqual(findingFormData(base), { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7' });
+        assert.deepEqual(
+            findingFormData({ ...base, quality_process: { id: 3 }, control: null }),
+            { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7', quality_process_id: '3', control_item_id: '' },
+        );
     });
 });

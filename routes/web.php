@@ -439,6 +439,10 @@ Route::prefix('app')
             Route::delete('/audits/{auditId}/requirements/{requirementId}', [ComplianceAuditController::class, 'removeRequirement'])->whereNumber(['auditId', 'requirementId'])->name('audits.requirements.destroy');
             Route::post('/audits/{auditId}/processes', [ComplianceAuditController::class, 'addProcess'])->whereNumber('auditId')->name('audits.processes.store');
             Route::delete('/audits/{auditId}/processes/{processId}', [ComplianceAuditController::class, 'removeProcess'])->whereNumber(['auditId', 'processId'])->name('audits.processes.destroy');
+            Route::post('/audits/{auditId}/findings', [ComplianceAuditController::class, 'storeFinding'])->whereNumber('auditId')->name('audits.findings.store');
+            Route::patch('/audits/{auditId}/findings/{findingId}', [ComplianceAuditController::class, 'updateFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.update');
+            Route::delete('/audits/{auditId}/findings/{findingId}', [ComplianceAuditController::class, 'destroyFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.destroy');
+            Route::post('/audits/{auditId}/findings/{findingId}/handoff', [ComplianceAuditController::class, 'handOffFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.handoff');
             // Kravkilder, managed from the Krav register.
             Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
             Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');
