@@ -734,7 +734,7 @@ return [
             'risk' => 'Identifiser, vurder og følg opp risiko.',
             'objectives' => 'Sett mål, følg resultater og se hva som trenger oppmerksomhet.',
             'improvements' => 'Registrer, behandle og følg opp avvik og forbedringsmuligheter.',
-            'compliance' => 'Samle kravene virksomheten skal etterleve, med kilde og ansvarlig.',
+            'compliance' => 'Kravene virksomheten skal etterleve, vurdering av etterlevelse og revisjoner med funn og oppfølging.',
         ],
     ],
     'home' => [
@@ -857,6 +857,8 @@ return [
             'contracts' => 'Kontrakter',
             'hse' => 'HMS',
             'compliance' => 'Etterlevelse og revisjon',
+            'compliance_requirements' => 'Krav',
+            'compliance_audits' => 'Revisjoner',
             'services' => 'Tjenester & SLA',
             'projects' => 'Prosjekter',
             'competence' => 'Kompetanse',
@@ -2499,11 +2501,11 @@ return [
                 'improvement_edit' => 'Registrere og behandle avvik og forbedringer',
                 'improvement_close' => 'Lukke, avbryte og gjenåpne avvik og forbedringer',
                 'improvement_delete' => 'Slette feilregistrerte avvik og forbedringer',
-                'compliance_view' => 'Se krav',
+                'compliance_view' => 'Se krav og revisjoner',
                 'compliance_edit' => 'Registrere og endre krav og kravkilder',
                 'compliance_assess' => 'Vurdere etterlevelse',
                 'compliance_audit' => 'Gjennomføre revisjoner',
-                'compliance_delete' => 'Slette feilregistrerte krav og ubrukte kravkilder',
+                'compliance_delete' => 'Slette feilregistrerte krav, revisjoner og ubrukte kravkilder',
             ],
         ],
     ],
@@ -2548,7 +2550,7 @@ return [
                             ['title' => 'Ikke vurdert', 'text' => 'Kravet har ingen etterlevelsesvurdering ennå.'],
                             ['title' => 'Ikke oppfylt', 'text' => 'Siste vurdering konkluderte med at kravet ikke er oppfylt.'],
                             ['title' => 'Delvis oppfylt', 'text' => 'Siste vurdering konkluderte med at kravet bare er delvis oppfylt.'],
-                            ['title' => 'Revurdering forfalt', 'text' => 'Revurderingsintervallet har gått ut siden siste vurdering. Forfaller samme dag regnes ikke som forfalt.'],
+                            ['title' => 'Revurdering forfalt', 'text' => 'Revurderingsintervallet har gått ut siden siste vurdering. Selve fristdagen regnes ikke som forfalt.'],
                             ['title' => 'Mangler ansvarlig', 'text' => 'Ingen er satt som ansvarlig for kravet.'],
                             ['title' => 'Beregnes automatisk', 'text' => 'Årsakene beregnes automatisk fra vurderingene, revurderingsintervallet og ansvarlig hver gang siden åpnes. De er ikke egne lagrede statuser, og de endrer aldri kravet eller vurderingene. Utgåtte krav trenger aldri oppmerksomhet. Når forholdet er rettet, forsvinner årsaken.'],
                         ],
@@ -2558,7 +2560,7 @@ return [
                         'items' => [
                             ['title' => 'Aktiv', 'text' => 'Kravet gjelder for virksomheten. Aktive krav vises først.'],
                             ['title' => 'Utgått', 'text' => 'Kravet gjelder ikke lenger, for eksempel fordi standarden er erstattet. Det blir stående i registeret med historikken sin.'],
-                            ['title' => 'Søk og filter', 'text' => 'Søk i referanse, tittel og kravtekst, og filtrer på kravkilde og status. Bare krav som trenger oppmerksomhet viser bare kravene med minst én årsak.'],
+                            ['title' => 'Søk og filter', 'text' => 'Søk i referanse, tittel og kravtekst, og filtrer på kravkilde og status. Filteret «Bare krav som trenger oppmerksomhet» viser kravene med minst én årsak.'],
                         ],
                     ],
                 ],
@@ -2635,8 +2637,6 @@ return [
                         ],
                     ],
                     [
-                        'title' => 'Registeret',
-                    [
                         'title' => 'Trenger oppmerksomhet',
                         'items' => [
                             ['title' => 'Hva det betyr', 'text' => 'Trenger oppmerksomhet betyr at en revisjon har noe konkret som bør følges opp. Listen øverst viser hvilke revisjoner det gjelder og hvorfor, og hver revisjon i registeret viser de samme årsakene.'],
@@ -2645,6 +2645,8 @@ return [
                             ['title' => 'Beregnes automatisk', 'text' => 'Årsakene beregnes automatisk fra status, planlagt slutt og funnene hver gang siden åpnes. De er ikke egne lagrede statuser. Når avviket følges opp eller revisjonen fullføres, forsvinner årsaken. Avbrutte revisjoner trenger aldri oppmerksomhet.'],
                         ],
                     ],
+                    [
+                        'title' => 'Registeret',
                         'items' => [
                             ['title' => 'Søk og filter', 'text' => 'Søk i tittel, scope og revisor, og filtrer på status og type. Revisjoner under arbeid vises først, deretter planlagte, fullførte og avbrutte.'],
                             ['title' => 'Funn', 'text' => 'Revisjonsfunn – avvik, observasjoner og forbedringsmuligheter – registreres på revisjonssiden mens revisjonen er under arbeid. Oppfølgingen skjer i Avvik og forbedringer.'],
@@ -2676,7 +2678,7 @@ return [
                             ['title' => 'Funn er ikke tiltak', 'text' => 'Et funn har ingen ansvarlig, frist, status eller tiltak. Oppfølgingen – ansvar, tiltak, frister og lukking – skjer i Avvik og forbedringer.'],
                             ['title' => 'Følg opp i Avvik og forbedringer', 'text' => 'Oppretter en ny sak fra funnet. Det skjer bare når noen velger det – aldri automatisk. Du velger fagområde, ansvarlig og frist; tittel og beskrivelse hentes fra funnet. Avvik blir et avvik, observasjoner og forbedringsmuligheter en forbedring. Det kan også gjøres etter at revisjonen er fullført.'],
                             ['title' => 'Overført', 'text' => 'Et overført funn låses for godt, også om revisjonen gjenåpnes, og kan ikke slettes. Revisjonen viser bare at funnet er overført – ikke status, tiltak eller frister i saken.'],
-                            ['title' => 'Det du ikke har tilgang til', 'text' => 'Prosess og kontroll vises bare hvis du har tilgang til Kvalitet. En sak i et fagområde du ikke har tilgang til, vises uten lenke, tittel og status.'],
+                            ['title' => 'Det du ikke har tilgang til', 'text' => 'Prosess og kontroll vises bare hvis du har tilgang til Kvalitet. En sak i et fagområde du ikke har tilgang til, vises bare som «Overført» – uten lenke og tittel.'],
                         ],
                     ],
                     [
@@ -2685,9 +2687,9 @@ return [
                             ['title' => 'Start revisjon', 'text' => 'Setter revisjonen fra Planlagt til Under arbeid. Typen kan ikke endres etter at revisjonen er startet.'],
                             ['title' => 'Konklusjon', 'text' => 'Revisjonens samlede vurdering. Den skrives mens revisjonen er under arbeid, og må være fylt ut før revisjonen kan fullføres.'],
                             ['title' => 'Fullfør revisjon', 'text' => 'Avslutter revisjonen med konklusjonen. En revisjon kan fullføres uten funn. Etterpå er den låst, men funn som ikke er overført, kan fortsatt følges opp.'],
+                            ['title' => 'Trenger oppmerksomhet', 'text' => 'Vises under tittelen når revisjonen har passert planlagt slutt uten å være fullført, eller er fullført med avvik som ikke er fulgt opp. Beregnes automatisk og lagres ikke.'],
                             ['title' => 'Avbryt revisjon', 'text' => 'Brukes når revisjonen ikke skal gjennomføres likevel. Begrunnelse er påkrevd, og revisjonen blir stående som avbrutt.'],
                             ['title' => 'Gjenåpne revisjon', 'text' => 'Gjør en fullført revisjon redigerbar igjen, for eksempel for å rette konklusjonen. Begrunnelse er påkrevd, og gjenåpningen logges.'],
-                            ['title' => 'Trenger oppmerksomhet', 'text' => 'Vises under tittelen når revisjonen har passert planlagt slutt uten å være fullført, eller er fullført med avvik som ikke er fulgt opp. Beregnes automatisk og lagres ikke.'],
                         ],
                     ],
                     [
@@ -3043,8 +3045,6 @@ return [
                 'completed_in_progress' => 'Gjenåpnet av :name',
             ],
             'unknown_user' => 'en tidligere bruker',
-            'findings' => [
-                'heading' => 'Funn',
             'attention' => [
                 'heading' => 'Trenger oppmerksomhet',
                 'total_one' => '1 revisjon trenger oppmerksomhet',
@@ -3058,6 +3058,8 @@ return [
                     'nonconformity_without_follow_up' => 'Avvik uten oppfølging',
                 ],
             ],
+            'findings' => [
+                'heading' => 'Funn',
                 'intro' => 'Det revisjonen fant. Et funn er ikke et tiltak – oppfølgingen skjer i Avvik og forbedringer.',
                 'empty' => 'Ingen funn er registrert.',
                 'empty_planned' => 'Funn registreres når revisjonen er startet.',
@@ -4931,7 +4933,7 @@ return [
                 'core' => 'Kunnskapsgrunnlaget: Wiki, kilder, krav til dokumentasjon og sporbarhet.',
                 'tender' => 'Hele tilbudsløpet fra kunngjøring til levert tilbud.',
                 'quality' => 'Kvalitetsstyring med avvik, tiltak og dokumentert oppfølging.',
-                'grc' => 'Styring, risiko og etterlevelse samlet: kvalitet, risiko og revisjon/compliance.',
+                'grc' => 'Styring, risiko og etterlevelse samlet: kvalitet, risiko, etterlevelse og revisjon.',
             ],
             'module_labels' => [
                 'wiki_core' => 'Wiki/Core',

@@ -732,7 +732,7 @@ return [
             'risk' => 'Identify, assess and follow up risk.',
             'objectives' => 'Set objectives, follow results and see what needs attention.',
             'improvements' => 'Register, handle and follow up deviations and improvement opportunities.',
-            'compliance' => 'Collect the requirements the organisation must comply with, with source and owner.',
+            'compliance' => 'The requirements the organisation must comply with, compliance assessments, and audits with findings and follow-up.',
         ],
     ],
     'home' => [
@@ -855,6 +855,8 @@ return [
             'contracts' => 'Contracts',
             'hse' => 'HSE',
             'compliance' => 'Compliance and audit',
+            'compliance_requirements' => 'Requirements',
+            'compliance_audits' => 'Audits',
             'services' => 'Services & SLA',
             'projects' => 'Projects',
             'competence' => 'Competence',
@@ -2498,11 +2500,11 @@ return [
                 'improvement_edit' => 'Register and handle deviations and improvements',
                 'improvement_close' => 'Close, cancel and reopen deviations and improvements',
                 'improvement_delete' => 'Delete mistakenly registered deviations and improvements',
-                'compliance_view' => 'View requirements',
+                'compliance_view' => 'View requirements and audits',
                 'compliance_edit' => 'Register and change requirements and requirement sources',
                 'compliance_assess' => 'Assess compliance',
                 'compliance_audit' => 'Carry out audits',
-                'compliance_delete' => 'Delete mistakenly registered requirements and unused requirement sources',
+                'compliance_delete' => 'Delete mistakenly registered requirements and audits, and unused requirement sources',
             ],
         ],
     ],
@@ -2547,7 +2549,7 @@ return [
                             ['title' => 'Not assessed', 'text' => 'The requirement has no compliance assessment yet.'],
                             ['title' => 'Not compliant', 'text' => 'The latest assessment concluded that the requirement is not met.'],
                             ['title' => 'Partially compliant', 'text' => 'The latest assessment concluded that the requirement is only partially met.'],
-                            ['title' => 'Review overdue', 'text' => 'The review interval has passed since the latest assessment. Due today does not count as overdue.'],
+                            ['title' => 'Review overdue', 'text' => 'The review interval has passed since the latest assessment. The due date itself does not count as overdue.'],
                             ['title' => 'No owner', 'text' => 'Nobody is set as owner of the requirement.'],
                             ['title' => 'Calculated automatically', 'text' => 'The reasons are calculated automatically from the assessments, the review interval and the owner every time the page is opened. They are not statuses of their own, and they never change the requirement or its assessments. Retired requirements never need attention. Once the matter is put right, the reason disappears.'],
                         ],
@@ -2557,7 +2559,7 @@ return [
                         'items' => [
                             ['title' => 'Active', 'text' => 'The requirement applies to the organisation. Active requirements are listed first.'],
                             ['title' => 'Retired', 'text' => 'The requirement no longer applies, for example because the standard has been replaced. It stays in the register with its history.'],
-                            ['title' => 'Search and filter', 'text' => 'Search the reference, title and requirement text, and filter by source and status. Only requirements that need attention shows just the requirements with at least one reason.'],
+                            ['title' => 'Search and filter', 'text' => 'Search the reference, title and requirement text, and filter by source and status. The filter «Only requirements that need attention» shows the requirements with at least one reason.'],
                         ],
                     ],
                 ],
@@ -2634,8 +2636,6 @@ return [
                         ],
                     ],
                     [
-                        'title' => 'The register',
-                    [
                         'title' => 'Needs attention',
                         'items' => [
                             ['title' => 'What it means', 'text' => 'Needs attention means that an audit has something concrete that should be followed up. The list at the top shows which audits and why, and every audit in the register shows the same reasons.'],
@@ -2644,6 +2644,8 @@ return [
                             ['title' => 'Calculated automatically', 'text' => 'The reasons are calculated automatically from the status, the planned end and the findings every time the page is opened. They are not statuses of their own. Once the nonconformity is followed up or the audit is completed, the reason disappears. Cancelled audits never need attention.'],
                         ],
                     ],
+                    [
+                        'title' => 'The register',
                         'items' => [
                             ['title' => 'Search and filter', 'text' => 'Search in title, scope and auditor, and filter by status and type. Audits in progress are shown first, then planned, completed and cancelled ones.'],
                             ['title' => 'Findings', 'text' => 'Audit findings – nonconformities, observations and improvement opportunities – are recorded on the audit page while the audit is in progress. Follow-up happens in Deviations & improvements.'],
@@ -2675,7 +2677,7 @@ return [
                             ['title' => 'Findings are not actions', 'text' => 'A finding has no owner, due date, status or actions. Follow-up – responsibility, actions, due dates and closing – happens in Deviations & improvements.'],
                             ['title' => 'Follow up in Deviations & improvements', 'text' => 'Creates a new case from the finding. It only happens when someone chooses it – never automatically. You choose the business area, owner and due date; the title and description are taken from the finding. A nonconformity becomes a deviation, observations and improvement opportunities an improvement. It can also be done after the audit is completed.'],
                             ['title' => 'Handed off', 'text' => 'A handed-off finding is locked for good, also if the audit is reopened, and cannot be deleted. The audit only shows that the finding was handed off – not the case\'s status, actions or due dates.'],
-                            ['title' => 'What you have no access to', 'text' => 'Process and control are shown only if you have access to Quality. A case in a business area you do not have access to is shown without link, title and status.'],
+                            ['title' => 'What you have no access to', 'text' => 'Process and control are shown only if you have access to Quality. A case in a business area you do not have access to is shown only as «Handed off» – without link and title.'],
                         ],
                     ],
                     [
@@ -2684,9 +2686,9 @@ return [
                             ['title' => 'Start audit', 'text' => 'Moves the audit from Planned to In progress. The type cannot be changed once the audit has started.'],
                             ['title' => 'Conclusion', 'text' => 'The overall assessment of the audit. It is written while the audit is in progress, and must be filled in before the audit can be completed.'],
                             ['title' => 'Complete audit', 'text' => 'Ends the audit with the conclusion. An audit can be completed without findings. Afterwards it is locked, but findings not yet handed off can still be followed up.'],
+                            ['title' => 'Needs attention', 'text' => 'Shown under the title when the audit has passed its planned end without being completed, or is completed with nonconformities that have not been followed up. Calculated automatically and not stored.'],
                             ['title' => 'Cancel audit', 'text' => 'Used when the audit will not be carried out after all. A reason is required, and the audit stays as cancelled.'],
                             ['title' => 'Reopen audit', 'text' => 'Makes a completed audit editable again, for example to correct the conclusion. A reason is required, and the reopening is logged.'],
-                            ['title' => 'Needs attention', 'text' => 'Shown under the title when the audit has passed its planned end without being completed, or is completed with nonconformities that have not been followed up. Calculated automatically and not stored.'],
                         ],
                     ],
                     [
@@ -3042,8 +3044,6 @@ return [
                 'completed_in_progress' => 'Reopened by :name',
             ],
             'unknown_user' => 'a former user',
-            'findings' => [
-                'heading' => 'Findings',
             'attention' => [
                 'heading' => 'Needs attention',
                 'total_one' => '1 audit needs attention',
@@ -3057,6 +3057,8 @@ return [
                     'nonconformity_without_follow_up' => 'Nonconformity not followed up',
                 ],
             ],
+            'findings' => [
+                'heading' => 'Findings',
                 'intro' => 'What the audit found. A finding is not an action – follow-up happens in Deviations & improvements.',
                 'empty' => 'No findings recorded.',
                 'empty_planned' => 'Findings are recorded once the audit has started.',
@@ -4930,7 +4932,7 @@ return [
                 'core' => 'The knowledge foundation: Wiki, sources, documentation requirements and traceability.',
                 'tender' => 'The whole bid process from notice to submitted tender.',
                 'quality' => 'Quality management with deviations, actions and documented follow-up.',
-                'grc' => 'Governance, risk and compliance together: quality, risk and audit/compliance.',
+                'grc' => 'Governance, risk and compliance together: quality, risk, compliance and audit.',
             ],
             'module_labels' => [
                 'wiki_core' => 'Wiki/Core',

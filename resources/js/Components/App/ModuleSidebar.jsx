@@ -114,7 +114,7 @@ function CollapseIcon({ collapsed }) {
  * page and must stay fully legible — it is the only module navigation there — so the collapse
  * control itself is hidden and the collapsed classes simply do not apply.
  */
-export default function ModuleSidebar({ modules = {}, activeModules = [], permissions = [], activeKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null }) {
+export default function ModuleSidebar({ modules = {}, activeModules = [], permissions = [], activeKey = null, activeAreaKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null }) {
     // A module this person holds no permission in is deliberately never rendered — it is not
     // dimmed, it is simply not theirs. See appModules.moduleAvailability.
     const groups = railEntries(activeModules, permissions);
@@ -208,6 +208,39 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
      * hierarchy comes from position and the line, not from shrinking the text. Collapsed to icons,
      * the indentation goes and each child is its own icon, as every other module is.
      */
+    /**
+     * A module's work areas, one level further in under a guide line of their own. The module row
+     * above keeps its pill while one of them is open; the area carries `aria-current`. Collapsed to
+     * icons there is no room for a third level, and the module's icon is enough — the header lists
+     * the areas anyway.
+     */
+    const renderSubAreas = (module) => (
+        <ul
+            data-testid={`module-${module.key}-areas`}
+            className={classNames('mt-0.5 ml-3 space-y-0.5 border-l border-slate-200 pl-2', collapsed ? 'lg:hidden' : '')}
+        >
+            {module.subAreas.map((area) => {
+                const isActive = activeAreaKey === area.key;
+
+                return (
+                    <li key={area.key}>
+                        <Link
+                            href={area.href}
+                            data-testid={`module-area-${area.key}`}
+                            aria-current={isActive ? 'page' : undefined}
+                            className={classNames(
+                                'flex items-center rounded-xl px-3 py-2 text-base leading-snug transition',
+                                isActive ? 'font-semibold text-violet-700' : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                            )}
+                        >
+                            {area.label(modules)}
+                        </Link>
+                    </li>
+                );
+            })}
+        </ul>
+    );
+
     const renderWorkspace = (workspace) => {
         const label = workspace.label(modules);
         const onLanding = activeKey === workspace.key;
@@ -244,6 +277,9 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
                 >
                     {workspace.children.map((child) => {
                         const isActive = activeKey === child.key;
+                        // With one of its work areas open, the area is the current page; the module
+                        // keeps its pill as the place you are in, like a workspace does.
+                        const areaOpen = isActive && (child.subAreas ?? []).some((area) => area.key === activeAreaKey);
                         const childLabel = child.label(modules);
 
                         return (
@@ -251,7 +287,8 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
                                 <Link
                                     href={child.href}
                                     data-testid={`module-${child.key}`}
-                                    aria-current={isActive ? 'page' : undefined}
+                                    data-active={isActive ? 'true' : 'false'}
+                                    aria-current={isActive && ! areaOpen ? 'page' : undefined}
                                     title={collapsed ? childLabel : undefined}
                                     className={classNames(
                                         rowClass,
@@ -267,6 +304,7 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
                                     />
                                     <span className={labelClass}>{childLabel}</span>
                                 </Link>
+                                {child.subAreas && renderSubAreas(child)}
                             </li>
                         );
                     })}

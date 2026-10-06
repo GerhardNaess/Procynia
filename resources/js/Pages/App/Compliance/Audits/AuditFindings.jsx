@@ -177,7 +177,7 @@ function FindingForm({ auditId, finding = null, options, types, onDone, ta }) {
                 )}
             </div>
 
-            {(form.errors.audit || form.errors.finding) && <p className={ERROR}>{form.errors.audit ?? form.errors.finding}</p>}
+            {form.errors.finding && <p className={ERROR}>{form.errors.finding}</p>}
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>{tf.cancel ?? 'Avbryt'}</button>

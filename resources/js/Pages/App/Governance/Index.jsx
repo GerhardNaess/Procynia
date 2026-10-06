@@ -14,7 +14,7 @@ const FALLBACK_DESCRIPTIONS = {
     risk: 'Identifiser, vurder og følg opp risiko.',
     objectives: 'Sett mål, følg resultater og se hva som trenger oppmerksomhet.',
     improvements: 'Registrer, behandle og følg opp avvik og forbedringsmuligheter.',
-    compliance: 'Samle kravene virksomheten skal etterleve, med kilde og ansvarlig.',
+    compliance: 'Kravene virksomheten skal etterleve, vurdering av etterlevelse og revisjoner med funn og oppfølging.',
 };
 
 /**

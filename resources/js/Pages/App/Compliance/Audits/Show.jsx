@@ -47,6 +47,7 @@ export default function ComplianceAuditShow() {
         types = [],
         responsible_options: responsibleOptions = [],
         locale = 'no',
+        errors = {},
     } = usePage().props;
 
     const tr = translations?.compliance ?? {};
@@ -99,8 +100,8 @@ export default function ComplianceAuditShow() {
                                 <span className="text-base font-semibold text-slate-700">{auditTypeLabel(audit.audit_type, ta)}</span>
                             </div>
                             <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{audit.title}</h1>
-                        </div>
                             <AttentionReasons reasons={attention} tr={ta} withLabel testId="compliance-audit-show-attention" />
+                        </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...complianceHelp(tr, 'audit')} />
                             {permissions.can_edit && panel === null && (
@@ -111,6 +112,12 @@ export default function ComplianceAuditShow() {
                             )}
                         </div>
                     </div>
+
+                    {/* A step the audit's status no longer allows — scope, findings — answers on
+                        `audit`; shown once here, whichever form or button sent it. */}
+                    {errors.audit && (
+                        <p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800" data-testid="compliance-audit-error">{errors.audit}</p>
+                    )}
 
                     {locked && (
                         <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" data-testid="compliance-audit-locked">{locked}</p>

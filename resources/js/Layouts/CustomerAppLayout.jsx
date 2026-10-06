@@ -959,6 +959,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 activeModules={activeModules}
                                 permissions={userPermissions}
                                 activeKey={activeModule}
+                                activeAreaKey={activeSecondaryKey}
                                 activeWorkspace={activeWorkspace}
                                 collapsed={sidebarCollapsed}
                                 onToggleCollapsed={toggleSidebarCollapsed}

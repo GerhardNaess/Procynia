@@ -302,7 +302,7 @@ class CompliancePageHelpTranslationsTest extends TestCase
         // A finding is not an action; follow-up is in Avvik og forbedringer, explicit, and locks it;
         // hidden cases and Kvalitet context are not shown.
         $no = $this->allText(['sections' => [collect($this->compliance('no')['help']['audit']['sections'])->firstWhere('title', 'Funn')]]);
-        foreach (['ingen ansvarlig, frist, status eller tiltak', 'Avvik og forbedringer', 'aldri automatisk', 'låses for godt', 'ikke status, tiltak eller frister', 'tilgang til Kvalitet', 'uten lenke, tittel og status', 'etter at revisjonen er fullført'] as $phrase) {
+        foreach (['ingen ansvarlig, frist, status eller tiltak', 'Avvik og forbedringer', 'aldri automatisk', 'låses for godt', 'ikke status, tiltak eller frister', 'tilgang til Kvalitet', 'uten lenke og tittel', 'etter at revisjonen er fullført'] as $phrase) {
             $this->assertStringContainsString($phrase, $no);
         }
     }

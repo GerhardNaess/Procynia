@@ -30,6 +30,10 @@
  *
  * `workspace` puts a module under an arbeidsområde on the rail (see APP_WORKSPACES). It changes
  * where the module is listed, never whether it is: all three gates above still decide that.
+ *
+ * `subAreas` lists a module's work areas under it in the rail. Only Etterlevelse og revisjon has
+ * them: its two areas, Krav and Revisjoner, are equal destinations, and the module entry alone only
+ * ever led to the first. They are shown exactly when the module is.
  */
 export const APP_MODULES = [
     {
@@ -122,6 +126,12 @@ export const APP_MODULES = [
         permission: 'compliance.view',
         label: (m) => m.compliance ?? 'Etterlevelse og revisjon',
         areas: ['compliance'],
+        // Its two work areas, listed under it in the rail as well as in the header, so Revisjoner is
+        // one click away from anywhere. Keys match the header's (CustomerAppLayout).
+        subAreas: [
+            { key: 'compliance-requirements', href: '/app/compliance/requirements', label: (m) => m.compliance_requirements ?? 'Krav' },
+            { key: 'compliance-audits', href: '/app/compliance/audits', label: (m) => m.compliance_audits ?? 'Revisjoner' },
+        ],
     },
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },

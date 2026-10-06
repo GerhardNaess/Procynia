@@ -120,14 +120,31 @@ describe('the rail does not take navigation away from anyone', () => {
         assert.match(layout, /flex max-w-\[1600px\] flex-col gap-6 .* lg:flex-row/);
     });
 
-    test('the rail picks modules and workspaces, never the work areas inside a module', () => {
+    test('the rail picks modules and workspaces; only a module that declares its work areas lists them', () => {
         // Anbud used to nest its four work areas here, which made one module structurally unlike
-        // every other. Wiki never did, and Wiki is the pattern. The only nesting is Styring, a
-        // level above modules.
-        assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a module\'s work areas');
+        // every other, and it still does not. Etterlevelse og revisjon is the one exception, chosen on
+        // purpose: Krav and Revisjoner are equal destinations, and the module entry only led to Krav.
+        assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a module\'s sections');
         assert.ok(! sidebar.includes('activeSectionKey'), 'the rail takes no section state');
-        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null \}\)/);
-        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}\s*\n\s*activeWorkspace=\{activeWorkspace\}/);
+        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, activeAreaKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null \}\)/);
+        assert.match(sidebar, /\{child\.subAreas && renderSubAreas\(child\)\}/);
+        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}\s*\n\s*activeAreaKey=\{activeSecondaryKey\}\s*\n\s*activeWorkspace=\{activeWorkspace\}/);
+
+        const withAreas = APP_MODULES.filter((module) => module.subAreas);
+        assert.deepEqual(withAreas.map((module) => module.key), ['compliance']);
+        assert.deepEqual(withAreas[0].subAreas.map((area) => [area.key, area.href, area.label({})]), [
+            ['compliance-requirements', '/app/compliance/requirements', 'Krav'],
+            ['compliance-audits', '/app/compliance/audits', 'Revisjoner'],
+        ]);
+    });
+
+    test('one current page: with a work area open, the area carries aria-current, not the module', () => {
+        assert.match(sidebar, /aria-current=\{isActive && ! areaOpen \? 'page' : undefined\}/);
+        assert.match(sidebar, /const isActive = activeAreaKey === area\.key;/);
+    });
+
+    test('the work areas fold away with the rail on desktop, never on a phone', () => {
+        assert.match(sidebar, /collapsed \? 'lg:hidden' : ''/);
     });
 });
 

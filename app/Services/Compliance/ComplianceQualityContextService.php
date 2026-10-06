@@ -157,7 +157,7 @@ class ComplianceQualityContextService
         $process = $this->linkableProcesses((int) $requirement->customer_id)->whereKey($processId)->first();
 
         if ($process === null) {
-            throw ValidationException::withMessages(['quality_process_id' => __('procynia.compliance.quality.validation.process_not_allowed')]);
+            throw ValidationException::withMessages(['quality_process_id' => __('procynia.compliance.validation.quality.process_not_allowed')]);
         }
 
         $this->createOnce(
@@ -169,7 +169,7 @@ class ComplianceQualityContextService
                 'created_by' => $user->id,
             ]),
             'quality_process_id',
-            __('procynia.compliance.quality.validation.process_already_linked'),
+            __('procynia.compliance.validation.quality.process_already_linked'),
         );
     }
 
@@ -197,7 +197,7 @@ class ComplianceQualityContextService
         $control = $this->linkableControls((int) $requirement->customer_id)->whereKey($controlId)->first();
 
         if ($control === null) {
-            throw ValidationException::withMessages(['control_item_id' => __('procynia.compliance.quality.validation.control_not_allowed')]);
+            throw ValidationException::withMessages(['control_item_id' => __('procynia.compliance.validation.quality.control_not_allowed')]);
         }
 
         $this->createOnce(
@@ -209,7 +209,7 @@ class ComplianceQualityContextService
                 'created_by' => $user->id,
             ]),
             'control_item_id',
-            __('procynia.compliance.quality.validation.control_already_linked'),
+            __('procynia.compliance.validation.quality.control_already_linked'),
         );
     }
 
@@ -239,7 +239,7 @@ class ComplianceQualityContextService
         abort_unless($this->hasManagePermissions($user), 403);
 
         if (! $requirement->isActive()) {
-            throw ValidationException::withMessages(['requirement' => __('procynia.compliance.quality.validation.requirement_retired')]);
+            throw ValidationException::withMessages(['requirement' => __('procynia.compliance.validation.quality.requirement_retired')]);
         }
     }
 

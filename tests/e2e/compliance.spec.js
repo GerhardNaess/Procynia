@@ -35,7 +35,9 @@ test('a requirement is registered under a new source, edited, retired and reopen
     await page.getByTestId('governance-module-compliance').click();
     await page.waitForURL(/\/app\/compliance\/requirements$/);
     await expect(page.getByRole('heading', { name: 'Krav', level: 1 })).toBeVisible();
-    await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Etterlevelse og revisjon');
+    // One current page: the work area, under the module that stays marked as the place you are in.
+    await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Krav');
+    await expect(page.getByTestId('module-compliance')).toHaveAttribute('data-active', 'true');
     await expectPageHelp(page, 'Om krav', ['Krav og kravkilder', 'Etterlevelse og revisjon', 'Registeret']);
     await expectReadable(page, '01-register');
 
