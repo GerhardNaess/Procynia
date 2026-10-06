@@ -32,8 +32,9 @@ test('a process Dokument tab has no structure or relations and still saves', asy
     await expect(page.getByRole('heading', { name: 'Input' })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Output' })).toHaveCount(0);
 
-    // Everything else the tab is for is untouched.
-    await expect(page.getByRole('heading', { name: 'Dokumenter' })).toBeVisible();
+    // Everything else the tab is for is untouched. Exact: the tab also has a «Styrende dokumenter»
+    // card, and a substring match would pass on that one even if the Dokumenter card were gone.
+    await expect(page.getByRole('heading', { name: 'Dokumenter', exact: true })).toBeVisible();
 
     const purpose = page.getByLabel('Formål');
     const marker = `E2E opprydding ${Date.now()}`;

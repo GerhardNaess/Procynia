@@ -5,8 +5,8 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * An activity as a source of knowledge articles, as a user meets it.
  *
  * What is checked is the journey the feature exists for: standing on a step of a process, seeing
- * what it has already produced, writing the next article, and landing in Enterprise Wiki with it as
- * a draft that follows Wiki's own review. The rules about tenancy, provenance surviving a rewrite
+ * what it has already produced, and writing the next article, which is handed to Enterprise Wiki as
+ * a source that Wiki's own pipeline turns into pages. The rules about tenancy, provenance surviving a rewrite
  * and what reaches the graph are owned by QualityProcessBlueprintTest and QualityGraphProjectionTest
  * — none of that is re-asserted here.
  *
@@ -43,7 +43,7 @@ test.describe('an activity as a source of knowledge articles', () => {
         await openFlow(page, PROCESS);
 
         // The indicator on the diagram: a count, discreetly, on the node itself.
-        await expect(page.locator('svg[role="img"]').getByText('2 kunnskapsartikler')).toBeVisible();
+        await expect(page.locator('svg[role="img"]').getByText('2 kunnskapssider')).toBeVisible();
 
         await page.getByRole('button', { name: `Åpne kunnskapen bak ${ACTIVITY}` }).first().click();
 
@@ -70,14 +70,14 @@ test.describe('an activity as a source of knowledge articles', () => {
      * Written by hand rather than drafted, so the test makes no provider call — what is created is
      * the text in the two fields either way.
      */
-    test('an activity creates a knowledge article as a Wiki draft', async ({ page }) => {
+    test('an activity hands a knowledge article to Wiki as a source', async ({ page }) => {
         await openFlow(page, 'E2E liten prosess');
 
         await page.getByRole('button', { name: /Åpne kunnskapen bak/ }).first().click();
 
         const panel = page.getByRole('dialog');
 
-        await expect(panel.getByText('Denne aktiviteten har ikke gitt noen kunnskapsartikkel ennå.')).toBeVisible();
+        await expect(panel.getByText('Denne aktiviteten har ikke gitt noen kunnskap ennå.')).toBeVisible();
 
         await panel.getByRole('button', { name: 'Skriv artikkelen selv' }).click();
 
@@ -88,19 +88,39 @@ test.describe('an activity as a source of knowledge articles', () => {
         const title = `E2E Sikkerhetskrav ${Date.now()}`;
 
         await panel.getByLabel('Tittel').fill(title);
-        await panel.getByLabel('Artikkel').fill('Dette dekker hva som kontrolleres.\n\n## Hva du ser etter\n\nDokumentasjon.');
-        await panel.getByRole('button', { name: 'Opprett utkast i Wiki' }).click();
+        const markdown = 'Dette dekker hva som kontrolleres.\n\n## Hva du ser etter\n\nDokumentasjon.';
+        await panel.getByLabel('Artikkel').fill(markdown);
 
-        // Landed in Wiki, as a draft, because everything after this happens there.
-        await expect(page).toHaveURL(/\/app\/wiki\//);
-        await expect(page.getByRole('heading', { name: title }).first()).toBeVisible();
+        // The article is handed to Wiki as a source, and Wiki's own ingest run turns it into pages.
+        // That run calls the model on the Wiki queues and each activity takes only so many
+        // articles, so the hand-over is caught here and answered the way the server answers it — a
+        // redirect back to the flow. What is checked is the browser's half: the text sent is the
+        // user's, for this activity, and the user stays on the flow (there is no page to go to
+        // yet). The server's half is covered in QualityProcessBlueprintTest.
+        const flowUrl = page.url();
+        let sent = null;
+        await page.route('**/activities/articles', async (route) => {
+            sent = route.request().postDataJSON();
+            await route.fulfill({ status: 303, headers: { Location: flowUrl } });
+        });
+
+        await panel.getByRole('button', { name: 'Legg artikkelen inn i Wiki' }).click();
+
+        await expect.poll(() => sent).not.toBeNull();
+        expect(sent.title).toBe(title);
+        expect(sent.markdown).toBe(markdown);
+        expect(typeof sent.activity_key).toBe('string');
+        expect(sent.activity_key).not.toBe('');
+
+        await expect(page).toHaveURL(/\/app\/quality\/items\/\d+/);
+        await expect(page).not.toHaveURL(/\/app\/wiki\//);
     });
 
     /** A step that has produced nothing still has a way in — that is the point of the direction. */
     test('an activity that has produced nothing still offers the way in', async ({ page }) => {
         await openFlow(page, 'E2E liten prosess');
 
-        await expect(page.locator('svg[role="img"]').getByText(/kunnskapsartikler/)).toHaveCount(0);
+        await expect(page.locator('svg[role="img"]').getByText(/kunnskapssid/)).toHaveCount(0);
         await expect(page.getByRole('button', { name: /Åpne kunnskapen bak/ }).first()).toBeVisible();
     });
 });
