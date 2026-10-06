@@ -414,6 +414,8 @@ Route::prefix('app')
             // Sett som utgått / Gjenåpne: the only ways status changes. Each writes an immutable history row.
             Route::post('/requirements/{requirementId}/retire', [ComplianceRequirementController::class, 'retire'])->whereNumber('requirementId')->name('requirements.retire');
             Route::post('/requirements/{requirementId}/reopen', [ComplianceRequirementController::class, 'reopen'])->whereNumber('requirementId')->name('requirements.reopen');
+            // Vurder etterlevelse: append-only, a correction is a new assessment.
+            Route::post('/requirements/{requirementId}/assessments', [ComplianceRequirementController::class, 'assess'])->whereNumber('requirementId')->name('requirements.assess');
             // Kravkilder, managed from the Krav register.
             Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
             Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');

@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\ComplianceAssessment;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceRequirementStatusChange;
 use App\Models\ComplianceSource;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Compliance\ComplianceAssessmentService;
 use App\Services\Compliance\ComplianceRequirementLifecycleService;
+use App\Services\Compliance\ComplianceStatusResolver;
 use App\Support\Compliance\ComplianceValidationMessages;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -30,7 +33,8 @@ use Inertia\Response;
  *
  * compliance.edit registers and changes requirements and retires and reopens them;
  * compliance.delete deletes one registered by mistake. Status changes only through retire() and
- * reopen(), never through store() or update().
+ * reopen(), never through store() or update(). compliance.assess — not compliance.edit — registers
+ * an etterlevelsesvurdering through assess().
  */
 class ComplianceRequirementController extends Controller
 {
@@ -38,6 +42,8 @@ class ComplianceRequirementController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly ComplianceAccessService $access,
         private readonly ComplianceRequirementLifecycleService $lifecycle,
+        private readonly ComplianceStatusResolver $status,
+        private readonly ComplianceAssessmentService $assessments,
     ) {}
 
     /** /app/compliance: Krav is the module's only main area so far. */
@@ -98,9 +104,13 @@ class ComplianceRequirementController extends Controller
 
         $canEdit = $this->access->canEdit($user);
         $canDelete = $this->access->canDelete($user);
+        // Only the rows already narrowed above, so no hidden requirement's status is ever read.
+        $latest = $this->status->latestForRequirements((int) $user->customer_id, $requirements->pluck('id')->map(fn (mixed $id): int => (int) $id)->all());
 
         return Inertia::render('App/Compliance/Requirements/Index', [
-            'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->row($requirement))->all(),
+            'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->row($requirement) + [
+                'compliance' => $this->registerCompliance($requirement, $latest->get((int) $requirement->id)),
+            ])->all(),
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleRequirements($user)->count(),
             'filters' => [
@@ -137,6 +147,7 @@ class ComplianceRequirementController extends Controller
 
         $canEdit = $this->access->canEdit($user);
         $active = $requirement->isActive();
+        $assessments = $requirement->assessments()->with('assessedBy:id,name')->get();
 
         return Inertia::render('App/Compliance/Requirements/Show', [
             'requirement' => $this->row($requirement) + [
@@ -144,6 +155,23 @@ class ComplianceRequirementController extends Controller
                 'source_kind' => $requirement->source?->kind,
                 'created_at' => $requirement->created_at?->toIso8601String(),
             ],
+            'compliance' => $this->status->summarize($requirement, $assessments->first()),
+            // Reached through visibleRequirements(), like the status history.
+            'assessments' => $assessments->map(fn (ComplianceAssessment $assessment): array => [
+                'id' => (int) $assessment->id,
+                'result' => $assessment->result,
+                'rationale' => $assessment->rationale,
+                'assessed_at' => $assessment->assessed_at?->toIso8601String(),
+                'assessed_by_name' => $assessment->assessedBy?->name,
+                'snapshot' => [
+                    'reference' => $assessment->requirement_reference,
+                    'title' => $assessment->requirement_title,
+                    'requirement_text' => $assessment->requirement_text,
+                    'source_name' => $assessment->source_name,
+                    'source_version' => $assessment->source_version,
+                ],
+            ])->all(),
+            'assessment_results' => ComplianceAssessment::RESULTS,
             // Reached through visibleRequirements(); the history carries no access of its own.
             'status_history' => $requirement->statusChanges()->with('changedBy:id,name')->get()
                 ->map(fn (ComplianceRequirementStatusChange $change): array => [
@@ -161,6 +189,8 @@ class ComplianceRequirementController extends Controller
                 'can_retire' => $canEdit && $active,
                 'can_reopen' => $canEdit && ! $active,
                 'can_delete' => $this->access->canDelete($user) && $requirement->isDeletable(),
+                // Only an active requirement is assessed; the server refuses it otherwise too.
+                'can_assess' => $this->access->canAssess($user) && $active,
             ],
             'source_options' => $canEdit && $active ? $this->sourceOptions($user) : [],
             'owner_options' => $canEdit && $active ? $this->access->ownerCandidates($user) : [],
@@ -225,6 +255,31 @@ class ComplianceRequirementController extends Controller
         $this->lifecycle->reopen($requirement, $user, $this->validatedReason($request));
 
         return back()->with('success', __('procynia.compliance.flash.reopened'));
+    }
+
+    /**
+     * Vurder etterlevelse: a new, immutable assessment. Access first — the requirement must be
+     * visible (404 otherwise), then compliance.assess (403). Only an active requirement is
+     * assessed. The date is the system's; nothing in the request can set it.
+     */
+    public function assess(Request $request, int $requirementId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $requirement = $this->visibleRequirementOrFail($user, $requirementId);
+        abort_unless($this->access->canAssess($user), 403);
+
+        if (! $requirement->isActive()) {
+            return back()->with('error', __('procynia.compliance.validation.assess_retired'));
+        }
+
+        $validated = $request->validate([
+            'result' => ['required', 'string', Rule::in(ComplianceAssessment::RESULTS)],
+            'rationale' => ['required', 'string', 'max:10000'],
+        ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
+
+        $this->assessments->assess($requirement, $user, $validated['result'], $validated['rationale']);
+
+        return back()->with('success', __('procynia.compliance.flash.assessed'));
     }
 
     public function destroy(int $requirementId): RedirectResponse
@@ -355,6 +410,23 @@ class ComplianceRequirementController extends Controller
     private function sourceLabel(ComplianceSource $source): string
     {
         return $source->version !== null && $source->version !== '' ? "{$source->name} ({$source->version})" : $source->name;
+    }
+
+    /**
+     * The register's Etterlevelse column. A retired requirement keeps its last result only as
+     * history: no next review date and never overdue (the schedule sees to that).
+     *
+     * @return array{status: string, is_overdue: bool, assessed_at: string|null}
+     */
+    private function registerCompliance(ComplianceRequirement $requirement, ?ComplianceAssessment $latest): array
+    {
+        $summary = $this->status->summarize($requirement, $latest);
+
+        return [
+            'status' => $summary['status'],
+            'is_overdue' => $summary['is_overdue'],
+            'assessed_at' => $summary['assessed_at'],
+        ];
     }
 
     /** @return array<string, mixed> */

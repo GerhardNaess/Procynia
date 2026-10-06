@@ -11,8 +11,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Et krav i Etterlevelse og revisjon: one requirement from one kravkilde, with a reference, the
  * requirement text, one person responsible and how often it should be reassessed.
  *
- * What it does not carry, on purpose: whether it is met. Compliance is assessed in its own layer,
- * and a status or next review date derived from that is computed, never stored here.
+ * What it does not carry, on purpose: whether it is met. Compliance is assessed in assessments(),
+ * and the status and next review date derived from them are computed by ComplianceStatusResolver,
+ * never stored here.
  *
  * Status is not a form field and not mass assignable: every requirement starts active, and moves
  * only through ComplianceRequirementLifecycleService (Sett som utgått, Gjenåpne). How it got there
@@ -80,13 +81,13 @@ class ComplianceRequirement extends Model
 
     /**
      * Whether the requirement may be deleted at all, before any permission is considered. Deleting
-     * is for a requirement registered by mistake: still active and with no status change ever
-     * written. Once it has been retired — even if it was reopened since — it has a history, and is
+     * is for a requirement registered by mistake: still active, with no status change and no
+     * assessment ever written. Once it has been retired or assessed it has a history, and is
      * handled through its lifecycle; the database refuses the delete as well.
      */
     public function isDeletable(): bool
     {
-        return $this->isActive() && ! $this->statusChanges()->exists();
+        return $this->isActive() && ! $this->statusChanges()->exists() && ! $this->assessments()->exists();
     }
 
     public function source(): BelongsTo
@@ -97,6 +98,14 @@ class ComplianceRequirement extends Model
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    /** Newest first: latest assessed_at, the highest id breaking a tie. */
+    public function assessments(): HasMany
+    {
+        return $this->hasMany(ComplianceAssessment::class, 'requirement_id')
+            ->orderByDesc('assessed_at')
+            ->orderByDesc('id');
     }
 
     /** Newest first. */

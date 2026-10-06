@@ -15,7 +15,8 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * Customer-wide in v1: a role that grants compliance.view reads every requirement and source of the
  * user's own customer; there is no fagområde. compliance.edit registers and changes them, and
- * retires and reopens requirements; compliance.delete removes what was registered by mistake.
+ * retires and reopens requirements; compliance.assess registers etterlevelsesvurderinger;
+ * compliance.delete removes what was registered by mistake.
  *
  * SYSTEM OWNER, EXPLICIT GRANT.
  *
@@ -78,6 +79,15 @@ class ComplianceAccessService
     public function canEdit(User $user): bool
     {
         return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::COMPLIANCE_EDIT);
+    }
+
+    /**
+     * Registering an etterlevelsesvurdering. compliance.edit alone is not enough: maintaining the
+     * register and judging whether it is met are separate responsibilities, as with risk.assess.
+     */
+    public function canAssess(User $user): bool
+    {
+        return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::COMPLIANCE_ASSESS);
     }
 
     /** Deleting a requirement registered by mistake, or a source nothing uses. */
