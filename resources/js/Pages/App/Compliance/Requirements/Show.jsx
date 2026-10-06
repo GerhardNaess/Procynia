@@ -7,6 +7,7 @@ import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../.
 import RequirementCompliance from './RequirementCompliance';
 import RequirementForm from './RequirementForm';
 import RequirementHistory from './RequirementHistory';
+import RequirementQualityContext from './RequirementQualityContext';
 import { RequirementReopenForm, RequirementRetireForm } from './RequirementStatusForms';
 import { complianceHelp } from './complianceHelp';
 import { REQUIREMENT_STATUS_TONES, reviewIntervalLabel } from './complianceRequirement';
@@ -16,8 +17,10 @@ const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
 
 /**
- * One requirement: what it says, where it comes from, who follows it up and how often it is
- * reassessed, whether it is met (Etterlevelse), its status, and the status history. Every action
+ * One requirement, read as «Hva kreves? → Hvordan gjør vi det? → Oppfyller vi det?»: what it
+ * says, where it comes from, who follows it up and how often it is reassessed; the Kvalitet
+ * processes and controls it is met through (only for someone who can read Kvalitet); whether it is
+ * met (Etterlevelse); its status, and the status history. Every action
  * is offered only when the server said this person may do it; the controller refuses it
  * otherwise. An active requirement can be edited, assessed and retired; a retired one only
  * reopened. Status never moves through Rediger.
@@ -30,6 +33,8 @@ export default function ComplianceRequirementShow() {
         compliance = null,
         assessments = [],
         assessment_results: assessmentResults = [],
+        quality_context: qualityContext = null,
+        quality_options: qualityOptions = null,
         locale = 'no',
         permissions = {},
         source_options: sourceOptions = [],
@@ -128,6 +133,17 @@ export default function ComplianceRequirementShow() {
                         </div>
                     </dl>
                 </section>
+
+                {qualityContext && (
+                    <RequirementQualityContext
+                        item={item}
+                        context={qualityContext}
+                        options={qualityOptions}
+                        canManage={Boolean(permissions.can_manage_quality_links)}
+                        tr={tr}
+                        qualityTr={translations?.quality ?? {}}
+                    />
+                )}
 
                 <RequirementCompliance
                     item={item}

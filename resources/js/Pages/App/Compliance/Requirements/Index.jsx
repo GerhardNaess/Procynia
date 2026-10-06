@@ -112,7 +112,7 @@ export default function ComplianceRequirementsIndex() {
                         <p className="text-base font-semibold text-violet-700">{tr.module_name ?? 'Etterlevelse og revisjon'}</p>
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.index_heading ?? 'Krav'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
-                            {tr.index_subtitle ?? 'Kravene virksomheten skal etterleve – med kilde, ansvarlig og revurderingsintervall samlet på ett sted.'}
+                            {tr.index_subtitle ?? 'Kravene virksomheten skal etterleve – med kilde, ansvarlig og siste etterlevelsesvurdering samlet på ett sted.'}
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">

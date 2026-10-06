@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { COMPLIANCE_HELP_PAGES, complianceHelp } from './complianceHelp.js';
+import { LINK_FILTER_THRESHOLD, QUALITY_STATUS_TONES, controlFacts, evidenceAddedLabel, filterQualityOptions, qualityItemLabel, qualityOptionLabel } from './complianceQuality.js';
 import { COMPLIANCE_STATUS_TONES, REQUIREMENT_STATUS_TONES, complianceStatusLabel, countLabel, describeHistoryEntry, registerCompliance, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -142,9 +143,9 @@ describe('The requirement form and page say what a requirement is, and whether i
         assert.doesNotMatch(code, /setData\('status'|data\.status/);
     });
 
-    test('the requirement page shows text, source and ownership, Etterlevelse, status and history — in that order', () => {
+    test('the requirement page reads «what is required → how we do it → is it met»: text, source and ownership, Hvordan kravet oppfylles, Etterlevelse, status and history', () => {
         const code = source('./Show.jsx');
-        const order = ['compliance-text-heading', 'compliance-details-heading', '<RequirementCompliance', 'compliance-status-heading', '<RequirementHistory'].map((needle) => code.indexOf(needle));
+        const order = ['compliance-text-heading', 'compliance-details-heading', '<RequirementQualityContext', '<RequirementCompliance', 'compliance-status-heading', '<RequirementHistory'].map((needle) => code.indexOf(needle));
 
         assert.ok(order.every((index) => index > -1));
         for (let i = 1; i < order.length; i += 1) {
@@ -157,12 +158,83 @@ describe('The requirement form and page say what a requirement is, and whether i
         const code = (file) => source(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
         for (const file of readdirSync(here).filter((name) => name.endsWith('.jsx'))) {
-            assert.doesNotMatch(code(`./${file}`), /audit|control|evidence|Revisjoner|Kontroller|Funn|Evidens/, file);
+            assert.doesNotMatch(code(`./${file}`), /audit|Revisjoner|Funn/, file);
         }
     });
 
     test('sources are managed from the register, not a page of their own', () => {
         assert.match(source('./Index.jsx'), /<ComplianceSources/);
         assert.ok(! readdirSync(here).includes('Sources.jsx'));
+    });
+});
+
+describe('Hvordan kravet oppfylles', () => {
+    const code = () => source('./RequirementQualityContext.jsx');
+
+    test('the section is drawn only when the server sent the Kvalitet context — never an empty or counted placeholder', () => {
+        assert.match(source('./Show.jsx'), /\{qualityContext && \(\s*<RequirementQualityContext/);
+        assert.match(source('./Show.jsx'), /quality_context: qualityContext = null/);
+        assert.doesNotMatch(code(), /hidden_count|hiddenCount|skjult/i);
+    });
+
+    test('every link and unlink action waits for the server\'s permission', () => {
+        assert.match(source('./Show.jsx'), /canManage=\{Boolean\(permissions\.can_manage_quality_links\)\}/);
+        // Add process, add control, unlink process, unlink control.
+        assert.equal(code().match(/canManage && /g).length, 4);
+        assert.match(code(), /`\/app\/compliance\/requirements\/\$\{requirementId\}\/\$\{kind === 'process' \? 'processes' : 'controls'\}`/);
+    });
+
+    test('a retired requirement says its links are read-only', () => {
+        assert.match(code(), /\{! active && \(\s*<p[^>]*>\{tq\.retired_requirement_note/);
+        assert.match(code(), /control\.status === 'retired'/);
+    });
+
+    test('evidence is shown, never written, and never turned into a compliance result', () => {
+        assert.doesNotMatch(code(), /type="file"|\/evidence`|compliant|assessment/);
+        assert.match(code(), /tq\.evidence_note/);
+    });
+
+    test('controls and evidence stack as cards, so they read on a phone', () => {
+        assert.doesNotMatch(code(), /<table/);
+        assert.match(code(), /data-testid="compliance-evidence"/);
+        assert.match(code(), /break-words/);
+    });
+
+    test('labels and options name the item, and a control by where it sits in Kvalitet', () => {
+        assert.equal(qualityItemLabel({ code: 'K-01', title: 'Logg' }), 'K-01 · Logg');
+        assert.equal(qualityItemLabel({ code: null, title: 'Logg' }), 'Logg');
+        assert.equal(qualityOptionLabel({ title: 'Logg', placements: ['Drift › Overvåk'] }), 'Logg — Drift › Overvåk');
+        assert.equal(qualityOptionLabel({ title: 'Prosess' }), 'Prosess');
+        assert.equal(LINK_FILTER_THRESHOLD, 6);
+        assert.equal(QUALITY_STATUS_TONES.retired, 'slate');
+    });
+
+    test('the search matches every word in code, title or placement, and keeps the chosen one', () => {
+        const options = [
+            { id: 1, code: 'K-01', title: 'Logggjennomgang', placements: ['Drift › Overvåk'] },
+            { id: 2, code: null, title: 'Tilgangsgjennomgang', placements: [] },
+        ];
+
+        assert.deepEqual(filterQualityOptions(options, 'drift logg').map((o) => o.id), [1]);
+        assert.deepEqual(filterQualityOptions(options, 'TILGANG').map((o) => o.id), [2]);
+        assert.deepEqual(filterQualityOptions(options, 'tilgang', '1').map((o) => o.id), [1, 2]);
+        assert.equal(filterQualityOptions(options, '  ').length, 2);
+    });
+
+    test('a control shows only the fields Kvalitet has filled in, with frequency as Kvalitet names it', () => {
+        const facts = controlFacts({ criterion: 'Alt godkjent', method: '', frequency: 'monthly', responsibility: null }, {}, { monthly: 'Månedlig' });
+
+        assert.deepEqual(facts, [
+            { key: 'criterion', label: 'Hva kontrolleres', value: 'Alt godkjent' },
+            { key: 'frequency', label: 'Frekvens', value: 'Månedlig' },
+        ]);
+        assert.deepEqual(controlFacts({}, {}), []);
+    });
+
+    test('evidence says when and by whom it was added, without a name when the person is gone', () => {
+        assert.equal(evidenceAddedLabel({ added_at: '2026-10-05', added_by: 'Kari' }), 'Lagt til 05.10.2026 av Kari');
+        assert.equal(evidenceAddedLabel({ added_at: '2026-10-05', added_by: null }), 'Lagt til 05.10.2026');
+        assert.equal(evidenceAddedLabel({ added_at: null }), '');
+        assert.equal(evidenceAddedLabel({ added_at: '2026-10-05', added_by: 'Ola' }, { evidence_added: 'Added :date by :name' }), 'Added 05.10.2026 by Ola');
     });
 });
