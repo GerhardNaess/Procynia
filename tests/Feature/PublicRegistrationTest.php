@@ -65,7 +65,7 @@ class PublicRegistrationTest extends TestCase
 
         $response = $this->postRegistration($payload);
 
-        $response->assertRedirect(route('app.notices.index', ['mode' => 'saved']));
+        $response->assertRedirect(route('app.dashboard'));
         $response->assertSessionHas('success', __('procynia.public.registration.success'));
         $this->assertAuthenticated();
 
@@ -95,11 +95,16 @@ class PublicRegistrationTest extends TestCase
         ]);
     }
 
-    public function test_public_registration_gives_the_new_customer_basis(): void
+    public function test_public_registration_gives_the_new_customer_basis_and_lands_on_home(): void
     {
         $payload = $this->validPayload();
 
-        $this->postRegistration($payload);
+        $response = $this->postRegistration($payload);
+
+        // Hjem, not Anbud: a Basis customer has no notices to land on.
+        $response->assertRedirect(route('app.dashboard'));
+        $this->assertStringNotContainsString(route('app.notices.index'), (string) $response->headers->get('Location'));
+        $this->get((string) $response->headers->get('Location'))->assertOk();
 
         $customer = Customer::query()->where('name', $payload['company_name'])->firstOrFail();
         $owner = User::query()->where('email', $payload['owner_email'])->firstOrFail();

@@ -72,8 +72,10 @@ class PublicRegistrationController extends Controller
         Auth::login($result['user']);
         $request->session()->regenerate();
 
+        // Hjem, which every customer reaches whatever it holds. A new customer is given Basis, not
+        // Anbud, so a module page would only bounce them there; the rail takes it from Hjem.
         return redirect()
-            ->route('app.notices.index', ['mode' => 'saved'])
+            ->route('app.dashboard')
             ->with('success', __('procynia.public.registration.success'));
     }
 
