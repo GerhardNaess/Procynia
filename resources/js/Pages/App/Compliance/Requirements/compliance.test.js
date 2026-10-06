@@ -9,7 +9,7 @@ import { ATTENTION_PREVIEW, ATTENTION_REASONS, COMPLIANCE_STATUS_TONES, REQUIREM
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
-const PAGE_FILES = { index: './Index.jsx', requirement: './Show.jsx' };
+const PAGE_FILES = { index: './Index.jsx', requirement: './Show.jsx', audit_index: '../Audits/Index.jsx', audit: '../Audits/Show.jsx' };
 
 describe('Every Krav page carries the shared PageHelp', () => {
     test('each help page is rendered by its page through PageHelpButton', () => {

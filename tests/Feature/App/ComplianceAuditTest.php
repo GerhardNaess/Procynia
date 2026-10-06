@@ -251,6 +251,13 @@ class ComplianceAuditTest extends TestCase
         app(ComplianceAuditLifecycleService::class)->start($audit, $auditor);
 
         $this->actingAs($auditor)->patch($this->url($audit), $this->auditPayload($auditor) + ['conclusion' => 'Lagret underveis.'])->assertSessionHasNoErrors();
+
+        // An emptied field in the form is no conclusion, whatever was saved before.
+        $this->actingAs($auditor)->post($this->url($audit, 'complete'), ['conclusion' => ''])
+            ->assertSessionHasErrors(['conclusion' => 'Skriv en konklusjon før revisjonen fullføres.']);
+        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $audit->fresh()->status);
+        $this->assertSame('Lagret underveis.', $audit->fresh()->conclusion);
+
         $this->actingAs($auditor)->post($this->url($audit, 'complete'))->assertSessionHasNoErrors();
 
         $this->assertSame(ComplianceAudit::STATUS_COMPLETED, $audit->fresh()->status);

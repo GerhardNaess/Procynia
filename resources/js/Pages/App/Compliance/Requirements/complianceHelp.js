@@ -1,8 +1,9 @@
 /**
  * The pages in Etterlevelse og revisjon that carry PageHelp, each with its own text under
- * translations.compliance.help.<page>: the Krav register and one requirement.
+ * translations.compliance.help.<page>: the Krav register, one requirement, the Revisjoner register
+ * and one audit.
  */
-export const COMPLIANCE_HELP_PAGES = ['index', 'requirement'];
+export const COMPLIANCE_HELP_PAGES = ['index', 'requirement', 'audit_index', 'audit'];
 
 /**
  * The PageHelpButton props for one page. The texts are whole sections in the language files, so the

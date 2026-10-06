@@ -208,9 +208,10 @@ class ComplianceAuditController extends Controller
     }
 
     /**
-     * Fullfør revisjon: in_progress → completed, with the conclusion written in the same step. The
-     * form sends the conclusion; without one, what Rediger already saved is used — and with neither,
-     * the audit is not completed.
+     * Fullfør revisjon: in_progress → completed, with the conclusion written in the same step. What
+     * the form sends is the conclusion — an emptied field is no conclusion, even if one was saved
+     * before. Only a request without the field falls back on what Rediger saved. With neither, the
+     * audit is not completed.
      */
     public function complete(Request $request, int $auditId): RedirectResponse
     {
@@ -222,7 +223,9 @@ class ComplianceAuditController extends Controller
             'conclusion' => ['nullable', 'string', 'max:20000'],
         ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
 
-        $this->lifecycle->complete($audit, $user, $validated['conclusion'] ?? $audit->conclusion);
+        $conclusion = $request->exists('conclusion') ? ($validated['conclusion'] ?? null) : $audit->conclusion;
+
+        $this->lifecycle->complete($audit, $user, $conclusion);
 
         return back()->with('success', __('procynia.compliance.audits.flash.completed'));
     }

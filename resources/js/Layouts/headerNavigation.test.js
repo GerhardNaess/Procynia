@@ -303,13 +303,20 @@ describe('one navigation choice is rendered in one place', () => {
         assert.match(layout, /data-testid="page-navigation"/);
     });
 
-    test('Risiko, Mål og KPI, Avvik og forbedringer and Etterlevelse og revisjon have one main area, so no header row is made up for them', () => {
+    test('Risiko, Mål og KPI and Avvik og forbedringer have one main area, so no header row is made up for them', () => {
         const secondary = block('const secondaryNavigation = (() => {', 'return [];\n    })();');
 
-        // Etterlevelse og revisjon will have two — Krav and Revisjoner — once Revisjoner exists. Until
-        // then Krav is the module, and the header carries no row with one item or a placeholder.
-        for (const area of ['risk', 'objectives', 'improvements', 'compliance']) {
+        for (const area of ['risk', 'objectives', 'improvements']) {
             assert.ok(! secondary.includes(`activeMainArea === '${area}'`), area);
         }
+    });
+
+    test('Etterlevelse og revisjon has exactly two real areas now that Revisjoner exists — Krav | Revisjoner', () => {
+        const areas = block('if (activeMainArea === \'compliance\') {\n            // Etterlevelse', '];');
+        const keys = [...areas.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+
+        assert.deepEqual(keys, ['compliance-requirements', 'compliance-audits']);
+        assert.match(areas, /href: '\/app\/compliance\/requirements'/);
+        assert.match(areas, /href: '\/app\/compliance\/audits'/);
     });
 });

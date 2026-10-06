@@ -141,6 +141,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const userPermissions = page.props.access?.permissions ?? [];
     const tw = translations?.wiki ?? {};
     const tq = translations?.quality ?? {};
+    const tc = translations?.compliance ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -426,6 +427,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             ];
         }
 
+        if (activeMainArea === 'compliance') {
+            // Etterlevelse og revisjon has two real work areas and nothing above them: no Oversikt,
+            // no dashboard. Like Kvalitet, they sit in the header under the rail's selection.
+            return [
+                { key: 'compliance-requirements', label: tc.index_heading ?? 'Krav', href: '/app/compliance/requirements' },
+                { key: 'compliance-audits', label: tc.audits?.nav ?? 'Revisjoner', href: '/app/compliance/audits' },
+            ];
+        }
+
         if (activeMainArea === 'environment') {
             const items = [];
             if (environmentHref) {
@@ -478,6 +488,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         if (activeMainArea === 'quality') {
             return `quality-${qualityTab}`;
+        }
+
+        if (activeMainArea === 'compliance') {
+            return pathname.startsWith('/app/compliance/audits') ? 'compliance-audits' : 'compliance-requirements';
         }
 
         if (activeMainArea === 'wiki') {

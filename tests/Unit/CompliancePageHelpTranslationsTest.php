@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\ComplianceAssessment;
+use App\Models\ComplianceAudit;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Services\Compliance\ComplianceAttentionService;
@@ -12,7 +13,8 @@ use PHPUnit\Framework\TestCase;
  * Purpose: Etterlevelse og revisjon must not ship without PageHelp. The Krav register and the
  * requirement page each have help with sections in both languages, built the same way, and the
  * help names what the pages actually show — the statuses, the source, the owner, the review
- * interval, the status history and compliance assessments — under the labels the pages use. A label renamed without the
+ * interval, the status history and compliance assessments — under the labels the pages use. The
+ * Revisjoner register and the audit page likewise explain types, statuses, scope and lifecycle. A label renamed without the
  * help following it fails here. Both languages also carry exactly the same keys.
  * Inputs: None.
  * Returns: None.
@@ -20,7 +22,7 @@ use PHPUnit\Framework\TestCase;
  */
 class CompliancePageHelpTranslationsTest extends TestCase
 {
-    private const PAGES = ['index', 'requirement'];
+    private const PAGES = ['index', 'requirement', 'audit_index', 'audit'];
 
     public function test_every_page_has_help_with_sections_in_both_languages(): void
     {
@@ -240,6 +242,62 @@ class CompliancePageHelpTranslationsTest extends TestCase
             [$no['col_compliance'], $no['assessment']['heading'], $no['assessment']['assess'], $no['assessment']['overdue'], $no['assessment']['changed_since']],
         );
         $this->assertStringStartsWith('Beskriv hvorfor virksomheten anses å oppfylle, delvis oppfylle eller ikke oppfylle kravet.', $no['assessment']['field_rationale_hint']);
+    }
+
+    public function test_the_audit_help_explains_types_statuses_scope_and_lifecycle_by_their_labels(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $audits = $this->compliance($locale)['audits'];
+            $help = $this->compliance($locale)['help'];
+            $register = $this->itemTitles($help['audit_index']);
+            $page = $this->itemTitles($help['audit']);
+
+            // What an audit is, both types and every status, in the register's help.
+            foreach (ComplianceAudit::TYPES as $type) {
+                $this->assertContains($audits['types'][$type], $register, "lang/{$locale}: the register help does not explain «{$audits['types'][$type]}».");
+            }
+            foreach (ComplianceAudit::STATUSES as $status) {
+                $this->assertContains($audits['statuses'][$status], $register, "lang/{$locale}: the register help does not explain «{$audits['statuses'][$status]}».");
+            }
+            $this->assertContains($audits['field_responsible'], $register);
+
+            // Scope, why requirements and processes are linked, the lifecycle actions, the lock and
+            // the history, on the audit's own page — under the labels the page uses.
+            foreach ([
+                $audits['scope_heading'], $audits['requirements_heading'], $audits['processes_heading'],
+                $audits['retired_requirement'], $audits['field_conclusion'],
+                $audits['start'], $audits['complete'], $audits['cancel_audit'], $audits['reopen'], $audits['history_heading'],
+            ] as $label) {
+                $this->assertContains($label, $page, "lang/{$locale}: the audit help does not explain «{$label}».");
+            }
+
+            // Findings are announced as a later step on both pages, never described as existing.
+            $this->assertMatchesRegularExpression($locale === 'no' ? '/[Ff]unn/' : '/[Ff]indings/', $this->allText($help['audit_index']));
+            $this->assertMatchesRegularExpression($locale === 'no' ? '/[Ff]unn/' : '/[Ff]indings/', $this->allText($help['audit']));
+        }
+    }
+
+    public function test_the_audit_labels_cover_exactly_the_values_and_transitions_that_exist(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $audits = $this->compliance($locale)['audits'];
+
+            $this->assertSame(ComplianceAudit::TYPES, array_keys($audits['types']));
+            $this->assertSame(ComplianceAudit::STATUSES, array_keys($audits['statuses']));
+            $this->assertSame(ComplianceAudit::STATUSES, array_keys($audits['status_text']));
+            $this->assertSame(
+                ['planned_in_progress', 'in_progress_completed', 'planned_cancelled', 'in_progress_cancelled', 'completed_in_progress'],
+                array_keys($audits['history']),
+            );
+        }
+
+        $no = $this->compliance('no')['audits'];
+        $this->assertSame(['internal' => 'Intern', 'external' => 'Ekstern'], $no['types']);
+        $this->assertSame(['planned' => 'Planlagt', 'in_progress' => 'Under arbeid', 'completed' => 'Fullført', 'cancelled' => 'Avbrutt'], $no['statuses']);
+        $this->assertSame(
+            ['Revisjoner', 'Start revisjon', 'Fullfør revisjon', 'Avbryt revisjon', 'Gjenåpne revisjon'],
+            [$no['nav'], $no['start'], $no['complete'], $no['cancel_audit'], $no['reopen']],
+        );
     }
 
     /** @return array<string, mixed> */
