@@ -239,6 +239,106 @@ class ComplianceE2EFixture
     }
 
     /**
+     * For the Trenger oppmerksomhet journey: a fresh person who may view, edit and assess, a second
+     * person who will own the spec's requirement until they leave, and a source holding one
+     * requirement that is owned and assessed «Oppfylt» today — so it needs no attention and the
+     * filter has something to leave out. The spec creates its own requirement through the pages.
+     *
+     * @return array{name: string, email: string, former_owner_name: string, source_label: string, settled_title: string}
+     */
+    public static function seedAttention(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Oppfølger'), 'oppfolger');
+            $formerOwner = self::person($customerId, $suffix, $password, $name('Tidligere ansvarlig'), 'tidligere');
+            $permissions = [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_EDIT,
+                CustomerPermissionCatalog::COMPLIANCE_ASSESS,
+            ];
+            self::role($customerId, $name('Kravoppfølger'), $permissions, $person);
+            self::role($customerId, $name('Kravleser'), [CustomerPermissionCatalog::COMPLIANCE_VIEW], $formerOwner);
+
+            $source = ComplianceSource::query()->create([
+                'customer_id' => $customerId,
+                'name' => $name('ISO 27001'),
+                'version' => '2022',
+                'kind' => ComplianceSource::KIND_STANDARD,
+            ]);
+            $settled = ComplianceRequirement::query()->create([
+                'customer_id' => $customerId,
+                'source_id' => $source->id,
+                'reference' => 'A.5.1',
+                'title' => $name('Informasjonssikkerhetspolicy'),
+                'requirement_text' => 'Registrert av E2E-fixturen.',
+                'owner_user_id' => $person->id,
+                'review_interval_months' => 12,
+            ]);
+            ComplianceAssessment::query()->create([
+                'customer_id' => $customerId,
+                'requirement_id' => $settled->id,
+                'result' => ComplianceAssessment::RESULT_COMPLIANT,
+                'rationale' => 'Policyen er vedtatt og publisert.',
+                'assessed_by_user_id' => $person->id,
+                'assessed_at' => now(),
+                'requirement_reference' => $settled->reference,
+                'requirement_title' => $settled->title,
+                'requirement_text' => $settled->requirement_text,
+                'source_name' => $source->name,
+                'source_version' => $source->version,
+            ]);
+
+            return [
+                'name' => $person->name,
+                'email' => $person->email,
+                'former_owner_name' => $formerOwner->name,
+                'source_label' => $source->name.' ('.$source->version.')',
+                'settled_title' => $settled->title,
+            ];
+        });
+    }
+
+    /**
+     * The former owner leaves: their account is deleted, and the requirements they owned are left
+     * without an owner by the foreign key, the way it happens in the product.
+     */
+    public static function removeFormerOwner(string $suffix): array
+    {
+        $deleted = self::runUsers(self::customerId(), self::pattern($suffix))
+            ->where('email', 'like', '%.tidligere@procynia.test')
+            ->delete();
+
+        return ['deleted' => $deleted];
+    }
+
+    /**
+     * Moves the run's assessments the given number of months into the past, as if they had been
+     * registered then — the test's clock, not the product's. Assessments are immutable, so the
+     * history trigger is switched off for this transaction only, as in cleanup().
+     */
+    public static function ageAssessments(string $suffix, int $months): array
+    {
+        $customerId = self::customerId();
+        $pattern = self::pattern($suffix);
+
+        return DB::transaction(function () use ($customerId, $pattern, $months): array {
+            $requirementIds = ComplianceRequirement::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->pluck('id');
+
+            DB::statement('ALTER TABLE compliance_assessments DISABLE TRIGGER compliance_assessments_immutable');
+            $aged = DB::table('compliance_assessments')
+                ->where('customer_id', $customerId)
+                ->whereIn('requirement_id', $requirementIds)
+                ->update(['assessed_at' => DB::raw("assessed_at - interval '{$months} months'")]);
+            DB::statement('ALTER TABLE compliance_assessments ENABLE TRIGGER compliance_assessments_immutable');
+
+            return ['aged' => $aged];
+        });
+    }
+
+    /**
      * The run's Kvalitet items as Kvalitet has them — for checking that linking and unlinking from
      * a requirement changed nothing there.
      *

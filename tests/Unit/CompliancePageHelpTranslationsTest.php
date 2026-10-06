@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Models\ComplianceAssessment;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
+use App\Services\Compliance\ComplianceAttentionService;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -170,6 +171,27 @@ class CompliancePageHelpTranslationsTest extends TestCase
         }
 
         $this->fail("No «{$strings['quality']['heading']}» section in lang/{$locale}.");
+    }
+
+    public function test_the_register_help_explains_needs_attention_and_each_reason_by_its_label(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $compliance = $this->compliance($locale);
+            $attention = $compliance['attention'];
+            $this->assertSame(ComplianceAttentionService::REASONS, array_keys($attention['reasons']), $locale);
+
+            $section = collect($compliance['help']['index']['sections'])->firstWhere('title', $attention['heading']);
+            $this->assertIsArray($section, "The register help in {$locale} has no section named «{$attention['heading']}».");
+            $titles = array_column($section['items'], 'title');
+
+            foreach ($attention['reasons'] as $label) {
+                $this->assertContains($label, $titles, "{$locale}: the help does not explain «{$label}».");
+            }
+
+            // It says the signals are computed, not stored.
+            $text = implode(' ', array_column($section['items'], 'text'));
+            $this->assertMatchesRegularExpression($locale === 'no' ? '/automatisk.*ikke egne lagrede statuser/u' : '/automatically.*not statuses of their own/u', $text);
+        }
     }
 
     public function test_the_value_labels_cover_exactly_the_values_that_exist(): void
