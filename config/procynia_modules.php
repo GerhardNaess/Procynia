@@ -21,6 +21,9 @@
 
 return [
 
+    // `sort_order` is the product order of the modules, and the one place it is declared: the
+    // left rail and the Styring landing page both list modules in this order
+    // (ModuleEntitlementService::modulesFor() hands it to the rail; GovernanceController reads it).
     'modules' => [
         'wiki_core' => ['sort_order' => 0],
         'tender' => ['sort_order' => 10],

@@ -10,7 +10,9 @@
  * `built` says the pages exist. It is a fact about this repository, so it lives here in code.
  * `module` names the technical module the entry needs, and whether the customer has that module
  * is a fact about the customer — it comes from the backend (`entitlements.modules`) and is never
- * decided here. A module is reachable only when it is both built and entitled.
+ * decided here. A module is reachable only when it is both built and entitled, and a built module
+ * the customer has not ordered is not on the rail at all — the rail names where a person works,
+ * not what the virksomhet could buy.
  *
  * Keeping them apart is what makes a package behave. A package may carry a module before its pages
  * exist; such an entry stays dimmed as planned whatever the customer has bought. An entitlement can
@@ -23,9 +25,8 @@
  *
  * `permission` names a key from CustomerPermissionCatalog the person must hold to have anything to
  * do in the module at all. Where it is set, an entry the person has no permission in is dropped
- * from the rail entirely rather than dimmed: "Ikke bestilt" and "Planlagt" are statements about
- * the product, and neither is true of a module the virksomhet owns and simply has not given this
- * person. Entries that declare no `permission` are untouched by this, which is why adding it to
+ * from the rail entirely rather than dimmed: "Planlagt" is a statement about the product, and it
+ * is not true of a module the virksomhet owns and simply has not given this person. Entries that declare no `permission` are untouched by this, which is why adding it to
  * one module changes nothing about the others.
  *
  * `workspace` puts a module under an arbeidsområde on the rail (see APP_WORKSPACES). It changes
@@ -33,7 +34,11 @@
  *
  * `subAreas` lists a module's work areas under it in the rail. Only Etterlevelse og revisjon has
  * them: its two areas, Krav and Revisjoner, are equal destinations, and the module entry alone only
- * ever led to the first. They are shown exactly when the module is.
+ * ever led to the first. They are shown exactly when the module is — they are not entitlements or
+ * permissions of their own, they inherit the module's.
+ *
+ * Packages never appear here. A package is product configuration (config/procynia_modules.php)
+ * that resolves to technical modules on the server; the rail only ever sees those modules.
  */
 export const APP_MODULES = [
     {
@@ -133,7 +138,11 @@ export const APP_MODULES = [
             { key: 'compliance-audits', href: '/app/compliance/audits', label: (m) => m.compliance_audits ?? 'Revisjoner' },
         ],
     },
-    { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
+    // Leverandøroppfølging belongs under Styring once it is built. Declaring the workspace now is
+    // the whole move: while `built` is false it stays in Planlagt, and the day it flips it leaves
+    // Planlagt and appears under Styring — for customers whose package carries `supplier`, and
+    // (once it declares one) for people who hold its view permission.
+    { key: 'suppliers', built: false, workspace: 'governance', module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
     { key: 'services', built: false, module: null, label: (m) => m.services ?? 'Tjenester & SLA' },
@@ -148,18 +157,16 @@ export const APP_MODULES = [
  * What the rail should do with one entry, given the modules the backend says are active.
  *
  * - `active`    — built and entitled. A link.
- * - `not_ordered` — built, but this customer has not bought it. Dimmed, and says so: the module
- *                 is finished, the customer simply does not have it, which is a different message
- *                 from "not built yet" and leads somewhere different (Abonnement).
- * - `planned`   — not built. Dimmed, whether or not an entitlement happens to cover it.
- *
+ * - `not_ordered` — built, but this customer has not bought it. Not shown at all: the rail shows
+ *                 the places a person works, not the product catalog. What could be ordered is
+ *                 the Abonnement page's business.
+ * - `planned`   — not built. Dimmed under Planlagt, whether or not an entitlement happens to
+ *                 cover it.
  * - `not_permitted` — built and entitled, but this person holds none of the module's permissions.
  *                 Not shown at all: see the note on `permission` above.
  *
  * `planned` is checked first on purpose. That single ordering is what stops a package from
- * advertising a destination that does not exist. `not_permitted` is checked last, after the
- * module is known to be both built and bought — a person's permissions are not a reason to hide
- * that the product has Risiko, or that Kvalitet could be ordered.
+ * advertising a destination that does not exist.
  */
 export function moduleAvailability(module, activeModules = [], permissions = []) {
     if (! module.built) {
@@ -201,8 +208,8 @@ export function partitionModules(activeModules = [], permissions = []) {
  * Styring holds Kvalitet, Risiko, Mål og KPI, Avvik og forbedringer and Etterlevelse og revisjon. It
  * is not a module: no package grants it, no permission gates it, and it owns no data. It is shown
  * exactly when at least one of its modules is `active` for this person, and it shows only those —
- * so it can never offer more than the modules themselves already would. A module in the workspace that is not ordered
- * stays in "Ikke bestilt" with the others; one the person has no permission in stays off the rail.
+ * so it can never offer more than the modules themselves already would. A module in the workspace
+ * that is not ordered, or that the person has no permission in, stays off the rail.
  */
 export const APP_WORKSPACES = [
     {
@@ -216,7 +223,16 @@ export const APP_WORKSPACES = [
 /**
  * The rail's top level, in render order: modules and workspaces, each workspace carrying the
  * modules of its own that are `active`. A workspace takes the place of its first module in the
- * catalog, which keeps the rail in product order; one with no active module is left out entirely.
+ * catalog, which keeps the rail in product order; one with no active module is left out entirely,
+ * so a person with nothing in Styring never sees an empty Styring.
+ *
+ * Inside a workspace the modules follow `activeModules`, which the backend hands over already in
+ * the module order of config/procynia_modules.php (`sort_order`). That is the one place the order
+ * Kvalitet, Risiko, Mål og KPI, Avvik og forbedringer, Etterlevelse og revisjon is declared, and
+ * the Styring landing page (GovernanceController) reads the same one.
+ *
+ * Modules the customer has not ordered are not returned: the rail is built from what the customer
+ * holds and the person may open, never from what merely exists in code.
  */
 export function railEntries(activeModules = [], permissions = []) {
     const groups = partitionModules(activeModules, permissions);
@@ -238,7 +254,13 @@ export function railEntries(activeModules = [], permissions = []) {
         workspace.children.push(module);
     }
 
-    return { entries, not_ordered: groups.not_ordered, planned: groups.planned };
+    const position = (module) => activeModules.indexOf(module.module);
+
+    for (const entry of entries) {
+        entry.children?.sort((left, right) => position(left) - position(right));
+    }
+
+    return { entries, planned: groups.planned };
 }
 
 /**

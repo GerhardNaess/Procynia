@@ -1,5 +1,7 @@
 import { Link } from '@inertiajs/react';
+import { useEffect, useState } from 'react';
 import { railEntries } from '../../Support/appModules';
+import { hasChildren, isGroupOpen, readOpenGroups, requiredOpenGroups, toggleGroup, withGroupsOpen, writeOpenGroups } from '../../Support/navigationGroups';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -86,26 +88,49 @@ function CollapseIcon({ collapsed }) {
 }
 
 /**
+ * A group's own chevron: pointing right while the group is closed, down while it is open.
+ */
+function GroupChevron({ open }) {
+    return (
+        <svg
+            className={classNames('h-4 w-4 transition-transform', open ? 'rotate-90' : '')}
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            <path d="M8 5.5 12.5 10 8 14.5" />
+        </svg>
+    );
+}
+
+/**
  * The module rail — a module picker, and nothing else.
  *
- * Three groups, separated on purpose, and each separation carries information.
- *
- * At the top is what this customer can use today — normal contrast, clickable, one of them
- * selected. Below it, "Ikke bestilt": modules that are finished and could be switched on tonight,
- * but that this customer has not bought. Below that, "Planlagt": the structure that does not exist
- * yet. Both lower groups are dimmed and inert, but they are not the same statement, and collapsing
- * them into one caption would tell a customer that Anbud is unfinished when it is simply unsold.
+ * Two groups, separated on purpose. At the top is what this person can use today — normal contrast,
+ * clickable, one of them selected. Below it, "Planlagt": the structure that does not exist yet,
+ * dimmed and inert. A built module the customer has not bought is not on the rail at all: the rail
+ * names the places a person works, not the product catalog, and Abonnement is where the catalog
+ * lives.
  *
  * What is active is decided in the backend, from the customer's package entitlements, and arrives
- * as `activeModules`. The rail renders that verdict and never computes one of its own — the same
- * data drives the Abonnement page's "Aktiv / Bestill" column, so the two cannot drift apart.
- * This is presentation only: every gated route is enforced server-side as well.
+ * as `activeModules` — technical modules, never package names. The rail renders that verdict and
+ * never computes one of its own. This is presentation only: every gated route is enforced
+ * server-side as well.
  *
- * What the rail deliberately does not carry is the level below a module. Wiki never put its work
- * areas here, and Anbud nesting its four under "Anbud" made one module look structurally unlike
- * every other. The areas live in the header's module navigation instead, where Wiki's always were.
- * The one nesting the rail does carry runs the other way — a level above modules: Styring groups
- * Kvalitet, Risiko, Mål og KPI and Avvik og forbedringer, which are modules in their own right.
+ * What the rail deliberately does not carry is the level below a module, with one exception.
+ * Wiki never put its work areas here, and Anbud nesting its four under "Anbud" made one module look
+ * structurally unlike every other; those areas live in the header's module navigation. The
+ * nesting the rail does carry runs a level above modules — Styring groups Kvalitet, Risiko, Mål og
+ * KPI, Avvik og forbedringer and Etterlevelse og revisjon — plus Etterlevelse og revisjon's two
+ * equal work areas, Krav and Revisjoner.
+ *
+ * Every entry with something under it can be folded away with its own chevron (navigationGroups.js),
+ * and only those entries have one. The chevron folds; the name navigates — one row never does both.
+ * The group holding the current page is opened on arrival, so the page is never hidden.
  *
  * Collapsing is a desktop-only affordance, and it is done in CSS rather than by branching on a
  * measured viewport. Every label stays in the markup; `lg:sr-only` is what takes it out of the
@@ -119,7 +144,21 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
     // dimmed, it is simply not theirs. See appModules.moduleAvailability.
     const groups = railEntries(activeModules, permissions);
     const plannedHint = modules.planned_hint ?? 'Ikke tilgjengelig ennå';
-    const notOrderedHint = modules.not_ordered_hint ?? 'Ikke bestilt — kan bestilles under Abonnement';
+
+    // Open groups: the person's own choice, with the groups holding this page forced open.
+    const requiredKeys = requiredOpenGroups(groups.entries, { activeWorkspace, activeKey }).join('|');
+    const [openGroups, setOpenGroups] = useState(() => withGroupsOpen(readOpenGroups(), requiredKeys ? requiredKeys.split('|') : []));
+
+    useEffect(() => {
+        setOpenGroups((current) => withGroupsOpen(current, requiredKeys ? requiredKeys.split('|') : []));
+    }, [requiredKeys]);
+
+    const onToggleGroup = (key) => {
+        const next = toggleGroup(openGroups, key);
+
+        setOpenGroups(next);
+        writeOpenGroups(next);
+    };
     const toggleLabel = collapsed
         ? (modules.expand ?? 'Utvid menyen')
         : (modules.collapse ?? 'Slå sammen menyen');
@@ -132,8 +171,7 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
         : 'flex items-center gap-3 rounded-xl px-3 py-2';
 
     /**
-     * One dimmed group, used for both "Ikke bestilt" and "Planlagt". They differ only in caption
-     * and hint, so sharing the markup is what keeps them from drifting apart visually.
+     * The dimmed "Planlagt" group: captioned, inert, and saying why on hover.
      */
     const renderUnavailableGroup = (items, { testId, caption, hint }) => (items.length === 0 ? null : (
         <>
@@ -172,6 +210,38 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
         </>
     ));
 
+    /**
+     * The chevron for a group. Only entries with something under them get one, and it only ever
+     * folds — the name beside it is the link. Folded to icons on desktop there is nothing to
+     * unfold into, so it steps aside there and the group's icons are all shown.
+     */
+    const renderGroupToggle = (key, label, controlsId) => {
+        const open = isGroupOpen(openGroups, key);
+        const toggleLabel = (open ? (modules.collapse_group ?? 'Skjul :label') : (modules.expand_group ?? 'Vis :label')).replace(':label', label);
+
+        return (
+            <button
+                type="button"
+                data-testid={`module-${key}-toggle`}
+                onClick={() => onToggleGroup(key)}
+                aria-expanded={open}
+                aria-controls={controlsId}
+                aria-label={toggleLabel}
+                title={toggleLabel}
+                className={classNames(
+                    'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500',
+                    collapsed ? 'lg:hidden' : '',
+                )}
+            >
+                <GroupChevron open={open} />
+            </button>
+        );
+    };
+
+    // A closed group's list leaves the layout — except folded to icons on desktop, where the
+    // chevron is gone and every icon has to stay reachable.
+    const groupListClass = (key) => (isGroupOpen(openGroups, key) ? '' : classNames('hidden', collapsed ? 'lg:block' : ''));
+
     const renderLink = (entry, isActive) => {
         const label = entry.label(modules);
 
@@ -196,19 +266,6 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
     };
 
     /**
-     * An arbeidsområde and the modules of it this person can open — never the others.
-     *
-     * The workspace row is a link to its own landing page. It carries the pill only there; inside
-     * one of its modules it is marked as the place you are in (violet, semibold, `data-active`)
-     * while the module below carries the pill and `aria-current="page"` — one current page, and a
-     * parent that is plainly the one it belongs to. The children are always listed: there is
-     * nothing to unfold, so nothing can be hidden on a phone.
-     *
-     * Children are indented under a guide line in the full rail and drop their icons there; the
-     * hierarchy comes from position and the line, not from shrinking the text. Collapsed to icons,
-     * the indentation goes and each child is its own icon, as every other module is.
-     */
-    /**
      * A module's work areas, one level further in under a guide line of their own. The module row
      * above keeps its pill while one of them is open; the area carries `aria-current`. Collapsed to
      * icons there is no room for a third level, and the module's icon is enough — the header lists
@@ -216,8 +273,13 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
      */
     const renderSubAreas = (module) => (
         <ul
+            id={`module-${module.key}-areas`}
             data-testid={`module-${module.key}-areas`}
-            className={classNames('mt-0.5 ml-3 space-y-0.5 border-l border-slate-200 pl-2', collapsed ? 'lg:hidden' : '')}
+            className={classNames(
+                'mt-0.5 ml-3 space-y-0.5 border-l border-slate-200 pl-2',
+                collapsed ? 'lg:hidden' : '',
+                isGroupOpen(openGroups, module.key) ? '' : 'hidden',
+            )}
         >
             {module.subAreas.map((area) => {
                 const isActive = activeAreaKey === area.key;
@@ -241,6 +303,18 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
         </ul>
     );
 
+    /**
+     * An arbeidsområde and the modules of it this person can open — never the others.
+     *
+     * The workspace name is a link to its own landing page, and carries the pill only there; inside
+     * one of its modules it is marked as the place you are in (violet, semibold, `data-active`)
+     * while the module below carries the pill and `aria-current="page"` — one current page, and a
+     * parent that is plainly the one it belongs to. The chevron beside it folds the modules away.
+     *
+     * Children are indented under a guide line in the full rail and drop their icons there; the
+     * hierarchy comes from position and the line, not from shrinking the text. Collapsed to icons,
+     * the indentation goes and each child is its own icon, as every other module is.
+     */
     const renderWorkspace = (workspace) => {
         const label = workspace.label(modules);
         const onLanding = activeKey === workspace.key;
@@ -248,31 +322,36 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
 
         return (
             <>
-                <Link
-                    href={workspace.href}
-                    data-testid={`module-${workspace.key}`}
-                    data-active={activeWorkspace === workspace.key ? 'true' : 'false'}
-                    aria-current={onLanding ? 'page' : undefined}
-                    title={collapsed ? label : undefined}
-                    className={classNames(
-                        rowClass,
-                        'text-base transition',
-                        onLanding
-                            ? 'bg-violet-50 font-semibold text-violet-700 ring-1 ring-inset ring-violet-200'
-                            : inside
-                                ? 'font-semibold text-violet-700 hover:bg-slate-100'
-                                : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                    )}
-                >
-                    <ModuleIcon moduleKey={workspace.key} />
-                    <span className={labelClass}>{label}</span>
-                </Link>
+                <div className="flex items-center gap-1">
+                    <Link
+                        href={workspace.href}
+                        data-testid={`module-${workspace.key}`}
+                        data-active={activeWorkspace === workspace.key ? 'true' : 'false'}
+                        aria-current={onLanding ? 'page' : undefined}
+                        title={collapsed ? label : undefined}
+                        className={classNames(
+                            rowClass,
+                            'min-w-0 flex-1 text-base transition',
+                            onLanding
+                                ? 'bg-violet-50 font-semibold text-violet-700 ring-1 ring-inset ring-violet-200'
+                                : inside
+                                    ? 'font-semibold text-violet-700 hover:bg-slate-100'
+                                    : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                        )}
+                    >
+                        <ModuleIcon moduleKey={workspace.key} />
+                        <span className={labelClass}>{label}</span>
+                    </Link>
+                    {renderGroupToggle(workspace.key, label, `module-${workspace.key}-children`)}
+                </div>
 
                 <ul
+                    id={`module-${workspace.key}-children`}
                     data-testid={`module-${workspace.key}-children`}
                     className={classNames(
                         'mt-0.5 ml-[1.375rem] space-y-0.5 border-l border-slate-200 pl-2',
                         collapsed ? 'lg:ml-0 lg:border-l-0 lg:pl-0' : '',
+                        groupListClass(workspace.key),
                     )}
                 >
                     {workspace.children.map((child) => {
@@ -284,26 +363,29 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
 
                         return (
                             <li key={child.key}>
-                                <Link
-                                    href={child.href}
-                                    data-testid={`module-${child.key}`}
-                                    data-active={isActive ? 'true' : 'false'}
-                                    aria-current={isActive && ! areaOpen ? 'page' : undefined}
-                                    title={collapsed ? childLabel : undefined}
-                                    className={classNames(
-                                        rowClass,
-                                        'text-base font-medium transition',
-                                        isActive
-                                            ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                    )}
-                                >
-                                    <ModuleIcon
-                                        moduleKey={child.key}
-                                        className={classNames('h-5 w-5 shrink-0', collapsed ? 'hidden lg:block' : 'hidden')}
-                                    />
-                                    <span className={labelClass}>{childLabel}</span>
-                                </Link>
+                                <div className="flex items-center gap-1">
+                                    <Link
+                                        href={child.href}
+                                        data-testid={`module-${child.key}`}
+                                        data-active={isActive ? 'true' : 'false'}
+                                        aria-current={isActive && ! areaOpen ? 'page' : undefined}
+                                        title={collapsed ? childLabel : undefined}
+                                        className={classNames(
+                                            rowClass,
+                                            'min-w-0 flex-1 text-base font-medium transition',
+                                            isActive
+                                                ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
+                                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                                        )}
+                                    >
+                                        <ModuleIcon
+                                            moduleKey={child.key}
+                                            className={classNames('h-5 w-5 shrink-0', collapsed ? 'hidden lg:block' : 'hidden')}
+                                        />
+                                        <span className={labelClass}>{childLabel}</span>
+                                    </Link>
+                                    {hasChildren(child) && renderGroupToggle(child.key, childLabel, `module-${child.key}-areas`)}
+                                </div>
                                 {child.subAreas && renderSubAreas(child)}
                             </li>
                         );
@@ -327,12 +409,6 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
                     </li>
                 ))}
             </ul>
-
-            {renderUnavailableGroup(groups.not_ordered, {
-                testId: 'module-sidebar-not-ordered-caption',
-                caption: modules.not_ordered_caption ?? 'Ikke bestilt',
-                hint: notOrderedHint,
-            })}
 
             {renderUnavailableGroup(groups.planned, {
                 testId: 'module-sidebar-planned-caption',
