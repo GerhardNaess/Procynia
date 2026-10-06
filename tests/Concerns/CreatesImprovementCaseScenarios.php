@@ -147,12 +147,12 @@ trait CreatesImprovementCaseScenarios
     }
 
     /**
-     * A customer holding the given package (Kvalitet carries Avvik og forbedringer; so does GRC),
+     * A customer holding the given package (every step of the ladder from Basis carries Avvik og forbedringer),
      * or none, and its System Owner.
      *
      * @return array{customer: Customer, owner: User}
      */
-    private function context(?string $package = 'quality'): array
+    private function context(?string $package = 'basis'): array
     {
         $language = Language::query()->firstOrCreate(
             ['code' => 'no'],

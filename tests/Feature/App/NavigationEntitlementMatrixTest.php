@@ -6,6 +6,7 @@ use App\Http\Controllers\App\GovernanceController;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -18,9 +19,8 @@ use Tests\TestCase;
 /**
  * Bundle → module → permission → navigation, end to end on the server.
  *
- * The package catalog here is the product structure Procynia wants to be able to sell — Basis,
- * Styring, ISO, GRC, with Anbud as a separate add-on — expressed in the existing catalog format
- * (config/procynia_modules.php) and nothing else. That it needs no code of its own is the point:
+ * The package catalog is the real one in config/procynia_modules.php — Basis, Styring
+ * (`governance`), ISO, GRC, with Anbud (`tender`) as a separate add-on. Nothing here overrides it:
  * packages are configuration, the rail and the Styring landing page only ever see modules.
  *
  * What a person sees is read from the two places it is decided:
@@ -57,16 +57,6 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->useProjectPostgresConnection();
         $this->withoutMiddleware([VerifyCsrfToken::class, ValidateCsrfToken::class]);
         DB::beginTransaction();
-
-        config(['procynia_modules.packages' => [
-            'core' => ['mandatory' => true, 'orderable' => false, 'sort_order' => 0, 'modules' => ['wiki_core']],
-            'tender' => ['mandatory' => false, 'orderable' => true, 'sort_order' => 10, 'modules' => ['tender']],
-            'basis' => ['mandatory' => false, 'orderable' => true, 'sort_order' => 20, 'modules' => ['quality', 'improvements']],
-            'styring' => ['mandatory' => false, 'orderable' => true, 'sort_order' => 30, 'modules' => ['quality', 'improvements', 'risk', 'objectives']],
-            'iso' => ['mandatory' => false, 'orderable' => true, 'sort_order' => 40, 'modules' => ['quality', 'improvements', 'risk', 'objectives', 'compliance']],
-            // GRC already carries Leverandøroppfølging; the module is not built, so it must show nothing.
-            'grc' => ['mandatory' => false, 'orderable' => true, 'sort_order' => 50, 'modules' => ['quality', 'improvements', 'risk', 'objectives', 'compliance', 'supplier']],
-        ]]);
     }
 
     protected function tearDown(): void
@@ -89,14 +79,16 @@ class NavigationEntitlementMatrixTest extends TestCase
         $iso = [...$styring, 'compliance'];
 
         return [
-            'Basis' => [['basis'], ['wiki_core', 'quality', 'improvements'], ['quality', 'improvements'], false],
-            'Basis + Anbud' => [['basis', 'tender'], ['wiki_core', 'tender', 'quality', 'improvements'], ['quality', 'improvements'], true],
-            'Styring' => [['styring'], ['wiki_core', 'quality', 'risk', 'objectives', 'improvements'], $styring, false],
-            'ISO' => [['iso'], ['wiki_core', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, false],
-            'ISO + Anbud' => [['iso', 'tender'], ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, true],
-            'GRC' => [['grc'], ['wiki_core', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $iso, false],
-            'GRC + Anbud' => [['grc', 'tender'], ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $iso, true],
-            'Anbud alone' => [['tender'], ['wiki_core', 'tender'], [], true],
+            'Basis' => [['basis'], ['wiki', 'quality', 'improvements'], ['quality', 'improvements'], false],
+            'Basis + Anbud' => [['basis', 'tender'], ['wiki', 'tender', 'quality', 'improvements'], ['quality', 'improvements'], true],
+            'Styring' => [['governance'], ['wiki', 'quality', 'risk', 'objectives', 'improvements'], $styring, false],
+            'Styring + Anbud' => [['governance', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements'], $styring, true],
+            'ISO' => [['iso'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, false],
+            'ISO + Anbud' => [['iso', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, true],
+            // GRC already carries Leverandøroppfølging; the module is not built, so Styring shows ISO's.
+            'GRC' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $iso, false],
+            'GRC + Anbud' => [['grc', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $iso, true],
+            'Anbud alone' => [['tender'], ['wiki', 'tender'], [], true],
         ];
     }
 
@@ -119,8 +111,9 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->assertSame($governance, $this->governanceKeys($user));
         $this->assertSame($tender, in_array('tender', $props['entitlements']['modules'], true), 'Anbud is an add-on of its own');
 
-        // Wiki is the mandatory Wiki/Core module: every package has it, the view permission gates it.
-        $this->assertContains('wiki_core', $props['entitlements']['modules']);
+        // Every package carries Wiki; the view permission gates it.
+        $this->assertContains('wiki', $props['entitlements']['modules']);
+        $this->actingAs($user)->get('/app/wiki')->assertOk();
 
         // The routes say the same as the navigation.
         $this->actingAs($user)->get('/app/notices')->assertStatus($tender ? 200 : 302);
@@ -177,16 +170,40 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->assertSame($held, in_array($key, $this->governanceKeys($user), true));
     }
 
-    public function test_wiki_follows_its_view_permission_on_a_customer_that_always_holds_it(): void
+    public function test_wiki_follows_its_view_permission_on_a_customer_that_holds_it(): void
     {
-        $customer = $this->customerWith([]);
+        $customer = $this->customerWith(['basis']);
         $without = $this->member($customer);
         $with = $this->member($customer);
         $this->grantAll($customer, $with, [CustomerPermissionCatalog::WIKI_VIEW]);
 
-        $this->assertSame(['wiki_core'], $this->sharedProps($without)['entitlements']['modules']);
+        $this->assertContains('wiki', $this->sharedProps($without)['entitlements']['modules']);
         $this->assertNotContains(CustomerPermissionCatalog::WIKI_VIEW, $this->sharedProps($without)['access']['permissions']);
         $this->assertContains(CustomerPermissionCatalog::WIKI_VIEW, $this->sharedProps($with)['access']['permissions']);
+    }
+
+    public function test_a_customer_with_no_package_holds_no_module_and_not_even_wiki(): void
+    {
+        // There is no mandatory package any more: Wiki comes with a package like everything else.
+        $customer = $this->customerWith([]);
+        $user = $this->member($customer);
+        $this->grantAll($customer, $user, self::VIEW_ALL);
+
+        $this->assertSame([], $this->sharedProps($user)['entitlements']['modules']);
+        $this->actingAs($user)->get('/app/wiki')->assertRedirect(route('app.dashboard'));
+        $this->actingAs($user)->get('/app/governance')->assertForbidden();
+    }
+
+    public function test_only_the_new_package_keys_are_in_the_catalog(): void
+    {
+        $this->assertSame(
+            ['basis', 'governance', 'iso', 'grc', 'tender'],
+            array_keys(app(ModuleEntitlementService::class)->packages()),
+        );
+
+        // A row left over from the old catalog grants nothing.
+        $customer = $this->customerWith(['quality', 'core']);
+        $this->assertSame([], app(ModuleEntitlementService::class)->modulesFor($customer));
     }
 
     public function test_anbud_is_decided_by_the_add_on_alone_and_has_no_view_permission_of_its_own(): void

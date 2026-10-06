@@ -9,7 +9,7 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * after fit, a small flow is not shrunk for no reason, and zooming moves the diagram and nothing
  * else on the page. Exact scales are not asserted; diagramViewport.test.js owns the arithmetic.
  *
- * Both processes come from E2ETestSeeder, which also activates the Kvalitet package — without the
+ * Both processes come from E2ETestSeeder, which also activates the ISO package (which carries Kvalitet) — without the
  * entitlement the routes redirect to Hjem, and a skip would hide that.
  */
 

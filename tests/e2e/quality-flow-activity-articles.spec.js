@@ -14,7 +14,7 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * is what the two fields are prefilled with. Writing the article by hand goes through the same
  * create.
  *
- * The process comes from E2ETestSeeder, which also activates the Kvalitet package and records the
+ * The process comes from E2ETestSeeder, which also activates the ISO package (which carries Kvalitet) and records the
  * two articles the seeded activity has produced. Two rather than one, because the indicator is a
  * count.
  */

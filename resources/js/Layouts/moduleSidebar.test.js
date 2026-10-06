@@ -74,7 +74,7 @@ describe('available and planned look different, and say why', () => {
         assert.ok(! sidebar.includes('not_ordered'), 'the rail must not render an "Ikke bestilt" group');
         assert.ok(! sidebar.includes('Ikke bestilt'));
 
-        const rail = railEntries(['wiki_core'], ['wiki.view', 'quality.view']);
+        const rail = railEntries(['wiki'], ['wiki.view', 'quality.view']);
         const shown = [...rail.entries.map((entry) => entry.key), ...rail.planned.map((module) => module.key)];
 
         for (const key of ['tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'governance']) {
@@ -288,7 +288,7 @@ describe('Avvik og forbedringer is on the rail once it has pages', () => {
  * modules themselves already would.
  */
 describe('Styring groups the governance modules, and only the ones the person can open', () => {
-    const ALL_MODULES = ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
+    const ALL_MODULES = ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
     const governance = (activeModules, permissions) => railEntries(activeModules, permissions)
         .entries.find((entry) => entry.key === 'governance');
     const topLevel = (activeModules, permissions) => railEntries(activeModules, permissions)
@@ -338,7 +338,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
     });
 
     test('a module the customer has not ordered is neither under Styring nor anywhere else', () => {
-        const rail = railEntries(['wiki_core', 'tender', 'risk'], ['risk.view', 'quality.view']);
+        const rail = railEntries(['wiki', 'tender', 'risk'], ['risk.view', 'quality.view']);
         const workspace = rail.entries.find((entry) => entry.key === 'governance');
 
         assert.deepEqual(workspace.children.map((child) => child.key), ['risk']);
@@ -346,7 +346,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
     });
 
     test('a permission without the module is not access, so Styring stays away', () => {
-        const rail = railEntries(['wiki_core', 'tender'], ['risk.view']);
+        const rail = railEntries(['wiki', 'tender'], ['risk.view']);
 
         assert.equal(rail.entries.find((entry) => entry.key === 'governance'), undefined);
     });
@@ -394,11 +394,11 @@ describe('Styring groups the governance modules, and only the ones the person ca
         const permissions = ['quality.view', 'risk.view', 'objective.view', 'improvement.view', 'compliance.view'];
 
         assert.deepEqual(
-            governance(['wiki_core', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], permissions).children.map((child) => child.key),
+            governance(['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], permissions).children.map((child) => child.key),
             ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
         );
         assert.deepEqual(
-            governance(['wiki_core', 'compliance', 'improvements', 'objectives', 'risk', 'quality'], permissions).children.map((child) => child.key),
+            governance(['wiki', 'compliance', 'improvements', 'objectives', 'risk', 'quality'], permissions).children.map((child) => child.key),
             ['compliance', 'improvements', 'objectives', 'risk', 'quality'],
         );
     });

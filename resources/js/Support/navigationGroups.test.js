@@ -9,7 +9,7 @@ import { hasChildren, isGroupOpen, readOpenGroups, requiredOpenGroups, toggleGro
 const here = dirname(fileURLToPath(import.meta.url));
 const sidebar = readFileSync(join(here, '..', 'Components', 'App', 'ModuleSidebar.jsx'), 'utf8');
 
-const ALL = ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
+const ALL = ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
 const VIEW_ALL = ['wiki.view', 'quality.view', 'risk.view', 'objective.view', 'improvement.view', 'compliance.view'];
 const entries = railEntries(ALL, VIEW_ALL).entries;
 

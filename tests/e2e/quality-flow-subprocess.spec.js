@@ -9,7 +9,7 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
  * in one click. The arithmetic of the layout and the rules about tenancy and cycles are owned by
  * processBlueprintLayout.test.js and QualityProcessBlueprintTest — none of that is re-asserted here.
  *
- * Both processes come from E2ETestSeeder, which also activates the Kvalitet package.
+ * Both processes come from E2ETestSeeder, which also activates the ISO package (which carries Kvalitet).
  */
 
 const PARENT = 'E2E hovedprosess';

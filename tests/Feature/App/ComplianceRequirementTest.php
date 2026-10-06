@@ -149,8 +149,8 @@ class ComplianceRequirementTest extends TestCase
 
     public function test_a_customer_without_the_module_is_sent_home(): void
     {
-        // Kvalitet carries Avvik og forbedringer, not Etterlevelse og revisjon.
-        ['customer' => $customer] = $this->complianceContext('quality');
+        // Styring carries every governance module but Etterlevelse og revisjon, which starts at ISO.
+        ['customer' => $customer] = $this->complianceContext('governance');
         $user = $this->complianceReader($customer);
 
         $this->actingAs($user)->get('/app/compliance/requirements')->assertRedirect(route('app.dashboard'));

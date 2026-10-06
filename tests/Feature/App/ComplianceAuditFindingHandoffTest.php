@@ -406,7 +406,7 @@ class ComplianceAuditFindingHandoffTest extends TestCase
     // ---------------------------------------------------------------------
 
     /**
-     * A GRC customer (Etterlevelse og revisjon and Avvik og forbedringer), one fagområde, and an
+     * An ISO customer (Etterlevelse og revisjon and Avvik og forbedringer), one fagområde, and an
      * auditor who may also register cases there — with an audit in progress.
      *
      * @return array{customer: Customer, area: BusinessArea, auditor: User, audit: ComplianceAudit}

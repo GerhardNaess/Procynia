@@ -649,9 +649,9 @@ class KpiQualityContextLinkTest extends TestCase
             'is_active' => true,
         ]);
 
-        // GRC carries Risiko as well as Kvalitet and Mål og KPI, which the cleanup test needs.
+        // Styring carries Risiko as well as Kvalitet and Mål og KPI, which the cleanup test needs.
         CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'grc'],
+            ['customer_id' => $customer->id, 'package_key' => 'governance'],
             ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
         );
 

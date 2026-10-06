@@ -397,7 +397,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame([$process->id], array_column($this->props($owner, $audit)['processes'], 'id'));
 
         // The customer holds Etterlevelse og revisjon but not Kvalitet.
-        config()->set('procynia_modules.packages.grc.modules', ['risk', 'objectives', 'improvements', 'compliance']);
+        config()->set('procynia_modules.packages.iso.modules', ['risk', 'objectives', 'improvements', 'compliance']);
 
         $props = $this->props($owner, $audit);
         $this->assertNull($props['processes']);

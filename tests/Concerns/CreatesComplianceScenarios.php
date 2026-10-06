@@ -22,12 +22,12 @@ use Illuminate\Support\Str;
 trait CreatesComplianceScenarios
 {
     /**
-     * A customer holding the given package (GRC carries Etterlevelse og revisjon), or none, and its
+     * A customer holding the given package (ISO is the lowest step that carries Etterlevelse og revisjon), or none, and its
      * System Owner.
      *
      * @return array{customer: Customer, owner: User}
      */
-    private function complianceContext(?string $package = 'grc'): array
+    private function complianceContext(?string $package = 'iso'): array
     {
         $language = Language::query()->firstOrCreate(['code' => 'no'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk']);
         $nationality = Nationality::query()->firstOrCreate(['code' => 'NO'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO']);

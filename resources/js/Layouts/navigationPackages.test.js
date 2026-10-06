@@ -1,21 +1,22 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { railEntries } from '../Support/appModules.js';
+import { APP_MODULES, railEntries } from '../Support/appModules.js';
 
 /**
  * The rail for the commercial packages Procynia sells, as the rail actually receives them: the
  * technical modules the backend resolved (`entitlements.modules`, already in config sort_order)
  * plus the person's permissions. Packages never reach the frontend, so this matrix is written in
- * the modules each package resolves to; that resolution itself is covered in PHP
- * (tests/Feature/App/NavigationEntitlementMatrixTest.php), against the same package shapes.
+ * the modules each package in config/procynia_modules.php resolves to; that resolution itself is
+ * covered in PHP (tests/Feature/App/NavigationEntitlementMatrixTest.php) against the real config.
  *
  * Anbud is an add-on: it is in a module set only when the customer chose it, never because of the
  * governance package beside it.
  */
-const BASIS = ['wiki_core', 'quality', 'improvements'];
-const STYRING = ['wiki_core', 'quality', 'risk', 'objectives', 'improvements'];
-const ISO = ['wiki_core', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
-const GRC = ISO;
+const BASIS = ['wiki', 'quality', 'improvements'];
+const STYRING = ['wiki', 'quality', 'risk', 'objectives', 'improvements'];
+const ISO = ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
+// GRC carries Leverandøroppfølging ahead of it being built.
+const GRC = [...ISO, 'supplier'];
 const withTender = (modules) => [modules[0], 'tender', ...modules.slice(1)];
 
 const VIEW_ALL = ['wiki.view', 'quality.view', 'risk.view', 'objective.view', 'improvement.view', 'compliance.view'];
@@ -59,11 +60,30 @@ describe('what each package puts on the rail', () => {
     });
 
     test('GRC: what ISO shows — Leverandører is not built, so a package carrying it shows nothing more', () => {
-        const grcWithSupplier = [...GRC, 'supplier'];
-        const rail = railEntries(grcWithSupplier, VIEW_ALL);
+        const rail = railEntries(GRC, VIEW_ALL);
 
-        assert.deepEqual(shape(grcWithSupplier), shape(ISO));
+        assert.deepEqual(shape(GRC), shape(ISO));
         assert.ok(rail.planned.some((module) => module.key === 'suppliers'), 'still planned');
+    });
+
+    test('the day Leverandører is built, GRC shows it under Styring — once, and no longer as planned', () => {
+        const suppliers = APP_MODULES.find((module) => module.key === 'suppliers');
+        const original = { ...suppliers };
+
+        try {
+            Object.assign(suppliers, { built: true, href: '/app/suppliers-follow-up' });
+
+            const rail = railEntries(GRC, VIEW_ALL);
+            const governance = rail.entries.find((entry) => entry.key === 'governance');
+
+            assert.deepEqual(governance.children.map((child) => child.key).filter((key) => key === 'suppliers'), ['suppliers']);
+            assert.ok(! rail.planned.some((module) => module.key === 'suppliers'));
+            // ISO does not carry it, so ISO is unchanged.
+            assert.ok(! JSON.stringify(shape(ISO)).includes('suppliers'));
+        } finally {
+            Object.keys(suppliers).forEach((key) => delete suppliers[key]);
+            Object.assign(suppliers, original);
+        }
     });
 
     test('GRC + Anbud: the same as ISO + Anbud', () => {

@@ -586,7 +586,7 @@ class WikiPermissionTest extends TestCase
 
         // Module entitlements are a separate gate that runs before any of this — the virksomhet
         // has bought the module, which is what makes the permission question the one being asked.
-        foreach (['quality', 'tender'] as $package) {
+        foreach (['basis', 'tender'] as $package) {
             CustomerPackageEntitlement::query()->updateOrCreate(
                 ['customer_id' => $customer->id, 'package_key' => $package],
                 ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],

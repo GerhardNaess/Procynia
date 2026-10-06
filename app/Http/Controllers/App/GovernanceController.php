@@ -20,8 +20,9 @@ use Inertia\Response;
  * the modules. Each card is a door into a module the person can already open, and the answer to
  * "can they" is exactly the one the module's own routes give — the customer holds the module
  * (EnsureModuleIsEnabled) and the person holds its view permission (the module's controller). There
- * is no Styring permission and no Styring package; a person with none of them gets a 403 here,
- * just as the rail shows them no Styring.
+ * is no Styring permission, and no package is consulted — the Styring package (`governance`) is
+ * only one of the packages that resolve to these modules. A person with none of them gets a 403
+ * here, just as the rail shows them no Styring.
  *
  * The same modules are declared for the rail in resources/js/Support/appModules.js
  * (`workspace: 'governance'`); GovernanceControllerTest holds the two lists together. Neither list

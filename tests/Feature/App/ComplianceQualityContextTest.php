@@ -377,7 +377,7 @@ class ComplianceQualityContextTest extends TestCase
         $this->complianceGrant($customer, $owner, [CustomerPermissionCatalog::COMPLIANCE_VIEW, CustomerPermissionCatalog::COMPLIANCE_EDIT]);
 
         // The customer holds Etterlevelse og revisjon but not Kvalitet.
-        config()->set('procynia_modules.packages.grc.modules', ['risk', 'objectives', 'improvements', 'compliance']);
+        config()->set('procynia_modules.packages.iso.modules', ['risk', 'objectives', 'improvements', 'compliance']);
 
         $this->assertQualityInvisible($owner, $requirement, [$process, $control]);
         $this->actingAs($owner)->post($this->url($requirement, 'controls'), ['control_item_id' => $control->id])->assertForbidden();

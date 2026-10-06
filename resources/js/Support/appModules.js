@@ -53,11 +53,11 @@ export const APP_MODULES = [
         key: 'wiki',
         href: '/app/wiki',
         built: true,
-        // Wiki/Core is the mandatory module every customer holds, so this entry can never be
-        // dimmed — but it is still resolved through entitlements rather than asserted here.
-        module: 'wiki_core',
-        // Every customer holds the module; not every person has been given work in it. The Wiki
-        // controllers refuse the page without this key, so the rail must not offer it either.
+        // Every package carries Wiki — the whole Styring ladder and Anbud — but it is still
+        // resolved through entitlements rather than asserted here.
+        module: 'wiki',
+        // A customer holding the module has not necessarily given every person work in it. The
+        // Wiki controllers refuse the page without this key, so the rail must not offer it either.
         permission: 'wiki.view',
         label: (m) => m.wiki ?? 'Wiki',
         areas: ['wiki', 'wiki-ask'],
@@ -206,7 +206,8 @@ export function partitionModules(activeModules = [], permissions = []) {
  * listing every internal module at the top level.
  *
  * Styring holds Kvalitet, Risiko, Mål og KPI, Avvik og forbedringer and Etterlevelse og revisjon. It
- * is not a module: no package grants it, no permission gates it, and it owns no data. It is shown
+ * is not a module: no package grants it as such (the Styring package grants its modules, like the
+ * others on the ladder), no permission gates it, and it owns no data. It is shown
  * exactly when at least one of its modules is `active` for this person, and it shows only those —
  * so it can never offer more than the modules themselves already would. A module in the workspace
  * that is not ordered, or that the person has no permission in, stays off the rail.

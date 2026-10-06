@@ -121,12 +121,12 @@ class GovernanceControllerTest extends TestCase
 
     public function test_a_permission_in_a_module_the_customer_has_not_ordered_is_not_shown(): void
     {
-        // Kvalitet carries Mål og KPI and Avvik og forbedringer, but not Risiko.
-        ['customer' => $customer] = $this->context('quality');
+        // Basis carries Kvalitet and Avvik og forbedringer, but not Risiko or Mål og KPI.
+        ['customer' => $customer] = $this->context('basis');
         $user = $this->member($customer);
-        $this->grantAll($customer, $user, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::OBJECTIVE_VIEW]);
+        $this->grantAll($customer, $user, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::OBJECTIVE_VIEW, CustomerPermissionCatalog::IMPROVEMENT_VIEW]);
 
-        $this->assertSame(['objectives'], array_column($this->governancePage($user)['props']['modules'], 'key'));
+        $this->assertSame(['improvements'], array_column($this->governancePage($user)['props']['modules'], 'key'));
 
         $riskOnly = $this->member($customer);
         $this->grantAll($customer, $riskOnly, [CustomerPermissionCatalog::RISK_VIEW]);
@@ -162,10 +162,10 @@ class GovernanceControllerTest extends TestCase
             array_column($this->governancePage($owner->fresh())['props']['modules'], 'key'),
         );
 
-        // A customer that holds only Kvalitet: the System Owner's permissions do not conjure Risiko.
-        ['owner' => $qualityOwner] = $this->context('quality');
+        // A customer that holds only Basis: the System Owner's permissions do not conjure Risiko.
+        ['owner' => $qualityOwner] = $this->context('basis');
         $this->assertSame(
-            ['quality', 'objectives', 'improvements'],
+            ['quality', 'improvements'],
             array_column($this->governancePage($qualityOwner)['props']['modules'], 'key'),
         );
     }

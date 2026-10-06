@@ -995,9 +995,9 @@ class ObjectiveTest extends TestCase
         ]);
 
         if ($entitled) {
-            // Kvalitet carries Mål og KPI as well as GRC; the smaller package is enough.
+            // Styring is the lowest step of the ladder that carries Mål og KPI.
             CustomerPackageEntitlement::query()->updateOrCreate(
-                ['customer_id' => $customer->id, 'package_key' => 'quality'],
+                ['customer_id' => $customer->id, 'package_key' => 'governance'],
                 ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
             );
         }

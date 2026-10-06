@@ -17,10 +17,11 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Commercial packages, the technical modules they switch on, and the one package nobody buys.
+ * Commercial packages and the technical modules they switch on.
  *
  * The point these tests defend: activation is decided in the backend, derived from the package ->
- * module mapping, and Wiki/Core is not a purchase decision at all.
+ * module mapping, and a package is only ever held through an entitlement row — there is no
+ * mandatory package any more.
  */
 class CustomerModuleEntitlementTest extends TestCase
 {
@@ -58,16 +59,51 @@ class CustomerModuleEntitlementTest extends TestCase
     {
         $service = app(ModuleEntitlementService::class);
 
-        $this->assertSame(['tender'], $service->modulesForPackage('tender'));
-        // Mål og KPI is a general management area, and Avvik og forbedringer is quality management;
-        // both are reached through Kvalitet and GRC.
-        $this->assertSame(['quality', 'objectives', 'improvements'], $service->modulesForPackage('quality'));
+        // The governance ladder: each step lists everything the step below carries.
+        $this->assertSame(['wiki', 'quality', 'improvements'], $service->modulesForPackage('basis'));
+        $this->assertSame(['wiki', 'quality', 'risk', 'objectives', 'improvements'], $service->modulesForPackage('governance'));
+        $this->assertSame(['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $service->modulesForPackage('iso'));
         $this->assertSame(
-            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
+            ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'],
             $service->modulesForPackage('grc'),
-            'GRC is the compound package and must carry all five modules.'
+            'GRC is the top of the ladder and carries Leverandøroppfølging ahead of it being built.'
         );
-        $this->assertSame([ModuleEntitlementService::MODULE_WIKI_CORE], $service->modulesForPackage('core'));
+
+        // Anbud is the add-on: Wiki, because the bid engine answers from it, and Anbud itself.
+        $this->assertSame(['wiki', 'tender'], $service->modulesForPackage('tender'));
+    }
+
+    public function test_the_catalog_is_the_ladder_plus_anbud_and_nothing_else(): void
+    {
+        $packages = app(ModuleEntitlementService::class)->packages();
+
+        $this->assertSame(['basis', 'governance', 'iso', 'grc', 'tender'], array_keys($packages));
+
+        foreach ($packages as $key => $package) {
+            $this->assertTrue($package['orderable'], "[{$key}] is a commercial package and can be ordered.");
+            $this->assertArrayNotHasKey('mandatory', $package);
+        }
+
+        // No governance package carries Anbud; Anbud carries none of the governance modules.
+        foreach (['basis', 'governance', 'iso', 'grc'] as $key) {
+            $this->assertNotContains('tender', $packages[$key]['modules'], $key);
+        }
+
+        $this->assertSame([], array_intersect($packages['tender']['modules'], ['quality', 'risk', 'objectives', 'improvements', 'compliance']));
+    }
+
+    public function test_each_step_of_the_ladder_contains_the_step_below(): void
+    {
+        $service = app(ModuleEntitlementService::class);
+        $ladder = ['basis', 'governance', 'iso', 'grc'];
+
+        for ($step = 1; $step < count($ladder); $step++) {
+            $below = $service->modulesForPackage($ladder[$step - 1]);
+            $above = $service->modulesForPackage($ladder[$step]);
+
+            $this->assertSame([], array_values(array_diff($below, $above)), "{$ladder[$step]} must carry all of {$ladder[$step - 1]}.");
+            $this->assertNotSame($below, $above, "{$ladder[$step]} must add something to {$ladder[$step - 1]}.");
+        }
     }
 
     public function test_a_module_a_package_claims_but_the_catalog_does_not_know_grants_nothing(): void
@@ -85,8 +121,8 @@ class CustomerModuleEntitlementTest extends TestCase
         $customer = $this->createCustomer();
         $this->grant($customer, 'grc');
 
-        // The mapping is resolved at read time, so GRC gaining supplier/contracts later needs no
-        // change to anyone's stored entitlement.
+        // The mapping is resolved at read time, so GRC gaining contracts later needs no change to
+        // anyone's stored entitlement.
         config()->set('procynia_modules.packages.grc.modules', ['quality', 'risk', 'compliance', 'supplier', 'contracts']);
 
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
@@ -99,14 +135,13 @@ class CustomerModuleEntitlementTest extends TestCase
     // Customer entitlements
     // ---------------------------------------------------------------------
 
-    public function test_a_customer_without_entitlements_has_only_the_mandatory_module(): void
+    public function test_a_customer_without_entitlements_has_no_module_at_all(): void
     {
         $customer = $this->createCustomer();
 
-        $this->assertSame(
-            [ModuleEntitlementService::MODULE_WIKI_CORE],
-            app(ModuleEntitlementService::class)->modulesFor($customer),
-        );
+        $this->assertSame([], app(ModuleEntitlementService::class)->activePackageKeys($customer));
+        $this->assertSame([], app(ModuleEntitlementService::class)->modulesFor($customer));
+        $this->assertFalse($customer->hasModule('wiki'));
         $this->assertFalse($customer->hasModule('tender'));
         $this->assertFalse($customer->hasModule('quality'));
     }
@@ -114,12 +149,12 @@ class CustomerModuleEntitlementTest extends TestCase
     public function test_an_active_package_grants_every_module_it_maps_to(): void
     {
         $customer = $this->createCustomer();
-        $this->grant($customer, 'grc');
+        $this->grant($customer, 'iso');
 
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
         $this->assertSame(
-            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'objectives', 'improvements', 'compliance'],
+            ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'],
             $modules,
         );
     }
@@ -127,17 +162,13 @@ class CustomerModuleEntitlementTest extends TestCase
     public function test_overlapping_packages_resolve_to_a_union_without_duplicates(): void
     {
         $customer = $this->createCustomer();
-        $this->grant($customer, 'quality');
-        $this->grant($customer, 'grc');
+        $this->grant($customer, 'basis');
+        $this->grant($customer, 'iso');
+        $this->grant($customer, 'tender');
 
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
-        $this->assertSame($modules, array_values(array_unique($modules)));
-        $this->assertContains('quality', $modules);
-        $this->assertContains('risk', $modules);
-        $this->assertContains('objectives', $modules);
-        $this->assertSame(1, count(array_keys($modules, 'objectives', true)));
-        $this->assertSame(1, count(array_keys($modules, 'improvements', true)));
+        $this->assertSame(['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $modules);
     }
 
     public function test_a_package_that_is_not_active_grants_nothing(): void
@@ -174,6 +205,26 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertNotContains('tender', app(ModuleEntitlementService::class)->activePackageKeys($customer->fresh()));
     }
 
+    public function test_rows_for_the_retired_packages_grant_nothing(): void
+    {
+        $customer = $this->createCustomer();
+
+        // `quality` and `core` left the catalog with the move to the ladder.
+        foreach (['quality', 'core'] as $retired) {
+            $this->grant($customer, $retired);
+        }
+
+        $this->assertSame([], app(ModuleEntitlementService::class)->activePackageKeys($customer->fresh()));
+        $this->assertSame([], app(ModuleEntitlementService::class)->modulesFor($customer->fresh()));
+    }
+
+    public function test_a_retired_package_cannot_be_requested(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        app(ModuleEntitlementService::class)->requestPackage($this->createCustomer(), 'core');
+    }
+
     public function test_entitlements_do_not_leak_between_customers(): void
     {
         $owner = $this->createCustomer('Kunde A');
@@ -182,54 +233,6 @@ class CustomerModuleEntitlementTest extends TestCase
 
         $this->assertTrue($owner->fresh()->hasModule('tender'));
         $this->assertFalse($other->fresh()->hasModule('tender'));
-    }
-
-    // ---------------------------------------------------------------------
-    // Wiki/Core is mandatory
-    // ---------------------------------------------------------------------
-
-    public function test_wiki_core_is_active_for_every_customer_with_no_row_of_its_own(): void
-    {
-        $customer = $this->createCustomer();
-
-        $this->assertTrue($customer->hasModule(ModuleEntitlementService::MODULE_WIKI_CORE));
-        $this->assertTrue(app(ModuleEntitlementService::class)->hasPackage($customer, ModuleEntitlementService::CORE_PACKAGE));
-        $this->assertSame(0, $customer->packageEntitlements()->count());
-    }
-
-    public function test_wiki_core_cannot_be_ordered(): void
-    {
-        $customer = $this->createCustomer();
-
-        $this->expectException(InvalidArgumentException::class);
-
-        app(ModuleEntitlementService::class)->requestPackage($customer, ModuleEntitlementService::CORE_PACKAGE);
-    }
-
-    public function test_wiki_core_survives_a_revoked_row_being_forced_into_the_table(): void
-    {
-        $customer = $this->createCustomer();
-
-        // Nothing should create this row, but if one ever appears it must not switch Core off.
-        $customer->packageEntitlements()->create([
-            'package_key' => ModuleEntitlementService::CORE_PACKAGE,
-            'status' => CustomerPackageEntitlement::STATUS_REVOKED,
-        ]);
-
-        $this->assertTrue($customer->fresh()->hasModule(ModuleEntitlementService::MODULE_WIKI_CORE));
-    }
-
-    public function test_the_overview_reports_wiki_core_as_included_and_not_orderable(): void
-    {
-        $customer = $this->createCustomer();
-
-        $core = collect(app(ModuleEntitlementService::class)->overviewFor($customer))
-            ->firstWhere('key', ModuleEntitlementService::CORE_PACKAGE);
-
-        $this->assertSame('included', $core['status']);
-        $this->assertTrue($core['mandatory']);
-        $this->assertFalse($core['orderable']);
-        $this->assertFalse($core['can_order']);
     }
 
     // ---------------------------------------------------------------------
@@ -256,16 +259,16 @@ class CustomerModuleEntitlementTest extends TestCase
         $customer = $context['customer'];
 
         $customer->packageEntitlements()->create([
-            'package_key' => 'quality',
+            'package_key' => 'basis',
             'status' => CustomerPackageEntitlement::STATUS_REVOKED,
             'requested_by' => $context['owner']->id,
             'requested_at' => now()->subYear(),
             'deactivated_at' => now()->subMonth(),
         ]);
 
-        $entitlement = app(ModuleEntitlementService::class)->activatePackage($customer->fresh(), 'quality');
+        $entitlement = app(ModuleEntitlementService::class)->activatePackage($customer->fresh(), 'basis');
 
-        $this->assertSame(1, $customer->packageEntitlements()->where('package_key', 'quality')->count());
+        $this->assertSame(1, $customer->packageEntitlements()->where('package_key', 'basis')->count());
         $this->assertSame(CustomerPackageEntitlement::STATUS_ACTIVE, $entitlement->status);
         $this->assertNull($entitlement->deactivated_at);
         $this->assertSame($context['owner']->id, $entitlement->requested_by);
@@ -301,16 +304,18 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertNotNull($entitlement->activated_at);
         $this->assertSame($context['owner']->id, $entitlement->requested_by);
 
-        // GRC is the compound package: ordering it must switch on every module it maps to, not
+        // GRC is the top of the ladder: ordering it must switch on every module it maps to, not
         // just the one with pages.
         $customer = $context['customer']->fresh();
 
         $this->assertTrue($customer->hasModule('quality'));
         $this->assertTrue($customer->hasModule('risk'));
         $this->assertTrue($customer->hasModule('compliance'));
+        $this->assertTrue($customer->hasModule('wiki'));
+        $this->assertFalse($customer->hasModule('tender'), 'Anbud is never part of a governance package.');
     }
 
-    public function test_ordering_quality_opens_the_module_on_the_next_request(): void
+    public function test_ordering_basis_opens_the_module_on_the_next_request(): void
     {
         $context = $this->systemOwnerContext();
 
@@ -320,7 +325,7 @@ class CustomerModuleEntitlementTest extends TestCase
             ->assertRedirect(route('app.dashboard'));
 
         $this->actingAs($context['owner'])
-            ->post('/app/billing/packages/quality/request')
+            ->post('/app/billing/packages/basis/request')
             ->assertRedirect(route('app.billing.index'));
 
         $this->assertTrue($context['customer']->fresh()->hasModule('quality'));
@@ -339,7 +344,7 @@ class CustomerModuleEntitlementTest extends TestCase
 
         $this->assertNotContains('quality', $before['entitlements']['modules']);
 
-        $this->actingAs($context['owner'])->post('/app/billing/packages/quality/request');
+        $this->actingAs($context['owner'])->post('/app/billing/packages/basis/request');
 
         // The rail renders `entitlements.modules`; the redirect's GET is what has to carry the
         // new value, or the menu keeps saying "Ikke bestilt" while the route is already open.
@@ -349,13 +354,15 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertContains('quality', $after['active_modules']);
     }
 
-    public function test_the_mandatory_package_has_no_order_endpoint(): void
+    public function test_the_retired_packages_cannot_be_ordered(): void
     {
         $context = $this->systemOwnerContext();
 
-        $this->actingAs($context['owner'])
-            ->post('/app/billing/packages/core/request')
-            ->assertNotFound();
+        foreach (['core', 'quality'] as $retired) {
+            $this->actingAs($context['owner'])
+                ->post("/app/billing/packages/{$retired}/request")
+                ->assertNotFound();
+        }
 
         $this->assertSame(0, $context['customer']->packageEntitlements()->count());
     }
@@ -396,17 +403,14 @@ class CustomerModuleEntitlementTest extends TestCase
         $props = $response->viewData('page')['props'];
         $packages = collect($props['module_packages']);
 
-        $this->assertSame('included', $packages->firstWhere('key', 'core')['status']);
+        $this->assertSame(['basis', 'governance', 'iso', 'grc', 'tender'], $packages->pluck('key')->all());
         $this->assertSame('active', $packages->firstWhere('key', 'tender')['status']);
-        $this->assertSame('available', $packages->firstWhere('key', 'quality')['status']);
+        $this->assertSame('available', $packages->firstWhere('key', 'basis')['status']);
         $this->assertSame('available', $packages->firstWhere('key', 'grc')['status']);
         $this->assertTrue($packages->firstWhere('key', 'grc')['can_order']);
         $this->assertFalse($packages->firstWhere('key', 'tender')['can_order']);
 
-        $this->assertSame(
-            [ModuleEntitlementService::MODULE_WIKI_CORE, 'tender'],
-            $props['active_modules'],
-        );
+        $this->assertSame(['wiki', 'tender'], $props['active_modules']);
 
         // The AI capacity block the page already had must survive the new section.
         $this->assertArrayHasKey('ai_quota', $props);
@@ -416,10 +420,10 @@ class CustomerModuleEntitlementTest extends TestCase
     {
         $context = $this->systemOwnerContext();
 
-        $this->actingAs($context['owner'])->post('/app/billing/packages/quality/request');
+        $this->actingAs($context['owner'])->post('/app/billing/packages/basis/request');
 
         $props = $this->actingAs($context['owner'])->get('/app/billing')->viewData('page')['props'];
-        $quality = collect($props['module_packages'])->firstWhere('key', 'quality');
+        $quality = collect($props['module_packages'])->firstWhere('key', 'basis');
 
         $this->assertSame('active', $quality['status']);
         $this->assertFalse($quality['can_order']);
@@ -430,10 +434,10 @@ class CustomerModuleEntitlementTest extends TestCase
     public function test_ordering_an_already_active_package_is_refused_without_touching_it(): void
     {
         $context = $this->systemOwnerContext();
-        $granted = $this->grant($context['customer'], 'quality');
+        $granted = $this->grant($context['customer'], 'basis');
 
         $this->actingAs($context['owner'])
-            ->post('/app/billing/packages/quality/request')
+            ->post('/app/billing/packages/basis/request')
             ->assertSessionHas('error');
 
         $this->assertSame(

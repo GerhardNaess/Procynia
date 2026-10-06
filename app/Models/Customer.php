@@ -142,8 +142,8 @@ class Customer extends Model
     }
 
     /**
-     * Commercial packages the customer has ordered or holds. Mandatory packages are deliberately
-     * absent here — ModuleEntitlementService adds them, so a missing row never means lost access.
+     * Commercial packages the customer has ordered or holds. Read access through
+     * ModuleEntitlementService, which resolves them to modules.
      */
     public function packageEntitlements(): HasMany
     {

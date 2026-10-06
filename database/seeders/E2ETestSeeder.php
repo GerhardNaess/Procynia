@@ -155,24 +155,32 @@ class E2ETestSeeder extends Seeder
             ],
         );
 
+        $this->seedPackages($customer, $systemOwner);
         $this->seedQualityProcessFlows($customer, $systemOwner);
+    }
 
-        // Risiko is reached through GRC. Without it the routes redirect to Hjem and the risk spec
-        // would test nothing. Areas, roles and risks are created by the spec itself, through the UI.
-        app(ModuleEntitlementService::class)->activatePackage($customer, 'grc', $systemOwner);
+    /**
+     * The E2E customer is ISO + Anbud: ISO carries every governance module the specs reach
+     * (Kvalitet, Risiko, Mål og KPI, Avvik og forbedringer, Etterlevelse og revisjon) and Anbud is
+     * the add-on. Without them the routes redirect to Hjem and a spec would skip rather than fail —
+     * the worst of both, a green run that tested nothing. Areas, roles and risks are created by the
+     * specs themselves, through the UI.
+     *
+     * Anbud is activated here rather than left to the migration that granted it to customers that
+     * existed when packages arrived, so a freshly migrated database seeds the same customer.
+     */
+    private function seedPackages(Customer $customer, User $owner): void
+    {
+        foreach (['iso', 'tender'] as $package) {
+            app(ModuleEntitlementService::class)->activatePackage($customer, $package, $owner);
+        }
     }
 
     /**
      * A small and a large process, each with a saved flow, and one with none.
-     *
-     * Entitlement comes first: Kvalitet is an orderable module, so without the package the routes
-     * redirect to Hjem and every quality spec would skip rather than fail — which is the worst of
-     * both, a green run that tested nothing.
      */
     private function seedQualityProcessFlows(Customer $customer, User $owner): void
     {
-        app(ModuleEntitlementService::class)->activatePackage($customer, 'quality', $owner);
-
         $flows = [
             [self::SMALL_FLOW_CODE, 'E2E liten prosess', $this->smallFlowPayload()],
             [self::LARGE_FLOW_CODE, 'E2E stor prosess', $this->largeFlowPayload()],

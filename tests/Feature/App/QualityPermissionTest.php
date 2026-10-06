@@ -504,7 +504,7 @@ class QualityPermissionTest extends TestCase
         ]);
 
         CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'quality'],
+            ['customer_id' => $customer->id, 'package_key' => 'basis'],
             ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
         );
 

@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * A customer's standing with one commercial package.
  *
- * Only orderable packages are ever represented here. The mandatory core package has no row and
- * needs none — see App\Services\Modules\ModuleEntitlementService.
+ * A row is the only way a customer holds a package: there is no mandatory package that applies
+ * without one — see App\Services\Modules\ModuleEntitlementService.
  */
 class CustomerPackageEntitlement extends Model
 {

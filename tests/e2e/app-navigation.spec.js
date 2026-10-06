@@ -537,9 +537,9 @@ test.describe('one choice, one place', () => {
  *
  * Each case is a customer of its own (Tests\Support\NavigationE2EFixture::packageCustomer) whose one
  * person may view every module, so the only thing that differs between them is what the customer
- * bought. The packages are the ones the catalog sells today: Kvalitet, GRC, and Anbud as an add-on.
- * The intended product packages (Basis, Styring, ISO, GRC) are config shapes over the same modules
- * and are covered against the server in tests/Feature/App/NavigationEntitlementMatrixTest.php.
+ * bought. The packages are the real ones from config/procynia_modules.php — Basis, ISO, GRC, and
+ * Anbud as an add-on; the full matrix (Styring included) is covered against the server in
+ * tests/Feature/App/NavigationEntitlementMatrixTest.php.
  */
 test.describe('the rail follows what the customer bought, and folds', () => {
     const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
@@ -564,11 +564,14 @@ test.describe('the rail follows what the customer bought, and folds', () => {
     const topLevel = async (page) => labels(page.getByTestId('module-sidebar').locator(':scope > ul').first().locator(':scope > li > a, :scope > li > div > a'));
     const governanceChildren = async (page) => labels(page.getByTestId('module-governance-children').locator(':scope > li > div > a'));
 
-    test('three customers, three different rails', async ({ page }) => {
+    test('Basis, ISO, ISO + Anbud and GRC: each its own rail', async ({ page }) => {
+        const iso = ['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Etterlevelse og revisjon'];
         const cases = [
-            ['Kvalitet', ['quality'], ['Hjem', 'Wiki', 'Styring'], ['Kvalitet', 'Mål og KPI', 'Avvik og forbedringer'], false],
-            ['GRC', ['grc'], ['Hjem', 'Wiki', 'Styring'], ['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Etterlevelse og revisjon'], true],
-            ['GRC Anbud', ['grc', 'tender'], ['Hjem', 'Wiki', 'Anbud', 'Styring'], ['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Etterlevelse og revisjon'], true],
+            ['Basis', ['basis'], ['Hjem', 'Wiki', 'Styring'], ['Kvalitet', 'Avvik og forbedringer'], false],
+            ['ISO', ['iso'], ['Hjem', 'Wiki', 'Styring'], iso, true],
+            ['ISO Anbud', ['iso', 'tender'], ['Hjem', 'Wiki', 'Anbud', 'Styring'], iso, true],
+            // GRC carries Leverandøroppfølging, which is not built: the same rail as ISO.
+            ['GRC', ['grc'], ['Hjem', 'Wiki', 'Styring'], iso, true],
         ];
 
         for (const [label, packages, top, children, compliance] of cases) {
@@ -598,7 +601,7 @@ test.describe('the rail follows what the customer bought, and folds', () => {
     });
 
     test('Styring folds, stays folded after a reload, and opens itself for a page inside it', async ({ page }) => {
-        await loginAsSeeded(page, await seed('GRC Anbud', ['grc', 'tender']));
+        await loginAsSeeded(page, await seed('ISO Anbud', ['iso', 'tender']));
         await page.goto('/app/wiki');
 
         const toggle = page.getByTestId('module-governance-toggle');
@@ -626,7 +629,7 @@ test.describe('the rail follows what the customer bought, and folds', () => {
     });
 
     test('Etterlevelse og revisjon folds on its own; the name still navigates', async ({ page }) => {
-        await loginAsSeeded(page, await seed('GRC', ['grc']));
+        await loginAsSeeded(page, await seed('ISO', ['iso']));
         await page.goto('/app/quality');
 
         const toggle = page.getByTestId('module-compliance-toggle');
@@ -646,7 +649,7 @@ test.describe('the rail follows what the customer bought, and folds', () => {
     });
 
     test('on a phone the folding rail fits without a sideways scrollbar', async ({ page }) => {
-        await loginAsSeeded(page, await seed('GRC Anbud', ['grc', 'tender']));
+        await loginAsSeeded(page, await seed('ISO Anbud', ['iso', 'tender']));
         await page.setViewportSize(PHONE);
         await page.goto('/app/compliance/requirements');
 
