@@ -2666,7 +2666,7 @@ return [
                             ['title' => 'Findings are not actions', 'text' => 'A finding has no owner, due date, status or actions. Follow-up – responsibility, actions, due dates and closing – happens in Deviations & improvements.'],
                             ['title' => 'Follow up in Deviations & improvements', 'text' => 'Creates a new case from the finding. It only happens when someone chooses it – never automatically. You choose the business area, owner and due date; the title and description are taken from the finding. A nonconformity becomes a deviation, observations and improvement opportunities an improvement. It can also be done after the audit is completed.'],
                             ['title' => 'Handed off', 'text' => 'A handed-off finding is locked for good, also if the audit is reopened, and cannot be deleted. The audit only shows that the finding was handed off – not the case\'s status, actions or due dates.'],
-                            ['title' => 'Hidden information', 'text' => 'Process and control are shown only if you have access to Quality. A case in a business area you do not have access to is shown without link, title and status.'],
+                            ['title' => 'What you have no access to', 'text' => 'Process and control are shown only if you have access to Quality. A case in a business area you do not have access to is shown without link, title and status.'],
                         ],
                     ],
                     [

@@ -2667,7 +2667,7 @@ return [
                             ['title' => 'Funn er ikke tiltak', 'text' => 'Et funn har ingen ansvarlig, frist, status eller tiltak. Oppfølgingen – ansvar, tiltak, frister og lukking – skjer i Avvik og forbedringer.'],
                             ['title' => 'Følg opp i Avvik og forbedringer', 'text' => 'Oppretter en ny sak fra funnet. Det skjer bare når noen velger det – aldri automatisk. Du velger fagområde, ansvarlig og frist; tittel og beskrivelse hentes fra funnet. Avvik blir et avvik, observasjoner og forbedringsmuligheter en forbedring. Det kan også gjøres etter at revisjonen er fullført.'],
                             ['title' => 'Overført', 'text' => 'Et overført funn låses for godt, også om revisjonen gjenåpnes, og kan ikke slettes. Revisjonen viser bare at funnet er overført – ikke status, tiltak eller frister i saken.'],
-                            ['title' => 'Skjult informasjon', 'text' => 'Prosess og kontroll vises bare hvis du har tilgang til Kvalitet. En sak i et fagområde du ikke har tilgang til, vises uten lenke, tittel og status.'],
+                            ['title' => 'Det du ikke har tilgang til', 'text' => 'Prosess og kontroll vises bare hvis du har tilgang til Kvalitet. En sak i et fagområde du ikke har tilgang til, vises uten lenke, tittel og status.'],
                         ],
                     ],
                     [
