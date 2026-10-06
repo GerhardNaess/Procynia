@@ -110,10 +110,22 @@ export const APP_MODULES = [
         label: (m) => m.improvements ?? 'Avvik og forbedringer',
         areas: ['improvements'],
     },
+    {
+        key: 'compliance',
+        href: '/app/compliance/requirements',
+        built: true,
+        workspace: 'governance',
+        module: 'compliance',
+        // ComplianceRequirementController refuses the page without this key. compliance is an
+        // explicit-grant domain: System Owner holds it only through a role of their own, so the rail
+        // does not offer the module to a System Owner without one.
+        permission: 'compliance.view',
+        label: (m) => m.compliance ?? 'Etterlevelse og revisjon',
+        areas: ['compliance'],
+    },
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
-    { key: 'compliance', built: false, module: 'compliance', label: (m) => m.compliance ?? 'Etterlevelse og revisjon' },
     { key: 'services', built: false, module: null, label: (m) => m.services ?? 'Tjenester & SLA' },
     { key: 'projects', built: false, module: null, label: (m) => m.projects ?? 'Prosjekter' },
     { key: 'competence', built: false, module: null, label: (m) => m.competence ?? 'Kompetanse' },
@@ -176,10 +188,10 @@ export function partitionModules(activeModules = [], permissions = []) {
  * Arbeidsområder: what the rail groups modules under, so it names where a person works rather than
  * listing every internal module at the top level.
  *
- * Styring holds Kvalitet, Risiko, Mål og KPI and Avvik og forbedringer. It is not a module: no
- * package grants it, no permission gates it, and it owns no data. It is shown exactly when at least
- * one of its modules is `active` for this person, and it shows only those — so it can never offer
- * more than the modules themselves already would. A module in the workspace that is not ordered
+ * Styring holds Kvalitet, Risiko, Mål og KPI, Avvik og forbedringer and Etterlevelse og revisjon. It
+ * is not a module: no package grants it, no permission gates it, and it owns no data. It is shown
+ * exactly when at least one of its modules is `active` for this person, and it shows only those —
+ * so it can never offer more than the modules themselves already would. A module in the workspace that is not ordered
  * stays in "Ikke bestilt" with the others; one the person has no permission in stays off the rail.
  */
 export const APP_WORKSPACES = [

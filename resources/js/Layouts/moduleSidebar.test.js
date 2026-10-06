@@ -21,19 +21,19 @@ describe('the rail shows the whole planned product structure', () => {
             APP_MODULES.map((module) => module.key),
             [
                 'home', 'wiki', 'tenders', 'quality',
-                'risk', 'objectives', 'improvements', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
+                'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'contracts', 'hse', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
         );
     });
 
-    test('exactly seven are built, and they are the seven that have pages', () => {
+    test('exactly eight are built, and they are the eight that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements'],
         );
     });
 
@@ -256,9 +256,10 @@ describe('Avvik og forbedringer is on the rail once it has pages', () => {
 });
 
 /**
- * Styring is an arbeidsområde, not a module: it groups Kvalitet, Risiko, Mål og KPI and Avvik og
- * forbedringer, and it is derived entirely from them. No package grants it and no permission gates
- * it, so what these guard is that it can never show more than the four modules already would.
+ * Styring is an arbeidsområde, not a module: it groups Kvalitet, Risiko, Mål og KPI, Avvik og
+ * forbedringer and Etterlevelse og revisjon, and it is derived entirely from them. No package grants
+ * it and no permission gates it, so what these guard is that it can never show more than the
+ * modules themselves already would.
  */
 describe('Styring groups the governance modules, and only the ones the person can open', () => {
     const ALL_MODULES = ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
@@ -267,10 +268,10 @@ describe('Styring groups the governance modules, and only the ones the person ca
     const topLevel = (activeModules, permissions) => railEntries(activeModules, permissions)
         .entries.map((entry) => entry.key);
 
-    test('the four governance modules sit under Styring, and nothing else does', () => {
+    test('the five governance modules sit under Styring, and nothing else does', () => {
         assert.deepEqual(
             APP_MODULES.filter((module) => module.workspace === 'governance').map((module) => module.key),
-            ['quality', 'risk', 'objectives', 'improvements'],
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
         );
         assert.deepEqual(APP_WORKSPACES.map((workspace) => workspace.key), ['governance']);
         assert.equal(APP_WORKSPACES[0].href, '/app/governance');
@@ -289,6 +290,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
         ['risk.view', 'risk'],
         ['objective.view', 'objectives'],
         ['improvement.view', 'improvements'],
+        ['compliance.view', 'compliance'],
     ]) {
         test(`only ${permission} shows Styring with ${key} under it, and nothing else there`, () => {
             const workspace = governance(ALL_MODULES, [permission]);
@@ -299,9 +301,9 @@ describe('Styring groups the governance modules, and only the ones the person ca
     }
 
     test('several permissions show every permitted module, in product order', () => {
-        const workspace = governance(ALL_MODULES, ['improvement.view', 'risk.view', 'quality.view']);
+        const workspace = governance(ALL_MODULES, ['compliance.view', 'improvement.view', 'risk.view', 'quality.view']);
 
-        assert.deepEqual(workspace.children.map((child) => child.key), ['quality', 'risk', 'improvements']);
+        assert.deepEqual(workspace.children.map((child) => child.key), ['quality', 'risk', 'improvements', 'compliance']);
     });
 
     test('none of the four permissions shows no Styring at all', () => {
@@ -314,7 +316,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
         const workspace = rail.entries.find((entry) => entry.key === 'governance');
 
         assert.deepEqual(workspace.children.map((child) => child.key), ['risk']);
-        assert.deepEqual(rail.not_ordered.map((module) => module.key), ['quality', 'objectives', 'improvements']);
+        assert.deepEqual(rail.not_ordered.map((module) => module.key), ['quality', 'objectives', 'improvements', 'compliance']);
     });
 
     test('a permission without the module is not access, so Styring stays away', () => {
@@ -327,11 +329,12 @@ describe('Styring groups the governance modules, and only the ones the person ca
         const rail = railEntries(ALL_MODULES, ['quality.view']);
 
         assert.ok(rail.planned.every((module) => ! module.workspace));
-        assert.ok(rail.planned.some((module) => module.key === 'compliance'));
+        assert.ok(rail.planned.some((module) => module.key === 'contracts'));
+        assert.ok(! rail.planned.some((module) => module.key === 'compliance'), 'Etterlevelse og revisjon is built');
     });
 
     test('Styring is lit on its own page and on every page inside its modules', () => {
-        for (const area of ['governance', 'quality', 'risk', 'objectives', 'improvements']) {
+        for (const area of ['governance', 'quality', 'risk', 'objectives', 'improvements', 'compliance']) {
             assert.equal(activeWorkspaceKey(area), 'governance', area);
         }
 
@@ -343,7 +346,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
     test('the area comes from the path prefix, so detail, create and edit pages count too', () => {
         assert.match(layout, /if \(pathname === '\/app\/governance'\) \{\s*\n\s*return 'governance';/);
 
-        for (const prefix of ['quality', 'risk', 'objectives', 'improvements']) {
+        for (const prefix of ['quality', 'risk', 'objectives', 'improvements', 'compliance']) {
             assert.match(layout, new RegExp(`pathname\\.startsWith\\('/app/${prefix}'\\)`), prefix);
         }
 

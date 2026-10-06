@@ -13,8 +13,8 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Styring — the landing page of the arbeidsområde that groups Kvalitet, Risiko, Mål og KPI and
- * Avvik og forbedringer.
+ * Styring — the landing page of the arbeidsområde that groups Kvalitet, Risiko, Mål og KPI, Avvik og
+ * forbedringer and Etterlevelse og revisjon.
  *
  * Navigation and nothing else. It reads no domain data: no counts, no attention, no queries across
  * the four modules. Each card is a door into a module the person can already open, and the answer to
@@ -23,7 +23,7 @@ use Inertia\Response;
  * is no Styring permission and no Styring package; a person with none of the four gets a 403 here,
  * just as the rail shows them no Styring.
  *
- * The same four, in the same order, are declared for the rail in resources/js/Support/appModules.js
+ * The same modules, in the same order, are declared for the rail in resources/js/Support/appModules.js
  * (`workspace: 'governance'`). GovernanceControllerTest holds the two lists together.
  */
 class GovernanceController extends Controller
@@ -38,6 +38,7 @@ class GovernanceController extends Controller
         'risk' => ['risk', CustomerPermissionCatalog::RISK_VIEW, 'app.risk.index'],
         'objectives' => ['objectives', CustomerPermissionCatalog::OBJECTIVE_VIEW, 'app.objectives.index'],
         'improvements' => ['improvements', CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'app.improvements.index'],
+        'compliance' => ['compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW, 'app.compliance.requirements.index'],
     ];
 
     public function __construct(

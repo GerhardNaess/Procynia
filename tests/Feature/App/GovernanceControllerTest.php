@@ -61,6 +61,7 @@ class GovernanceControllerTest extends TestCase
             'Risiko' => [CustomerPermissionCatalog::RISK_VIEW, 'risk'],
             'Mål og KPI' => [CustomerPermissionCatalog::OBJECTIVE_VIEW, 'objectives'],
             'Avvik og forbedringer' => [CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'improvements'],
+            'Etterlevelse og revisjon' => [CustomerPermissionCatalog::COMPLIANCE_VIEW, 'compliance'],
         ];
     }
 
@@ -82,6 +83,7 @@ class GovernanceControllerTest extends TestCase
         ['customer' => $customer] = $this->context('grc');
         $user = $this->member($customer);
         $this->grantAll($customer, $user, [
+            CustomerPermissionCatalog::COMPLIANCE_VIEW,
             CustomerPermissionCatalog::IMPROVEMENT_VIEW,
             CustomerPermissionCatalog::QUALITY_VIEW,
             CustomerPermissionCatalog::RISK_VIEW,
@@ -90,9 +92,9 @@ class GovernanceControllerTest extends TestCase
 
         $modules = $this->governancePage($user)['props']['modules'];
 
-        $this->assertSame(['quality', 'risk', 'objectives', 'improvements'], array_column($modules, 'key'));
+        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'compliance'], array_column($modules, 'key'));
         $this->assertSame(
-            [route('app.quality.index'), route('app.risk.index'), route('app.objectives.index'), route('app.improvements.index')],
+            [route('app.quality.index'), route('app.risk.index'), route('app.objectives.index'), route('app.improvements.index'), route('app.compliance.requirements.index')],
             array_column($modules, 'href'),
         );
     }
@@ -108,7 +110,7 @@ class GovernanceControllerTest extends TestCase
         }
     }
 
-    public function test_none_of_the_four_permissions_is_a_403(): void
+    public function test_none_of_the_view_permissions_is_a_403(): void
     {
         ['customer' => $customer] = $this->context('grc');
         $user = $this->member($customer);
@@ -133,9 +135,10 @@ class GovernanceControllerTest extends TestCase
 
     public function test_system_owner_gets_no_more_through_styring_than_the_modules_already_give(): void
     {
-        // System Owner opens every module (CustomerPermissionService), but reads no data in one
-        // without a role in its fagområder. Styring must change neither half of that: its cards are
-        // exactly the modules System Owner's own routes already let in, and it shows no data at all.
+        // System Owner opens every module (CustomerPermissionService) except Etterlevelse og
+        // revisjon, an explicit-grant domain, and reads no data in one without a role in its
+        // fagområder. Styring must change neither half of that: its cards are exactly the modules
+        // System Owner's own routes already let in, and it shows no data at all.
         ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
         $case = $this->improvementCase($customer, $this->area($customer, 'HR'), 'Avvik ingen rolle');
 
@@ -150,6 +153,14 @@ class GovernanceControllerTest extends TestCase
         $register = $this->actingAs($owner)->get('/app/improvements')->viewData('page')['props'];
         $this->assertSame([], $register['cases']);
         $this->actingAs($owner)->get("/app/improvements/{$case->id}")->assertNotFound();
+        $this->actingAs($owner)->get('/app/compliance/requirements')->assertForbidden();
+
+        // With a role of their own that grants compliance.view, the card appears like anyone's.
+        $this->grantAll($customer, $owner, [CustomerPermissionCatalog::COMPLIANCE_VIEW]);
+        $this->assertSame(
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
+            array_column($this->governancePage($owner->fresh())['props']['modules'], 'key'),
+        );
 
         // A customer that holds only Kvalitet: the System Owner's permissions do not conjure Risiko.
         ['owner' => $qualityOwner] = $this->context('quality');
@@ -168,14 +179,15 @@ class GovernanceControllerTest extends TestCase
             CustomerPermissionCatalog::RISK_VIEW,
             CustomerPermissionCatalog::OBJECTIVE_VIEW,
             CustomerPermissionCatalog::IMPROVEMENT_VIEW,
+            CustomerPermissionCatalog::COMPLIANCE_VIEW,
         ]);
 
-        foreach (['/app/quality', '/app/risk', '/app/objectives', '/app/improvements'] as $url) {
+        foreach (['/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements'] as $url) {
             $this->actingAs($user)->get($url)->assertOk();
         }
     }
 
-    public function test_the_controller_and_the_rail_name_the_same_four_modules_in_the_same_order(): void
+    public function test_the_controller_and_the_rail_name_the_same_modules_in_the_same_order(): void
     {
         $rail = file_get_contents(resource_path('js/Support/appModules.js'));
         preg_match_all("/key: '([a-z]+)',\\n(?:(?!\\n    \\{).)*?workspace: 'governance'/s", $rail, $matches);

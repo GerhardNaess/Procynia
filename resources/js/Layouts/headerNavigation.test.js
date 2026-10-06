@@ -303,10 +303,12 @@ describe('one navigation choice is rendered in one place', () => {
         assert.match(layout, /data-testid="page-navigation"/);
     });
 
-    test('Risiko, Mål og KPI and Avvik og forbedringer have one main area, so no header row is made up for them', () => {
+    test('Risiko, Mål og KPI, Avvik og forbedringer and Etterlevelse og revisjon have one main area, so no header row is made up for them', () => {
         const secondary = block('const secondaryNavigation = (() => {', 'return [];\n    })();');
 
-        for (const area of ['risk', 'objectives', 'improvements']) {
+        // Etterlevelse og revisjon will have two — Krav and Revisjoner — once Revisjoner exists. Until
+        // then Krav is the module, and the header carries no row with one item or a placeholder.
+        for (const area of ['risk', 'objectives', 'improvements', 'compliance']) {
             assert.ok(! secondary.includes(`activeMainArea === '${area}'`), area);
         }
     });
