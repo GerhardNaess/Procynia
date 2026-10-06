@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import RequirementCompliance from './RequirementCompliance';
 import RequirementForm from './RequirementForm';
 import RequirementHistory from './RequirementHistory';
 import { RequirementReopenForm, RequirementRetireForm } from './RequirementStatusForms';
@@ -16,15 +17,19 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
 
 /**
  * One requirement: what it says, where it comes from, who follows it up and how often it is
- * reassessed, its status, and the status history. Every action is offered only when the server
- * said this person may do it; the controller refuses it otherwise. An active requirement can be
- * edited and retired; a retired one only reopened. Status never moves through Rediger.
+ * reassessed, whether it is met (Etterlevelse), its status, and the status history. Every action
+ * is offered only when the server said this person may do it; the controller refuses it
+ * otherwise. An active requirement can be edited, assessed and retired; a retired one only
+ * reopened. Status never moves through Rediger.
  */
 export default function ComplianceRequirementShow() {
     const {
         translations = {},
         requirement: item,
         status_history: statusHistory = [],
+        compliance = null,
+        assessments = [],
+        assessment_results: assessmentResults = [],
         locale = 'no',
         permissions = {},
         source_options: sourceOptions = [],
@@ -34,7 +39,7 @@ export default function ComplianceRequirementShow() {
 
     const tr = translations?.compliance ?? {};
     const statusLabels = tr.statuses ?? {};
-    // Which panel is open: 'edit', 'retire', 'reopen' or none. One at a time.
+    // Which panel is open: 'edit', 'assess', 'retire', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
 
     const form = useForm({
@@ -123,6 +128,19 @@ export default function ComplianceRequirementShow() {
                         </div>
                     </dl>
                 </section>
+
+                <RequirementCompliance
+                    item={item}
+                    compliance={compliance}
+                    assessments={assessments}
+                    results={assessmentResults}
+                    canAssess={permissions.can_assess && panel === null}
+                    assessing={panel === 'assess'}
+                    onAssess={() => setPanel('assess')}
+                    onDone={() => setPanel(null)}
+                    locale={locale}
+                    tr={tr}
+                />
 
                 <section className={CARD} aria-labelledby="compliance-status-heading" data-testid="compliance-status">
                     <h2 id="compliance-status-heading" className="text-xl font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h2>

@@ -62,3 +62,70 @@ export function describeHistoryEntry(entry, tr = {}) {
 export function countLabel(count, one, many) {
     return count === 1 ? one : many.replace(':count', String(count));
 }
+
+/**
+ * The badge tone of a compliance status. not_assessed is derived — no assessment exists — and is
+ * never a stored result.
+ */
+export const COMPLIANCE_STATUS_TONES = {
+    compliant: 'emerald',
+    partially_compliant: 'amber',
+    non_compliant: 'rose',
+    not_applicable: 'slate',
+    not_assessed: 'sky',
+};
+
+const RESULT_FALLBACKS = {
+    compliant: 'Oppfylt',
+    partially_compliant: 'Delvis oppfylt',
+    non_compliant: 'Ikke oppfylt',
+    not_applicable: 'Ikke relevant',
+    not_assessed: 'Ikke vurdert',
+};
+
+/** «Oppfylt», «Delvis oppfylt» … «Ikke vurdert». */
+export function complianceStatusLabel(status, tr = {}) {
+    return tr.assessment?.results?.[status] ?? RESULT_FALLBACKS[status] ?? status;
+}
+
+/**
+ * What the register's Etterlevelse column says for one requirement. An active requirement shows
+ * its current result, and «Revurdering forfalt» beside it — never instead of it. A retired one
+ * shows its last result only as history («Siste vurdering: Oppfylt»), so it never reads as active,
+ * and nothing at all when it was never assessed.
+ *
+ * @param {{status: string, is_overdue: boolean}} compliance  from ComplianceStatusResolver
+ * @param {string} requirementStatus  'active' | 'retired'
+ * @param {object} tr  translations.compliance
+ * @returns {{kind: 'current'|'historic'|'none', label: string, tone: string, overdue: boolean}}
+ */
+export function registerCompliance(compliance, requirementStatus, tr = {}) {
+    const status = compliance?.status ?? 'not_assessed';
+    const label = complianceStatusLabel(status, tr);
+
+    if (requirementStatus !== 'active') {
+        if (status === 'not_assessed') {
+            return { kind: 'none', label: '', tone: 'slate', overdue: false };
+        }
+
+        const template = tr.assessment?.historic ?? 'Siste vurdering: :result';
+
+        return { kind: 'historic', label: template.replace(':result', label), tone: 'slate', overdue: false };
+    }
+
+    return { kind: 'current', label, tone: COMPLIANCE_STATUS_TONES[status] ?? 'slate', overdue: Boolean(compliance?.is_overdue) };
+}
+
+/**
+ * A moment with date and time in the person's language: «6. oktober 2026 kl. 09:30» /
+ * «6 October 2026, 09:30».
+ */
+export function formatDateTime(iso, locale = 'no') {
+    if (! iso) {
+        return '';
+    }
+
+    const tag = String(locale).toLowerCase().startsWith('en') ? 'en-GB' : 'nb-NO';
+
+    return new Date(iso).toLocaleString(tag, { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}

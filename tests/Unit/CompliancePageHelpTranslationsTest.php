@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\ComplianceAssessment;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use PHPUnit\Framework\TestCase;
@@ -10,7 +11,7 @@ use PHPUnit\Framework\TestCase;
  * Purpose: Etterlevelse og revisjon must not ship without PageHelp. The Krav register and the
  * requirement page each have help with sections in both languages, built the same way, and the
  * help names what the pages actually show — the statuses, the source, the owner, the review
- * interval and the status history — under the labels the pages use. A label renamed without the
+ * interval, the status history and compliance assessments — under the labels the pages use. A label renamed without the
  * help following it fails here. Both languages also carry exactly the same keys.
  * Inputs: None.
  * Returns: None.
@@ -102,6 +103,36 @@ class CompliancePageHelpTranslationsTest extends TestCase
         }
     }
 
+    public function test_both_pages_explain_compliance_assessments_by_their_labels(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $strings = $this->compliance($locale);
+            $labels = $strings['assessment']['results'];
+
+            // The register explains every result, «Ikke vurdert» and «Revurdering forfalt» by name.
+            $indexTitles = $this->itemTitles($strings['help']['index']);
+            foreach ([...array_values($labels), $strings['assessment']['overdue']] as $label) {
+                $this->assertContains($label, $indexTitles, "The register help in lang/{$locale} does not explain «{$label}».");
+            }
+
+            // The requirement page explains what an assessment is, why «Ikke vurdert» is not stored,
+            // that assessments cannot be changed, the interval, and a changed requirement.
+            $requirement = $this->allText($strings['help']['requirement']);
+            $this->assertContains($strings['assessment']['results']['not_assessed'], $this->itemTitles($strings['help']['requirement']));
+            $this->assertContains($strings['field_review'], $this->itemTitles($strings['help']['requirement']));
+            $this->assertContains($strings['assessment']['heading'], array_column($strings['help']['requirement']['sections'], 'title'));
+            foreach (ComplianceAssessment::RESULTS as $result) {
+                $this->assertStringContainsString($labels[$result], $requirement, "The requirement help in lang/{$locale} does not name «{$labels[$result]}».");
+            }
+            $this->assertStringContainsString($strings['assessment']['overdue'], $requirement);
+        }
+
+        $no = $this->allText($this->compliance('no')['help']['requirement']);
+        foreach (['kan verken endres eller slettes', 'registrere en ny', 'ikke et lagret resultat', 'Endres kravet etterpå', 'pluss intervallet'] as $phrase) {
+            $this->assertStringContainsString($phrase, $no);
+        }
+    }
+
     public function test_the_value_labels_cover_exactly_the_values_that_exist(): void
     {
         foreach (['no', 'en'] as $locale) {
@@ -111,6 +142,8 @@ class CompliancePageHelpTranslationsTest extends TestCase
             $this->assertSame(ComplianceSource::KINDS, array_keys($strings['kinds']));
             $this->assertSame(['none', ...ComplianceRequirement::REVIEW_INTERVALS], array_keys($strings['review_intervals']));
             $this->assertSame(['retired', 'active'], array_keys($strings['history']));
+            // The four stored results, and the derived «not assessed» — which is never stored.
+            $this->assertSame([...ComplianceAssessment::RESULTS, 'not_assessed'], array_keys($strings['assessment']['results']));
         }
     }
 
@@ -137,6 +170,15 @@ class CompliancePageHelpTranslationsTest extends TestCase
             ['Sett som utgått', 'Gjenåpne', 'Statushistorikk', 'Mangler ansvarlig', 'Kravkilder'],
             [$no['retire'], $no['reopen'], $no['history_heading'], $no['no_owner'], $no['sources']['heading']],
         );
+        $this->assertSame(
+            ['compliant' => 'Oppfylt', 'partially_compliant' => 'Delvis oppfylt', 'non_compliant' => 'Ikke oppfylt', 'not_applicable' => 'Ikke relevant', 'not_assessed' => 'Ikke vurdert'],
+            $no['assessment']['results'],
+        );
+        $this->assertSame(
+            ['Etterlevelse', 'Etterlevelse', 'Vurder etterlevelse', 'Revurdering forfalt', 'Kravet er endret siden siste etterlevelsesvurdering.'],
+            [$no['col_compliance'], $no['assessment']['heading'], $no['assessment']['assess'], $no['assessment']['overdue'], $no['assessment']['changed_since']],
+        );
+        $this->assertStringStartsWith('Beskriv hvorfor virksomheten anses å oppfylle, delvis oppfylle eller ikke oppfylle kravet.', $no['assessment']['field_rationale_hint']);
     }
 
     /** @return array<string, mixed> */

@@ -8,7 +8,7 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyl
 import ComplianceSources from './ComplianceSources';
 import RequirementForm from './RequirementForm';
 import { complianceHelp } from './complianceHelp';
-import { REQUIREMENT_STATUS_TONES, countLabel, reviewIntervalLabel } from './complianceRequirement';
+import { REQUIREMENT_STATUS_TONES, countLabel, registerCompliance, reviewIntervalLabel } from './complianceRequirement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -19,10 +19,33 @@ function Owner({ item, tr }) {
 }
 
 /**
+ * The Etterlevelse cell: the current result with «Revurdering forfalt» beside it, or — for a
+ * retired requirement — the last result as plain history text, so it never reads as active.
+ */
+function ComplianceCell({ item, tr }) {
+    const cell = registerCompliance(item.compliance, item.status, tr);
+
+    if (cell.kind === 'none') {
+        return <span className="text-slate-600">—</span>;
+    }
+
+    if (cell.kind === 'historic') {
+        return <span className="text-slate-600">{cell.label}</span>;
+    }
+
+    return (
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <StatusBadge tone={cell.tone}>{cell.label}</StatusBadge>
+            {cell.overdue && <span className="font-semibold text-amber-800">{tr.assessment?.overdue ?? 'Revurdering forfalt'}</span>}
+        </span>
+    );
+}
+
+/**
  * Etterlevelse og revisjon → Krav: the register. Everything here is already scoped by the server:
  * the rows, the count, the search and the source filter are the user's own customer's, and none at
- * all without compliance.view. The register says which requirements apply — never whether they
- * are met; that belongs to compliance assessments.
+ * all without compliance.view. Whether a requirement is met comes from its latest assessment, as
+ * the server's ComplianceStatusResolver computed it; nothing here derives it on its own.
  */
 export default function ComplianceRequirementsIndex() {
     const {
@@ -205,6 +228,8 @@ export default function ComplianceRequirementsIndex() {
                                             <dd className="min-w-0 break-words text-slate-800"><Owner item={item} tr={tr} /></dd>
                                             <dt className="font-semibold text-slate-600">{tr.col_review ?? 'Revurdering'}</dt>
                                             <dd className="text-slate-800">{reviewIntervalLabel(item.review_interval_months, tr)}</dd>
+                                            <dt className="font-semibold text-slate-600">{tr.col_compliance ?? 'Etterlevelse'}</dt>
+                                            <dd className="min-w-0 text-slate-800" data-testid="compliance-cell"><ComplianceCell item={item} tr={tr} /></dd>
                                         </dl>
                                     </li>
                                 ))}
@@ -219,6 +244,7 @@ export default function ComplianceRequirementsIndex() {
                                             <th className="px-4 pb-3">{tr.col_source ?? 'Kravkilde'}</th>
                                             <th className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>
                                             <th className="px-4 pb-3">{tr.col_review ?? 'Revurdering'}</th>
+                                            <th className="px-4 pb-3">{tr.col_compliance ?? 'Etterlevelse'}</th>
                                             <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                         </tr>
                                     </thead>
@@ -234,6 +260,7 @@ export default function ComplianceRequirementsIndex() {
                                                 <td className="px-4 py-3 align-top text-slate-700">{item.source_label}</td>
                                                 <td className="px-4 py-3 align-top text-slate-700"><Owner item={item} tr={tr} /></td>
                                                 <td className="px-4 py-3 align-top text-slate-700">{reviewIntervalLabel(item.review_interval_months, tr)}</td>
+                                                <td className="px-4 py-3 align-top text-slate-700" data-testid="compliance-cell"><ComplianceCell item={item} tr={tr} /></td>
                                                 <td className="py-3 pl-4 align-top">
                                                     <StatusBadge tone={REQUIREMENT_STATUS_TONES[item.status] ?? 'slate'}>{statusLabels[item.status] ?? item.status}</StatusBadge>
                                                 </td>

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { COMPLIANCE_HELP_PAGES, complianceHelp } from './complianceHelp.js';
-import { REQUIREMENT_STATUS_TONES, countLabel, describeHistoryEntry, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
+import { COMPLIANCE_STATUS_TONES, REQUIREMENT_STATUS_TONES, complianceStatusLabel, countLabel, describeHistoryEntry, registerCompliance, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -82,7 +82,51 @@ describe('complianceRequirement', () => {
     });
 });
 
-describe('The requirement form and page say what a requirement is, and nothing about whether it is met', () => {
+describe('Etterlevelse in the register and on the page', () => {
+    test('every compliance status has a label and a tone, and the four results differ', () => {
+        assert.deepEqual(Object.keys(COMPLIANCE_STATUS_TONES), ['compliant', 'partially_compliant', 'non_compliant', 'not_applicable', 'not_assessed']);
+        assert.equal(new Set(['compliant', 'partially_compliant', 'non_compliant'].map((status) => COMPLIANCE_STATUS_TONES[status])).size, 3);
+        assert.deepEqual(
+            Object.keys(COMPLIANCE_STATUS_TONES).map((status) => complianceStatusLabel(status)),
+            ['Oppfylt', 'Delvis oppfylt', 'Ikke oppfylt', 'Ikke relevant', 'Ikke vurdert'],
+        );
+        assert.equal(complianceStatusLabel('compliant', { assessment: { results: { compliant: 'Compliant' } } }), 'Compliant');
+    });
+
+    test('an active requirement shows its result, and «Revurdering forfalt» beside it, never instead', () => {
+        assert.deepEqual(registerCompliance({ status: 'compliant', is_overdue: true }, 'active'), { kind: 'current', label: 'Oppfylt', tone: 'emerald', overdue: true });
+        assert.deepEqual(registerCompliance({ status: 'not_assessed', is_overdue: false }, 'active'), { kind: 'current', label: 'Ikke vurdert', tone: 'sky', overdue: false });
+        assert.equal(registerCompliance(undefined, 'active').label, 'Ikke vurdert');
+    });
+
+    test('a retired requirement shows its last result only as history, and is never overdue', () => {
+        assert.deepEqual(registerCompliance({ status: 'compliant', is_overdue: true }, 'retired'), { kind: 'historic', label: 'Siste vurdering: Oppfylt', tone: 'slate', overdue: false });
+        assert.equal(registerCompliance({ status: 'not_assessed' }, 'retired').kind, 'none');
+        assert.equal(registerCompliance({ status: 'non_compliant' }, 'retired', { assessment: { historic: 'Latest assessment: :result', results: { non_compliant: 'Non-compliant' } } }).label, 'Latest assessment: Non-compliant');
+    });
+
+    test('the assessment form asks for a result and a rationale — never a date', () => {
+        const code = source('./RequirementCompliance.jsx');
+
+        assert.match(code, /id=\{`compliance-assessment-result-\$\{value\}`\}/);
+        assert.match(code, /id="compliance-assessment-rationale"/);
+        assert.match(code, /useForm\(\{ result: '', rationale: '' \}\)/);
+        assert.doesNotMatch(code, /assessed_at'|type="date"|type="datetime-local"/);
+    });
+
+    test('the history offers the requirement as it was', () => {
+        const code = source('./RequirementCompliance.jsx');
+
+        assert.match(code, /<details/);
+        assert.match(code, /snapshot\.requirement_text/);
+    });
+
+    test('the register carries the column on the table and on the phone cards alike', () => {
+        assert.equal(source('./Index.jsx').match(/<ComplianceCell /g).length, 2);
+    });
+});
+
+describe('The requirement form and page say what a requirement is, and whether it is met only through assessments', () => {
     test('the form asks for source, reference, title, text, owner and interval — never a status', () => {
         const code = source('./RequirementForm.jsx');
         const ids = [...code.matchAll(/id="(compliance-requirement-[a-z-]+)"/g)].map((match) => match[1]).filter((id) => ! id.endsWith('-hint'));
@@ -98,9 +142,9 @@ describe('The requirement form and page say what a requirement is, and nothing a
         assert.doesNotMatch(code, /setData\('status'|data\.status/);
     });
 
-    test('the requirement page shows text, source and ownership, status and history — in that order', () => {
+    test('the requirement page shows text, source and ownership, Etterlevelse, status and history — in that order', () => {
         const code = source('./Show.jsx');
-        const order = ['compliance-text-heading', 'compliance-details-heading', 'compliance-status-heading', '<RequirementHistory'].map((needle) => code.indexOf(needle));
+        const order = ['compliance-text-heading', 'compliance-details-heading', '<RequirementCompliance', 'compliance-status-heading', '<RequirementHistory'].map((needle) => code.indexOf(needle));
 
         assert.ok(order.every((index) => index > -1));
         for (let i = 1; i < order.length; i += 1) {
@@ -113,7 +157,7 @@ describe('The requirement form and page say what a requirement is, and nothing a
         const code = (file) => source(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
         for (const file of readdirSync(here).filter((name) => name.endsWith('.jsx'))) {
-            assert.doesNotMatch(code(`./${file}`), /assessment|audit|control|Vurderinger|Etterlevelsesvurdering|Revisjoner|Kontroller|Funn/, file);
+            assert.doesNotMatch(code(`./${file}`), /audit|control|evidence|Revisjoner|Kontroller|Funn|Evidens/, file);
         }
     });
 
