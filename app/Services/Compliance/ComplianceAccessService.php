@@ -6,6 +6,7 @@ use App\Models\ComplianceAudit;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
@@ -36,6 +37,7 @@ class ComplianceAccessService
 {
     public function __construct(
         private readonly CustomerPermissionService $permissions,
+        private readonly ModuleEntitlementService $entitlements,
     ) {}
 
     /** Whether the user may open Etterlevelse og revisjon at all. */
@@ -44,6 +46,25 @@ class ComplianceAccessService
         return $user instanceof User
             && $user->customer_id !== null
             && $this->permissions->has($user, CustomerPermissionCatalog::COMPLIANCE_VIEW);
+    }
+
+    /**
+     * The gate for another module showing anything from Etterlevelse og revisjon — an audit title,
+     * a link, a finding — on its own page: the customer holds the `compliance` module *and* the
+     * user has compliance.view.
+     *
+     * canOpenModule() alone is not enough there. Inside Etterlevelse og revisjon the route guard
+     * (EnsureModuleIsEnabled) has already refused a customer without the module; a page in
+     * another module is reached without that guard, so a customer that has stepped down from ISO
+     * would otherwise keep seeing compliance data through a role that still carries the key.
+     */
+    public function canReadFromAnotherModule(?User $user): bool
+    {
+        $customer = $user?->customer;
+
+        return $customer !== null
+            && $this->canOpenModule($user)
+            && $this->entitlements->hasModule($customer, 'compliance');
     }
 
     /**

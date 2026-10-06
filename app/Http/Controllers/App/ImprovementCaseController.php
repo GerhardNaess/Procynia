@@ -216,8 +216,9 @@ class ImprovementCaseController extends Controller
             // null, not empty: the person cannot read Kvalitet, so nothing is said about context.
             'quality_context' => $canReadQuality ? $this->qualityContext->linkedContext($case) : null,
             'quality_context_options' => $canLinkContext ? $this->qualityContext->contextOptions($case) : [],
-            // «Fra revisjonsfunn i …»: null unless the case came from a finding *and* the person can
-            // read that audit in Etterlevelse og revisjon. Nothing about the audit otherwise.
+            // «Fra revisjonsfunn i …»: null unless the case came from a finding, the customer holds
+            // Etterlevelse og revisjon *and* the person can read that audit there. Nothing about the
+            // audit otherwise.
             'audit_origin' => $this->auditFindings->provenanceFor($user, $case),
             'today' => now()->toDateString(),
         ]);

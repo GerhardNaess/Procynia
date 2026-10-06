@@ -121,14 +121,15 @@ class ComplianceAuditFindingHandoffService
     }
 
     /**
-     * «Fra revisjonsfunn i …» on the case page — only for someone who can read the audit in
-     * Etterlevelse og revisjon. Null for everyone else, and for a case no finding was handed off to.
+     * «Fra revisjonsfunn i …» on the case page — only when the customer holds Etterlevelse og
+     * revisjon and the user can read the audit there. Null for everyone else, and for a case no
+     * finding was handed off to: no title, no link, no finding or audit id.
      *
      * @return array{audit_title: string, audit_url: string, finding_title: string}|null
      */
     public function provenanceFor(User $user, ImprovementCase $case): ?array
     {
-        if (! $this->access->canOpenModule($user)) {
+        if (! $this->access->canReadFromAnotherModule($user)) {
             return null;
         }
 

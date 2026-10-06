@@ -6,6 +6,7 @@ use App\Models\BusinessArea;
 use App\Models\ComplianceAudit;
 use App\Models\ComplianceAuditFinding;
 use App\Models\Customer;
+use App\Models\CustomerPackageEntitlement;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseProcess;
 use App\Models\QualityItem;
@@ -370,6 +371,60 @@ class ComplianceAuditFindingHandoffTest extends TestCase
         $this->assertNull($this->caseProps($auditor, $plain)['audit_origin']);
     }
 
+    public function test_a_customer_stepped_down_from_iso_shows_no_audit_origin_whatever_the_role_says(): void
+    {
+        ['customer' => $customer, 'area' => $area, 'auditor' => $auditor, 'audit' => $audit] = $this->scenario();
+        $finding = $this->finding($audit);
+        $this->actingAs($auditor)->post($this->url($audit, $finding), $this->handoffPayload($finding, $area, $auditor))->assertSessionHasNoErrors();
+        $case = ImprovementCase::query()->findOrFail($finding->fresh()->improvement_case_id);
+
+        // Down to Basis: Avvik og forbedringer stays, Etterlevelse og revisjon goes. The auditor's
+        // role still carries compliance.view.
+        $customer->packageEntitlements()->where('package_key', 'iso')->update([
+            'status' => CustomerPackageEntitlement::STATUS_REVOKED,
+            'deactivated_at' => now(),
+        ]);
+        CustomerPackageEntitlement::query()->create([
+            'customer_id' => $customer->id,
+            'package_key' => 'basis',
+            'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
+            'activated_at' => now(),
+        ]);
+
+        $this->assertAuditOriginHidden($this->caseProps($auditor, $case), $audit, $finding);
+    }
+
+    public function test_system_owner_without_an_explicit_compliance_grant_sees_no_audit_origin(): void
+    {
+        ['customer' => $customer, 'area' => $area, 'auditor' => $auditor, 'audit' => $audit] = $this->scenario();
+        $finding = $this->finding($audit);
+        $this->actingAs($auditor)->post($this->url($audit, $finding), $this->handoffPayload($finding, $area, $auditor))->assertSessionHasNoErrors();
+        $case = ImprovementCase::query()->findOrFail($finding->fresh()->improvement_case_id);
+
+        $owner = User::query()->where('customer_id', $customer->id)->where('bid_role', User::BID_ROLE_SYSTEM_OWNER)->firstOrFail();
+        // Enough to open the case; nothing in Etterlevelse og revisjon.
+        $this->grant($customer, $owner, [CustomerPermissionCatalog::IMPROVEMENT_VIEW], [$area]);
+
+        $this->assertAuditOriginHidden($this->caseProps($owner, $case), $audit, $finding);
+    }
+
+    public function test_another_customer_learns_nothing_about_the_case_or_its_audit(): void
+    {
+        ['area' => $area, 'auditor' => $auditor, 'audit' => $audit] = $this->scenario();
+        $finding = $this->finding($audit);
+        $this->actingAs($auditor)->post($this->url($audit, $finding), $this->handoffPayload($finding, $area, $auditor))->assertSessionHasNoErrors();
+        $case = ImprovementCase::query()->findOrFail($finding->fresh()->improvement_case_id);
+
+        // A full ISO auditor of their own customer, with Avvik og forbedringer across all its areas.
+        ['customer' => $foreign] = $this->complianceContext();
+        $stranger = $this->complianceAuditor($foreign);
+        $this->grantAll($foreign, $stranger, [CustomerPermissionCatalog::IMPROVEMENT_VIEW]);
+
+        $response = $this->actingAs($stranger)->get("/app/improvements/{$case->id}")->assertNotFound();
+        $this->assertStringNotContainsString($audit->title, (string) $response->getContent());
+        $this->assertStringNotContainsString('finding-'.$finding->id, (string) $response->getContent());
+    }
+
     public function test_a_finding_or_audit_of_another_customer_cannot_be_handed_off(): void
     {
         ['area' => $area, 'auditor' => $auditor, 'audit' => $audit] = $this->scenario();
@@ -465,6 +520,20 @@ class ComplianceAuditFindingHandoffTest extends TestCase
     private function props(User $user, ComplianceAudit $audit): array
     {
         return $this->actingAs($user)->get("/app/compliance/audits/{$audit->id}")->assertOk()->viewData('page')['props'];
+    }
+
+    /** @param  array<string, mixed>  $props */
+    private function assertAuditOriginHidden(array $props, ComplianceAudit $audit, ComplianceAuditFinding $finding): void
+    {
+        $this->assertNull($props['audit_origin']);
+
+        // The page's own props: the shared ones (navigation, translations, ...) say nothing about a case.
+        $pageData = json_encode(array_diff_key($props, array_flip(['errors', 'appName', 'locale', 'auth', 'entitlements', 'access', 'notifications', 'flash', 'translations'])));
+        $this->assertStringNotContainsString($audit->title, $pageData);
+        $this->assertStringNotContainsString('\/app\/compliance', $pageData);
+        $this->assertStringNotContainsString('finding-'.$finding->id, $pageData);
+        $this->assertStringNotContainsString('"audit_id"', $pageData);
+        $this->assertStringNotContainsString('"finding_id"', $pageData);
     }
 
     /** @return array<string, mixed> */
