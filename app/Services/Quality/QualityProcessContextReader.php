@@ -2,7 +2,9 @@
 
 namespace App\Services\Quality;
 
+use App\Models\QualityActivityControl;
 use App\Models\QualityItem;
+use App\Models\QualityItemDocument;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
@@ -14,8 +16,8 @@ use Illuminate\Support\Collection;
 /**
  * How another module reads Kvalitet's processes and their activities, live, for a link it owns.
  *
- * Risiko (a risk belongs in a process or an activity) and Mål og KPI (a KPI measures one) both
- * store only ids — a process id and, for an activity, the step's key in that process's working
+ * Risiko (a risk belongs in a process or an activity), Mål og KPI (a KPI measures one) and
+ * Etterlevelse og revisjon (a requirement is met through a process or a control) all store only ids — a process id and, for an activity, the step's key in that process's working
  * flow. Everything shown about them is read here when the page is drawn: title, code, step label,
  * role. Nothing is ever copied.
  *
@@ -60,6 +62,62 @@ class QualityProcessContextReader
             ->where('quality_items.quality_type', QualityItem::TYPE_PROCESS)
             ->orderBy('quality_items.title')
             ->orderBy('quality_items.id');
+    }
+
+    /**
+     * The customer's controls, by title.
+     *
+     * @return Builder<QualityItem>
+     */
+    public function controlsQuery(int $customerId): Builder
+    {
+        return QualityItem::query()
+            ->where('quality_items.customer_id', $customerId)
+            ->where('quality_items.quality_type', QualityItem::TYPE_CONTROL)
+            ->orderBy('quality_items.title')
+            ->orderBy('quality_items.id');
+    }
+
+    /**
+     * The evidence recorded on controls in Kvalitet — the `evidence` capacity of
+     * quality_item_documents — keyed by control id, oldest first, in the shape the control's own
+     * page shows it. Read-only: nothing here adds, changes or judges evidence.
+     *
+     * @param  list<int>  $controlIds
+     * @return array<int, list<array{id: int, title: ?string, description: ?string, filename: ?string, download_url: ?string, document_removed: bool, added_by: ?string, added_at: ?string}>>
+     */
+    public function controlEvidence(int $customerId, array $controlIds): array
+    {
+        if ($controlIds === []) {
+            return [];
+        }
+
+        $rows = [];
+
+        QualityItemDocument::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('quality_item_id', $controlIds)
+            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            ->with(['document:id,original_filename', 'createdBy:id,name'])
+            ->orderBy('id')
+            ->get()
+            ->each(function (QualityItemDocument $evidence) use (&$rows): void {
+                $rows[(int) $evidence->quality_item_id][] = [
+                    'id' => (int) $evidence->id,
+                    // Evidence attached as a plain file before evidence had a name falls back to it.
+                    'title' => $evidence->title ?? $evidence->document?->original_filename,
+                    'description' => $evidence->note,
+                    'filename' => $evidence->document?->original_filename,
+                    'download_url' => $evidence->document !== null
+                        ? route('app.wiki.sources.download', ['document' => $evidence->document->id])
+                        : null,
+                    'document_removed' => $evidence->document_removed_at !== null,
+                    'added_by' => $evidence->createdBy?->name,
+                    'added_at' => $evidence->created_at?->toDateString(),
+                ];
+            });
+
+        return $rows;
     }
 
     /**
@@ -212,6 +270,53 @@ class QualityProcessContextReader
                 'linked' => in_array($process->id.'|'.$step['key'], $linkedActivities, true),
             ], $this->steps($blueprints->get($process->id)))),
         ])->all();
+    }
+
+    /**
+     * Where controls sit in Kvalitet's flows: «Prosess › Aktivitet» for each placement, keyed by
+     * control id, read live like everything else here. A placement whose activity is no longer in
+     * the flow is left out.
+     *
+     * @param  list<int>  $controlIds
+     * @return array<int, list<string>>
+     */
+    public function controlPlacements(int $customerId, array $controlIds): array
+    {
+        if ($controlIds === []) {
+            return [];
+        }
+
+        $placements = QualityActivityControl::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('control_item_id', $controlIds)
+            ->orderBy('id')
+            ->get(['quality_item_id', 'activity_key', 'control_item_id']);
+
+        $processIds = $placements->pluck('quality_item_id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
+        $processes = $this->processesQuery($customerId)->whereIn('quality_items.id', $processIds)->get()->keyBy('id');
+        $blueprints = $this->blueprints($customerId, $processIds);
+        $steps = [];
+        $rows = [];
+
+        foreach ($placements as $placement) {
+            $process = $processes->get((int) $placement->quality_item_id);
+
+            if ($process === null) {
+                continue;
+            }
+
+            $steps[$process->id] ??= $this->steps($blueprints->get($process->id));
+            $step = $steps[$process->id][(string) $placement->activity_key] ?? null;
+
+            if ($step === null) {
+                continue;
+            }
+
+            $label = $step['label'] !== '' ? $process->title.' › '.$step['label'] : (string) $process->title;
+            $rows[(int) $placement->control_item_id][] = $label;
+        }
+
+        return array_map(fn (array $labels): array => array_values(array_unique($labels)), $rows);
     }
 
     public function processUrl(int $processId): string

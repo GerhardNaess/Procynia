@@ -416,6 +416,11 @@ Route::prefix('app')
             Route::post('/requirements/{requirementId}/reopen', [ComplianceRequirementController::class, 'reopen'])->whereNumber('requirementId')->name('requirements.reopen');
             // Vurder etterlevelse: append-only, a correction is a new assessment.
             Route::post('/requirements/{requirementId}/assessments', [ComplianceRequirementController::class, 'assess'])->whereNumber('requirementId')->name('requirements.assess');
+            // Hvordan kravet oppfylles: links to existing Kvalitet processes and controls, never copies.
+            Route::post('/requirements/{requirementId}/processes', [ComplianceRequirementController::class, 'linkProcess'])->whereNumber('requirementId')->name('requirements.processes.store');
+            Route::delete('/requirements/{requirementId}/processes/{processId}', [ComplianceRequirementController::class, 'unlinkProcess'])->whereNumber(['requirementId', 'processId'])->name('requirements.processes.destroy');
+            Route::post('/requirements/{requirementId}/controls', [ComplianceRequirementController::class, 'linkControl'])->whereNumber('requirementId')->name('requirements.controls.store');
+            Route::delete('/requirements/{requirementId}/controls/{controlId}', [ComplianceRequirementController::class, 'unlinkControl'])->whereNumber(['requirementId', 'controlId'])->name('requirements.controls.destroy');
             // Kravkilder, managed from the Krav register.
             Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
             Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');

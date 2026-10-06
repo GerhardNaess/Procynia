@@ -133,7 +133,7 @@ class ComplianceRequirementTest extends TestCase
 
         $show = $this->actingAs($reader)->get("/app/compliance/requirements/{$requirement->id}")->assertOk()->viewData('page');
         $this->assertSame('App/Compliance/Requirements/Show', $show['component']);
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false], $show['props']['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false, 'can_manage_quality_links' => false], $show['props']['permissions']);
 
         $this->actingAs($reader)->post('/app/compliance/requirements', $this->requirementPayload($source, $owner))->assertForbidden();
         $this->actingAs($reader)->patch("/app/compliance/requirements/{$requirement->id}", $this->requirementPayload($source, $owner))->assertForbidden();
@@ -314,7 +314,7 @@ class ComplianceRequirementTest extends TestCase
         $this->assertSame('Regler for fysisk og logisk tilgang skal etableres.', $props['requirement']['requirement_text']);
         $this->assertSame('ISO 27001 (2022)', $props['requirement']['source_label']);
         $this->assertSame([], $props['status_history']);
-        $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false, 'can_manage_quality_links' => false], $props['permissions']);
 
         // No fixed interval and no reference are both fine.
         $this->actingAs($editor)->post('/app/compliance/requirements', $this->requirementPayload($source, $owner, 'Uten', null, null))->assertSessionHasNoErrors();
@@ -447,7 +447,7 @@ class ComplianceRequirementTest extends TestCase
         $this->assertSame('Krav', $requirement->fresh()->title);
 
         $props = $this->actingAs($editor)->get($url)->viewData('page')['props'];
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false, 'can_assess' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false, 'can_assess' => false, 'can_manage_quality_links' => false], $props['permissions']);
         $this->assertSame([], $props['source_options']);
 
         $this->actingAs($editor)->post("{$url}/reopen", [])->assertSessionHasErrors(['reason' => 'Begrunnelse må fylles ut.']);

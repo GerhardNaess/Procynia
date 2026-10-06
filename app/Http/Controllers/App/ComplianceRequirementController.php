@@ -10,6 +10,7 @@ use App\Models\ComplianceSource;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAssessmentService;
+use App\Services\Compliance\ComplianceQualityContextService;
 use App\Services\Compliance\ComplianceRequirementLifecycleService;
 use App\Services\Compliance\ComplianceStatusResolver;
 use App\Support\Compliance\ComplianceValidationMessages;
@@ -35,6 +36,10 @@ use Inertia\Response;
  * compliance.delete deletes one registered by mistake. Status changes only through retire() and
  * reopen(), never through store() or update(). compliance.assess — not compliance.edit — registers
  * an etterlevelsesvurdering through assess().
+ *
+ * Hvordan kravet oppfylles — the Kvalitet processes and controls a requirement is met through — is
+ * ComplianceQualityContextService's: it decides what may be shown (Kvalitet read access, never
+ * implied by compliance.*) and what may be linked.
  */
 class ComplianceRequirementController extends Controller
 {
@@ -44,6 +49,7 @@ class ComplianceRequirementController extends Controller
         private readonly ComplianceRequirementLifecycleService $lifecycle,
         private readonly ComplianceStatusResolver $status,
         private readonly ComplianceAssessmentService $assessments,
+        private readonly ComplianceQualityContextService $qualityContext,
     ) {}
 
     /** /app/compliance: Krav is the module's only main area so far. */
@@ -148,6 +154,7 @@ class ComplianceRequirementController extends Controller
         $canEdit = $this->access->canEdit($user);
         $active = $requirement->isActive();
         $assessments = $requirement->assessments()->with('assessedBy:id,name')->get();
+        $canManageQualityLinks = $this->qualityContext->canManageLinks($user, $requirement);
 
         return Inertia::render('App/Compliance/Requirements/Show', [
             'requirement' => $this->row($requirement) + [
@@ -172,6 +179,10 @@ class ComplianceRequirementController extends Controller
                 ],
             ])->all(),
             'assessment_results' => ComplianceAssessment::RESULTS,
+            // Hvordan kravet oppfylles: null — not empty — without Kvalitet read access, so nothing
+            // about the links reaches the page, not even whether there are any.
+            'quality_context' => $this->qualityContext->canReadQuality($user) ? $this->qualityContext->linkedContext($requirement) : null,
+            'quality_options' => $canManageQualityLinks ? $this->qualityContext->options($requirement) : null,
             // Reached through visibleRequirements(); the history carries no access of its own.
             'status_history' => $requirement->statusChanges()->with('changedBy:id,name')->get()
                 ->map(fn (ComplianceRequirementStatusChange $change): array => [
@@ -191,6 +202,8 @@ class ComplianceRequirementController extends Controller
                 'can_delete' => $this->access->canDelete($user) && $requirement->isDeletable(),
                 // Only an active requirement is assessed; the server refuses it otherwise too.
                 'can_assess' => $this->access->canAssess($user) && $active,
+                // compliance.edit and Kvalitet read access, on an active requirement.
+                'can_manage_quality_links' => $canManageQualityLinks,
             ],
             'source_options' => $canEdit && $active ? $this->sourceOptions($user) : [],
             'owner_options' => $canEdit && $active ? $this->access->ownerCandidates($user) : [],
@@ -280,6 +293,52 @@ class ComplianceRequirementController extends Controller
         $this->assessments->assess($requirement, $user, $validated['result'], $validated['rationale']);
 
         return back()->with('success', __('procynia.compliance.flash.assessed'));
+    }
+
+    /** Koble prosess: the requirement is met (in part) through an existing Kvalitet process. */
+    public function linkProcess(Request $request, int $requirementId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $requirement = $this->visibleRequirementOrFail($user, $requirementId);
+        $processId = (int) $request->validate(['quality_process_id' => ['required', 'integer']], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes())['quality_process_id'];
+
+        $this->qualityContext->linkProcess($user, $requirement, $processId);
+
+        return back()->with('success', __('procynia.compliance.flash.process_linked'));
+    }
+
+    /** Fjern kobling. The process stays as it is in Kvalitet. */
+    public function unlinkProcess(int $requirementId, int $processId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $requirement = $this->visibleRequirementOrFail($user, $requirementId);
+
+        abort_unless($this->qualityContext->unlinkProcess($user, $requirement, $processId), 404);
+
+        return back()->with('success', __('procynia.compliance.flash.process_unlinked'));
+    }
+
+    /** Koble kontroll: the requirement is met (in part) through an existing Kvalitet control. */
+    public function linkControl(Request $request, int $requirementId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $requirement = $this->visibleRequirementOrFail($user, $requirementId);
+        $controlId = (int) $request->validate(['control_item_id' => ['required', 'integer']], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes())['control_item_id'];
+
+        $this->qualityContext->linkControl($user, $requirement, $controlId);
+
+        return back()->with('success', __('procynia.compliance.flash.control_linked'));
+    }
+
+    /** Fjern kobling. The control and its evidence stay as they are in Kvalitet. */
+    public function unlinkControl(int $requirementId, int $controlId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $requirement = $this->visibleRequirementOrFail($user, $requirementId);
+
+        abort_unless($this->qualityContext->unlinkControl($user, $requirement, $controlId), 404);
+
+        return back()->with('success', __('procynia.compliance.flash.control_unlinked'));
     }
 
     public function destroy(int $requirementId): RedirectResponse
