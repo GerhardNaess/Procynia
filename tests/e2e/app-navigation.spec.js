@@ -177,10 +177,10 @@ test('the rail lists the workspaces in product order, with Styring holding what 
 
     expect(await labels(rail.locator(':scope > ul').first().locator(':scope > li > a')))
         .toEqual(['Hjem', 'Wiki', 'Anbud', 'Styring']);
-    // This user holds quality.view and none of the other three, so Styring holds Kvalitet only —
+    // This user holds quality.view and none of the others, so Styring holds Kvalitet only —
     // no dimmed or empty rows for the modules the virksomhet has but this person was not given.
     expect(await labels(page.getByTestId('module-governance-children').locator('a'))).toEqual(['Kvalitet']);
-    for (const hidden of ['module-risk', 'module-objectives', 'module-improvements']) {
+    for (const hidden of ['module-risk', 'module-objectives', 'module-improvements', 'module-compliance']) {
         await expect(page.getByTestId(hidden)).toHaveCount(0);
     }
 });
