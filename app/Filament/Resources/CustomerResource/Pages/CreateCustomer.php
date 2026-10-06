@@ -3,7 +3,9 @@
 namespace App\Filament\Resources\CustomerResource\Pages;
 
 use App\Filament\Resources\CustomerResource;
+use App\Models\Customer;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -34,7 +36,7 @@ class CreateCustomer extends CreateRecord
     protected function handleRecordCreation(array $data): Model
     {
         return DB::transaction(function () use ($data): Model {
-            /** @var \App\Models\Customer $customer */
+            /** @var Customer $customer */
             $customer = static::getModel()::query()->create($data);
 
             $this->temporaryPassword = Str::password(16);
@@ -51,6 +53,8 @@ class CreateCustomer extends CreateRecord
                 'is_active' => true,
                 'customer_id' => $customer->id,
             ]);
+
+            app(ModuleEntitlementService::class)->grantDefaultPackage($customer);
 
             return $customer;
         });

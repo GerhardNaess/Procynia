@@ -253,6 +253,61 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertFalse($customer->fresh()->hasModule('tender'));
     }
 
+    // ---------------------------------------------------------------------
+    // Default package for a new customer
+    // ---------------------------------------------------------------------
+
+    public function test_a_new_customer_is_given_basis_and_exactly_its_modules(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(ModuleEntitlementService::class);
+
+        $entitlement = $service->grantDefaultPackage($customer);
+
+        $this->assertSame('basis', $entitlement?->package_key);
+        $this->assertSame(CustomerPackageEntitlement::STATUS_ACTIVE, $entitlement->status);
+        $this->assertSame(['basis'], $service->activePackageKeys($customer->fresh()));
+        $this->assertSame(['wiki', 'quality', 'improvements'], $service->modulesFor($customer->fresh()));
+
+        foreach (['risk', 'objectives', 'compliance', 'tender', 'supplier'] as $module) {
+            $this->assertFalse($service->hasModule($customer->fresh(), $module), $module);
+        }
+    }
+
+    public function test_granting_the_default_twice_never_writes_a_second_basis_row(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(ModuleEntitlementService::class);
+
+        $service->grantDefaultPackage($customer);
+        $service->grantDefaultPackage($customer->fresh());
+
+        $this->assertSame(1, $customer->packageEntitlements()->count());
+        $this->assertSame(1, $customer->packageEntitlements()->where('package_key', 'basis')->count());
+    }
+
+    public function test_an_explicitly_chosen_ladder_package_is_not_overridden_by_the_default(): void
+    {
+        foreach (['governance', 'iso', 'grc'] as $package) {
+            $customer = $this->createCustomer('Kunde '.$package);
+            $this->grant($customer, $package);
+
+            $this->assertNull(app(ModuleEntitlementService::class)->grantDefaultPackage($customer->fresh()), $package);
+            $this->assertSame([$package], $customer->packageEntitlements()->pluck('package_key')->all(), $package);
+        }
+    }
+
+    public function test_the_tender_add_on_does_not_stand_in_for_the_default(): void
+    {
+        $customer = $this->createCustomer();
+        $this->grant($customer, 'tender');
+        $service = app(ModuleEntitlementService::class);
+
+        $service->grantDefaultPackage($customer->fresh());
+
+        $this->assertSame(['basis', 'tender'], $service->activePackageKeys($customer->fresh()));
+    }
+
     public function test_activating_a_package_reuses_a_revoked_row_and_keeps_the_original_order(): void
     {
         $context = $this->systemOwnerContext();

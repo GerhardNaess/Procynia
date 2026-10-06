@@ -191,6 +191,33 @@ class ModuleEntitlementService
     }
 
     /**
+     * Give a newly created customer the default package (config `procynia_modules.default_package`).
+     *
+     * Called explicitly wherever a customer is created, so the grant is an ordinary active row and
+     * never a read-time assumption. It never overrides an explicit choice: if the customer already
+     * holds a package that carries every module of the default one (Styring, ISO, GRC — or the
+     * default itself), nothing is written. An add-on such as Anbud carries less, so it does not
+     * stand in for the default. Re-running it is a no-op, so there is never a second row.
+     */
+    public function grantDefaultPackage(Customer $customer, ?User $grantedBy = null): ?CustomerPackageEntitlement
+    {
+        $defaultKey = (string) config('procynia_modules.default_package', '');
+        $defaultModules = $this->modulesForPackage($defaultKey);
+
+        if ($defaultModules === []) {
+            return null;
+        }
+
+        foreach ($this->activePackageKeys($customer) as $heldKey) {
+            if (array_diff($defaultModules, $this->modulesForPackage($heldKey)) === []) {
+                return null;
+            }
+        }
+
+        return $this->activatePackage($customer, $defaultKey, $grantedBy);
+    }
+
+    /**
      * The catalog as the Abonnement page needs it: one entry per package, each already told
      * whether it is active, ordered or orderable. The page renders this verdict; it does
      * not compute one of its own.

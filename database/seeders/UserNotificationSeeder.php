@@ -8,6 +8,7 @@ use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\User;
 use App\Models\UserNotification;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -40,6 +41,8 @@ class UserNotificationSeeder extends Seeder
                 'language_id' => $language->id,
                 'is_active' => true,
             ]);
+
+            app(ModuleEntitlementService::class)->grantDefaultPackage($customer);
         }
 
         $primaryUser = User::query()->firstOrCreate(

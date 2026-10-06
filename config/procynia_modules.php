@@ -18,7 +18,8 @@
  *
  * There is no mandatory package. Wiki is an ordinary module, carried by every package that needs
  * it: the whole ladder, and Anbud, whose requirement answers are drawn from the Enterprise Wiki. A
- * customer with no package holds no module at all.
+ * customer with no package holds no module at all — which is why a new customer is handed
+ * `default_package` when it is created.
  *
  * Because entitlements are stored per package and resolved through this mapping at read time,
  * extending a package here reaches every customer who already holds it, with no data migration.
@@ -45,6 +46,13 @@ return [
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
     ],
+
+    /**
+     * The package a new customer is given when it is created. It is written as an ordinary active
+     * entitlement row at creation (ModuleEntitlementService::grantDefaultPackage()), never assumed
+     * at read time: a customer's modules are always exactly what its rows say.
+     */
+    'default_package' => 'basis',
 
     'packages' => [
 

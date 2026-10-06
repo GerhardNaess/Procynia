@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Filament\Notifications\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -16,6 +17,9 @@ use Tests\TestCase;
 class CustomerCreatePageTest extends TestCase
 {
     use RefreshDatabase;
+
+    /** Asserts exactly which packages a created customer holds, so it starts from none. */
+    protected bool $customersHoldTenderPackage = false;
 
     public function test_internal_admin_can_create_customer_with_first_system_owner(): void
     {
@@ -59,6 +63,9 @@ class CustomerCreatePageTest extends TestCase
         $this->assertSame(User::ROLE_CUSTOMER_ADMIN, $user->role);
         $this->assertTrue($user->is_active);
         $this->assertNotSame('', (string) $user->password);
+
+        $this->assertSame(['basis'], $customer->packageEntitlements()->active()->pluck('package_key')->all());
+        $this->assertSame(['wiki', 'quality', 'improvements'], app(ModuleEntitlementService::class)->modulesFor($customer));
 
         Notification::assertNotified('Kunden ble opprettet');
     }

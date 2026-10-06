@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\PublicRegistrationRequest;
 use App\Models\Customer;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -50,6 +51,8 @@ class PublicRegistrationController extends Controller
                     'is_active' => true,
                     'customer_id' => $customer->id,
                 ]);
+
+                app(ModuleEntitlementService::class)->grantDefaultPackage($customer, $user);
 
                 return [
                     'customer' => $customer,
