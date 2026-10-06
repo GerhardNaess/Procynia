@@ -2636,6 +2636,15 @@ return [
                     ],
                     [
                         'title' => 'Registeret',
+                    [
+                        'title' => 'Trenger oppmerksomhet',
+                        'items' => [
+                            ['title' => 'Hva det betyr', 'text' => 'Trenger oppmerksomhet betyr at en revisjon har noe konkret som bør følges opp. Listen øverst viser hvilke revisjoner det gjelder og hvorfor, og hver revisjon i registeret viser de samme årsakene.'],
+                            ['title' => 'Revisjon forfalt', 'text' => 'Revisjonen er planlagt eller under arbeid, og planlagt slutt har passert. Selve sluttdagen regnes ikke som forfalt.'],
+                            ['title' => 'Avvik uten oppfølging', 'text' => 'Revisjonen er fullført, og minst ett avvik er ikke fulgt opp i Avvik og forbedringer. Observasjoner og forbedringsmuligheter teller ikke med.'],
+                            ['title' => 'Beregnes automatisk', 'text' => 'Årsakene beregnes automatisk fra status, planlagt slutt og funnene hver gang siden åpnes. De er ikke egne lagrede statuser. Når avviket følges opp eller revisjonen fullføres, forsvinner årsaken. Avbrutte revisjoner trenger aldri oppmerksomhet.'],
+                        ],
+                    ],
                         'items' => [
                             ['title' => 'Søk og filter', 'text' => 'Søk i tittel, scope og revisor, og filtrer på status og type. Revisjoner under arbeid vises først, deretter planlagte, fullførte og avbrutte.'],
                             ['title' => 'Funn', 'text' => 'Revisjonsfunn – avvik, observasjoner og forbedringsmuligheter – registreres på revisjonssiden mens revisjonen er under arbeid. Oppfølgingen skjer i Avvik og forbedringer.'],
@@ -2678,6 +2687,7 @@ return [
                             ['title' => 'Fullfør revisjon', 'text' => 'Avslutter revisjonen med konklusjonen. En revisjon kan fullføres uten funn. Etterpå er den låst, men funn som ikke er overført, kan fortsatt følges opp.'],
                             ['title' => 'Avbryt revisjon', 'text' => 'Brukes når revisjonen ikke skal gjennomføres likevel. Begrunnelse er påkrevd, og revisjonen blir stående som avbrutt.'],
                             ['title' => 'Gjenåpne revisjon', 'text' => 'Gjør en fullført revisjon redigerbar igjen, for eksempel for å rette konklusjonen. Begrunnelse er påkrevd, og gjenåpningen logges.'],
+                            ['title' => 'Trenger oppmerksomhet', 'text' => 'Vises under tittelen når revisjonen har passert planlagt slutt uten å være fullført, eller er fullført med avvik som ikke er fulgt opp. Beregnes automatisk og lagres ikke.'],
                         ],
                     ],
                     [
@@ -3035,6 +3045,19 @@ return [
             'unknown_user' => 'en tidligere bruker',
             'findings' => [
                 'heading' => 'Funn',
+            'attention' => [
+                'heading' => 'Trenger oppmerksomhet',
+                'total_one' => '1 revisjon trenger oppmerksomhet',
+                'total_many' => ':count revisjoner trenger oppmerksomhet',
+                'row_label' => 'Trenger oppmerksomhet',
+                'filter' => 'Bare revisjoner som trenger oppmerksomhet',
+                'show_all' => 'Vis alle :count',
+                'show_fewer' => 'Vis færre',
+                'reasons' => [
+                    'overdue' => 'Revisjon forfalt',
+                    'nonconformity_without_follow_up' => 'Avvik uten oppfølging',
+                ],
+            ],
                 'intro' => 'Det revisjonen fant. Et funn er ikke et tiltak – oppfølgingen skjer i Avvik og forbedringer.',
                 'empty' => 'Ingen funn er registrert.',
                 'empty_planned' => 'Funn registreres når revisjonen er startet.',

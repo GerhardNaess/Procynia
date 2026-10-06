@@ -5,6 +5,7 @@ import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../../Support/actionStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
+import { AttentionReasons } from '../Requirements/ComplianceAttention';
 import { complianceHelp } from '../Requirements/complianceHelp';
 import AuditFindings from './AuditFindings';
 import AuditForm from './AuditForm';
@@ -31,6 +32,7 @@ export default function ComplianceAuditShow() {
     const {
         translations = {},
         audit,
+        attention = [],
         requirements = [],
         requirement_options: requirementOptions = null,
         processes = null,
@@ -98,6 +100,7 @@ export default function ComplianceAuditShow() {
                             </div>
                             <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{audit.title}</h1>
                         </div>
+                            <AttentionReasons reasons={attention} tr={ta} withLabel testId="compliance-audit-show-attention" />
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...complianceHelp(tr, 'audit')} />
                             {permissions.can_edit && panel === null && (

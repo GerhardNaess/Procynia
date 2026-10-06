@@ -165,16 +165,17 @@ export const ATTENTION_PREVIEW = 5;
  * What the «Trenger oppmerksomhet» panel draws: nothing when no requirement needs attention, else
  * the first ATTENTION_PREVIEW entries — or all of them once expanded — and whether there are more.
  *
- * @param {{total: number, requirements: Array}|null} attention  from the server
+ * @param {{total: number, requirements?: Array, audits?: Array}|null} attention  from the server
  * @param {boolean} expanded
  * @returns {{visible: boolean, total: number, items: Array, hasMore: boolean}}
  */
 export function attentionPanel(attention, expanded = false) {
     const total = attention?.total ?? 0;
-    const all = attention?.requirements ?? [];
+    // Krav sends `requirements`, Revisjoner `audits`: the same worklist over a different register.
+    const all = attention?.requirements ?? attention?.audits ?? [];
 
     if (total === 0 || all.length === 0) {
-        return { visible: false, total: 0, items: [], hasMore: false };
+        return { visible: false, total: 0, items: [], hasMore: false, count: 0 };
     }
 
     return {
@@ -182,5 +183,6 @@ export function attentionPanel(attention, expanded = false) {
         total,
         items: expanded ? all : all.slice(0, ATTENTION_PREVIEW),
         hasMore: all.length > ATTENTION_PREVIEW,
+        count: all.length,
     };
 }

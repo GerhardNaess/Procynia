@@ -132,10 +132,22 @@ describe('The register', () => {
         }
     });
 
-    test('no dashboard, chart or attention in the register yet', () => {
-        for (const word of ['Chart', 'attention', 'overdue', 'findings']) {
+    test('no dashboard or chart in the register; findings live on the audit page', () => {
+        for (const word of ['Chart', 'findings', 'percent', 'score']) {
             assert.ok(! index.includes(word), word);
         }
+    });
+
+    test('Trenger oppmerksomhet: the shared panel over the audits, a filter, and the reasons on rows and phone cards', () => {
+        assert.match(index, /<ComplianceAttention attention=\{attention\} tr=\{ta\} testIdPrefix="compliance-audit-attention" \/>/);
+        assert.match(index, /attention: attentionOnly \? 1 : undefined,/);
+        assert.match(index, /setAttentionOnly\(false\);/);
+        assert.match(index, /filters\.search \|\| filters\.status \|\| filters\.type \|\| filters\.attention/);
+        const table = block(index, 'data-testid="compliance-audit-table"', '</table>');
+        const cards = block(index, 'data-testid="compliance-audit-list"', '</ul>');
+        assert.ok(table.includes('<AttentionReasons reasons={item.attention} tr={ta} withLabel />'));
+        assert.ok(cards.includes('<AttentionReasons reasons={item.attention ?? []} tr={ta} withLabel />'));
+        assert.match(source('./Show.jsx'), /<AttentionReasons reasons=\{attention\} tr=\{ta\} withLabel testId="compliance-audit-show-attention" \/>/);
     });
 });
 

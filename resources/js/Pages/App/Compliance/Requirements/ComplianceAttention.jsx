@@ -27,12 +27,13 @@ export function AttentionReasons({ reasons = [], tr, withLabel = false, testId =
 }
 
 /**
- * «Trenger oppmerksomhet» at the top of the register: a worklist, not a dashboard. The server has
- * already applied the five rules (ComplianceAttentionService) to the active requirements this
- * person may see, and only to those; this lists them with their reasons. Not shown at all when
+ * «Trenger oppmerksomhet» at the top of a register: a worklist, not a dashboard. The server has
+ * already applied the rules — ComplianceAttentionService on Krav, ComplianceAuditAttentionService on
+ * Revisjoner — to what this person may see, and only to that; this lists the entries with their
+ * reasons. `tr` is the namespace holding the register's own `attention` texts. Not shown at all when
  * nothing needs attention.
  */
-export default function ComplianceAttention({ attention, tr }) {
+export default function ComplianceAttention({ attention, tr, testIdPrefix = 'compliance-attention' }) {
     const [expanded, setExpanded] = useState(false);
     const panel = attentionPanel(attention, expanded);
 
@@ -41,17 +42,17 @@ export default function ComplianceAttention({ attention, tr }) {
     }
 
     return (
-        <section aria-labelledby="compliance-attention-heading" className="rounded-[24px] border border-amber-200 bg-amber-50 p-6 shadow-sm" data-testid="compliance-attention">
-            <h2 id="compliance-attention-heading" className="text-xl font-semibold text-slate-950">
+        <section aria-labelledby={`${testIdPrefix}-heading`} className="rounded-[24px] border border-amber-200 bg-amber-50 p-6 shadow-sm" data-testid={testIdPrefix}>
+            <h2 id={`${testIdPrefix}-heading`} className="text-xl font-semibold text-slate-950">
                 {tr.attention?.heading ?? 'Trenger oppmerksomhet'}
             </h2>
-            <p className="mt-1 text-base font-semibold text-amber-900" data-testid="compliance-attention-total">
+            <p className="mt-1 text-base font-semibold text-amber-900" data-testid={`${testIdPrefix}-total`}>
                 {attentionTotalLabel(panel.total, tr)}
             </p>
 
-            <ul className="mt-4 space-y-2" data-testid="compliance-attention-list">
+            <ul className="mt-4 space-y-2" data-testid={`${testIdPrefix}-list`}>
                 {panel.items.map((item) => (
-                    <li key={item.id} className="rounded-2xl bg-white px-4 py-3" data-testid="compliance-attention-item">
+                    <li key={item.id} className="rounded-2xl bg-white px-4 py-3" data-testid={`${testIdPrefix}-item`}>
                         <Link href={item.url} className="block break-words text-base font-semibold text-violet-700 hover:text-violet-900">
                             {item.reference && <span className="mr-2 text-slate-700">{item.reference}</span>}
                             {item.title}
@@ -72,7 +73,7 @@ export default function ComplianceAttention({ attention, tr }) {
                 >
                     {expanded
                         ? (tr.attention?.show_fewer ?? 'Vis færre')
-                        : (tr.attention?.show_all ?? 'Vis alle :count').replace(':count', String(attention.requirements.length))}
+                        : (tr.attention?.show_all ?? 'Vis alle :count').replace(':count', String(panel.count))}
                 </button>
             )}
         </section>

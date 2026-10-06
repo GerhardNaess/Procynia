@@ -5,6 +5,7 @@ import EmptyStateBox from '../../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import ComplianceAttention, { AttentionReasons } from '../Requirements/ComplianceAttention';
 import { complianceHelp } from '../Requirements/complianceHelp';
 import { countLabel } from '../Requirements/complianceRequirement';
 import AuditForm from './AuditForm';
@@ -22,12 +23,14 @@ function Responsible({ item, ta }) {
  * Etterlevelse og revisjon → Revisjoner: the register. Everything here is already scoped by the
  * server: the rows, the count, the search and the filters are the user's own customer's, and none at
  * all without compliance.view. Ny revisjon is offered only with compliance.audit; the requirements
- * and processes in scope are added on the audit's own page once it exists.
+ * and processes in scope are added on the audit's own page once it exists. «Trenger oppmerksomhet»
+ * lists the audits ComplianceAuditAttentionService flagged among those the user can see.
  */
 export default function ComplianceAuditsIndex() {
     const {
         translations = {},
         audits = [],
+        attention = null,
         visible_count: visibleCount = 0,
         filters = {},
         statuses = [],
@@ -44,6 +47,7 @@ export default function ComplianceAuditsIndex() {
     const [search, setSearch] = useState(filters.search ?? '');
     const [status, setStatus] = useState(filters.status ?? '');
     const [type, setType] = useState(filters.type ?? '');
+    const [attentionOnly, setAttentionOnly] = useState(Boolean(filters.attention));
 
     const form = useForm({
         title: '',
@@ -61,6 +65,7 @@ export default function ComplianceAuditsIndex() {
             search: search || undefined,
             status: status || undefined,
             type: type || undefined,
+            attention: attentionOnly ? 1 : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -68,6 +73,7 @@ export default function ComplianceAuditsIndex() {
         setSearch('');
         setStatus('');
         setType('');
+        setAttentionOnly(false);
         router.get('/app/compliance/audits', {}, { replace: true });
     };
 
@@ -76,7 +82,7 @@ export default function ComplianceAuditsIndex() {
         form.post('/app/compliance/audits', { preserveScroll: true });
     };
 
-    const filtered = Boolean(filters.search || filters.status || filters.type);
+    const filtered = Boolean(filters.search || filters.status || filters.type || filters.attention);
 
     return (
         <CustomerAppLayout title={ta.index_title ?? 'Revisjoner'} showPageTitle={false}>
@@ -114,6 +120,8 @@ export default function ComplianceAuditsIndex() {
                     </section>
                 )}
 
+                <ComplianceAttention attention={attention} tr={ta} testIdPrefix="compliance-audit-attention" />
+
                 <section className={CARD}>
                     <form onSubmit={submitSearch} className="grid gap-3 sm:flex sm:flex-wrap sm:items-end">
                         <div className="min-w-0 sm:min-w-[16rem] sm:flex-1">
@@ -145,6 +153,16 @@ export default function ComplianceAuditsIndex() {
                                 ))}
                             </select>
                         </div>
+                        <label className="flex min-h-10 items-center gap-2 text-base font-semibold text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={attentionOnly}
+                                onChange={(event) => setAttentionOnly(event.target.checked)}
+                                className="h-5 w-5 rounded border-slate-300"
+                                data-testid="compliance-audit-attention-filter"
+                            />
+                            {ta.attention?.filter ?? 'Bare revisjoner som trenger oppmerksomhet'}
+                        </label>
                         <div className="flex flex-wrap gap-2">
                             <button type="submit" className={SECONDARY_ACTION}>{ta.search ?? 'Søk'}</button>
                             {filtered && (
@@ -174,6 +192,7 @@ export default function ComplianceAuditsIndex() {
                                             <span className="text-base font-semibold text-slate-700">{auditTypeLabel(item.audit_type, ta)}</span>
                                         </div>
                                         <Link href={item.url} className="block break-words text-base font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
+                                        <AttentionReasons reasons={item.attention ?? []} tr={ta} withLabel />
                                         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-base">
                                             <dt className="font-semibold text-slate-600">{ta.col_responsible ?? 'Ansvarlig'}</dt>
                                             <dd className="min-w-0 break-words text-slate-800"><Responsible item={item} ta={ta} /></dd>
@@ -200,6 +219,11 @@ export default function ComplianceAuditsIndex() {
                                             <tr key={item.id}>
                                                 <td className="py-3 pr-4 align-top">
                                                     <Link href={item.url} className="font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
+                                                    {(item.attention ?? []).length > 0 && (
+                                                        <div className="mt-1">
+                                                            <AttentionReasons reasons={item.attention} tr={ta} withLabel />
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-4 py-3 align-top text-slate-700">{auditTypeLabel(item.audit_type, ta)}</td>
                                                 <td className="px-4 py-3 align-top text-slate-700"><Responsible item={item} ta={ta} /></td>

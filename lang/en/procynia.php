@@ -2635,6 +2635,15 @@ return [
                     ],
                     [
                         'title' => 'The register',
+                    [
+                        'title' => 'Needs attention',
+                        'items' => [
+                            ['title' => 'What it means', 'text' => 'Needs attention means that an audit has something concrete that should be followed up. The list at the top shows which audits and why, and every audit in the register shows the same reasons.'],
+                            ['title' => 'Audit overdue', 'text' => 'The audit is planned or in progress, and the planned end has passed. The end date itself does not count as overdue.'],
+                            ['title' => 'Nonconformity not followed up', 'text' => 'The audit is completed, and at least one nonconformity has not been followed up in Deviations & improvements. Observations and improvement opportunities do not count.'],
+                            ['title' => 'Calculated automatically', 'text' => 'The reasons are calculated automatically from the status, the planned end and the findings every time the page is opened. They are not statuses of their own. Once the nonconformity is followed up or the audit is completed, the reason disappears. Cancelled audits never need attention.'],
+                        ],
+                    ],
                         'items' => [
                             ['title' => 'Search and filter', 'text' => 'Search in title, scope and auditor, and filter by status and type. Audits in progress are shown first, then planned, completed and cancelled ones.'],
                             ['title' => 'Findings', 'text' => 'Audit findings – nonconformities, observations and improvement opportunities – are recorded on the audit page while the audit is in progress. Follow-up happens in Deviations & improvements.'],
@@ -2677,6 +2686,7 @@ return [
                             ['title' => 'Complete audit', 'text' => 'Ends the audit with the conclusion. An audit can be completed without findings. Afterwards it is locked, but findings not yet handed off can still be followed up.'],
                             ['title' => 'Cancel audit', 'text' => 'Used when the audit will not be carried out after all. A reason is required, and the audit stays as cancelled.'],
                             ['title' => 'Reopen audit', 'text' => 'Makes a completed audit editable again, for example to correct the conclusion. A reason is required, and the reopening is logged.'],
+                            ['title' => 'Needs attention', 'text' => 'Shown under the title when the audit has passed its planned end without being completed, or is completed with nonconformities that have not been followed up. Calculated automatically and not stored.'],
                         ],
                     ],
                     [
@@ -3034,6 +3044,19 @@ return [
             'unknown_user' => 'a former user',
             'findings' => [
                 'heading' => 'Findings',
+            'attention' => [
+                'heading' => 'Needs attention',
+                'total_one' => '1 audit needs attention',
+                'total_many' => ':count audits need attention',
+                'row_label' => 'Needs attention',
+                'filter' => 'Only audits that need attention',
+                'show_all' => 'Show all :count',
+                'show_fewer' => 'Show fewer',
+                'reasons' => [
+                    'overdue' => 'Audit overdue',
+                    'nonconformity_without_follow_up' => 'Nonconformity not followed up',
+                ],
+            ],
                 'intro' => 'What the audit found. A finding is not an action – follow-up happens in Deviations & improvements.',
                 'empty' => 'No findings recorded.',
                 'empty_planned' => 'Findings are recorded once the audit has started.',

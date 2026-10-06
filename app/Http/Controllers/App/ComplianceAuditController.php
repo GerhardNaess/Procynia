@@ -8,6 +8,7 @@ use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditStatusChange;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Compliance\ComplianceAuditAttentionService;
 use App\Services\Compliance\ComplianceAuditFindingHandoffService;
 use App\Services\Compliance\ComplianceAuditFindingService;
 use App\Services\Compliance\ComplianceAuditLifecycleService;
@@ -43,7 +44,8 @@ use Inertia\Response;
  * Funn are ComplianceAuditFindingService's: recorded, changed and deleted with compliance.audit
  * while the audit is in progress. «Følg opp i Avvik og forbedringer» is
  * ComplianceAuditFindingHandoffService's, and the only way a finding reaches an ImprovementCase —
- * nothing is created when an audit is completed. No attention yet.
+ * nothing is created when an audit is completed. «Trenger oppmerksomhet» is
+ * ComplianceAuditAttentionService's, computed on the audits the user can see and never stored.
  */
 class ComplianceAuditController extends Controller
 {
@@ -54,6 +56,7 @@ class ComplianceAuditController extends Controller
         private readonly ComplianceAuditScopeService $scope,
         private readonly ComplianceAuditFindingService $findings,
         private readonly ComplianceAuditFindingHandoffService $handoff,
+        private readonly ComplianceAuditAttentionService $attention,
     ) {}
 
     public function index(Request $request): Response
@@ -63,6 +66,7 @@ class ComplianceAuditController extends Controller
         $search = trim((string) $request->query('search', ''));
         $status = in_array($request->query('status'), ComplianceAudit::STATUSES, true) ? (string) $request->query('status') : '';
         $type = in_array($request->query('type'), ComplianceAudit::TYPES, true) ? (string) $request->query('type') : '';
+        $attentionOnly = $request->boolean('attention');
 
         $query = $this->access->visibleAudits($user);
 
@@ -92,16 +96,45 @@ class ComplianceAuditController extends Controller
             ->with('responsible:id,name')
             ->get();
 
+        // «Trenger oppmerksomhet» is the worklist of the whole register the user can see — every audit
+        // that is not cancelled, whatever the search above — so the panel does not shrink with a search.
+        $attentionSet = $this->access->visibleAudits($user)
+            ->where('compliance_audits.status', '!=', ComplianceAudit::STATUS_CANCELLED)
+            ->orderBy('compliance_audits.planned_end_date')
+            ->orderBy('compliance_audits.title')
+            ->orderBy('compliance_audits.id')
+            ->get();
+        $reasons = $this->attention->reasonsForAudits($audits->concat($attentionSet)->unique('id')->values());
+
+        if ($attentionOnly) {
+            $audits = $audits->filter(fn (ComplianceAudit $audit): bool => $reasons[(int) $audit->id] !== [])->values();
+        }
+
+        $flagged = $attentionSet->filter(fn (ComplianceAudit $audit): bool => $reasons[(int) $audit->id] !== []);
+
         $canAudit = $this->access->canAudit($user);
 
         return Inertia::render('App/Compliance/Audits/Index', [
-            'audits' => $audits->map(fn (ComplianceAudit $audit): array => $this->row($audit))->all(),
+            'audits' => $audits->map(fn (ComplianceAudit $audit): array => $this->row($audit) + [
+                'attention' => $reasons[(int) $audit->id],
+            ])->all(),
+            'attention' => [
+                'total' => $flagged->count(),
+                'audits' => $flagged->map(fn (ComplianceAudit $audit): array => [
+                    'id' => (int) $audit->id,
+                    'title' => $audit->title,
+                    'url' => route('app.compliance.audits.show', ['auditId' => $audit->id]),
+                    'reasons' => $reasons[(int) $audit->id],
+                ])->values()->all(),
+            ],
+            'attention_reasons' => ComplianceAuditAttentionService::REASONS,
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleAudits($user)->count(),
             'filters' => [
                 'search' => $search,
                 'status' => $status,
                 'type' => $type,
+                'attention' => $attentionOnly,
             ],
             'statuses' => ComplianceAudit::STATUSES,
             'types' => ComplianceAudit::TYPES,
@@ -133,6 +166,7 @@ class ComplianceAuditController extends Controller
                 'conclusion' => $audit->conclusion,
                 'created_at' => $audit->created_at?->toIso8601String(),
             ],
+            'attention' => $this->attention->reasonsForAudit($audit),
             'requirements' => $this->scope->requirements($audit),
             'requirement_options' => $canManageRequirements ? $this->scope->requirementOptions($user, $audit) : null,
             // Prosesser i scope: null — not empty — without Kvalitet read access, so nothing about
