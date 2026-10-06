@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { COMPLIANCE_HELP_PAGES, complianceHelp } from './complianceHelp.js';
 import { LINK_FILTER_THRESHOLD, QUALITY_STATUS_TONES, controlFacts, evidenceAddedLabel, filterQualityOptions, qualityItemLabel, qualityOptionLabel } from './complianceQuality.js';
-import { COMPLIANCE_STATUS_TONES, REQUIREMENT_STATUS_TONES, complianceStatusLabel, countLabel, describeHistoryEntry, registerCompliance, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
+import { ATTENTION_PREVIEW, ATTENTION_REASONS, COMPLIANCE_STATUS_TONES, REQUIREMENT_STATUS_TONES, attentionPanel, attentionReasonLabel, attentionTotalLabel, complianceStatusLabel, countLabel, describeHistoryEntry, registerCompliance, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -236,5 +236,106 @@ describe('Hvordan kravet oppfylles', () => {
         assert.equal(evidenceAddedLabel({ added_at: '2026-10-05', added_by: null }), 'Lagt til 05.10.2026');
         assert.equal(evidenceAddedLabel({ added_at: null }), '');
         assert.equal(evidenceAddedLabel({ added_at: '2026-10-05', added_by: 'Ola' }, { evidence_added: 'Added :date by :name' }), 'Added 05.10.2026 by Ola');
+    });
+});
+
+describe('Trenger oppmerksomhet', () => {
+    const entry = (id, reasons) => ({ id, title: `Krav ${id}`, reference: null, url: `/app/compliance/requirements/${id}`, reasons });
+
+    test('the five reasons, in the server\'s order, each with a name', () => {
+        assert.deepEqual(ATTENTION_REASONS, ['not_assessed', 'non_compliant', 'partially_compliant', 'review_overdue', 'missing_owner']);
+        assert.deepEqual(ATTENTION_REASONS.map((reason) => attentionReasonLabel(reason)), ['Ikke vurdert', 'Ikke oppfylt', 'Delvis oppfylt', 'Revurdering forfalt', 'Mangler ansvarlig']);
+        assert.equal(attentionReasonLabel('missing_owner', { attention: { reasons: { missing_owner: 'No owner' } } }), 'No owner');
+    });
+
+    test('the total reads as a sentence, singular and plural', () => {
+        assert.equal(attentionTotalLabel(1), '1 krav trenger oppmerksomhet');
+        assert.equal(attentionTotalLabel(3), '3 krav trenger oppmerksomhet');
+        assert.equal(attentionTotalLabel(2, { attention: { total_many: ':count requirements need attention' } }), '2 requirements need attention');
+    });
+
+    test('no panel when nothing needs attention', () => {
+        assert.equal(attentionPanel(null).visible, false);
+        assert.equal(attentionPanel({ total: 0, requirements: [] }).visible, false);
+    });
+
+    test('the panel lists every requirement with all its reasons, the first few until expanded', () => {
+        const items = Array.from({ length: ATTENTION_PREVIEW + 2 }, (_, index) => entry(index + 1, ['not_assessed', 'missing_owner']));
+        const collapsed = attentionPanel({ total: items.length, requirements: items });
+
+        assert.equal(collapsed.visible, true);
+        assert.equal(collapsed.total, ATTENTION_PREVIEW + 2);
+        assert.equal(collapsed.items.length, ATTENTION_PREVIEW);
+        assert.equal(collapsed.hasMore, true);
+        assert.deepEqual(collapsed.items[0].reasons, ['not_assessed', 'missing_owner']);
+        assert.equal(attentionPanel({ total: items.length, requirements: items }, true).items.length, items.length);
+
+        const few = attentionPanel({ total: 1, requirements: [entry(1, ['partially_compliant', 'review_overdue'])] });
+        assert.equal(few.hasMore, false);
+        assert.deepEqual(few.items[0].reasons, ['partially_compliant', 'review_overdue']);
+    });
+
+    test('the panel sits above the register, and the panel draws every reason of an entry', () => {
+        const index = source('./Index.jsx');
+        assert.ok(index.indexOf('<ComplianceAttention ') > -1);
+        assert.ok(index.indexOf('<ComplianceAttention ') < index.indexOf('data-testid="compliance-count"'));
+
+        const panel = source('./ComplianceAttention.jsx');
+        assert.match(panel, /if \(! panel\.visible\) \{\s*return null;/);
+        assert.match(panel, /<Link href=\{item\.url\}/);
+        assert.match(panel, /<AttentionReasons reasons=\{item\.reasons\}/);
+        assert.match(panel, /reasons\.map\(\(reason\) =>/);
+    });
+
+    test('every register row says why — on the table and on the phone cards alike', () => {
+        assert.equal(source('./Index.jsx').match(/<AttentionReasons reasons=\{item\.attention/g).length, 2);
+        assert.match(source('./Show.jsx'), /<AttentionReasons reasons=\{attention\}/);
+    });
+
+    test('one filter, «Bare krav som trenger oppmerksomhet», sent as attention=1 and cleared by Nullstill', () => {
+        const index = source('./Index.jsx');
+        assert.match(index, /data-testid="compliance-attention-filter"/);
+        assert.match(index, /attention: attentionOnly \? 1 : undefined/);
+        assert.match(index, /setAttentionOnly\(false\)/);
+        assert.match(index, /filters\.attention\)/);
+    });
+
+    test('nothing in the attention UI is a score, a percentage or a chart', () => {
+        const code = source('./ComplianceAttention.jsx') + source('./complianceRequirement.js');
+        assert.doesNotMatch(code, /score|percent|%\s*\}|<svg|Chart/i);
+    });
+});
+
+describe('PageHelp explains Trenger oppmerksomhet in both languages', () => {
+    const lang = (locale) => readFileSync(new URL(`../../../../../../lang/${locale}/procynia.php`, import.meta.url), 'utf8');
+    const complianceBlock = (php) => php.slice(php.indexOf("    'compliance' => ["));
+    const helpSection = (php, title) => {
+        const block = complianceBlock(php);
+        const start = block.indexOf(`'title' => '${title}',`);
+        assert.ok(start > -1, title);
+        const items = block.slice(start, block.indexOf('],\n                    ],', start));
+
+        return [...items.matchAll(/\['title' => '((?:[^'\\]|\\.)*)', 'text' => '/g)].map((match) => match[1]);
+    };
+    const reasonKeys = (php) => {
+        const block = complianceBlock(php);
+        const attention = block.slice(block.indexOf("        'attention' => ["));
+        const reasons = attention.slice(attention.indexOf("'reasons' => ["), attention.indexOf('],'));
+
+        return [...reasons.matchAll(/'([a-z_]+)' => '/g)].map((match) => match[1]);
+    };
+
+    test('a section with what it means, the five reasons and that they are computed', () => {
+        assert.deepEqual(helpSection(lang('no'), 'Trenger oppmerksomhet'), [
+            'Hva det betyr', 'Ikke vurdert', 'Ikke oppfylt', 'Delvis oppfylt', 'Revurdering forfalt', 'Mangler ansvarlig', 'Beregnes automatisk',
+        ]);
+        assert.deepEqual(helpSection(lang('en'), 'Needs attention'), [
+            'What it means', 'Not assessed', 'Not compliant', 'Partially compliant', 'Review overdue', 'No owner', 'Calculated automatically',
+        ]);
+    });
+
+    test('the reason names have the same keys in Norwegian and English, matching the server', () => {
+        assert.deepEqual(reasonKeys(lang('no')), ATTENTION_REASONS);
+        assert.deepEqual(reasonKeys(lang('en')), ATTENTION_REASONS);
     });
 });

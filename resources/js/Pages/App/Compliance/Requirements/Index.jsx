@@ -5,6 +5,7 @@ import EmptyStateBox from '../../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import ComplianceAttention, { AttentionReasons } from './ComplianceAttention';
 import ComplianceSources from './ComplianceSources';
 import RequirementForm from './RequirementForm';
 import { complianceHelp } from './complianceHelp';
@@ -45,7 +46,8 @@ function ComplianceCell({ item, tr }) {
  * Etterlevelse og revisjon → Krav: the register. Everything here is already scoped by the server:
  * the rows, the count, the search and the source filter are the user's own customer's, and none at
  * all without compliance.view. Whether a requirement is met comes from its latest assessment, as
- * the server's ComplianceStatusResolver computed it; nothing here derives it on its own.
+ * the server's ComplianceStatusResolver computed it; nothing here derives it on its own — nor which
+ * requirements need attention, which ComplianceAttentionService decided on the same rows.
  */
 export default function ComplianceRequirementsIndex() {
     const {
@@ -59,6 +61,7 @@ export default function ComplianceRequirementsIndex() {
         review_intervals: reviewIntervals = [],
         permissions = {},
         owner_options: ownerOptions = [],
+        attention = null,
     } = usePage().props;
 
     const tr = translations?.compliance ?? {};
@@ -70,6 +73,7 @@ export default function ComplianceRequirementsIndex() {
     const [search, setSearch] = useState(filters.search ?? '');
     const [source, setSource] = useState(filters.source ? String(filters.source) : '');
     const [status, setStatus] = useState(filters.status ?? '');
+    const [attentionOnly, setAttentionOnly] = useState(Boolean(filters.attention));
 
     const form = useForm({
         source_id: sources.length === 1 ? String(sources[0].id) : '',
@@ -86,6 +90,7 @@ export default function ComplianceRequirementsIndex() {
             search: search || undefined,
             source: source || undefined,
             status: status || undefined,
+            attention: attentionOnly ? 1 : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -93,6 +98,7 @@ export default function ComplianceRequirementsIndex() {
         setSearch('');
         setSource('');
         setStatus('');
+        setAttentionOnly(false);
         router.get('/app/compliance/requirements', {}, { replace: true });
     };
 
@@ -101,7 +107,7 @@ export default function ComplianceRequirementsIndex() {
         form.post('/app/compliance/requirements', { preserveScroll: true });
     };
 
-    const filtered = Boolean(filters.search || filters.source || filters.status);
+    const filtered = Boolean(filters.search || filters.source || filters.status || filters.attention);
     const sourceOptions = sources.map((option) => ({ id: option.id, label: option.label }));
 
     return (
@@ -161,6 +167,8 @@ export default function ComplianceRequirementsIndex() {
                     </section>
                 )}
 
+                <ComplianceAttention attention={attention} tr={tr} />
+
                 <section className={CARD}>
                     <form onSubmit={submitSearch} className="grid gap-3 sm:flex sm:flex-wrap sm:items-end">
                         <div className="min-w-0 sm:min-w-[16rem] sm:flex-1">
@@ -192,6 +200,16 @@ export default function ComplianceRequirementsIndex() {
                                 ))}
                             </select>
                         </div>
+                        <label className="flex min-h-10 items-center gap-2 text-base font-semibold text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={attentionOnly}
+                                onChange={(event) => setAttentionOnly(event.target.checked)}
+                                className="h-5 w-5 rounded border-slate-300"
+                                data-testid="compliance-attention-filter"
+                            />
+                            {tr.attention?.filter ?? 'Bare krav som trenger oppmerksomhet'}
+                        </label>
                         <div className="flex flex-wrap gap-2">
                             <button type="submit" className={SECONDARY_ACTION}>{tr.search ?? 'Søk'}</button>
                             {filtered && (
@@ -221,6 +239,7 @@ export default function ComplianceRequirementsIndex() {
                                             {item.reference && <span className="break-words text-base font-semibold text-slate-700">{item.reference}</span>}
                                         </div>
                                         <Link href={item.url} className="block break-words text-base font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
+                                        <AttentionReasons reasons={item.attention ?? []} tr={tr} withLabel />
                                         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-base">
                                             <dt className="font-semibold text-slate-600">{tr.col_source ?? 'Kravkilde'}</dt>
                                             <dd className="min-w-0 break-words text-slate-800">{item.source_label}</dd>
@@ -256,6 +275,11 @@ export default function ComplianceRequirementsIndex() {
                                                 </td>
                                                 <td className="px-4 py-3 align-top">
                                                     <Link href={item.url} className="font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
+                                                    {(item.attention ?? []).length > 0 && (
+                                                        <div className="mt-1">
+                                                            <AttentionReasons reasons={item.attention} tr={tr} withLabel />
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-4 py-3 align-top text-slate-700">{item.source_label}</td>
                                                 <td className="px-4 py-3 align-top text-slate-700"><Owner item={item} tr={tr} /></td>

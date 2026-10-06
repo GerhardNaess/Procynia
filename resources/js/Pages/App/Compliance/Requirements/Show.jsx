@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { AttentionReasons } from './ComplianceAttention';
 import RequirementCompliance from './RequirementCompliance';
 import RequirementForm from './RequirementForm';
 import RequirementHistory from './RequirementHistory';
@@ -31,6 +32,7 @@ export default function ComplianceRequirementShow() {
         requirement: item,
         status_history: statusHistory = [],
         compliance = null,
+        attention = [],
         assessments = [],
         assessment_results: assessmentResults = [],
         quality_context: qualityContext = null,
@@ -84,6 +86,7 @@ export default function ComplianceRequirementShow() {
                                 {item.reference && <span className="break-words text-base font-semibold text-slate-700" data-testid="compliance-reference">{item.reference}</span>}
                             </div>
                             <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
+                            <AttentionReasons reasons={attention} tr={tr} withLabel testId="compliance-show-attention" />
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...complianceHelp(tr, 'requirement')} />

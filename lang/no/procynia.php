@@ -2542,11 +2542,23 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Trenger oppmerksomhet',
+                        'items' => [
+                            ['title' => 'Hva det betyr', 'text' => 'Trenger oppmerksomhet betyr at et aktivt krav har ett eller flere konkrete forhold som bør følges opp. Listen øverst viser hvilke krav det gjelder og hvorfor, og hvert krav i registeret viser de samme årsakene.'],
+                            ['title' => 'Ikke vurdert', 'text' => 'Kravet har ingen etterlevelsesvurdering ennå.'],
+                            ['title' => 'Ikke oppfylt', 'text' => 'Siste vurdering konkluderte med at kravet ikke er oppfylt.'],
+                            ['title' => 'Delvis oppfylt', 'text' => 'Siste vurdering konkluderte med at kravet bare er delvis oppfylt.'],
+                            ['title' => 'Revurdering forfalt', 'text' => 'Revurderingsintervallet har gått ut siden siste vurdering. Forfaller samme dag regnes ikke som forfalt.'],
+                            ['title' => 'Mangler ansvarlig', 'text' => 'Ingen er satt som ansvarlig for kravet.'],
+                            ['title' => 'Beregnes automatisk', 'text' => 'Årsakene beregnes automatisk fra vurderingene, revurderingsintervallet og ansvarlig hver gang siden åpnes. De er ikke egne lagrede statuser, og de endrer aldri kravet eller vurderingene. Utgåtte krav trenger aldri oppmerksomhet. Når forholdet er rettet, forsvinner årsaken.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Registeret',
                         'items' => [
                             ['title' => 'Aktiv', 'text' => 'Kravet gjelder for virksomheten. Aktive krav vises først.'],
                             ['title' => 'Utgått', 'text' => 'Kravet gjelder ikke lenger, for eksempel fordi standarden er erstattet. Det blir stående i registeret med historikken sin.'],
-                            ['title' => 'Søk og filter', 'text' => 'Søk i referanse, tittel og kravtekst, og filtrer på kravkilde og status.'],
+                            ['title' => 'Søk og filter', 'text' => 'Søk i referanse, tittel og kravtekst, og filtrer på kravkilde og status. Bare krav som trenger oppmerksomhet viser bare kravene med minst én årsak.'],
                         ],
                     ],
                 ],
@@ -2629,6 +2641,22 @@ return [
         'empty_hint' => 'Registrer kravene virksomheten skal etterleve, med kravkilde og ansvarlig.',
         'no_matches' => 'Ingen krav passer søket.',
         'no_sources_hint' => 'Opprett en kravkilde under Kravkilder før du registrerer krav.',
+        'attention' => [
+            'heading' => 'Trenger oppmerksomhet',
+            'total_one' => '1 krav trenger oppmerksomhet',
+            'total_many' => ':count krav trenger oppmerksomhet',
+            'row_label' => 'Trenger oppmerksomhet',
+            'filter' => 'Bare krav som trenger oppmerksomhet',
+            'show_all' => 'Vis alle :count',
+            'show_fewer' => 'Vis færre',
+            'reasons' => [
+                'not_assessed' => 'Ikke vurdert',
+                'non_compliant' => 'Ikke oppfylt',
+                'partially_compliant' => 'Delvis oppfylt',
+                'review_overdue' => 'Revurdering forfalt',
+                'missing_owner' => 'Mangler ansvarlig',
+            ],
+        ],
         'statuses' => [
             'active' => 'Aktiv',
             'retired' => 'Utgått',

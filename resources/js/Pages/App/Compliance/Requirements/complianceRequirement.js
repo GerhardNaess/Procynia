@@ -129,3 +129,58 @@ export function formatDateTime(iso, locale = 'no') {
 
     return new Date(iso).toLocaleString(tag, { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+/**
+ * The five reasons a requirement needs attention, in the server's display order
+ * (ComplianceAttentionService::REASONS). The server decides which apply; this only names them.
+ */
+export const ATTENTION_REASONS = ['not_assessed', 'non_compliant', 'partially_compliant', 'review_overdue', 'missing_owner'];
+
+const ATTENTION_REASON_FALLBACKS = {
+    not_assessed: 'Ikke vurdert',
+    non_compliant: 'Ikke oppfylt',
+    partially_compliant: 'Delvis oppfylt',
+    review_overdue: 'Revurdering forfalt',
+    missing_owner: 'Mangler ansvarlig',
+};
+
+/** «Ikke vurdert», «Mangler ansvarlig» … */
+export function attentionReasonLabel(reason, tr = {}) {
+    return tr.attention?.reasons?.[reason] ?? ATTENTION_REASON_FALLBACKS[reason] ?? reason;
+}
+
+/** «1 krav trenger oppmerksomhet» / «3 krav trenger oppmerksomhet». */
+export function attentionTotalLabel(total, tr = {}) {
+    return countLabel(
+        total,
+        tr.attention?.total_one ?? '1 krav trenger oppmerksomhet',
+        tr.attention?.total_many ?? ':count krav trenger oppmerksomhet',
+    );
+}
+
+/** How many entries the panel lists before «Vis alle». */
+export const ATTENTION_PREVIEW = 5;
+
+/**
+ * What the «Trenger oppmerksomhet» panel draws: nothing when no requirement needs attention, else
+ * the first ATTENTION_PREVIEW entries — or all of them once expanded — and whether there are more.
+ *
+ * @param {{total: number, requirements: Array}|null} attention  from the server
+ * @param {boolean} expanded
+ * @returns {{visible: boolean, total: number, items: Array, hasMore: boolean}}
+ */
+export function attentionPanel(attention, expanded = false) {
+    const total = attention?.total ?? 0;
+    const all = attention?.requirements ?? [];
+
+    if (total === 0 || all.length === 0) {
+        return { visible: false, total: 0, items: [], hasMore: false };
+    }
+
+    return {
+        visible: true,
+        total,
+        items: expanded ? all : all.slice(0, ATTENTION_PREVIEW),
+        hasMore: all.length > ATTENTION_PREVIEW,
+    };
+}

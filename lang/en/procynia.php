@@ -2541,11 +2541,23 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Needs attention',
+                        'items' => [
+                            ['title' => 'What it means', 'text' => 'Needs attention means that an active requirement has one or more concrete matters that should be followed up. The list at the top shows which requirements and why, and every requirement in the register shows the same reasons.'],
+                            ['title' => 'Not assessed', 'text' => 'The requirement has no compliance assessment yet.'],
+                            ['title' => 'Not compliant', 'text' => 'The latest assessment concluded that the requirement is not met.'],
+                            ['title' => 'Partially compliant', 'text' => 'The latest assessment concluded that the requirement is only partially met.'],
+                            ['title' => 'Review overdue', 'text' => 'The review interval has passed since the latest assessment. Due today does not count as overdue.'],
+                            ['title' => 'No owner', 'text' => 'Nobody is set as owner of the requirement.'],
+                            ['title' => 'Calculated automatically', 'text' => 'The reasons are calculated automatically from the assessments, the review interval and the owner every time the page is opened. They are not statuses of their own, and they never change the requirement or its assessments. Retired requirements never need attention. Once the matter is put right, the reason disappears.'],
+                        ],
+                    ],
+                    [
                         'title' => 'The register',
                         'items' => [
                             ['title' => 'Active', 'text' => 'The requirement applies to the organisation. Active requirements are listed first.'],
                             ['title' => 'Retired', 'text' => 'The requirement no longer applies, for example because the standard has been replaced. It stays in the register with its history.'],
-                            ['title' => 'Search and filter', 'text' => 'Search the reference, title and requirement text, and filter by source and status.'],
+                            ['title' => 'Search and filter', 'text' => 'Search the reference, title and requirement text, and filter by source and status. Only requirements that need attention shows just the requirements with at least one reason.'],
                         ],
                     ],
                 ],
@@ -2628,6 +2640,22 @@ return [
         'empty_hint' => 'Register the requirements the organisation must comply with, with source and owner.',
         'no_matches' => 'No requirements match the search.',
         'no_sources_hint' => 'Create a requirement source under Requirement sources before registering requirements.',
+        'attention' => [
+            'heading' => 'Needs attention',
+            'total_one' => '1 requirement needs attention',
+            'total_many' => ':count requirements need attention',
+            'row_label' => 'Needs attention',
+            'filter' => 'Only requirements that need attention',
+            'show_all' => 'Show all :count',
+            'show_fewer' => 'Show fewer',
+            'reasons' => [
+                'not_assessed' => 'Not assessed',
+                'non_compliant' => 'Not compliant',
+                'partially_compliant' => 'Partially compliant',
+                'review_overdue' => 'Review overdue',
+                'missing_owner' => 'No owner',
+            ],
+        ],
         'statuses' => [
             'active' => 'Active',
             'retired' => 'Retired',
