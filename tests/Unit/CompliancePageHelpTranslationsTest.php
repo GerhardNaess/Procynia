@@ -133,6 +133,45 @@ class CompliancePageHelpTranslationsTest extends TestCase
         }
     }
 
+    public function test_the_requirement_help_explains_how_the_requirement_is_met(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $strings = $this->compliance($locale);
+            $sections = $strings['help']['requirement']['sections'];
+            $titles = array_column($sections, 'title');
+
+            // A section named like the page section, between ownership and etterlevelse — the page's order.
+            $index = array_search($strings['quality']['heading'], $titles, true);
+            $this->assertIsInt($index, "The requirement help in lang/{$locale} has no «{$strings['quality']['heading']}» section.");
+            $this->assertLessThan(array_search($strings['assessment']['heading'], $titles, true), $index);
+            $this->assertCount(6, $sections[$index]['items']);
+        }
+
+        // Why link, Kvalitet owns it, evidence read-only, evidence is no verdict, retired controls, access.
+        $no = $this->allText(['sections' => [$this->section('no')]]);
+        foreach (['hvordan virksomheten har tenkt å oppfylle kravet', 'Kvalitet', 'Her lagres bare koblingen', 'kan ikke legges til, endres eller fjernes', 'betyr ikke automatisk at kravet er oppfylt', 'vurderes eksplisitt', 'satt som utgått i Kvalitet', 'gir ikke innsyn i Kvalitet'] as $phrase) {
+            $this->assertStringContainsString($phrase, $no);
+        }
+
+        // The index subtitle now names etterlevelse.
+        $this->assertStringContainsString('etterlevelsesvurdering', $this->compliance('no')['index_subtitle']);
+        $this->assertStringContainsString('compliance assessment', $this->compliance('en')['index_subtitle']);
+    }
+
+    /** @return array<string, mixed> */
+    private function section(string $locale): array
+    {
+        $strings = $this->compliance($locale);
+
+        foreach ($strings['help']['requirement']['sections'] as $section) {
+            if ($section['title'] === $strings['quality']['heading']) {
+                return $section;
+            }
+        }
+
+        $this->fail("No «{$strings['quality']['heading']}» section in lang/{$locale}.");
+    }
+
     public function test_the_value_labels_cover_exactly_the_values_that_exist(): void
     {
         foreach (['no', 'en'] as $locale) {
