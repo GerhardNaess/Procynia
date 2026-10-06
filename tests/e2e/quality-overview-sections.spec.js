@@ -55,6 +55,14 @@ test('Oversikt lists documents, processes and controls in separate sections', as
     await expect(controls.getByRole('columnheader', { name: 'Wiki' })).toHaveCount(0);
     await expect(controls.getByRole('columnheader', { name: 'Type' })).toHaveCount(0);
 
+    // Its actions call it a control, never a document.
+    // The menu closes on scroll, so the row is brought into view before it is opened.
+    const actions = row.getByRole('button', { name: `Handlinger – ${titles.control}` });
+    await actions.scrollIntoViewIfNeeded();
+    await actions.click();
+    await expect(page.getByRole('menuitem', { name: 'Slett kontroll' })).toBeVisible();
+    await page.keyboard.press('Escape');
+
     // No generic relation editor: a governing document is linked on the process itself.
     await expect(page.getByRole('heading', { name: 'Relasjoner' })).toHaveCount(0);
 

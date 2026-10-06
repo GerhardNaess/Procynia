@@ -296,7 +296,7 @@ class QualityController extends Controller
 
         return redirect()
             ->route('app.quality.items.show', $route)
-            ->with('success', __('procynia.quality.flash.item_created'));
+            ->with('success', __($this->itemFlashKey($item, 'created')));
     }
 
     /**
@@ -356,7 +356,7 @@ class QualityController extends Controller
 
         $this->items->updateItem((int) $customerId, $item, $validated, $user);
 
-        return back()->with('success', __('procynia.quality.flash.item_updated'));
+        return back()->with('success', __($this->itemFlashKey($item, 'updated')));
     }
 
     /**
@@ -413,7 +413,7 @@ class QualityController extends Controller
             return $backToIndex()->with('error', __('procynia.quality.errors.wiki_page_deletion_failed'));
         }
 
-        $message = __('procynia.quality.flash.item_deleted');
+        $message = __($this->itemFlashKey($item, 'deleted'));
 
         if ($result['wiki_pages_deleted'] > 0) {
             $message .= ' '.trans_choice(
@@ -1577,6 +1577,17 @@ class QualityController extends Controller
             ))
             ->values()
             ->all();
+    }
+
+    /**
+     * The flash message for a created, updated or deleted item. A control is not a document, so it
+     * is never confirmed as one.
+     */
+    private function itemFlashKey(QualityItem $item, string $verb): string
+    {
+        $subject = $item->quality_type === QualityItem::TYPE_CONTROL ? 'control' : 'item';
+
+        return "procynia.quality.flash.{$subject}_{$verb}";
     }
 
     /**

@@ -285,6 +285,35 @@ class QualityActivityControlTest extends TestCase
             ->viewData('page')['props']['control_register']);
     }
 
+    public function test_a_control_is_confirmed_as_a_control_never_as_a_document(): void
+    {
+        $customer = $this->customer();
+        $editor = $this->member($customer, [
+            CustomerPermissionCatalog::QUALITY_VIEW,
+            CustomerPermissionCatalog::QUALITY_CREATE,
+            CustomerPermissionCatalog::QUALITY_EDIT,
+            CustomerPermissionCatalog::QUALITY_DELETE,
+        ]);
+
+        $this->actingAs($editor)
+            ->post('/app/quality/items', ['quality_type' => QualityItem::TYPE_CONTROL, 'title' => 'Tilgangskontroll'])
+            ->assertSessionHas('success', 'Kontrollen er opprettet.');
+        $control = QualityItem::query()->where('customer_id', $customer->id)->where('title', 'Tilgangskontroll')->sole();
+
+        $this->actingAs($editor)
+            ->patch("/app/quality/items/{$control->id}", ['title' => 'Tilgangskontroll kvartal'])
+            ->assertSessionHas('success', 'Kontrollen er oppdatert.');
+
+        $this->actingAs($editor)
+            ->delete("/app/quality/items/{$control->id}")
+            ->assertSessionHas('success', 'Kontrollen er slettet.');
+
+        // A policy is still a document.
+        $this->actingAs($editor)
+            ->post('/app/quality/items', ['quality_type' => QualityItem::TYPE_POLICY, 'title' => 'Informasjonssikkerhet'])
+            ->assertSessionHas('success', 'Dokumentet er opprettet.');
+    }
+
     public function test_a_control_page_lists_the_activities_it_is_used_in_and_the_flow_opens_on_one(): void
     {
         $customer = $this->customer();

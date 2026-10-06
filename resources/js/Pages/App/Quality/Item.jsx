@@ -634,7 +634,10 @@ function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOpt
                     <input className={INPUT} value={data.title} onChange={(e) => setData('title', e.target.value)} />
                 </Field>
 
-                <Field label={tq.field_code ?? 'Dokumentnr.'} error={errors.code}>
+                <Field
+                    label={item.quality_type === 'control' ? (tq.field_code_control ?? 'Kontrollnr.') : (tq.field_code ?? 'Dokumentnr.')}
+                    error={errors.code}
+                >
                     <input className={INPUT} value={data.code} onChange={(e) => setData('code', e.target.value)} />
                 </Field>
 
@@ -1063,6 +1066,7 @@ function DocumentsPanel({
     relationTypeLabels,
 }) {
     const tdoc = tq.documents ?? {};
+    const isControl = item.quality_type === 'control';
     const statusLabels = tdoc.statuses ?? {};
     const [search, setSearch] = useState(documentSearch ?? '');
     // The input is hidden behind a styled label, so it has to be remounted after an upload —
@@ -1104,11 +1108,13 @@ function DocumentsPanel({
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tdoc.heading ?? 'Dokumenter'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tdoc.help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{(isControl ? tdoc.help_control : tdoc.help) ?? ''}</p>
 
             {documents.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
-                    {tdoc.empty ?? 'Ingen dokumenter er koblet til dette styrende dokumentet ennå.'}
+                    {isControl
+                        ? (tdoc.empty_control ?? 'Ingen filer er koblet til denne kontrollen ennå.')
+                        : (tdoc.empty ?? 'Ingen dokumenter er koblet til dette styrende dokumentet ennå.')}
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
@@ -1293,6 +1299,7 @@ function DocumentsPanel({
  */
 function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, documentSearch, linkTypes, linkTypeLabels }) {
     const tw = tq.wiki ?? {};
+    const isControl = item.quality_type === 'control';
     const [search, setSearch] = useState(wikiSearch ?? '');
     const { data, setData, post, processing, errors, reset } = useForm({
         enterprise_wiki_page_id: '',
@@ -1311,11 +1318,13 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tw.heading ?? 'Kunnskap i Wiki'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tw.help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{(isControl ? tw.help_control : tw.help) ?? ''}</p>
 
             {wikiLinks.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
-                    {tw.empty ?? 'Ingen Wiki-sider er koblet til dette dokumentet ennå.'}
+                    {isControl
+                        ? (tw.empty_control ?? 'Ingen Wiki-sider er koblet til denne kontrollen ennå.')
+                        : (tw.empty ?? 'Ingen Wiki-sider er koblet til dette dokumentet ennå.')}
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">

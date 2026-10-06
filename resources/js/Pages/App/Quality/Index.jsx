@@ -827,6 +827,8 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                                 ...previous,
                                 quality_type: qualityType,
                                 status: qualityType === 'process' ? 'draft' : previous.status,
+                                // A control has no document of its own: its records are evidence.
+                                file: qualityType === 'control' ? null : previous.file,
                             }));
                         }}
                     >
@@ -845,7 +847,10 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                     />
                 </Field>
 
-                <Field label={tq.field_code ?? 'Dokumentnr.'} error={errors.code}>
+                <Field
+                    label={data.quality_type === 'control' ? (tq.field_code_control ?? 'Kontrollnr.') : (tq.field_code ?? 'Dokumentnr.')}
+                    error={errors.code}
+                >
                     <input
                         className={INPUT}
                         value={data.code}
@@ -904,20 +909,22 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                     />
                 </Field>
 
-                <div className="md:col-span-2">
-                    <FilePickerField
-                        id="quality-create-file"
-                        inputKey={fileInputKey}
-                        label={tq.field_file ?? 'Last opp dokument'}
-                        accept=".pdf,.docx"
-                        file={data.file}
-                        buttonLabel={tq.file_choose ?? 'Velg fil'}
-                        emptyLabel={tq.file_none_selected ?? 'Ingen fil valgt'}
-                        help={tq.field_file_help ?? 'Valgfritt. PDF eller Word (DOCX), maks 20 MB.'}
-                        error={errors.file}
-                        onChange={(file) => setData('file', file)}
-                    />
-                </div>
+                {data.quality_type !== 'control' && (
+                    <div className="md:col-span-2">
+                        <FilePickerField
+                            id="quality-create-file"
+                            inputKey={fileInputKey}
+                            label={tq.field_file ?? 'Last opp dokument'}
+                            accept=".pdf,.docx"
+                            file={data.file}
+                            buttonLabel={tq.file_choose ?? 'Velg fil'}
+                            emptyLabel={tq.file_none_selected ?? 'Ingen fil valgt'}
+                            help={tq.field_file_help ?? 'Valgfritt. PDF eller Word (DOCX), maks 20 MB.'}
+                            error={errors.file}
+                            onChange={(file) => setData('file', file)}
+                        />
+                    </div>
+                )}
 
                 <div className="md:col-span-2">
                     <Field label={tq.field_purpose ?? 'Formål'} error={errors.purpose}>
