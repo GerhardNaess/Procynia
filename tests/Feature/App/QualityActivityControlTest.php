@@ -285,7 +285,7 @@ class QualityActivityControlTest extends TestCase
             ->viewData('page')['props']['control_register']);
     }
 
-    public function test_a_control_is_confirmed_as_a_control_never_as_a_document(): void
+    public function test_a_control_or_a_process_is_confirmed_as_itself_never_as_a_document(): void
     {
         $customer = $this->customer();
         $editor = $this->member($customer, [
@@ -308,10 +308,26 @@ class QualityActivityControlTest extends TestCase
             ->delete("/app/quality/items/{$control->id}")
             ->assertSessionHas('success', 'Kontrollen er slettet.');
 
-        // A policy is still a document.
+        // Nor is a process.
         $this->actingAs($editor)
-            ->post('/app/quality/items', ['quality_type' => QualityItem::TYPE_POLICY, 'title' => 'Informasjonssikkerhet'])
-            ->assertSessionHas('success', 'Dokumentet er opprettet.');
+            ->post('/app/quality/items', ['quality_type' => QualityItem::TYPE_PROCESS, 'title' => 'Avvikshåndtering'])
+            ->assertSessionHas('success', 'Prosessen er opprettet.');
+        $process = QualityItem::query()->where('customer_id', $customer->id)->where('title', 'Avvikshåndtering')->sole();
+
+        $this->actingAs($editor)
+            ->patch("/app/quality/items/{$process->id}", ['title' => 'Avvikshåndtering og læring'])
+            ->assertSessionHas('success', 'Prosessen er oppdatert.');
+
+        $this->actingAs($editor)
+            ->delete("/app/quality/items/{$process->id}")
+            ->assertSessionHas('success', 'Prosessen er slettet.');
+
+        // A policy, a procedure, a work instruction and a checklist are governing documents.
+        foreach ([QualityItem::TYPE_POLICY, QualityItem::TYPE_PROCEDURE, QualityItem::TYPE_WORK_INSTRUCTION, QualityItem::TYPE_CHECKLIST] as $type) {
+            $this->actingAs($editor)
+                ->post('/app/quality/items', ['quality_type' => $type, 'title' => 'Dokument '.$type])
+                ->assertSessionHas('success', 'Dokumentet er opprettet.');
+        }
     }
 
     public function test_a_control_page_lists_the_activities_it_is_used_in_and_the_flow_opens_on_one(): void

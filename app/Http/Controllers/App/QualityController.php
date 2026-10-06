@@ -1580,12 +1580,17 @@ class QualityController extends Controller
     }
 
     /**
-     * The flash message for a created, updated or deleted item. A control is not a document, so it
-     * is never confirmed as one.
+     * The flash message for a created, updated or deleted item. A process and a control are not
+     * documents, so neither is ever confirmed as one; policy, procedure, work instruction and
+     * checklist are the governing documents and are.
      */
     private function itemFlashKey(QualityItem $item, string $verb): string
     {
-        $subject = $item->quality_type === QualityItem::TYPE_CONTROL ? 'control' : 'item';
+        $subject = match ($item->quality_type) {
+            QualityItem::TYPE_PROCESS => 'process',
+            QualityItem::TYPE_CONTROL => 'control',
+            default => 'item',
+        };
 
         return "procynia.quality.flash.{$subject}_{$verb}";
     }
