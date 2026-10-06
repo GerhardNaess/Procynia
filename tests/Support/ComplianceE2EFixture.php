@@ -438,6 +438,35 @@ class ComplianceE2EFixture
     }
 
     /**
+     * For the whole v1 journey: one fresh person who may do everything in Etterlevelse og revisjon,
+     * read Kvalitet and register cases in one fagområde; a Kvalitet process, a control and its
+     * evidence. The spec creates the source, the requirement, the audit and the finding itself.
+     *
+     * @return array{name: string, email: string, process_title: string, control_title: string, evidence_title: string, area_name: string}
+     */
+    public static function seedV1Journey(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Etterlevelsesansvarlig'), 'v1');
+            self::role($customerId, $name('Etterlevelse og revisjon'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_EDIT,
+                CustomerPermissionCatalog::COMPLIANCE_ASSESS,
+                CustomerPermissionCatalog::COMPLIANCE_AUDIT,
+                CustomerPermissionCatalog::QUALITY_VIEW,
+            ], $person);
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Oppfølging')]);
+            self::areaRole($customerId, $name('Saksbehandler'), [CustomerPermissionCatalog::IMPROVEMENT_VIEW, CustomerPermissionCatalog::IMPROVEMENT_EDIT], $area, $person);
+            $quality = self::qualityItems($customerId, $name, $person);
+
+            return ['name' => $person->name, 'email' => $person->email, 'area_name' => $area->name] + $quality['labels'];
+        });
+    }
+
+    /**
      * For the Funn journey: a fresh person who may run audits and read Kvalitet, and register cases
      * in one fagområde of Avvik og forbedringer; a requirement, a Kvalitet process and a control to
      * link. The spec creates the audit and the finding itself, through the pages.
