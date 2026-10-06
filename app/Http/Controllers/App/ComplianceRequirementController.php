@@ -10,6 +10,7 @@ use App\Models\ComplianceSource;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAssessmentService;
+use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceQualityContextService;
 use App\Services\Compliance\ComplianceRequirementLifecycleService;
 use App\Services\Compliance\ComplianceStatusResolver;
@@ -40,6 +41,9 @@ use Inertia\Response;
  * Hvordan kravet oppfylles — the Kvalitet processes and controls a requirement is met through — is
  * ComplianceQualityContextService's: it decides what may be shown (Kvalitet read access, never
  * implied by compliance.*) and what may be linked.
+ *
+ * «Trenger oppmerksomhet» is ComplianceAttentionService's, computed on the rows reached here and on
+ * nothing else.
  */
 class ComplianceRequirementController extends Controller
 {
@@ -50,6 +54,7 @@ class ComplianceRequirementController extends Controller
         private readonly ComplianceStatusResolver $status,
         private readonly ComplianceAssessmentService $assessments,
         private readonly ComplianceQualityContextService $qualityContext,
+        private readonly ComplianceAttentionService $attention,
     ) {}
 
     /** /app/compliance: Krav is the module's only main area so far. */
@@ -74,12 +79,12 @@ class ComplianceRequirementController extends Controller
 
         $search = trim((string) $request->query('search', ''));
         $status = in_array($request->query('status'), ComplianceRequirement::STATUSES, true) ? (string) $request->query('status') : '';
+        $attentionOnly = $request->boolean('attention');
         // Only a source the user can read is a filter; anything else is ignored rather than answered.
         $sourceId = (int) $request->query('source', 0);
         $sourceId = in_array($sourceId, $sourceIds, true) ? $sourceId : 0;
 
-        $query = $this->access->visibleRequirements($user)
-            ->with(['source:id,name,version', 'owner:id,name']);
+        $query = $this->access->visibleRequirements($user);
 
         if ($search !== '') {
             $needle = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
@@ -98,31 +103,54 @@ class ComplianceRequirementController extends Controller
             $query->where('compliance_requirements.source_id', $sourceId);
         }
 
-        $requirements = $query
-            // Aktive first; then by source, and within it by reference (unreferenced last).
-            ->orderByRaw('CASE compliance_requirements.status WHEN ? THEN 0 ELSE 1 END', [ComplianceRequirement::STATUS_ACTIVE])
-            ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
-            ->orderBy('compliance_requirements.source_id')
-            ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
-            ->orderBy('compliance_requirements.title')
-            ->orderBy('compliance_requirements.id')
+        $requirements = $this->inRegisterOrder($query)->with(['source:id,name,version', 'owner:id,name'])->get();
+
+        // «Trenger oppmerksomhet» is the worklist of the whole register the user can see — every
+        // active requirement, whatever the search above — so the panel does not shrink with a search.
+        $attentionSet = $this->inRegisterOrder($this->access->visibleRequirements($user)
+            ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE))
             ->get();
 
         $canEdit = $this->access->canEdit($user);
         $canDelete = $this->access->canDelete($user);
-        // Only the rows already narrowed above, so no hidden requirement's status is ever read.
-        $latest = $this->status->latestForRequirements((int) $user->customer_id, $requirements->pluck('id')->map(fn (mixed $id): int => (int) $id)->all());
+        // Only the rows already narrowed above, so no hidden requirement's status is ever read; one
+        // query for both sets.
+        $latest = $this->status->latestForRequirements(
+            (int) $user->customer_id,
+            $requirements->pluck('id')->merge($attentionSet->pluck('id'))->map(fn (mixed $id): int => (int) $id)->unique()->values()->all(),
+        );
+        $rowReasons = $this->attention->reasonsForRequirements($requirements, $latest);
+        $panelReasons = $this->attention->reasonsForRequirements($attentionSet, $latest);
+
+        if ($attentionOnly) {
+            $requirements = $requirements->filter(fn (ComplianceRequirement $requirement): bool => $rowReasons[(int) $requirement->id] !== [])->values();
+        }
+
+        $flagged = $attentionSet->filter(fn (ComplianceRequirement $requirement): bool => $panelReasons[(int) $requirement->id] !== []);
 
         return Inertia::render('App/Compliance/Requirements/Index', [
             'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->row($requirement) + [
                 'compliance' => $this->registerCompliance($requirement, $latest->get((int) $requirement->id)),
+                'attention' => $rowReasons[(int) $requirement->id],
             ])->all(),
+            'attention' => [
+                'total' => $flagged->count(),
+                'requirements' => $flagged->map(fn (ComplianceRequirement $requirement): array => [
+                    'id' => (int) $requirement->id,
+                    'reference' => $requirement->reference,
+                    'title' => $requirement->title,
+                    'url' => route('app.compliance.requirements.show', ['requirementId' => $requirement->id]),
+                    'reasons' => $panelReasons[(int) $requirement->id],
+                ])->values()->all(),
+            ],
+            'attention_reasons' => ComplianceAttentionService::REASONS,
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleRequirements($user)->count(),
             'filters' => [
                 'search' => $search,
                 'source' => $sourceId !== 0 ? $sourceId : null,
                 'status' => $status,
+                'attention' => $attentionOnly,
             ],
             'statuses' => ComplianceRequirement::STATUSES,
             'sources' => $sources->map(fn (ComplianceSource $source): array => [
@@ -163,6 +191,7 @@ class ComplianceRequirementController extends Controller
                 'created_at' => $requirement->created_at?->toIso8601String(),
             ],
             'compliance' => $this->status->summarize($requirement, $assessments->first()),
+            'attention' => $this->attention->reasonsFor($requirement, $assessments->first()),
             // Reached through visibleRequirements(), like the status history.
             'assessments' => $assessments->map(fn (ComplianceAssessment $assessment): array => [
                 'id' => (int) $assessment->id,
@@ -486,6 +515,21 @@ class ComplianceRequirementController extends Controller
             'is_overdue' => $summary['is_overdue'],
             'assessed_at' => $summary['assessed_at'],
         ];
+    }
+
+    /**
+     * The register's order: aktive first; then by source, and within it by reference (unreferenced
+     * last).
+     */
+    private function inRegisterOrder(Builder $query): Builder
+    {
+        return $query
+            ->orderByRaw('CASE compliance_requirements.status WHEN ? THEN 0 ELSE 1 END', [ComplianceRequirement::STATUS_ACTIVE])
+            ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
+            ->orderBy('compliance_requirements.source_id')
+            ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
+            ->orderBy('compliance_requirements.title')
+            ->orderBy('compliance_requirements.id');
     }
 
     /** @return array<string, mixed> */
