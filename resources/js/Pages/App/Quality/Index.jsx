@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
@@ -6,25 +6,27 @@ import FilePickerField from '../../../Components/App/FilePickerField';
 import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { publicationLabel, publicationTone } from '../../../Support/processPublication';
+import { itemLabel } from '../../../Support/qualityStructure';
 import {
     DESTRUCTIVE_COLOURS,
     PRIMARY_ACTION,
     SECONDARY_ACTION,
 } from '../../../Support/actionStyles';
-import {
-    candidatesForRelationEnd,
-    candidatesForRelationStart,
-    itemLabel,
-    relationTypeIsUsable,
-} from '../../../Support/qualityStructure';
 
 /**
- * Kvalitet — the virksomhet's styrende dokumenter.
+ * Kvalitet — the virksomhet's styrende dokumenter, prosesser and kontroller.
  *
  * Every row is a quality object of its own, with its own owner, number, status and review cycle. A
- * row leads to the document's page in Kvalitet, where its structure is edited and the Wiki pages
+ * row leads to the object's page in Kvalitet, where its structure is edited and the Wiki pages
  * behind it are attached. Wiki is never typed or relabelled by any of this.
+ *
+ * All three are stored as quality items, but they are never listed as one kind of thing: a document
+ * says what applies, a process how the virksomhet works, a control how it verifies that it happens —
+ * with evidence as the record that it did.
  */
+
+// Listed in their own sections, by what they are rather than as documents.
+const NON_DOCUMENT_TYPES = ['process', 'control'];
 
 const TYPE_TONES = {
     policy: 'violet',
@@ -44,8 +46,8 @@ const STATUS_TONES = {
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
-const ROW_DESTRUCTIVE = `ml-auto inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
+const LABEL = 'block text-base font-semibold text-slate-700';
+const ROW_DESTRUCTIVE = `ml-auto inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-base font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 
 export default function QualityIndex() {
     const {
@@ -56,9 +58,6 @@ export default function QualityIndex() {
         type_counts: typeCounts = {},
         quality_types: qualityTypes = [],
         statuses = [],
-        relation_types: relationTypes = [],
-        relations = [],
-        relation_item_options: relationItemOptions = [],
         owner_options: ownerOptions = [],
         control_register: controlRegister = {},
         tools = [],
@@ -99,7 +98,7 @@ export default function QualityIndex() {
                 {activeTab === 'overview' && <AttentionPanel findings={attention} tq={tq} />}
 
                 {! canChange && (
-                    <p className="text-sm text-slate-500">
+                    <p className="text-base text-slate-500">
                         {tq.manage_denied ?? 'Du kan se kvalitetssystemet, men ikke endre det.'}
                     </p>
                 )}
@@ -121,11 +120,24 @@ export default function QualityIndex() {
                         register={controlRegister}
                         tq={tq}
                         canDelete={canDelete}
+                        activeTab={activeTab}
+                        statusLabels={statusLabels}
+                        heading={tq.register?.heading ?? 'Kontrollregister'}
+                        help={tq.register?.help ?? 'Alle kontroller i kvalitetssystemet, og hvilke prosessaktiviteter de brukes i.'}
+                        showPlacements
+                    />
+                ) : activeTab === 'processes' ? (
+                    <ProcessTable
+                        items={items}
+                        tq={tq}
+                        canDelete={canDelete}
+                        activeTab={activeTab}
                         statusLabels={statusLabels}
                     />
                 ) : (
-                    <ItemTable
+                    <OverviewSections
                         items={items}
+                        register={controlRegister}
                         tq={tq}
                         canDelete={canDelete}
                         activeTab={activeTab}
@@ -136,15 +148,6 @@ export default function QualityIndex() {
 
                 {activeTab === 'overview' && (
                     <>
-                        <RelationPanel
-                            tq={tq}
-                            canEdit={canEdit}
-                            relations={relations}
-                            relationTypes={relationTypes}
-                            itemOptions={relationItemOptions}
-                            typeLabels={typeLabels}
-                        />
-
                         {canCreate && (
                             <CreateItemPanel
                                 tq={tq}
@@ -168,7 +171,7 @@ function TypeCounts({ counts, types, labels }) {
             {types.map((type) => (
                 <div key={type} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                     <p className="text-2xl font-semibold text-slate-950">{counts?.[type] ?? 0}</p>
-                    <p className="text-sm text-slate-600">{labels?.[type] ?? type}</p>
+                    <p className="text-base text-slate-600">{labels?.[type] ?? type}</p>
                 </div>
             ))}
         </div>
@@ -188,7 +191,7 @@ function AttentionPanel({ findings, tq }) {
             <h2 id="quality-attention-heading" className="text-xl font-semibold text-slate-950">
                 {ta.heading ?? 'Trenger oppmerksomhet'}
             </h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{ta.help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{ta.help ?? ''}</p>
 
             <ul className="mt-4 grid gap-3 lg:grid-cols-2">
                 {findings.map((finding) => (
@@ -211,17 +214,17 @@ function AttentionFinding({ finding, ta }) {
                 <p className={`text-2xl font-semibold ${count > 0 ? 'text-amber-800' : 'text-slate-400'}`}>{count}</p>
                 <div className="min-w-0 flex-1">
                     <h3 className="text-base font-semibold text-slate-950">{copy.title ?? finding.key}</h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">{copy.help ?? ''}</p>
+                    <p className="mt-1 text-base leading-6 text-slate-600">{copy.help ?? ''}</p>
                 </div>
             </div>
 
             {count === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">{ta.clear ?? 'Ingen funn'}</p>
+                <p className="mt-2 text-base text-slate-500">{ta.clear ?? 'Ingen funn'}</p>
             ) : (
                 <>
                     <button
                         type="button"
-                        className="mt-2 text-sm font-semibold text-violet-700 hover:text-violet-900"
+                        className="mt-2 text-base font-semibold text-violet-700 hover:text-violet-900"
                         aria-expanded={open}
                         aria-controls={listId}
                         onClick={() => setOpen((value) => ! value)}
@@ -232,7 +235,7 @@ function AttentionFinding({ finding, ta }) {
                         <ul id={listId} className="mt-2 space-y-1">
                             {finding.items.map((item) => (
                                 <li key={item.id}>
-                                    <Link href={item.url} className="text-sm font-medium text-slate-800 underline-offset-2 hover:underline">
+                                    <Link href={item.url} className="text-base font-medium text-slate-800 underline-offset-2 hover:underline">
                                         {item.code ? `${item.code} ${item.title}` : item.title}
                                     </Link>
                                 </li>
@@ -245,24 +248,91 @@ function AttentionFinding({ finding, ta }) {
     );
 }
 
+/**
+ * Oversikt: the whole kvalitetssystem, one section per kind of object. Policies, procedures,
+ * arbeidsinstrukser and sjekklister are the styrende dokumenter; processes and controls each get a
+ * section of their own, so neither is ever presented as a document.
+ */
+function OverviewSections({ items, register, tq, canDelete, activeTab, typeLabels, statusLabels }) {
+    const ts = tq.sections ?? {};
+    const documents = items.filter((item) => ! NON_DOCUMENT_TYPES.includes(item.quality_type));
+    const processes = items.filter((item) => item.quality_type === 'process');
+    const controls = items.filter((item) => item.quality_type === 'control');
+
+    return (
+        <>
+            <ItemTable
+                items={documents}
+                tq={tq}
+                canDelete={canDelete}
+                activeTab={activeTab}
+                typeLabels={typeLabels}
+                statusLabels={statusLabels}
+            />
+            <ProcessTable
+                items={processes}
+                tq={tq}
+                canDelete={canDelete}
+                activeTab={activeTab}
+                statusLabels={statusLabels}
+                help={ts.processes_help ?? 'Hvordan virksomheten arbeider.'}
+            />
+            <ControlRegister
+                items={controls}
+                register={register}
+                tq={tq}
+                canDelete={canDelete}
+                activeTab={activeTab}
+                statusLabels={statusLabels}
+                heading={ts.controls_heading ?? 'Kontroller'}
+                help={ts.controls_help ?? 'Hvordan virksomheten verifiserer at noe faktisk skjer. Evidens er dokumentasjonen på at kontrollen er gjennomført.'}
+            />
+        </>
+    );
+}
+
+/**
+ * A titled card for one kind of quality object. The heading stays when the list is empty, so a
+ * reader of Oversikt always sees which three kinds of object the kvalitetssystem holds.
+ */
+function Section({ id, heading, help, empty, emptyText, children }) {
+    return (
+        <section aria-labelledby={id} className={CARD}>
+            <h2 id={id} className="text-xl font-semibold text-slate-950">{heading}</h2>
+            {help && <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{help}</p>}
+            {empty ? <p className="mt-4 text-base text-slate-600">{emptyText}</p> : children}
+        </section>
+    );
+}
+
+function ItemStatus({ item, tq, statusLabels }) {
+    // A process reads its status from its approved revisions; the other types have no revisions
+    // and show the stored status.
+    return item.publication ? (
+        <StatusBadge tone={publicationTone(item.publication)}>
+            {publicationLabel(item.publication, tq.publication)}
+        </StatusBadge>
+    ) : (
+        <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
+            {statusLabels?.[item.status] ?? item.status}
+        </StatusBadge>
+    );
+}
+
 function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }) {
     const table = tq.table ?? {};
 
-    if (items.length === 0) {
-        return (
-            <EmptyStateBox
-                title={tq.items_heading ?? 'Styrende dokumenter'}
-                description={tq.items_empty ?? 'Ingen styrende dokumenter er registrert ennå.'}
-            />
-        );
-    }
-
     return (
-        <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tq.items_heading ?? 'Styrende dokumenter'}</h2>
+        <Section
+            id="quality-documents-heading"
+            heading={tq.items_heading ?? 'Styrende dokumenter'}
+            help={tq.sections?.documents_help ?? 'Policyer, prosedyrer, arbeidsinstrukser og sjekklister — det virksomheten styres etter.'}
+            empty={items.length === 0}
+            emptyText={tq.items_empty ?? 'Ingen styrende dokumenter er registrert ennå.'}
+        >
             <div className="relative mt-4 overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-base">
-                    <thead className="text-sm uppercase tracking-wide text-slate-500">
+                    <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
                             <th className="pb-2">{table.document ?? 'Dokument'}</th>
                             <th className="pb-2">{table.type ?? 'Type'}</th>
@@ -294,17 +364,7 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                                     {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
                                 </td>
                                 <td className="py-3 pr-4">
-                                    {/* A process reads its status from its approved revisions; the
-                                        other types have no revisions and show the stored status. */}
-                                    {item.publication ? (
-                                        <StatusBadge tone={publicationTone(item.publication)}>
-                                            {publicationLabel(item.publication, tq.publication)}
-                                        </StatusBadge>
-                                    ) : (
-                                        <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
-                                            {statusLabels?.[item.status] ?? item.status}
-                                        </StatusBadge>
-                                    )}
+                                    <ItemStatus item={item} tq={tq} statusLabels={statusLabels} />
                                 </td>
                                 <td className="py-3 pr-4 text-slate-700">
                                     {item.next_review_at ?? (tq.no_review ?? 'Ingen revisjonssyklus')}
@@ -320,44 +380,107 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                     </tbody>
                 </table>
             </div>
-        </section>
+        </Section>
     );
 }
 
 /**
- * Kontroller as a register: what each control checks and the process activities it is applied in.
+ * Prosesser: how the virksomhet works. Owner, publication status, review and the Wiki behind each —
+ * no type column, because every row is a process.
+ */
+function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = null }) {
+    const table = tq.table ?? {};
+    const ts = tq.sections ?? {};
+
+    return (
+        <Section
+            id="quality-processes-heading"
+            heading={ts.processes_heading ?? 'Prosesser'}
+            help={help}
+            empty={items.length === 0}
+            emptyText={ts.processes_empty ?? 'Ingen prosesser er registrert ennå.'}
+        >
+            <div className="relative mt-4 overflow-x-auto">
+                <table className="w-full min-w-[640px] text-left text-base">
+                    <thead className="text-base uppercase tracking-wide text-slate-500">
+                        <tr>
+                            <th className="pb-2">{tq.types?.process ?? 'Prosess'}</th>
+                            <th className="pb-2">{table.owner ?? 'Eier'}</th>
+                            <th className="pb-2">{table.status ?? 'Status'}</th>
+                            <th className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
+                            <th className="pb-2">{table.wiki ?? 'Wiki'}</th>
+                            {canDelete && (
+                                <th className="pb-2 text-right">
+                                    <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
+                                </th>
+                            )}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {items.map((item) => (
+                            <tr key={item.id} className="align-top">
+                                <td className="py-3 pr-4">
+                                    <Link href={item.url} className="font-semibold text-slate-950 hover:underline">
+                                        {itemLabel(item)}
+                                    </Link>
+                                </td>
+                                <td className="py-3 pr-4 text-slate-700">
+                                    {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
+                                </td>
+                                <td className="py-3 pr-4">
+                                    <ItemStatus item={item} tq={tq} statusLabels={statusLabels} />
+                                </td>
+                                <td className="py-3 pr-4 text-slate-700">
+                                    {item.next_review_at ?? (tq.no_review ?? 'Ingen revisjonssyklus')}
+                                </td>
+                                <td className="py-3 text-slate-700">{item.wiki_link_count}</td>
+                                {canDelete && (
+                                    <td className="py-3 pl-4 text-right">
+                                        <QualityItemActions tq={tq} item={item} tab={activeTab} />
+                                    </td>
+                                )}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </Section>
+    );
+}
+
+/**
+ * Kontroller as a register: what each control checks, who carries it out, how often and how,
+ * whether evidence has been recorded — and, on the Kontroller tab, the process activities it is
+ * applied in. No document columns: a control has no Wiki page count or document number to show.
  *
  * Controls are listed whether they are placed or not — one that has been taken off every activity
  * is still a control the virksomhet has, and stays here until somebody deletes it.
  */
-function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
+function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabels, heading, help, showPlacements = false }) {
     const tr = tq.register ?? {};
-    const table = tq.table ?? {};
-
-    if (items.length === 0) {
-        return (
-            <EmptyStateBox
-                title={tr.heading ?? 'Kontrollregister'}
-                description={tr.empty ?? 'Ingen kontroller er registrert ennå. Kontroller legges til på aktivitetene i en prosessflyt.'}
-            />
-        );
-    }
+    const frequencyLabels = tq.frequencies ?? {};
+    const notSet = <span className="text-slate-500">{tr.not_set ?? 'Ikke angitt'}</span>;
 
     return (
-        <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tr.heading ?? 'Kontrollregister'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-                {tr.help ?? 'Alle kontroller i kvalitetssystemet, og hvilke prosessaktiviteter de brukes i.'}
-            </p>
+        <Section
+            id={`quality-controls-heading-${activeTab}`}
+            heading={heading}
+            help={help}
+            empty={items.length === 0}
+            emptyText={tr.empty ?? 'Ingen kontroller er registrert ennå. Kontroller legges til på aktivitetene i en prosessflyt.'}
+        >
             <div className="relative mt-4 overflow-x-auto">
-                <table className="w-full min-w-[820px] text-left text-base">
-                    <thead className="text-sm uppercase tracking-wide text-slate-500">
+                <table className={`w-full text-left text-base ${showPlacements ? 'min-w-[1080px]' : 'min-w-[900px]'}`}>
+                    <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
                             <th className="pb-2">{tr.control ?? 'Kontroll'}</th>
                             <th className="pb-2">{tr.criterion ?? 'Hva kontrolleres'}</th>
-                            <th className="pb-2">{tr.used_in ?? 'Brukes i'}</th>
-                            <th className="pb-2">{table.owner ?? 'Eier'}</th>
-                            <th className="pb-2">{table.status ?? 'Status'}</th>
+                            <th className="pb-2">{tr.responsibility ?? 'Ansvarlig'}</th>
+                            <th className="pb-2">{tr.frequency ?? 'Frekvens'}</th>
+                            <th className="pb-2">{tr.method ?? 'Metode'}</th>
+                            <th className="pb-2">{tq.table?.status ?? 'Status'}</th>
+                            <th className="pb-2">{tr.evidence ?? 'Evidens'}</th>
+                            {showPlacements && <th className="pb-2">{tr.used_in ?? 'Brukes i'}</th>}
                             {canDelete && (
                                 <th className="pb-2 text-right">
                                     <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
@@ -369,6 +492,10 @@ function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
                         {items.map((item) => {
                             const entry = register?.[item.id] ?? {};
                             const placements = entry.placements ?? [];
+                            const evidenceCount = entry.evidence_count ?? 0;
+                            // Who carries the control out; a control described without it falls back
+                            // to its owner, who answers for it.
+                            const responsible = entry.responsibility || item.owner_name;
 
                             return (
                                 <tr key={item.id} className="align-top">
@@ -380,36 +507,49 @@ function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
                                     <td className="max-w-sm py-3 pr-4 text-slate-700">
                                         {entry.criterion || <span className="text-slate-500">{tr.no_criterion ?? 'Ikke beskrevet'}</span>}
                                     </td>
-                                    <td className="py-3 pr-4">
-                                        {placements.length === 0 ? (
-                                            <span className="text-slate-500">{tr.unplaced ?? 'Ikke koblet til noen aktivitet'}</span>
-                                        ) : (
-                                            <ul className="space-y-1">
-                                                {placements.map((placement) => (
-                                                    <li key={placement.id} className="text-slate-700">
-                                                        <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
-                                                            {placement.process_title}
-                                                        </Link>
-                                                        <span className="text-slate-400"> › </span>
-                                                        {placement.activity_exists
-                                                            ? placement.activity_label
-                                                            : <span className="italic text-slate-500">{tr.activity_missing ?? 'Aktiviteten finnes ikke lenger'}</span>}
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </td>
+                                    <td className="py-3 pr-4 text-slate-700">{responsible || notSet}</td>
                                     <td className="py-3 pr-4 text-slate-700">
-                                        {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
+                                        {entry.frequency ? (frequencyLabels[entry.frequency] ?? entry.frequency) : notSet}
                                     </td>
+                                    <td className="max-w-xs py-3 pr-4 text-slate-700">{entry.method || notSet}</td>
                                     <td className="py-3 pr-4">
                                         <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
                                             {statusLabels?.[item.status] ?? item.status}
                                         </StatusBadge>
                                     </td>
+                                    <td className="py-3 pr-4">
+                                        <StatusBadge tone={evidenceCount > 0 ? 'green' : 'amber'}>
+                                            {evidenceCount === 0
+                                                ? (tr.evidence_none ?? 'Ingen evidens')
+                                                : evidenceCount === 1
+                                                    ? (tr.evidence_count_one ?? '1 registrert')
+                                                    : (tr.evidence_count_many ?? ':count registrert').replace(':count', evidenceCount)}
+                                        </StatusBadge>
+                                    </td>
+                                    {showPlacements && (
+                                        <td className="py-3 pr-4">
+                                            {placements.length === 0 ? (
+                                                <span className="text-slate-500">{tr.unplaced ?? 'Ikke koblet til noen aktivitet'}</span>
+                                            ) : (
+                                                <ul className="space-y-1">
+                                                    {placements.map((placement) => (
+                                                        <li key={placement.id} className="text-slate-700">
+                                                            <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
+                                                                {placement.process_title}
+                                                            </Link>
+                                                            <span className="text-slate-400"> › </span>
+                                                            {placement.activity_exists
+                                                                ? placement.activity_label
+                                                                : <span className="italic text-slate-500">{tr.activity_missing ?? 'Aktiviteten finnes ikke lenger'}</span>}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </td>
+                                    )}
                                     {canDelete && (
                                         <td className="py-3 pl-4 text-right">
-                                            <QualityItemActions tq={tq} item={item} tab="controls" />
+                                            <QualityItemActions tq={tq} item={item} tab={activeTab} />
                                         </td>
                                     )}
                                 </tr>
@@ -418,7 +558,7 @@ function ControlRegister({ items, register, tq, canDelete, statusLabels }) {
                     </tbody>
                 </table>
             </div>
-        </section>
+        </Section>
     );
 }
 
@@ -445,7 +585,7 @@ function ToolLibrary({ tools, tq }) {
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tt.heading ?? 'Verktøy'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tt.help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{tt.help ?? ''}</p>
 
             <ul className="mt-5 grid gap-4 lg:grid-cols-2">
                 {tools.map((tool) => (
@@ -461,9 +601,9 @@ function ToolLibrary({ tools, tq }) {
                         )}
 
                         <div className="mt-4">
-                            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{tt.used_in ?? 'Brukes i'}</p>
+                            <p className="text-base font-semibold uppercase tracking-wide text-slate-500">{tt.used_in ?? 'Brukes i'}</p>
                             {tool.controls.length === 0 ? (
-                                <p className="mt-1 text-sm text-slate-500">
+                                <p className="mt-1 text-base text-slate-500">
                                     {tt.unused ?? 'Ikke koblet til noen kontroll ennå. Koble det til fra kontrollen.'}
                                 </p>
                             ) : (
@@ -472,7 +612,7 @@ function ToolLibrary({ tools, tq }) {
                                         <li key={control.id}>
                                             <Link
                                                 href={control.url}
-                                                className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
+                                                className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-base font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
                                             >
                                                 {itemLabel(control)}
                                             </Link>
@@ -491,7 +631,7 @@ function ToolLibrary({ tools, tq }) {
                                     {tt.download ?? 'Last ned'}
                                 </a>
                                 {tool.filename && (
-                                    <span className="min-w-0 break-all text-sm text-slate-500">{tool.filename}</span>
+                                    <span className="min-w-0 break-all text-base text-slate-500">{tool.filename}</span>
                                 )}
                             </div>
                         </div>
@@ -539,7 +679,7 @@ function RegisterToolPanel({ tq, categories, documentOptions }) {
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tt.add_heading ?? 'Registrer verktøy'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tt.add_help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{tt.add_help ?? ''}</p>
 
             <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
                 <Field label={tt.field_title ?? 'Navn'} error={form.errors.title}>
@@ -671,8 +811,8 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tq.create_heading ?? 'Nytt styrende dokument'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tq.create_help ?? ''}</p>
+            <h2 className="text-xl font-semibold text-slate-950">{tq.create_heading ?? 'Registrer i kvalitetssystemet'}</h2>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{tq.create_help ?? ''}</p>
 
             <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
                 <Field label={tq.field_type ?? 'Type'} error={errors.quality_type}>
@@ -800,141 +940,12 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
     );
 }
 
-function RelationPanel({ tq, canEdit, relations, relationTypes, itemOptions, typeLabels }) {
-    const relationLabels = tq.relation_types ?? {};
-    const usableTypes = useMemo(
-        () => relationTypes.filter((entry) => relationTypeIsUsable(itemOptions, relationTypes, entry.key)),
-        [relationTypes, itemOptions],
-    );
-
-    const [relationType, setRelationType] = useState(usableTypes[0]?.key ?? '');
-    const { data, setData, post, delete: destroy, processing, errors, reset } = useForm({
-        from_item_id: '',
-        to_item_id: '',
-        relation_type: '',
-    });
-
-    const fromCandidates = candidatesForRelationStart(itemOptions, relationTypes, relationType);
-    const fromItem = fromCandidates.find((item) => String(item.id) === String(data.from_item_id)) ?? null;
-    const toCandidates = candidatesForRelationEnd(
-        itemOptions,
-        relationTypes,
-        relationType,
-        fromItem?.quality_type ?? null,
-    );
-
-    function submit(event) {
-        event.preventDefault();
-        post('/app/quality/relations', {
-            data: { ...data, relation_type: relationType },
-            onSuccess: () => reset(),
-        });
-    }
-
-    return (
-        <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tq.relations_heading ?? 'Relasjoner'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{tq.relations_help ?? ''}</p>
-
-            {relations.length === 0 ? (
-                <p className="mt-4 text-base text-slate-600">{tq.relations_empty ?? 'Ingen relasjoner er opprettet ennå.'}</p>
-            ) : (
-                <ul className="mt-4 divide-y divide-slate-100">
-                    {relations.map((relation) => (
-                        <li key={relation.id} className="flex flex-wrap items-center gap-2 py-2 text-base text-slate-800">
-                            <span className="font-semibold">{relation.from_title}</span>
-                            <span className="text-slate-500">
-                                {relationLabels?.[relation.relation_type] ?? relation.relation_type}
-                            </span>
-                            <span className="font-semibold">{relation.to_title}</span>
-                            {canEdit && (
-                                <button
-                                    type="button"
-                                    className={ROW_DESTRUCTIVE}
-                                    onClick={() => {
-                                        if (window.confirm(tq.relation_delete_confirm ?? 'Fjern relasjonen?')) {
-                                            destroy(`/app/quality/relations/${relation.id}`);
-                                        }
-                                    }}
-                                >
-                                    {tq.relation_delete ?? 'Fjern'}
-                                </button>
-                            )}
-                        </li>
-                    ))}
-                </ul>
-            )}
-
-            {canEdit && (
-                usableTypes.length === 0 ? (
-                    <p className="mt-4 text-sm text-slate-500">
-                        {tq.relation_no_candidates ?? 'Ingen dokumenter er registrert slik at denne relasjonen kan brukes.'}
-                    </p>
-                ) : (
-                    <form onSubmit={submit} className="mt-6 grid gap-4 md:grid-cols-4">
-                        <Field label={tq.relation_type ?? 'Relasjon'} error={errors.relation_type}>
-                            <select
-                                className={INPUT}
-                                value={relationType}
-                                onChange={(event) => {
-                                    setRelationType(event.target.value);
-                                    setData({ from_item_id: '', to_item_id: '', relation_type: '' });
-                                }}
-                            >
-                                {usableTypes.map((entry) => (
-                                    <option key={entry.key} value={entry.key}>
-                                        {relationLabels?.[entry.key] ?? entry.key}
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        <Field label={tq.relation_from ?? 'Fra'} error={errors.from_item_id}>
-                            <select
-                                className={INPUT}
-                                value={data.from_item_id}
-                                onChange={(event) => setData({ ...data, from_item_id: event.target.value, to_item_id: '' })}
-                            >
-                                <option value="">—</option>
-                                {fromCandidates.map((item) => (
-                                    <option key={item.id} value={item.id}>{itemLabel(item)}</option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        <Field label={tq.relation_to ?? 'Til'} error={errors.to_item_id}>
-                            <select
-                                className={INPUT}
-                                value={data.to_item_id}
-                                onChange={(event) => setData('to_item_id', event.target.value)}
-                            >
-                                <option value="">—</option>
-                                {toCandidates.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                        {itemLabel(item)} ({typeLabels?.[item.quality_type] ?? item.quality_type})
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        <div className="flex items-end">
-                            <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
-                                {tq.relation_submit ?? 'Legg til relasjon'}
-                            </button>
-                        </div>
-                    </form>
-                )
-            )}
-        </section>
-    );
-}
-
 function Field({ label, error, children }) {
     return (
         <label className="block space-y-1">
             <span className={LABEL}>{label}</span>
             {children}
-            {error && <span className="block text-sm text-rose-600">{error}</span>}
+            {error && <span className="block text-base text-rose-600">{error}</span>}
         </label>
     );
 }

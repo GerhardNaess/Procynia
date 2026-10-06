@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityActivityControl;
+use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
 use App\Models\QualityProcessBlueprint;
@@ -223,6 +224,65 @@ class QualityActivityControlTest extends TestCase
         $gone = $register[$orphaned->control_item_id]['placements'][0];
         $this->assertFalse($gone['activity_exists']);
         $this->assertNull($gone['activity_label']);
+    }
+
+    public function test_the_register_describes_each_control_as_a_control_on_overview_and_kontroller(): void
+    {
+        $customer = $this->customer();
+        $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $described = $this->control($customer);
+        QualityControlDetail::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $described->id,
+            'criterion' => 'Tilgangene stemmer med rollene',
+            'responsibility' => 'IT-sjef',
+            'frequency' => QualityControlDetail::FREQUENCY_QUARTERLY,
+            'method' => 'Stikkprøve',
+        ]);
+        foreach (['Protokoll Q1', 'Protokoll Q2'] as $title) {
+            QualityItemDocument::query()->create([
+                'customer_id' => $customer->id,
+                'quality_item_id' => $described->id,
+                'relation_type' => QualityItemDocument::RELATION_TYPE_EVIDENCE,
+                'title' => $title,
+            ]);
+        }
+        $bare = $this->control($customer);
+
+        // Another customer's evidence never counts towards this one's control.
+        $other = $this->customer();
+        QualityItemDocument::query()->create([
+            'customer_id' => $other->id,
+            'quality_item_id' => $this->control($other)->id,
+            'relation_type' => QualityItemDocument::RELATION_TYPE_EVIDENCE,
+            'title' => 'Annen kunde',
+        ]);
+
+        foreach (['overview', 'controls'] as $tab) {
+            $register = $this->actingAs($reader)->get("/app/quality?tab={$tab}")
+                ->assertOk()->viewData('page')['props']['control_register'];
+
+            $this->assertSame('Tilgangene stemmer med rollene', $register[$described->id]['criterion'], $tab);
+            $this->assertSame('IT-sjef', $register[$described->id]['responsibility'], $tab);
+            $this->assertSame(QualityControlDetail::FREQUENCY_QUARTERLY, $register[$described->id]['frequency'], $tab);
+            $this->assertSame('Stikkprøve', $register[$described->id]['method'], $tab);
+            $this->assertSame(2, $register[$described->id]['evidence_count'], $tab);
+
+            $this->assertNull($register[$bare->id]['responsibility'], $tab);
+            $this->assertNull($register[$bare->id]['frequency'], $tab);
+            $this->assertSame(0, $register[$bare->id]['evidence_count'], $tab);
+            $this->assertCount(2, $register, $tab);
+        }
+
+        // Oversikt carries no generic relation editor, so it ships no relation data either.
+        $overview = $this->actingAs($reader)->get('/app/quality')->viewData('page')['props'];
+        foreach (['relations', 'relation_types', 'relation_item_options'] as $prop) {
+            $this->assertArrayNotHasKey($prop, $overview);
+        }
+
+        // Prosesser lists no controls, so it is not read there.
+        $this->assertSame([], (array) $this->actingAs($reader)->get('/app/quality?tab=processes')
+            ->viewData('page')['props']['control_register']);
     }
 
     public function test_a_control_page_lists_the_activities_it_is_used_in_and_the_flow_opens_on_one(): void
@@ -559,7 +619,7 @@ class QualityActivityControlTest extends TestCase
         ]);
 
         CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'quality'],
+            ['customer_id' => $customer->id, 'package_key' => 'basis'],
             ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
         );
 
