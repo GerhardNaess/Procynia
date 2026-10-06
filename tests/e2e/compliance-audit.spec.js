@@ -92,7 +92,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     // 4. Start revisjon.
     await page.getByTestId('compliance-audit-actions').getByRole('button', { name: 'Start revisjon' }).click();
     await page.getByTestId('compliance-audit-start').getByRole('button', { name: 'Start revisjon' }).click();
-    await expect(page.getByText('Revisjonen er startet.')).toBeVisible();
+    await expect(page.getByText('Revisjonen er startet.', { exact: true })).toBeVisible();
     await expect(page.getByTestId('compliance-audit-status')).toHaveText('Under arbeid');
 
     // 5. Skriv konklusjon — the type is no longer offered once the audit has started.

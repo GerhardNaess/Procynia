@@ -2,8 +2,10 @@
 
 namespace Tests\Support;
 
+use App\Models\BusinessArea;
 use App\Models\ComplianceAssessment;
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditProcess;
 use App\Models\ComplianceAuditRequirement;
 use App\Models\ComplianceAuditStatusChange;
@@ -13,6 +15,7 @@ use App\Models\ComplianceRequirementProcess;
 use App\Models\ComplianceRequirementStatusChange;
 use App\Models\ComplianceSource;
 use App\Models\CustomerRole;
+use App\Models\ImprovementCase;
 use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
@@ -41,10 +44,14 @@ use Illuminate\Support\Facades\DB;
  * Revisjoner follow the same rule: an audit is the run's when its title carries the marker. They
  * are removed before the requirements, since a requirement in an audit's scope cannot be deleted.
  *
- * Status history (requirements and audits) and compliance assessments are append-only, and the
- * database refuses to delete them while the customer exists. Cleanup is the one place that must
- * remove them anyway, so it switches the three history triggers off for its own transaction only —
- * a test-only step, never something the product can do.
+ * Revisjonsfunn go with their audit. The fagområder and the Avvik og forbedringer cases a finding
+ * spec hands off to carry the marker too — a case's title starts as its finding's — and are removed
+ * after the audits, since a case a finding points at cannot be deleted while it does.
+ *
+ * Status history (requirements and audits), compliance assessments and handed-off findings are
+ * frozen, and the database refuses to delete them while the customer exists. Cleanup is the one
+ * place that must remove them anyway, so it switches those triggers off for its own transaction
+ * only — a test-only step, never something the product can do.
  */
 class ComplianceE2EFixture
 {
@@ -431,6 +438,153 @@ class ComplianceE2EFixture
     }
 
     /**
+     * For the Funn journey: a fresh person who may run audits and read Kvalitet, and register cases
+     * in one fagområde of Avvik og forbedringer; a requirement, a Kvalitet process and a control to
+     * link. The spec creates the audit and the finding itself, through the pages.
+     *
+     * @return array{name: string, email: string, requirement_label: string, requirement_title: string, process_title: string, control_title: string, area_name: string}
+     */
+    public static function seedFindingJourney(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Revisor'), 'funnrevisor');
+            self::role($customerId, $name('Revisor med Kvalitet'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_AUDIT,
+                CustomerPermissionCatalog::QUALITY_VIEW,
+            ], $person);
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Revisjonsoppfølging')]);
+            self::areaRole($customerId, $name('Saksbehandler'), [CustomerPermissionCatalog::IMPROVEMENT_VIEW, CustomerPermissionCatalog::IMPROVEMENT_EDIT], $area, $person);
+
+            $source = ComplianceSource::query()->create([
+                'customer_id' => $customerId,
+                'name' => $name('ISO 27001'),
+                'version' => '2022',
+                'kind' => ComplianceSource::KIND_STANDARD,
+            ]);
+            $requirement = ComplianceRequirement::query()->create([
+                'customer_id' => $customerId,
+                'source_id' => $source->id,
+                'reference' => 'A.5.18',
+                'title' => $name('Tilgangsrettigheter'),
+                'requirement_text' => 'Registrert av E2E-fixturen.',
+                'owner_user_id' => $person->id,
+            ]);
+            $process = QualityItem::query()->create([
+                'customer_id' => $customerId,
+                'quality_type' => QualityItem::TYPE_PROCESS,
+                'title' => $name('Brukeradministrasjon'),
+                'status' => QualityItem::STATUS_ACTIVE,
+            ]);
+            $control = QualityItem::query()->create([
+                'customer_id' => $customerId,
+                'quality_type' => QualityItem::TYPE_CONTROL,
+                'title' => $name('Kvartalsvis tilgangsgjennomgang'),
+                'status' => QualityItem::STATUS_ACTIVE,
+            ]);
+
+            return [
+                'name' => $person->name,
+                'email' => $person->email,
+                'requirement_label' => $requirement->reference.' '.$requirement->title,
+                'requirement_title' => $requirement->title,
+                'process_title' => $process->title,
+                'control_title' => $control->title,
+                'area_name' => $area->name,
+            ];
+        });
+    }
+
+    /**
+     * For the Funn access spec: a fresh person who may run audits but only *read* cases in one
+     * fagområde, and an audit in progress with two findings — an avvik not yet followed up, and one
+     * already handed off to a case in a fagområde the person cannot reach.
+     *
+     * @return array{email: string, audit_id: int, audit_title: string, finding_id: int, finding_title: string, handed_off_title: string, area_id: int, hidden_case_id: int, hidden_case_title: string}
+     */
+    public static function seedFindingAccess(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Revisor uten saker'), 'funnleser');
+            self::role($customerId, $name('Revisor'), [CustomerPermissionCatalog::COMPLIANCE_VIEW, CustomerPermissionCatalog::COMPLIANCE_AUDIT], $person);
+            $readable = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Lesbart område')]);
+            self::areaRole($customerId, $name('Saksleser'), [CustomerPermissionCatalog::IMPROVEMENT_VIEW], $readable, $person);
+            $hidden = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Skjult område')]);
+
+            $audit = ComplianceAudit::query()->create([
+                'customer_id' => $customerId,
+                'title' => $name('Leverandørrevisjon'),
+                'audit_type' => ComplianceAudit::TYPE_INTERNAL,
+                'responsible_user_id' => $person->id,
+                'planned_start_date' => now()->toDateString(),
+                'planned_end_date' => now()->addWeek()->toDateString(),
+                'scope_description' => 'Oppfølging av leverandøravtaler.',
+            ]);
+            ComplianceAuditStatusChange::query()->create([
+                'customer_id' => $customerId,
+                'audit_id' => $audit->id,
+                'from_status' => ComplianceAudit::STATUS_PLANNED,
+                'to_status' => ComplianceAudit::STATUS_IN_PROGRESS,
+                'changed_by_user_id' => $person->id,
+                'changed_at' => now(),
+            ]);
+            $audit->forceFill(['status' => ComplianceAudit::STATUS_IN_PROGRESS])->save();
+
+            $finding = fn (string $title) => ComplianceAuditFinding::query()->create([
+                'customer_id' => $customerId,
+                'audit_id' => $audit->id,
+                'finding_type' => ComplianceAuditFinding::TYPE_NONCONFORMITY,
+                'title' => $title,
+                'description' => 'Registrert av E2E-fixturen.',
+            ]);
+            $open = $finding($name('Databehandleravtale mangler'));
+            $handedOff = $finding($name('Leverandør uten risikovurdering'));
+            $hiddenCase = ImprovementCase::query()->create([
+                'customer_id' => $customerId,
+                'business_area_id' => $hidden->id,
+                'type' => ImprovementCase::TYPE_DEVIATION,
+                'title' => $name('Skjult sakstittel'),
+                'description' => 'Registrert av E2E-fixturen.',
+            ]);
+            $handedOff->forceFill(['improvement_case_id' => $hiddenCase->id, 'handed_off_at' => now(), 'handed_off_by_user_id' => $person->id])->save();
+
+            return [
+                'email' => $person->email,
+                'audit_id' => (int) $audit->id,
+                'audit_title' => $audit->title,
+                'finding_id' => (int) $open->id,
+                'finding_title' => $open->title,
+                'handed_off_title' => $handedOff->title,
+                'area_id' => (int) $readable->id,
+                'hidden_case_id' => (int) $hiddenCase->id,
+                'hidden_case_title' => $hiddenCase->title,
+            ];
+        });
+    }
+
+    /**
+     * Whether the run's findings were handed off, and how many cases the run has.
+     *
+     * @return array{handed_off: int, cases: int}
+     */
+    public static function findingState(string $suffix): array
+    {
+        $customerId = self::customerId();
+        $pattern = self::pattern($suffix);
+
+        return [
+            'handed_off' => ComplianceAuditFinding::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->whereNotNull('improvement_case_id')->count(),
+            'cases' => ImprovementCase::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->count(),
+        ];
+    }
+
+    /**
      * The former owner leaves: their account is deleted, and the requirements they owned are left
      * without an owner by the foreign key, the way it happens in the product.
      */
@@ -498,7 +652,7 @@ class ComplianceE2EFixture
     /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, audits: int, audit_status_changes: int, audit_requirements: int, audit_processes: int, quality_items: int, roles: int, users: int}
+     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, audits: int, audit_status_changes: int, audit_requirements: int, audit_processes: int, audit_findings: int, improvement_cases: int, business_areas: int, quality_items: int, roles: int, users: int}
      */
     public static function remaining(string $suffix): array
     {
@@ -521,6 +675,9 @@ class ComplianceE2EFixture
             'audit_status_changes' => ComplianceAuditStatusChange::query()->whereIn('audit_id', $auditIds)->count(),
             'audit_requirements' => ComplianceAuditRequirement::query()->whereIn('audit_id', $auditIds)->orWhereIn('requirement_id', $requirementIds)->count(),
             'audit_processes' => ComplianceAuditProcess::query()->whereIn('audit_id', $auditIds)->count(),
+            'audit_findings' => ComplianceAuditFinding::query()->whereIn('audit_id', $auditIds)->count(),
+            'improvement_cases' => ImprovementCase::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->count(),
+            'business_areas' => BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'quality_items' => QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->count(),
             'roles' => CustomerRole::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'users' => self::runUsers($customerId, $pattern)->count(),
@@ -547,10 +704,18 @@ class ComplianceE2EFixture
             DB::statement('ALTER TABLE compliance_requirement_status_changes DISABLE TRIGGER compliance_requirement_status_changes_immutable');
             DB::statement('ALTER TABLE compliance_assessments DISABLE TRIGGER compliance_assessments_immutable');
             DB::statement('ALTER TABLE compliance_audit_status_changes DISABLE TRIGGER compliance_audit_status_changes_immutable');
+            DB::statement('ALTER TABLE compliance_audit_findings DISABLE TRIGGER compliance_audit_findings_handed_off_immutable');
 
-            // The run's audits first: their history and scope go with them through the cascade, and a
-            // requirement in an audit's scope could not be deleted otherwise.
+            // The run's audits first: their history, scope and findings go with them through the
+            // cascade, and a requirement in an audit's scope could not be deleted otherwise.
             $sweepOnly(ComplianceAudit::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
+
+            // The cases the run's findings were handed off to — named after the finding, or in one of
+            // the run's fagområder. No finding points at them any more.
+            $areaIds = $sweepOnly(BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->pluck('id');
+            $sweepOnly(ImprovementCase::query()->where('customer_id', $customerId)
+                ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('business_area_id', $areaIds)))
+                ->delete();
 
             // A requirement is the run's when its title carries the marker, or when it sits under one
             // of the run's sources — a spec may retitle it, but not move it out of a source no one
@@ -562,6 +727,7 @@ class ComplianceE2EFixture
             DB::statement('ALTER TABLE compliance_requirement_status_changes ENABLE TRIGGER compliance_requirement_status_changes_immutable');
             DB::statement('ALTER TABLE compliance_assessments ENABLE TRIGGER compliance_assessments_immutable');
             DB::statement('ALTER TABLE compliance_audit_status_changes ENABLE TRIGGER compliance_audit_status_changes_immutable');
+            DB::statement('ALTER TABLE compliance_audit_findings ENABLE TRIGGER compliance_audit_findings_handed_off_immutable');
 
             // The run's Kvalitet items; details, evidence and any remaining links cascade.
             $sweepOnly(QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern))->delete();
@@ -574,6 +740,11 @@ class ComplianceE2EFixture
 
             // People the run seeded carry the marker in both name and address; the shared E2E users never do.
             $sweepOnly(self::runUsers($customerId, $pattern))->delete();
+
+            // An area still holding content the run did not create stays.
+            BusinessArea::query()->whereIn('id', $areaIds)->get()
+                ->reject(fn (BusinessArea $area): bool => $area->isInUse())
+                ->each(fn (BusinessArea $area) => $area->delete());
         });
     }
 
@@ -642,6 +813,19 @@ class ComplianceE2EFixture
         $role = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name, 'is_active' => true]);
         $role->syncPermissions($permissionKeys);
         $holder->customerRoles()->attach($role->id, ['customer_id' => $customerId]);
+
+        return $role;
+    }
+
+    /**
+     * A role whose permissions reach one fagområde — the shape Avvik og forbedringer needs.
+     *
+     * @param  list<string>  $permissionKeys
+     */
+    private static function areaRole(int $customerId, string $name, array $permissionKeys, BusinessArea $area, User $holder): CustomerRole
+    {
+        $role = self::role($customerId, $name, $permissionKeys, $holder);
+        $role->syncBusinessAreas(false, [$area->id]);
 
         return $role;
     }
