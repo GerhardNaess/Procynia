@@ -261,7 +261,7 @@ describe('Avvik og forbedringer is on the rail once it has pages', () => {
  * it, so what these guard is that it can never show more than the four modules already would.
  */
 describe('Styring groups the governance modules, and only the ones the person can open', () => {
-    const ALL_MODULES = ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'audit_compliance'];
+    const ALL_MODULES = ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
     const governance = (activeModules, permissions) => railEntries(activeModules, permissions)
         .entries.find((entry) => entry.key === 'governance');
     const topLevel = (activeModules, permissions) => railEntries(activeModules, permissions)

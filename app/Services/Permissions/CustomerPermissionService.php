@@ -19,6 +19,10 @@ use Illuminate\Support\Collection;
  * System Owner holds the whole catalogue unconditionally, mirroring Customer::roleHasPermission().
  * That is what makes the administration surface impossible to lock yourself out of: the person who
  * edits roles does not depend on a role to keep editing them.
+ *
+ * The one exception is the explicit-grant domains (CustomerPermissionCatalog::explicitGrantDomains()):
+ * their keys reach System Owner only through a role, exactly as for anyone else. Nothing about the
+ * administration surface depends on them, so the lock-out argument above does not apply.
  */
 class CustomerPermissionService
 {
@@ -67,11 +71,18 @@ class CustomerPermissionService
      */
     public function effectivePermissions(User $user): array
     {
-        if ($user->isSystemOwner()) {
-            return CustomerPermissionCatalog::all();
+        if (! $user->isSystemOwner()) {
+            return $this->permissionsFromRoles($user);
         }
 
-        return $this->permissionsFromRoles($user);
+        $fromRoles = $this->permissionsFromRoles($user);
+
+        // In catalogue order: the implicit grant minus the explicit-grant domains, plus whatever of
+        // those the System Owner's own roles give them.
+        return array_values(array_filter(
+            CustomerPermissionCatalog::all(),
+            fn (string $key): bool => ! CustomerPermissionCatalog::requiresExplicitGrant($key) || in_array($key, $fromRoles, true),
+        ));
     }
 
     public function has(User $user, string $permissionKey): bool
@@ -80,7 +91,7 @@ class CustomerPermissionService
             return false;
         }
 
-        if ($user->isSystemOwner()) {
+        if ($user->isSystemOwner() && ! CustomerPermissionCatalog::requiresExplicitGrant($permissionKey)) {
             return true;
         }
 

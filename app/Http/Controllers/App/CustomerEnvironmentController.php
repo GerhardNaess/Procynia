@@ -216,6 +216,8 @@ class CustomerEnvironmentController extends Controller
             // The domains whose rights are scoped by fagområde, so the page shows the Fagområder
             // column there and nowhere else. Kvalitet and Wiki are not scoped (yet).
             'area_scoped_domains' => CustomerPermissionCatalog::areaScopedDomains(),
+            // The domains System Owner reaches only through a role of their own, so the page can say so.
+            'explicit_grant_domains' => CustomerPermissionCatalog::explicitGrantDomains(),
         ];
     }
 

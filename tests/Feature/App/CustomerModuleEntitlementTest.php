@@ -63,7 +63,7 @@ class CustomerModuleEntitlementTest extends TestCase
         // both are reached through Kvalitet and GRC.
         $this->assertSame(['quality', 'objectives', 'improvements'], $service->modulesForPackage('quality'));
         $this->assertSame(
-            ['quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
             $service->modulesForPackage('grc'),
             'GRC is the compound package and must carry all five modules.'
         );
@@ -87,7 +87,7 @@ class CustomerModuleEntitlementTest extends TestCase
 
         // The mapping is resolved at read time, so GRC gaining supplier/contracts later needs no
         // change to anyone's stored entitlement.
-        config()->set('procynia_modules.packages.grc.modules', ['quality', 'risk', 'audit_compliance', 'supplier', 'contracts']);
+        config()->set('procynia_modules.packages.grc.modules', ['quality', 'risk', 'compliance', 'supplier', 'contracts']);
 
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
@@ -119,7 +119,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
         $this->assertSame(
-            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
+            [ModuleEntitlementService::MODULE_WIKI_CORE, 'quality', 'risk', 'objectives', 'improvements', 'compliance'],
             $modules,
         );
     }
@@ -307,7 +307,7 @@ class CustomerModuleEntitlementTest extends TestCase
 
         $this->assertTrue($customer->hasModule('quality'));
         $this->assertTrue($customer->hasModule('risk'));
-        $this->assertTrue($customer->hasModule('audit_compliance'));
+        $this->assertTrue($customer->hasModule('compliance'));
     }
 
     public function test_ordering_quality_opens_the_module_on_the_next_request(): void

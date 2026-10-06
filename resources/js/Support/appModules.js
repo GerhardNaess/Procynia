@@ -12,10 +12,9 @@
  * is a fact about the customer — it comes from the backend (`entitlements.modules`) and is never
  * decided here. A module is reachable only when it is both built and entitled.
  *
- * Keeping them apart is what makes the GRC case behave. GRC grants `quality`, `risk` and
- * `audit_compliance`; only `quality` and `risk` have pages, so buying GRC lights up Kvalitet and
- * Risiko (and Mål og KPI, which it also carries) and leaves Revisjon & Compliance exactly as planned as it was. An entitlement can never conjure a
- * destination that does not exist.
+ * Keeping them apart is what makes a package behave. A package may carry a module before its pages
+ * exist; such an entry stays dimmed as planned whatever the customer has bought. An entitlement can
+ * never conjure a destination that does not exist.
  *
  * `module: null` means the entry is not something a customer buys — Hjem is the app itself, and
  * the unbuilt entries have no technical module assigned yet.
@@ -114,7 +113,7 @@ export const APP_MODULES = [
     { key: 'suppliers', built: false, module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
-    { key: 'compliance', built: false, module: 'audit_compliance', label: (m) => m.compliance ?? 'Revisjon & Compliance' },
+    { key: 'compliance', built: false, module: 'compliance', label: (m) => m.compliance ?? 'Etterlevelse og revisjon' },
     { key: 'services', built: false, module: null, label: (m) => m.services ?? 'Tjenester & SLA' },
     { key: 'projects', built: false, module: null, label: (m) => m.projects ?? 'Prosjekter' },
     { key: 'competence', built: false, module: null, label: (m) => m.competence ?? 'Kompetanse' },

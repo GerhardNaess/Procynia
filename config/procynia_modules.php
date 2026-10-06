@@ -32,7 +32,8 @@ return [
         // Avvik og forbedringer. Classic quality management, so Kvalitet carries it — and GRC,
         // which carries Kvalitet. Its own module so the rail and the route guard name it directly.
         'improvements' => ['sort_order' => 37],
-        'audit_compliance' => ['sort_order' => 40],
+        // Etterlevelse og revisjon. Krav (and later revisjoner) — sold with GRC only.
+        'compliance' => ['sort_order' => 40],
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
     ],
@@ -67,7 +68,7 @@ return [
             'mandatory' => false,
             'orderable' => true,
             'sort_order' => 30,
-            'modules' => ['quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
+            'modules' => ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
         ],
 
     ],
@@ -95,6 +96,7 @@ return [
         'app.risk.' => 'risk',
         'app.objectives.' => 'objectives',
         'app.improvements.' => 'improvements',
+        'app.compliance.' => 'compliance',
     ],
 
 ];

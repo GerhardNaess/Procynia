@@ -175,14 +175,112 @@ class CustomerRolePermissionTest extends TestCase
             ->post('/app/customer-environment/roles', ['name' => 'Selvbetjent', 'permissions' => []])
             ->assertForbidden();
 
-        // System Owner holds the catalogue unconditionally, so no combination of ticks below can
-        // take away the authority that edits them.
+        // System Owner holds the catalogue unconditionally — apart from the explicit-grant domains,
+        // which nothing in administration depends on — so no combination of ticks below can take
+        // away the authority that edits them.
         $role = $this->createRole($customer, 'Tom rolle', []);
         $owner->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
 
         $service = app(CustomerPermissionService::class);
-        $this->assertSame(CustomerPermissionCatalog::all(), $service->effectivePermissions($owner->fresh()));
+        $this->assertSame(
+            array_values(array_filter(CustomerPermissionCatalog::all(), fn (string $key): bool => ! CustomerPermissionCatalog::requiresExplicitGrant($key))),
+            $service->effectivePermissions($owner->fresh()),
+        );
         $this->assertTrue($service->has($owner->fresh(), CustomerPermissionCatalog::QUALITY_DELETE));
+    }
+
+    public function test_the_catalogue_names_compliance_as_its_only_explicit_grant_domain(): void
+    {
+        $this->assertSame(
+            ['compliance.view', 'compliance.edit', 'compliance.assess', 'compliance.audit', 'compliance.delete'],
+            CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE],
+        );
+        $this->assertSame([CustomerPermissionCatalog::DOMAIN_COMPLIANCE], CustomerPermissionCatalog::explicitGrantDomains());
+
+        foreach (CustomerPermissionCatalog::all() as $key) {
+            $this->assertSame(str_starts_with($key, 'compliance.'), CustomerPermissionCatalog::requiresExplicitGrant($key), $key);
+        }
+
+        // Customer-wide in v1: no fagområde scopes it.
+        foreach (CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE] as $key) {
+            $this->assertFalse(CustomerPermissionCatalog::isAreaScoped($key), $key);
+        }
+    }
+
+    public function test_system_owner_keeps_every_key_outside_the_explicit_grant_domains_without_a_role(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $service = app(CustomerPermissionService::class);
+
+        foreach (CustomerPermissionCatalog::domains() as $domain => $keys) {
+            if (in_array($domain, CustomerPermissionCatalog::explicitGrantDomains(), true)) {
+                continue;
+            }
+
+            foreach ($keys as $key) {
+                $this->assertTrue($service->has($owner, $key), $key);
+                $this->assertContains($key, $service->effectivePermissions($owner), $key);
+            }
+        }
+    }
+
+    public function test_system_owner_holds_no_compliance_key_without_a_role_of_their_own(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $service = app(CustomerPermissionService::class);
+
+        foreach (CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE] as $key) {
+            $this->assertFalse($service->has($owner, $key), $key);
+            $this->assertNotContains($key, $service->effectivePermissions($owner), $key);
+        }
+
+        $this->assertFalse($service->hasAny($owner, CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE]));
+
+        // An inactive role gives System Owner no more than it gives anyone else.
+        $role = $this->createRole($customer, 'Etterlevelse (inaktiv)', [CustomerPermissionCatalog::COMPLIANCE_VIEW]);
+        $role->forceFill(['is_active' => false])->save();
+        $owner->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
+
+        $this->assertFalse($service->has($owner->fresh(), CustomerPermissionCatalog::COMPLIANCE_VIEW));
+    }
+
+    public function test_system_owner_holds_exactly_the_compliance_keys_their_own_role_grants(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $owner = $this->systemOwner($customer);
+        $service = app(CustomerPermissionService::class);
+
+        $role = $this->createRole($customer, 'Etterlevelse', [CustomerPermissionCatalog::COMPLIANCE_VIEW, CustomerPermissionCatalog::COMPLIANCE_EDIT]);
+        $owner->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
+        $owner = $owner->fresh();
+
+        $this->assertTrue($service->has($owner, CustomerPermissionCatalog::COMPLIANCE_VIEW));
+        $this->assertTrue($service->has($owner, CustomerPermissionCatalog::COMPLIANCE_EDIT));
+        $this->assertFalse($service->has($owner, CustomerPermissionCatalog::COMPLIANCE_DELETE));
+        $this->assertFalse($service->has($owner, CustomerPermissionCatalog::COMPLIANCE_ASSESS));
+
+        $effective = $service->effectivePermissions($owner);
+        $this->assertSame(
+            [CustomerPermissionCatalog::COMPLIANCE_VIEW, CustomerPermissionCatalog::COMPLIANCE_EDIT],
+            array_values(array_filter($effective, fn (string $key): bool => str_starts_with($key, 'compliance.'))),
+        );
+        // Still everything else, in catalogue order.
+        $this->assertSame($effective, array_values(array_intersect(CustomerPermissionCatalog::all(), $effective)));
+        $this->assertContains(CustomerPermissionCatalog::QUALITY_DELETE, $effective);
+    }
+
+    public function test_a_role_from_another_customer_gives_system_owner_no_compliance_key(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $other = $this->createCustomer('Annen AS');
+        $owner = $this->systemOwner($customer);
+
+        $foreign = $this->createRole($other, 'Fremmed etterlevelse', [CustomerPermissionCatalog::COMPLIANCE_VIEW]);
+        $owner->customerRoles()->attach($foreign->id, ['customer_id' => $customer->id]);
+
+        $this->assertFalse(app(CustomerPermissionService::class)->has($owner->fresh(), CustomerPermissionCatalog::COMPLIANCE_VIEW));
     }
 
     public function test_unknown_permission_keys_are_rejected_on_write_and_ignored_on_read(): void
