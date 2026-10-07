@@ -4,18 +4,21 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\Supplier;
+use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierLifecycleService;
+use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Support\CustomerContext;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -30,6 +33,9 @@ use Inertia\Response;
  * without supplier.view — before any id is looked at. A supplier of another customer is a 404 like
  * an id that does not exist; a user without supplier.view gets a 403 on everything. System Owner is
  * no exception — supplier is an explicit-grant domain.
+ *
+ * Leverandørvurderinger are shown here and registered by SupplierAssessmentController
+ * (supplier.assess).
  *
  * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
  * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
@@ -52,6 +58,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierAccessService $access,
         private readonly SupplierLifecycleService $lifecycle,
         private readonly SupplierCriticalityService $criticality,
+        private readonly SupplierReviewSchedule $schedule,
     ) {}
 
     public function index(Request $request): Response
@@ -89,6 +96,12 @@ class SupplierManagementController extends Controller
         }
 
         $suppliers = $query
+            ->select('suppliers.*')
+            // The day of the current assessment, for Neste vurdering; never more than that.
+            ->addSelect(['latest_assessed_on' => SupplierAssessment::query()
+                ->selectRaw('max(assessed_on)')
+                ->whereColumn('supplier_assessments.supplier_id', 'suppliers.id')
+                ->whereColumn('supplier_assessments.customer_id', 'suppliers.customer_id')])
             ->with('owner:id,name')
             ->orderByRaw('lower(suppliers.name)')
             ->orderBy('suppliers.id')
@@ -129,10 +142,12 @@ class SupplierManagementController extends Controller
         // Reached through visibleSuppliers(); the history carries no access of its own.
         $changes = $supplier->statusChanges()->with('changedBy:id,name')->get();
         $criticalityChanges = $supplier->criticalityChanges()->with('changedBy:id,name')->get();
+        $assessments = $supplier->assessments()->with('assessedBy:id,name')->get();
+        $canAssess = $this->access->canAssess($user);
         $canDelete = $this->access->canDelete($user);
 
         return Inertia::render('App/SupplierManagement/Show', [
-            'supplier' => $this->row($supplier) + [
+            'supplier' => $this->row($supplier, $assessments->first()?->assessed_on?->toDateString()) + [
                 'contact_name' => $supplier->contact_name,
                 'contact_email' => $supplier->contact_email,
                 'contact_phone' => $supplier->contact_phone,
@@ -146,6 +161,17 @@ class SupplierManagementController extends Controller
                 'status' => $changes->last()?->from_status ?? $supplier->status,
             ],
             'criticality' => $this->criticalityPayload($supplier, $criticalityChanges),
+            'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
+                'id' => (int) $assessment->id,
+                'assessed_on' => $assessment->assessed_on?->toDateString(),
+                'assessed_by_name' => $assessment->assessedBy?->name,
+                'ratings' => $assessment->only(SupplierAssessment::CRITERIA),
+                'overall_result' => $assessment->overall_result,
+                'rationale' => $assessment->rationale,
+                'criticality' => $assessment->criticality,
+                'review_interval_months' => $assessment->review_interval_months,
+                'recorded_at' => $assessment->recorded_at?->toIso8601String(),
+            ])->all(),
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,
                 'from_status' => $change->from_status,
@@ -161,6 +187,10 @@ class SupplierManagementController extends Controller
                 'can_end' => $canEdit && $open,
                 'can_reopen' => $canEdit && ! $open,
                 'can_change_criticality' => $canEdit && $open,
+                // Only an active supplier is assessed (plan §4.3).
+                'can_assess' => $canAssess && $supplier->status === Supplier::STATUS_ACTIVE,
+                // Says why Vurder leverandør is missing, for someone who could otherwise assess.
+                'has_assess_right' => $canAssess,
                 'can_delete' => $canDelete && $supplier->isDeletable(),
                 // Says why the delete button is missing, for someone who could otherwise delete.
                 'has_delete_right' => $canDelete,
@@ -168,6 +198,10 @@ class SupplierManagementController extends Controller
             'categories' => Supplier::CATEGORIES,
             'criticalities' => Supplier::CRITICALITIES,
             'review_intervals' => Supplier::REVIEW_INTERVALS,
+            'ratings' => SupplierAssessment::RATINGS,
+            'criteria' => SupplierAssessment::CRITERIA,
+            'results' => SupplierAssessment::RESULTS,
+            'today' => now()->toDateString(),
             'owner_options' => $canEdit && $open ? $this->access->ownerCandidates($user) : [],
         ]);
     }
@@ -407,9 +441,17 @@ class SupplierManagementController extends Controller
         ], SupplierValidationMessages::messages(), SupplierValidationMessages::attributes())['reason'];
     }
 
-    /** @return array<string, mixed> */
-    private function row(Supplier $supplier): array
+    /**
+     * One supplier as the register and the page show it. Neste vurdering is the current
+     * assessment's day plus the supplier's current interval, computed here and never stored.
+     *
+     * @return array<string, mixed>
+     */
+    private function row(Supplier $supplier, ?string $latestAssessedOn = null): array
     {
+        $latestAssessedOn ??= $supplier->getAttribute('latest_assessed_on');
+        $next = $this->schedule->nextReviewOn($supplier->review_interval_months, $latestAssessedOn !== null ? Carbon::parse($latestAssessedOn) : null);
+
         return [
             'id' => (int) $supplier->id,
             'name' => $supplier->name,
@@ -418,6 +460,9 @@ class SupplierManagementController extends Controller
             'deliverable_description' => $supplier->deliverable_description,
             'status' => $supplier->status,
             'criticality' => $supplier->criticality,
+            'review_interval_months' => $supplier->review_interval_months,
+            'last_assessed_on' => $latestAssessedOn !== null ? Carbon::parse($latestAssessedOn)->toDateString() : null,
+            'next_review_on' => $next?->toDateString(),
             'owner_user_id' => $supplier->owner_user_id !== null ? (int) $supplier->owner_user_id : null,
             'owner_name' => $supplier->owner?->name,
             'url' => route('app.supplier-management.show', ['supplierId' => $supplier->id]),

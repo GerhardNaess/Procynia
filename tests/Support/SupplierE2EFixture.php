@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Supplier;
+use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
@@ -25,9 +26,9 @@ use Illuminate\Support\Facades\DB;
  * nothing the run does can touch the shared E2E data, and the shared users are never given a
  * supplier role.
  *
- * Cleanup removes the run's customer; its suppliers and their status and criticality history go
- * with it. The history triggers allow that one delete (the customer going), so no trigger is
- * switched off.
+ * Cleanup removes the run's customer; its suppliers, their status and criticality history and
+ * their assessments go with it. The history triggers allow that one delete (the customer going), so
+ * no trigger is switched off.
  */
 class SupplierE2EFixture
 {
@@ -41,7 +42,7 @@ class SupplierE2EFixture
     private const SWEEP_MIN_AGE_MINUTES = 10;
 
     /**
-     * The run's GRC customer with two people: a supplier manager (view, edit, delete) who works
+     * The run's GRC customer with two people: a supplier manager (view, edit, assess, delete) who works
      * through the pages, and a colleague with supplier.view who can be intern ansvarlig. The spec
      * registers every supplier itself.
      *
@@ -71,6 +72,7 @@ class SupplierE2EFixture
             self::role($customer, $name('Leverandørforvalter'), [
                 CustomerPermissionCatalog::SUPPLIER_VIEW,
                 CustomerPermissionCatalog::SUPPLIER_EDIT,
+                CustomerPermissionCatalog::SUPPLIER_ASSESS,
                 CustomerPermissionCatalog::SUPPLIER_DELETE,
             ], $manager);
 
@@ -89,6 +91,17 @@ class SupplierE2EFixture
      */
     public static function unclassifiedSupplier(string $suffix, string $name): array
     {
+        return self::activeSupplier($suffix, $name);
+    }
+
+    /**
+     * An active supplier of the run's customer, owned by the supplier manager, classified with the
+     * given level and interval (Nei to all four questions) — or not classified without a level.
+     *
+     * @return array{id: int, name: string}
+     */
+    public static function activeSupplier(string $suffix, string $name, ?string $criticality = null, ?int $intervalMonths = null): array
+    {
         $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
         $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
 
@@ -102,12 +115,18 @@ class SupplierE2EFixture
             'updated_by' => $manager->id,
         ]);
         $supplier->status = Supplier::STATUS_ACTIVE;
+
+        if ($criticality !== null) {
+            $supplier->forceFill(['criticality' => $criticality, 'review_interval_months' => $intervalMonths]
+                + array_fill_keys(Supplier::CRITICALITY_QUESTIONS, false));
+        }
+
         $supplier->save();
 
         return ['id' => (int) $supplier->id, 'name' => $supplier->name];
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, roles: int, users: int} */
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -117,6 +136,7 @@ class SupplierE2EFixture
             'suppliers' => Supplier::query()->whereIn('customer_id', $customerIds)->count(),
             'status_changes' => SupplierStatusChange::query()->whereIn('customer_id', $customerIds)->count(),
             'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lev.'.strtolower($suffix).'.%')->count(),
         ];
@@ -137,7 +157,7 @@ class SupplierE2EFixture
                 CustomerRole::query()->where('customer_id', $customer->id)->delete();
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
-                // Suppliers and their status and criticality history go with the customer.
+                // Suppliers, their history and their assessments go with the customer.
                 $customer->delete();
             });
         }

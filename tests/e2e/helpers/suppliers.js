@@ -37,7 +37,7 @@ export function cleanUpSupplierE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await supplierFixture(`remaining('${suffix}')`)).toEqual({
-            customers: 0, suppliers: 0, status_changes: 0, criticality_changes: 0, roles: 0, users: 0,
+            customers: 0, suppliers: 0, status_changes: 0, criticality_changes: 0, assessments: 0, roles: 0, users: 0,
         });
     });
 }
@@ -54,4 +54,19 @@ export async function answerCriticality(scope, level, answers = []) {
     }
 
     await scope.getByTestId('criticality-level').getByRole('radio', { name: new RegExp(`^${level}`) }).check();
+}
+
+/**
+ * Fills Vurder leverandør: a rating per criterion (Bra, Akseptabelt, Svakt or Ikke relevant, in the
+ * plan's order), the overall result, and the begrunnelse. The date stays at today.
+ */
+export async function fillAssessment(scope, ratings, result, rationale) {
+    const criteria = ['quality_rating', 'delivery_rating', 'security_rating', 'compliance_rating'];
+
+    for (const [index, criterion] of criteria.entries()) {
+        await scope.getByTestId(`assessment-criterion-${criterion}`).getByRole('radio', { name: ratings[index], exact: true }).check();
+    }
+
+    await scope.getByTestId('assessment-result').getByRole('radio', { name: result, exact: true }).check();
+    await scope.locator('#supplier-assessment-rationale').fill(rationale);
 }

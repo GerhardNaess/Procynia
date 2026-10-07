@@ -4,19 +4,26 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SUPPLIER_HELP_PAGES, supplierHelp } from './supplierHelp.js';
 import {
+    ASSESSMENT_CRITERIA,
     CRITICALITY_TONES,
+    RESULT_TONES,
     SUPPLIER_STATUS_TONES,
     categoryLabel,
     chooseCriticality,
     countLabel,
+    criterionLabel,
     criticalityLabel,
     describeCriticalityChange,
     describeCriticalityRegistration,
     describeHistoryEntry,
     describeRegistration,
+    emptyAssessment,
     emptyCriticality,
     intervalLabel,
     intervalRequired,
+    nextReviewText,
+    ratingLabel,
+    resultLabel,
     statusLabel,
 } from './supplierManagement.js';
 
@@ -100,6 +107,33 @@ describe('Criticality is chosen, never computed', () => {
             describeCriticalityRegistration({ classification: { criticality: 'important' }, by_name: null }),
             'Vurdert som Viktig ved registrering av en tidligere bruker',
         );
+    });
+});
+
+describe('Supplier assessment', () => {
+    test('the four criteria, the ratings and the results read as in the plan', () => {
+        assert.deepEqual(ASSESSMENT_CRITERIA.map((criterion) => criterionLabel(criterion)), [
+            'Kvalitet på leveransen', 'Leveringspresisjon og respons', 'Informasjonssikkerhet og personvern', 'Etterlevelse av avtale og krav',
+        ]);
+        assert.deepEqual(['good', 'acceptable', 'poor', 'not_relevant'].map((rating) => ratingLabel(rating)), ['Bra', 'Akseptabelt', 'Svakt', 'Ikke relevant']);
+        assert.deepEqual(Object.keys(RESULT_TONES).map((result) => resultLabel(result)), ['Tilfredsstillende', 'Delvis tilfredsstillende', 'Ikke tilfredsstillende']);
+        assert.equal(new Set(Object.values(RESULT_TONES)).size, 3);
+    });
+
+    test('Neste vurdering is a date, or says why there is none', () => {
+        assert.equal(nextReviewText({ next_review_on: '2027-10-07', last_assessed_on: '2026-10-07' }, {}, (date) => `«${date}»`), '«2027-10-07»');
+        assert.equal(nextReviewText({ next_review_on: null, last_assessed_on: '2026-10-07' }), 'Ingen fast vurdering');
+        assert.equal(nextReviewText({ next_review_on: null, last_assessed_on: null }), 'Ikke vurdert');
+    });
+
+    test('the form starts with nothing chosen, and the criticality in it is context only', () => {
+        assert.deepEqual(emptyAssessment('2026-10-07'), {
+            quality_rating: '', delivery_rating: '', security_rating: '', compliance_rating: '', overall_result: '', rationale: '', assessed_on: '2026-10-07',
+        });
+        const form = source('./SupplierAssessment.jsx');
+        assert.doesNotMatch(form, /setData\('(criticality|review_interval_months)'/);
+        assert.doesNotMatch(form, /CriticalityFields/);
+        assert.match(form, /\[current, \.\.\.earlier\] = assessments/, 'the newest is the current one, the rest the history');
     });
 });
 

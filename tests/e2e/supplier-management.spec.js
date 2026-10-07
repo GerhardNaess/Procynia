@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
 import { DESKTOP, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
-import { SUPPLIER_E2E_PASSWORD, answerCriticality, cleanUpSupplierE2eData, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
+import { SUPPLIER_E2E_PASSWORD, answerCriticality, cleanUpSupplierE2eData, fillAssessment, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
 
 const suffix = supplierE2eSuffix();
 cleanUpSupplierE2eData(suffix);
@@ -228,4 +228,63 @@ test('a supplier is assessed for criticality, reassessed, and the history shows 
     // The register shows the level and filters on it.
     await page.goto(`/app/supplier-management?${new URLSearchParams({ criticality: 'critical' })}`);
     await expect(page.locator('tbody tr', { hasText: supplier.name })).toContainText('Kritisk');
+});
+
+/**
+ * Leverandørvurdering: how a supplier performs now. The rules — supplier.assess, active suppliers
+ * only, immutability, the snapshot, the next-review rule and the delete rule — are PHP's
+ * (SupplierAssessmentTest); this is the journey: an important supplier is assessed, the result and
+ * the next review show, it is assessed again, and the earlier assessment stays in the history — at
+ * desktop and 390 px.
+ */
+test('an active supplier is assessed, reassessed, and the earlier assessment stays in the history', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Lønnsdrift ${suffix} AS', 'important', 24)`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-assessment');
+    await expect(section.getByTestId('assessment-none')).toHaveText('Leverandøren er ikke vurdert ennå.');
+
+    // Vurder leverandør: today's criticality is context, never a field.
+    await section.getByRole('button', { name: 'Vurder leverandør' }).click();
+    const context = section.getByTestId('assessment-criticality-context');
+    await expect(context).toContainText('Viktig');
+    await expect(context).toContainText('Hver 24. måned');
+    await expect(context.locator('input, select')).toHaveCount(0);
+    await fillAssessment(section, ['Bra', 'Akseptabelt', 'Bra', 'Ikke relevant'], 'Tilfredsstillende', 'Leveransene har vært stabile og i avtalt kvalitet.');
+    await expectReadable(page, '20-assessment-form');
+    await section.getByRole('button', { name: 'Lagre vurdering' }).click();
+    await expect(page.getByText('Vurderingen er lagret.', { exact: true })).toBeVisible();
+
+    const current = section.getByTestId('assessment-current');
+    for (const text of ['Tilfredsstillende', person.name, 'Leveringspresisjon og respons', 'Akseptabelt', 'Kritikalitet på tidspunktet: Viktig']) {
+        await expect(current).toContainText(text);
+    }
+    // Neste vurdering: today + 24 months.
+    await expect(section.getByTestId('assessment-next-review')).toContainText(String(new Date().getFullYear() + 2));
+
+    // Vurder på nytt: the new one is current, the first one moves to the history unchanged.
+    await section.getByRole('button', { name: 'Vurder leverandør' }).click();
+    await fillAssessment(section, ['Bra', 'Svakt', 'Bra', 'Akseptabelt'], 'Delvis tilfredsstillende',
+        'Leveransene har vært stabile, men flere supporthenvendelser har overskredet avtalt responstid de siste månedene.');
+    await section.getByRole('button', { name: 'Lagre vurdering' }).click();
+    await expect(page.getByText('Vurderingen er lagret.', { exact: true })).toBeVisible();
+
+    await expect(current).toContainText('Delvis tilfredsstillende');
+    await expect(section.getByTestId('assessment-rationale')).toContainText('overskredet avtalt responstid');
+    const entries = section.getByTestId('assessment-history-entry');
+    await expect(entries).toHaveCount(1);
+    await expect(entries.first()).toContainText(`av ${person.name}`);
+    await expect(entries.first()).toContainText('Samlet vurdering: Tilfredsstillende');
+    await expect(entries.first()).toContainText('Leveransene har vært stabile og i avtalt kvalitet.');
+    await expectReadable(page, '21-assessment-history');
+
+    // The register shows when the supplier is next to be assessed.
+    await page.goto(`/app/supplier-management?${new URLSearchParams({ search: supplier.name })}`);
+    await expect(page.locator('tbody tr', { hasText: supplier.name })).toContainText(String(new Date().getFullYear() + 2));
 });

@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
+import SupplierAssessment from './SupplierAssessment';
 import SupplierCriticality from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import SupplierForm from './SupplierForm';
@@ -38,6 +39,11 @@ export default function SupplierManagementShow() {
         registered = null,
         criticality = null,
         review_intervals: reviewIntervals = [],
+        assessments = [],
+        criteria = [],
+        ratings = [],
+        results = [],
+        today = '',
         status_history: statusHistory = [],
         permissions = {},
         categories = [],
@@ -163,6 +169,18 @@ export default function SupplierManagementShow() {
                     criticality={criticality}
                     canChange={permissions.can_change_criticality ?? false}
                     reviewIntervals={reviewIntervals}
+                    locale={locale}
+                    tr={tr}
+                />
+
+                <SupplierAssessment
+                    supplier={item}
+                    assessments={assessments}
+                    permissions={permissions}
+                    criteria={criteria}
+                    ratings={ratings}
+                    results={results}
+                    today={today}
                     locale={locale}
                     tr={tr}
                 />

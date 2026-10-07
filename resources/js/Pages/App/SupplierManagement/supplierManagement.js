@@ -175,3 +175,78 @@ export function describeCriticalityRegistration(registered, tr = {}) {
         .replace(':level', criticalityLabel(registered.classification.criticality, tr))
         .replace(':name', registered.by_name ?? (tr.unknown_user ?? 'en tidligere bruker'));
 }
+
+/** The four fixed criteria of a supplier assessment, in the order the form asks them. */
+export const ASSESSMENT_CRITERIA = ['quality_rating', 'delivery_rating', 'security_rating', 'compliance_rating'];
+
+/** The badge tone of each overall result; the three differ. */
+export const RESULT_TONES = {
+    satisfactory: 'emerald',
+    partially_satisfactory: 'amber',
+    unsatisfactory: 'rose',
+};
+
+const CRITERION_FALLBACKS = {
+    quality_rating: 'Kvalitet på leveransen',
+    delivery_rating: 'Leveringspresisjon og respons',
+    security_rating: 'Informasjonssikkerhet og personvern',
+    compliance_rating: 'Etterlevelse av avtale og krav',
+};
+
+const RATING_FALLBACKS = {
+    good: 'Bra',
+    acceptable: 'Akseptabelt',
+    poor: 'Svakt',
+    not_relevant: 'Ikke relevant',
+};
+
+const RESULT_FALLBACKS = {
+    satisfactory: 'Tilfredsstillende',
+    partially_satisfactory: 'Delvis tilfredsstillende',
+    unsatisfactory: 'Ikke tilfredsstillende',
+};
+
+/** «Kvalitet på leveransen» … */
+export function criterionLabel(criterion, tr = {}) {
+    return tr.assessment?.criteria?.[criterion] ?? CRITERION_FALLBACKS[criterion] ?? criterion;
+}
+
+/** «Bra», «Akseptabelt», «Svakt», «Ikke relevant». */
+export function ratingLabel(rating, tr = {}) {
+    return tr.assessment?.ratings?.[rating] ?? RATING_FALLBACKS[rating] ?? rating;
+}
+
+/** «Tilfredsstillende», «Delvis tilfredsstillende», «Ikke tilfredsstillende». */
+export function resultLabel(result, tr = {}) {
+    return tr.assessment?.results?.[result] ?? RESULT_FALLBACKS[result] ?? result;
+}
+
+/**
+ * Neste vurdering as the page says it: a date when there is one; otherwise why there is none —
+ * «Ikke vurdert» before the first assessment, «Ingen fast vurdering» without an interval.
+ *
+ * @param {{next_review_on: string|null, last_assessed_on: string|null}} supplier
+ * @param {(date: string) => string} formatDate
+ */
+export function nextReviewText(supplier, tr = {}, formatDate = (date) => date) {
+    if (supplier.next_review_on) {
+        return formatDate(supplier.next_review_on);
+    }
+
+    return supplier.last_assessed_on
+        ? (tr.assessment?.next_review_none_interval ?? 'Ingen fast vurdering')
+        : (tr.assessment?.not_assessed ?? 'Ikke vurdert');
+}
+
+/** The form an assessment starts from: nothing rated, nothing chosen, dated today. */
+export function emptyAssessment(today) {
+    return {
+        quality_rating: '',
+        delivery_rating: '',
+        security_rating: '',
+        compliance_rating: '',
+        overall_result: '',
+        rationale: '',
+        assessed_on: today,
+    };
+}

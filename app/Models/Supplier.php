@@ -170,17 +170,20 @@ class Supplier extends Model
     /**
      * Whether the supplier may be deleted at all, before any permission is considered. Deleting is
      * for a supplier registered by mistake and never used: one that has changed status or
-     * criticality has a history — a real decision was made about it — and is ended instead. The
+     * criticality, or has been assessed, has a history — a real decision was made about it — and
+     * is ended instead. The
      * classification it was registered with is the supplier's own and does not count. The database refuses the delete as well (NO ACTION from every
      * child table).
      *
-     * Each later part of the module that attaches something to a supplier — assessments, documentation, links to risks, requirements and cases — adds its check here,
-     * so the rule stays «completely unused» without changing.
+     * Each later part of the module that attaches something to a supplier — documentation, links
+     * to risks, requirements and cases — adds its check here, so the rule stays «completely
+     * unused» without changing.
      */
     public function isDeletable(): bool
     {
         return ! $this->statusChanges()->exists()
-            && ! $this->criticalityChanges()->exists();
+            && ! $this->criticalityChanges()->exists()
+            && ! $this->assessments()->exists();
     }
 
     public function owner(): BelongsTo
@@ -206,6 +209,14 @@ class Supplier extends Model
     {
         return $this->hasMany(SupplierCriticalityChange::class, 'supplier_id')
             ->orderByDesc('changed_at')
+            ->orderByDesc('id');
+    }
+
+    /** Current first: the latest assessed_on, then the highest id (plan §4.3). */
+    public function assessments(): HasMany
+    {
+        return $this->hasMany(SupplierAssessment::class, 'supplier_id')
+            ->orderByDesc('assessed_on')
             ->orderByDesc('id');
     }
 }

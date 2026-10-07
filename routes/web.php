@@ -33,6 +33,7 @@ use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
+use App\Http\Controllers\App\SupplierAssessmentController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\UserController;
@@ -464,6 +465,8 @@ Route::prefix('app')
             Route::post('/{supplierId}/activate', [SupplierManagementController::class, 'activate'])->whereNumber('supplierId')->name('activate');
             Route::post('/{supplierId}/end', [SupplierManagementController::class, 'end'])->whereNumber('supplierId')->name('end');
             Route::post('/{supplierId}/reopen', [SupplierManagementController::class, 'reopen'])->whereNumber('supplierId')->name('reopen');
+            // Vurder leverandør: a new, immutable supplier assessment (supplier.assess).
+            Route::post('/{supplierId}/assessments', [SupplierAssessmentController::class, 'store'])->whereNumber('supplierId')->name('assessments.store');
             // Vurder / Endre kritikalitet: the only way criticality changes after registration.
             Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
         });

@@ -8,7 +8,8 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles'
 import SupplierForm from './SupplierForm';
 import { supplierHelp } from './supplierHelp';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
-import { SUPPLIER_STATUS_TONES, categoryLabel, countLabel, criticalityLabel, emptyCriticality, statusLabel } from './supplierManagement';
+import { formatLongDate } from '../Improvements/improvementStatus';
+import { SUPPLIER_STATUS_TONES, categoryLabel, countLabel, criticalityLabel, emptyCriticality, nextReviewText, statusLabel } from './supplierManagement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -41,10 +42,12 @@ export default function SupplierManagementIndex() {
         review_intervals: reviewIntervals = [],
         permissions = {},
         owner_options: ownerOptions = [],
+        locale = 'no',
     } = usePage().props;
 
     const tr = translations?.supplier_management ?? {};
     const canEdit = permissions.can_edit ?? false;
+    const nextReview = (item) => nextReviewText(item, tr, (date) => formatLongDate(date, locale));
 
     const [creating, setCreating] = useState(false);
     const [search, setSearch] = useState(filters.search ?? '');
@@ -205,6 +208,8 @@ export default function SupplierManagementIndex() {
                                                 <dd className="min-w-0 break-words text-slate-800">{categoryLabel(item.category, tr)}</dd>
                                                 <dt className="font-semibold text-slate-600">{tr.col_criticality ?? 'Kritikalitet'}</dt>
                                                 <dd className="min-w-0 break-words text-slate-800"><SupplierCriticalityBadge level={item.criticality} tr={tr} /></dd>
+                                                <dt className="font-semibold text-slate-600">{tr.col_next_review ?? 'Neste vurdering'}</dt>
+                                                <dd className="min-w-0 break-words text-slate-800">{nextReview(item)}</dd>
                                                 <dt className="font-semibold text-slate-600">{tr.col_owner ?? 'Intern ansvarlig'}</dt>
                                                 <dd className="min-w-0 break-words text-slate-800"><Owner item={item} tr={tr} /></dd>
                                             </dl>
@@ -221,6 +226,7 @@ export default function SupplierManagementIndex() {
                                                 <th className="px-4 pb-3">{tr.col_criticality ?? 'Kritikalitet'}</th>
                                                 <th className="px-4 pb-3">{tr.col_deliverable ?? 'Leverer'}</th>
                                                 <th className="px-4 pb-3">{tr.col_owner ?? 'Intern ansvarlig'}</th>
+                                                <th className="px-4 pb-3">{tr.col_next_review ?? 'Neste vurdering'}</th>
                                                 <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                             </tr>
                                         </thead>
@@ -235,6 +241,7 @@ export default function SupplierManagementIndex() {
                                                     <td className="px-4 py-3 align-top"><SupplierCriticalityBadge level={item.criticality} tr={tr} /></td>
                                                     <td className="max-w-md px-4 py-3 align-top text-slate-700"><span className="line-clamp-2 break-words">{item.deliverable_description}</span></td>
                                                     <td className="px-4 py-3 align-top text-slate-700"><Owner item={item} tr={tr} /></td>
+                                                    <td className="px-4 py-3 align-top text-slate-700">{nextReview(item)}</td>
                                                     <td className="py-3 pl-4 align-top">
                                                         <StatusBadge tone={SUPPLIER_STATUS_TONES[item.status] ?? 'slate'}>{statusLabel(item.status, tr)}</StatusBadge>
                                                     </td>
