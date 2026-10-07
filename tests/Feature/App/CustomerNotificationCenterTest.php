@@ -306,6 +306,19 @@ class CustomerNotificationCenterTest extends TestCase
 
         $this->createCustomerAccessTables();
 
+        // Kundemiljø, the page these tests read the shared notifications from, also lists the
+        // customer's fagområder (since 2139196d). Columns mirror 2026_10_04_000003 as renamed by
+        // 2026_10_04_000006.
+        Schema::create('business_areas', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('customer_id');
+            $table->string('name');
+            $table->text('description')->nullable();
+            $table->timestamps();
+
+            $table->unique(['customer_id', 'name']);
+        });
+
         Schema::create('departments', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
