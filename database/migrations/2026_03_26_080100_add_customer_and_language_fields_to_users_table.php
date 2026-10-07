@@ -42,8 +42,14 @@ return new class extends Migration
 
     public function down(): void
     {
+        // up() chains ->index() onto the foreign key definition, where `index` is the constraint's
+        // name — so the key was created as "1", not users_customer_id_foreign. Both names are
+        // dropped if present, so this rolls back whichever one a database holds.
+        DB::statement('ALTER TABLE users DROP CONSTRAINT IF EXISTS "1"');
+        DB::statement('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_customer_id_foreign');
+
         Schema::table('users', function (Blueprint $table): void {
-            $table->dropConstrainedForeignId('customer_id');
+            $table->dropColumn('customer_id');
             $table->dropColumn(['nationality_code', 'preferred_language_code']);
         });
     }

@@ -37,8 +37,14 @@ return new class extends Migration
     {
         DB::statement('ALTER TABLE notice_decisions ALTER COLUMN customer_id DROP NOT NULL');
 
+        // up() chains ->index() onto the foreign key definition, where `index` is the constraint's
+        // name — so the key was created as "1", not notice_decisions_customer_id_foreign. Both names are
+        // dropped if present, so this rolls back whichever one a database holds.
+        DB::statement('ALTER TABLE notice_decisions DROP CONSTRAINT IF EXISTS "1"');
+        DB::statement('ALTER TABLE notice_decisions DROP CONSTRAINT IF EXISTS notice_decisions_customer_id_foreign');
+
         Schema::table('notice_decisions', function (Blueprint $table): void {
-            $table->dropConstrainedForeignId('customer_id');
+            $table->dropColumn('customer_id');
         });
     }
 };

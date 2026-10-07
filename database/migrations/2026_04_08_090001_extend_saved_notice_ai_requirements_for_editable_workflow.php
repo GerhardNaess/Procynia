@@ -89,6 +89,8 @@ return new class extends Migration
         Schema::table('saved_notice_ai_requirements', function (Blueprint $table): void {
             $table->dropIndex('saved_notice_ai_requirements_approval_status_index');
             $table->dropIndex('saved_notice_ai_requirements_source_type_index');
+            // dropConstrainedForeignId() drops the column with its key, so approved_by_user_id and
+            // rejected_by_user_id are gone by here and must not be named again below.
             $table->dropConstrainedForeignId('approved_by_user_id');
             $table->dropConstrainedForeignId('rejected_by_user_id');
             $table->dropColumn([
@@ -100,9 +102,7 @@ return new class extends Migration
                 'original_candidate_snapshot',
                 'current_requirement_snapshot',
                 'approved_at',
-                'approved_by_user_id',
                 'rejected_at',
-                'rejected_by_user_id',
             ]);
         });
     }
