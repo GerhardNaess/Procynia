@@ -41,6 +41,7 @@ export default function ImprovementShow() {
         quality_context: qualityContext = null,
         quality_context_options: qualityContextOptions = [],
         audit_origin: auditOrigin = null,
+        supplier_origin: supplierOrigin = null,
         today = '',
     } = usePage().props;
 
@@ -137,6 +138,19 @@ export default function ImprovementShow() {
                             <span className="block text-slate-600">{(tr.audit_origin_finding ?? 'Funn: :title').replace(':title', auditOrigin.finding_title)}</span>
                         </p>
                     )}
+                    {supplierOrigin && supplierOrigin.map((origin) => (
+                        <p key={origin.url} className="break-words rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" data-testid="improvement-supplier-origin">
+                            {tr.supplier_origin ?? 'Gjelder leverandør'}{' '}
+                            <Link href={origin.url} className="font-semibold text-violet-700 hover:text-violet-900">{origin.name}</Link>
+                            {origin.from_supplier && (
+                                <span className="block text-slate-600">
+                                    {origin.assessed_on
+                                        ? (tr.supplier_origin_assessment ?? 'Saken ble opprettet fra leverandørvurderingen :date.').replace(':date', formatLongDate(origin.assessed_on, locale))
+                                        : (tr.supplier_origin_handoff ?? 'Saken ble opprettet fra leverandøren.')}
+                                </span>
+                            )}
+                        </p>
+                    ))}
                 </header>
 
                 <ImprovementAttentionNote attention={attention} tr={tr} />

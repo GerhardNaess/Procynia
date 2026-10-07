@@ -10,6 +10,7 @@ import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import SupplierDocuments from './SupplierDocuments';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
+import SupplierImprovementCases from './SupplierImprovementCases';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
 import { supplierHelp } from './supplierHelp';
 import { SUPPLIER_STATUS_TONES, categoryLabel, statusLabel } from './supplierManagement';
@@ -47,6 +48,8 @@ export default function SupplierManagementShow() {
         today = '',
         documents = [],
         document_types: documentTypes = [],
+        improvement_cases: improvementCases = null,
+        improvement_handoff: improvementHandoff = null,
         status_history: statusHistory = [],
         permissions = {},
         categories = [],
@@ -59,6 +62,9 @@ export default function SupplierManagementShow() {
     const fields = tr.fields ?? {};
     // Which panel is open: 'edit', 'end', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
+    // «Følg opp i Avvik og forbedringer», from the supplier ({ assessment: null }) or an assessment.
+    const [followUp, setFollowUp] = useState(null);
+    const canFollowUp = (improvementHandoff?.area_options ?? []).length > 0;
 
     const form = useForm({
         name: item.name ?? '',
@@ -184,6 +190,7 @@ export default function SupplierManagementShow() {
                     ratings={ratings}
                     results={results}
                     today={today}
+                    onFollowUp={canFollowUp && followUp === null ? (assessment) => setFollowUp({ assessment }) : null}
                     locale={locale}
                     tr={tr}
                 />
@@ -196,6 +203,18 @@ export default function SupplierManagementShow() {
                     permissions={permissions}
                     locale={locale}
                     tr={tr}
+                />
+
+                <SupplierImprovementCases
+                    supplier={item}
+                    cases={improvementCases}
+                    handoff={improvementHandoff}
+                    followUp={followUp}
+                    setFollowUp={setFollowUp}
+                    hasEditRight={permissions.has_edit_right ?? false}
+                    locale={locale}
+                    tr={tr}
+                    ti={translations?.improvements ?? {}}
                 />
 
                 <section className={CARD} aria-labelledby="supplier-status-heading" data-testid="supplier-status">

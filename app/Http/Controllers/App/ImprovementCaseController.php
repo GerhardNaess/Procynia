@@ -17,6 +17,7 @@ use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Services\Improvements\ImprovementCaseLifecycleService;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
+use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Improvements\ImprovementValidationMessages;
@@ -50,6 +51,7 @@ class ImprovementCaseController extends Controller
         private readonly ImprovementAttentionService $attention,
         private readonly ImprovementCaseCreator $creator,
         private readonly ComplianceAuditFindingHandoffService $auditFindings,
+        private readonly SupplierImprovementHandoffService $supplierHandoff,
     ) {}
 
     public function index(Request $request): Response
@@ -220,6 +222,10 @@ class ImprovementCaseController extends Controller
             // Etterlevelse og revisjon *and* the person can read that audit there. Nothing about the
             // audit otherwise.
             'audit_origin' => $this->auditFindings->provenanceFor($user, $case),
+            // «Gjelder leverandør»: null unless the case concerns a supplier, the customer holds
+            // Leverandøroppfølging *and* the person can read that supplier there. Nothing about the
+            // supplier otherwise.
+            'supplier_origin' => $this->supplierHandoff->provenanceFor($user, $case),
             'today' => now()->toDateString(),
         ]);
     }

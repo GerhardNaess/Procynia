@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\ImprovementCase;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
@@ -11,6 +12,7 @@ use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierCriticalityService;
+use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Services\Suppliers\SupplierLifecycleService;
 use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Support\CustomerContext;
@@ -37,7 +39,8 @@ use Inertia\Response;
  *
  * Leverandørvurderinger are shown here and registered by SupplierAssessmentController
  * (supplier.assess). The dokumentasjonsoversikt is shown here and written by
- * SupplierDocumentController (supplier.edit).
+ * SupplierDocumentController (supplier.edit). Avvik og forbedringer hos leverandøren is read here
+ * through SupplierImprovementHandoffService and written by SupplierImprovementController.
  *
  * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
  * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
@@ -61,6 +64,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierLifecycleService $lifecycle,
         private readonly SupplierCriticalityService $criticality,
         private readonly SupplierReviewSchedule $schedule,
+        private readonly SupplierImprovementHandoffService $improvements,
     ) {}
 
     public function index(Request $request): Response
@@ -188,6 +192,12 @@ class SupplierManagementController extends Controller
                 'updated_at' => $document->updated_at?->toIso8601String(),
                 'updated_by_name' => $document->updatedBy?->name,
             ])->all(),
+            // null, not empty: the person cannot read Avvik og forbedringer, so nothing is said about it.
+            'improvement_cases' => $this->improvements->casesFor($user, $supplier),
+            'improvement_handoff' => $canEdit && $open ? $this->improvements->formOptions($user) + [
+                'link_options' => $this->improvements->linkOptions($user, $supplier),
+                'types' => ImprovementCase::TYPES,
+            ] : null,
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,
                 'from_status' => $change->from_status,

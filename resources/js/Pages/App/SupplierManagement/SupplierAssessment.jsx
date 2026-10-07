@@ -8,6 +8,7 @@ import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import {
     ASSESSMENT_CRITERIA,
     RESULT_TONES,
+    assessmentNeedsFollowUp,
     criterionLabel,
     criticalityLabel,
     emptyAssessment,
@@ -35,6 +36,23 @@ function Ratings({ ratings, tr }) {
                 </div>
             ))}
         </dl>
+    );
+}
+
+/**
+ * «Følg opp vurderingen i Avvik og forbedringer» under an assessment whose result calls for it —
+ * offered only when the page can hand off (onFollowUp is null otherwise). The form opens under Avvik
+ * og forbedringer hos leverandøren; the assessment itself never changes.
+ */
+function FollowUpButton({ assessment, onFollowUp, tr }) {
+    if (! onFollowUp || ! assessmentNeedsFollowUp(assessment)) {
+        return null;
+    }
+
+    return (
+        <button type="button" onClick={() => onFollowUp(assessment)} className={SECONDARY_ACTION} data-testid="assessment-follow-up">
+            {tr.cases?.follow_up_assessment ?? 'Følg opp vurderingen i Avvik og forbedringer'}
+        </button>
     );
 }
 
@@ -175,7 +193,7 @@ function AssessmentForm({ supplierId, supplier, criteria, ratings, results, toda
  * «Vurder leverandør» is offered only when the server says this person may assess this supplier;
  * someone with the right is told why it is missing for a supplier not in use or ended.
  */
-export default function SupplierAssessment({ supplier, assessments = [], permissions = {}, criteria = [], ratings = [], results = [], today, locale, tr }) {
+export default function SupplierAssessment({ supplier, assessments = [], permissions = {}, criteria = [], ratings = [], results = [], today, onFollowUp = null, locale, tr }) {
     const a = tr.assessment ?? {};
     const [open, setOpen] = useState(false);
     const [current, ...earlier] = assessments;
@@ -212,6 +230,7 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
                         <p className={`${VALUE} whitespace-pre-line`} data-testid="assessment-rationale">{current.rationale}</p>
                     </div>
                     <CriticalityThen assessment={current} tr={tr} />
+                    <FollowUpButton assessment={current} onFollowUp={onFollowUp} tr={tr} />
                 </div>
             ) : (
                 <p className="mt-4 text-base text-slate-800" data-testid="assessment-none">{a.none ?? 'Leverandøren er ikke vurdert ennå.'}</p>
@@ -257,6 +276,7 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
                                 </p>
                                 <CriticalityThen assessment={entry} tr={tr} />
                                 <p className="whitespace-pre-line break-words text-base text-slate-800">{entry.rationale}</p>
+                                <FollowUpButton assessment={entry} onFollowUp={onFollowUp} tr={tr} />
                                 <details className="pt-1">
                                     <summary className="cursor-pointer text-base font-semibold text-violet-700">{a.criteria_heading ?? 'Hvordan fungerer leverandøren?'}</summary>
                                     <div className="mt-2"><Ratings ratings={entry.ratings} tr={tr} /></div>

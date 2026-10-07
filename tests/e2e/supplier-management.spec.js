@@ -365,3 +365,62 @@ test('documentation is added, corrected, renewed and deleted, and is read-only o
     await expect(section.getByTestId('documents-read-only')).toContainText('Gjenåpne den for å endre dokumentasjonen.');
     await expect(section.getByRole('button')).toHaveCount(0);
 });
+
+/**
+ * Avvik og forbedringer hos leverandøren: a supplier problem is handed to Avvik og forbedringer and
+ * worked there. The rules — both modules' rights, ended read-only, one case per submit, the hidden
+ * case and the hidden supplier — are PHP's (SupplierImprovementHandoffTest); this is the journey:
+ * Følg opp, choose the type, fagområde and ansvarlig, create the case, open it in Avvik og
+ * forbedringer, and back to the supplier — at desktop and 390 px.
+ */
+test('a supplier is followed up in Avvik og forbedringer, and each side links to the other', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Skydrift ${suffix} AS', 'important', 24)`);
+    const { area_name: areaName } = await supplierFixture(`seedImprovementAccess('${suffix}')`);
+    const title = `Leverandør: ${supplier.name} – manglende svar på henvendelser`;
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-cases');
+    await expect(section.getByTestId('cases-none')).toHaveText('Ingen saker i Avvik og forbedringer gjelder leverandøren.');
+
+    // Følg opp: a visible, editable suggestion; the type is the person's choice.
+    await section.getByRole('button', { name: 'Følg opp i Avvik og forbedringer' }).click();
+    const form = section.getByTestId('case-handoff-form');
+    await expect(form.locator('#case-handoff-title')).toHaveValue(`Leverandør: ${supplier.name}`);
+    await expect(form.locator('#case-handoff-description')).toHaveValue(`Sak opprettet fra Leverandøroppfølging for ${supplier.name}.`);
+    await expect(form.getByTestId('case-handoff-type').getByRole('radio', { checked: true })).toHaveCount(0);
+    await form.getByTestId('case-handoff-type').getByRole('radio', { name: 'Avvik', exact: true }).check();
+    await form.locator('#case-handoff-title').fill(title);
+    await form.locator('#case-handoff-area').selectOption({ label: areaName });
+    await form.locator('#case-handoff-owner').selectOption({ label: person.name });
+    await form.locator('#case-handoff-due').fill(`${new Date().getFullYear() + 1}-03-31`);
+    await expectReadable(page, '40-case-handoff-form');
+    await form.getByRole('button', { name: 'Opprett sak' }).click();
+    await expect(page.getByText('Saken er opprettet i Avvik og forbedringer.', { exact: true })).toBeVisible();
+
+    const entry = section.getByTestId('case-entry');
+    await expect(entry).toHaveCount(1);
+    for (const text of ['Avvik', title, 'Åpen', String(new Date().getFullYear() + 1), 'Opprettet fra leverandøren']) {
+        await expect(entry).toContainText(text);
+    }
+    await expectReadable(page, '41-supplier-cases');
+
+    // The case lives in Avvik og forbedringer, and says which supplier it concerns.
+    await entry.getByRole('link', { name: title }).click();
+    await page.waitForURL(/\/app\/improvements\/\d+$/);
+    await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
+    const origin = page.getByTestId('improvement-supplier-origin');
+    await expect(origin).toContainText(`Gjelder leverandør ${supplier.name}`);
+    await expect(origin).toContainText('Saken ble opprettet fra leverandøren.');
+    await expectReadable(page, '42-case-from-supplier');
+
+    // And back.
+    await origin.getByRole('link', { name: supplier.name }).click();
+    await page.waitForURL(new RegExp(`/app/supplier-management/${supplier.id}$`));
+    await expect(page.getByTestId('supplier-cases').getByTestId('case-entry')).toContainText(title);
+});

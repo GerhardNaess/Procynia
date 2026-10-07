@@ -36,6 +36,7 @@ use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierDocumentController;
+use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -475,6 +476,11 @@ Route::prefix('app')
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
             Route::post('/{supplierId}/documents/{documentId}/renew', [SupplierDocumentController::class, 'renew'])->whereNumber(['supplierId', 'documentId'])->name('documents.renew');
             Route::delete('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'destroy'])->whereNumber(['supplierId', 'documentId'])->name('documents.destroy');
+            // Avvik og forbedringer hos leverandøren: a new case through ImprovementCaseCreator, or an
+            // existing one connected; the case itself stays Avvik og forbedringer's.
+            Route::post('/{supplierId}/improvement-cases', [SupplierImprovementController::class, 'store'])->whereNumber('supplierId')->name('improvement-cases.store');
+            Route::post('/{supplierId}/improvement-cases/link', [SupplierImprovementController::class, 'link'])->whereNumber('supplierId')->name('improvement-cases.link');
+            Route::delete('/{supplierId}/improvement-cases/{linkId}', [SupplierImprovementController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('improvement-cases.unlink');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

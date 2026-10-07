@@ -4,6 +4,7 @@ namespace App\Services\Suppliers;
 
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
@@ -35,6 +36,7 @@ class SupplierAccessService
 {
     public function __construct(
         private readonly CustomerPermissionService $permissions,
+        private readonly ModuleEntitlementService $entitlements,
     ) {}
 
     /** Whether the user may open Leverandøroppfølging at all. */
@@ -43,6 +45,20 @@ class SupplierAccessService
         return $user instanceof User
             && $user->customer_id !== null
             && $this->permissions->has($user, CustomerPermissionCatalog::SUPPLIER_VIEW);
+    }
+
+    /**
+     * Whether a page in another module may show Leverandøroppfølging data — «Gjelder leverandør» on a
+     * case: the customer holds the `supplier` module *and* the user has supplier.view. Such a page is
+     * reached without this module's route guard, so the entitlement is checked here.
+     */
+    public function canReadFromAnotherModule(?User $user): bool
+    {
+        $customer = $user?->customer;
+
+        return $customer !== null
+            && $this->canOpenModule($user)
+            && $this->entitlements->hasModule($customer, 'supplier');
     }
 
     /** Registering and changing suppliers, their criticality and documentation, and their lifecycle. */

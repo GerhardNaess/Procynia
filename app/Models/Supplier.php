@@ -170,13 +170,13 @@ class Supplier extends Model
     /**
      * Whether the supplier may be deleted at all, before any permission is considered. Deleting is
      * for a supplier registered by mistake and never used: one that has changed status or
-     * criticality, has been assessed or has documentation registered has a history — a real
-     * decision was made about it — and is ended instead. The classification it was registered with
+     * criticality, has been assessed, has documentation registered or concerns a case in Avvik og
+     * forbedringer has a history — a real decision was made about it — and is ended instead. The classification it was registered with
      * is the supplier's own and does not count. The database refuses the delete as well (NO ACTION
      * from every child table).
      *
-     * Each later part of the module that attaches something to a supplier — links to risks,
-     * requirements and cases — adds its check here, so the rule stays «completely unused» without
+     * Each later part of the module that attaches something to a supplier — links to risks and
+     * requirements — adds its check here, so the rule stays «completely unused» without
      * changing.
      */
     public function isDeletable(): bool
@@ -184,7 +184,8 @@ class Supplier extends Model
         return ! $this->statusChanges()->exists()
             && ! $this->criticalityChanges()->exists()
             && ! $this->assessments()->exists()
-            && ! $this->documents()->exists();
+            && ! $this->documents()->exists()
+            && ! $this->improvementCaseLinks()->exists();
     }
 
     public function owner(): BelongsTo
@@ -231,5 +232,14 @@ class Supplier extends Model
             ->orderByRaw('replaced_by_document_id IS NOT NULL')
             ->orderByRaw('lower(title)')
             ->orderBy('id');
+    }
+
+    /**
+     * The cases in Avvik og forbedringer that concern the supplier — the rows only. Whether a case
+     * may be shown is ImprovementCaseAccessService's to say.
+     */
+    public function improvementCaseLinks(): HasMany
+    {
+        return $this->hasMany(SupplierImprovementCase::class, 'supplier_id');
     }
 }

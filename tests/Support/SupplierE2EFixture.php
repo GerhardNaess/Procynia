@@ -2,13 +2,16 @@
 
 namespace Tests\Support;
 
+use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
+use App\Models\ImprovementCase;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
+use App\Models\SupplierImprovementCase;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -28,8 +31,9 @@ use Illuminate\Support\Facades\DB;
  * supplier role.
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
- * assessments and their documentation go with it. The history triggers allow that one delete (the
- * customer going), so no trigger is switched off.
+ * assessments, their documentation, the run's fagområde and the cases created in Avvik og
+ * forbedringer, with the rows linking them to suppliers, go with it. The history triggers allow that
+ * one delete (the customer going), so no trigger is switched off.
  */
 class SupplierE2EFixture
 {
@@ -127,7 +131,32 @@ class SupplierE2EFixture
         return ['id' => (int) $supplier->id, 'name' => $supplier->name];
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, roles: int, users: int} */
+    /**
+     * Gives the supplier manager Avvik og forbedringer — improvement.view and .edit in one fagområde
+     * of the run's customer — so the spec can follow a supplier up there. The manager is also the
+     * only one offered as ansvarlig.
+     *
+     * @return array{area_name: string}
+     */
+    public static function seedImprovementAccess(string $suffix): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $manager, $name): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customer->id, 'name' => $name('Innkjøp')]);
+            $role = self::role($customer, $name('Saksbehandler'), [
+                CustomerPermissionCatalog::IMPROVEMENT_VIEW,
+                CustomerPermissionCatalog::IMPROVEMENT_EDIT,
+            ], $manager);
+            $role->syncBusinessAreas(false, [$area->id]);
+
+            return ['area_name' => $area->name];
+        });
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -139,6 +168,12 @@ class SupplierE2EFixture
             'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
+            // Also by the run's suffix in the title, wherever it might have landed.
+            'improvement_cases' => ImprovementCase::query()->where(fn (Builder $query) => $query
+                ->whereIn('customer_id', $customerIds)
+                ->orWhere('title', 'like', '%'.strtoupper($suffix).'%'))->count(),
+            'case_links' => SupplierImprovementCase::query()->whereIn('customer_id', $customerIds)->count(),
+            'business_areas' => BusinessArea::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lev.'.strtolower($suffix).'.%')->count(),
         ];
@@ -159,7 +194,7 @@ class SupplierE2EFixture
                 CustomerRole::query()->where('customer_id', $customer->id)->delete();
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
-                // Suppliers, their history, assessments and documentation go with the customer.
+                // Suppliers, their history, assessments, documentation, the fagområde and the cases go with the customer.
                 $customer->delete();
             });
         }

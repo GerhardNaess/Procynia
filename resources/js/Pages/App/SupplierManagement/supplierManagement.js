@@ -328,3 +328,74 @@ export function documentFormData(mode, document = null) {
         comment: '',
     };
 }
+
+const CASE_TYPE_FALLBACKS = {
+    deviation: 'Avvik',
+    improvement: 'Forbedring',
+};
+
+const CASE_STATUS_FALLBACKS = {
+    open: 'Åpen',
+    in_progress: 'Under arbeid',
+    closed: 'Lukket',
+    cancelled: 'Avbrutt',
+};
+
+/** A case type as Avvik og forbedringer names it: «Avvik», «Forbedring». */
+export function caseTypeLabel(type, ti = {}) {
+    return ti.types?.[type] ?? CASE_TYPE_FALLBACKS[type] ?? type;
+}
+
+/** A case status as Avvik og forbedringer names it: «Åpen», «Under arbeid», «Lukket», «Avbrutt». */
+export function caseStatusLabel(status, ti = {}) {
+    return ti.statuses?.[status] ?? CASE_STATUS_FALLBACKS[status] ?? status;
+}
+
+/**
+ * The suggested title and description for «Følg opp i Avvik og forbedringer» — from the supplier, or
+ * from one of its assessments with the result, the date and the begrunnelse. Only a suggestion: the
+ * form shows it and the person may change all of it. The type is never suggested.
+ *
+ * @param {{name: string}} supplier
+ * @param {object|null} assessment  the assessment followed up, or null
+ * @param {(date: string) => string} formatDate
+ */
+export function caseHandoffPrefill(supplier, assessment, tr = {}, formatDate = (date) => date) {
+    const c = tr.cases ?? {};
+    const title = (c.prefill_title ?? 'Leverandør: :name').replace(':name', supplier.name);
+
+    if (! assessment) {
+        return { title, description: (c.prefill_description ?? 'Sak opprettet fra Leverandøroppfølging for :name.').replace(':name', supplier.name) };
+    }
+
+    const intro = (c.prefill_description_assessment ?? 'Sak opprettet fra leverandørvurderingen av :name :date. Samlet vurdering: :result.')
+        .replace(':name', supplier.name)
+        .replace(':date', formatDate(assessment.assessed_on))
+        .replace(':result', resultLabel(assessment.overall_result, tr));
+    const rationale = (c.prefill_rationale ?? 'Begrunnelse fra vurderingen: :rationale').replace(':rationale', assessment.rationale ?? '');
+
+    return { title, description: `${intro}\n\n${rationale}` };
+}
+
+/** Whether an assessment's result calls for «Følg opp vurderingen»: Delvis or Ikke tilfredsstillende. */
+export function assessmentNeedsFollowUp(assessment) {
+    return Boolean(assessment) && assessment.overall_result !== 'satisfactory';
+}
+
+/** How a listed case came to concern the supplier: created here, from an assessment, or linked later. */
+export function caseOriginText(entry, tr = {}, formatDate = (date) => date) {
+    const c = tr.cases ?? {};
+
+    if (entry.origin === 'linked') {
+        return c.linked ?? 'Koblet til senere';
+    }
+
+    return entry.assessed_on
+        ? (c.from_assessment ?? 'Opprettet fra vurderingen :date').replace(':date', formatDate(entry.assessed_on))
+        : (c.from_supplier ?? 'Opprettet fra leverandøren');
+}
+
+/** A one-time key per opened hand-off form, so a double submit creates one case. */
+export function newHandoffKey() {
+    return globalThis.crypto.randomUUID();
+}

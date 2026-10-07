@@ -7,6 +7,9 @@ import {
     ASSESSMENT_CRITERIA,
     CRITICALITY_TONES,
     DOCUMENT_STATUS_TONES,
+    assessmentNeedsFollowUp,
+    caseHandoffPrefill,
+    caseOriginText,
     RESULT_TONES,
     SUPPLIER_STATUS_TONES,
     categoryLabel,
@@ -166,6 +169,33 @@ describe('Documentation', () => {
         assert.deepEqual(documentFormData('renew', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', location: '', valid_from: '', valid_until: '', comment: '' });
         assert.deepEqual(documentFormData('edit', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' });
         assert.equal(documentFormData('create').document_type, '');
+    });
+});
+
+describe('Avvik og forbedringer hos leverandøren', () => {
+    test('the hand-off suggests a title and description, never a type, and follows up only a weak assessment', () => {
+        assert.deepEqual(caseHandoffPrefill({ name: 'Acme AS' }, null), {
+            title: 'Leverandør: Acme AS',
+            description: 'Sak opprettet fra Leverandøroppfølging for Acme AS.',
+        });
+        const weak = { id: 3, assessed_on: '2026-10-01', overall_result: 'unsatisfactory', rationale: 'Svar tar for lang tid.' };
+        const fromAssessment = caseHandoffPrefill({ name: 'Acme AS' }, weak, {}, (date) => `«${date}»`);
+        assert.match(fromAssessment.description, /«2026-10-01».*Ikke tilfredsstillende/);
+        assert.match(fromAssessment.description, /Svar tar for lang tid\./);
+        assert.equal(assessmentNeedsFollowUp(weak), true);
+        assert.equal(assessmentNeedsFollowUp({ overall_result: 'satisfactory' }), false);
+
+        const form = source('./SupplierImprovementCases.jsx');
+        assert.match(form, /type: '',/, 'the type starts unchosen');
+    });
+
+    test('the section says nothing without access to Avvik og forbedringer, and shows only what the server sent', () => {
+        const section = source('./SupplierImprovementCases.jsx');
+        assert.match(section, /if \(cases === null \|\| cases === undefined\) \{\s*return null;/);
+        assert.match(section, /canHandOff = Boolean\(handoff\) && \(handoff\.area_options \?\? \[\]\)\.length > 0/, 'the follow-up button needs an area to create in');
+        assert.equal(caseOriginText({ origin: 'handoff', assessed_on: null }), 'Opprettet fra leverandøren');
+        assert.equal(caseOriginText({ origin: 'handoff', assessed_on: '2026-10-01' }, {}, (date) => `«${date}»`), 'Opprettet fra vurderingen «2026-10-01»');
+        assert.equal(caseOriginText({ origin: 'linked', assessed_on: null }), 'Koblet til senere');
     });
 });
 
