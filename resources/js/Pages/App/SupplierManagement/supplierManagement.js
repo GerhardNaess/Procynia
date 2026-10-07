@@ -444,3 +444,25 @@ export function riskOriginText(entry, tr = {}) {
         ? (r.linked ?? 'Koblet til senere')
         : (r.from_supplier ?? 'Opprettet fra leverandøren');
 }
+
+/** A requirement as «Legg til krav» offers it: «A.5.15 Tilgangsstyring – ISO 27001 (2022)». */
+export function requirementOptionLabel(option) {
+    const title = option.reference ? `${option.reference} ${option.title}` : option.title;
+
+    return option.source_label ? `${title} – ${option.source_label}` : title;
+}
+
+/** The offered requirements whose reference, title or kravkilde contain every word searched for. */
+export function filterRequirementOptions(options, search) {
+    const words = (search ?? '').toLocaleLowerCase('nb').split(/\s+/).filter(Boolean);
+
+    if (words.length === 0) {
+        return options;
+    }
+
+    return options.filter((option) => {
+        const text = requirementOptionLabel(option).toLocaleLowerCase('nb');
+
+        return words.every((word) => text.includes(word));
+    });
+}

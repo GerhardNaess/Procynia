@@ -496,3 +496,60 @@ test('a risk is created from a supplier and an existing one linked, and each sid
     await page.waitForURL(new RegExp(`/app/supplier-management/${supplier.id}$`));
     await expect(page.getByTestId('supplier-risks').getByTestId('risk-entry')).toHaveCount(2);
 });
+
+/**
+ * Krav som gjelder leverandøren: an existing requirement in Etterlevelse og revisjon is added to a
+ * supplier and removed again; the requirement is worked there. The rules — both modules' rights,
+ * active requirements only, ended read-only, hidden requirements, no compliance status — are PHP's
+ * (SupplierComplianceRequirementTest); this is the journey: Legg til krav, search, add, see
+ * reference, title and kravkilde, open the requirement in Etterlevelse og revisjon, back, and
+ * Fjern krav — the supplier page at desktop and 390 px. Etterlevelse og revisjon shows no supplier
+ * back in v1 (plan §7.3).
+ */
+test('a requirement is added to a supplier, opened in Etterlevelse og revisjon and removed again', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Backup ${suffix} AS', 'important', 12)`);
+    const requirement = await supplierFixture(`seedComplianceAccess('${suffix}')`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-requirements');
+    await expect(section.getByTestId('requirements-none')).toHaveText('Ingen krav i Etterlevelse og revisjon er lagt til for leverandøren.');
+
+    // Legg til krav: search among the active requirements, choose one.
+    await section.getByRole('button', { name: 'Legg til krav' }).click();
+    const form = section.getByTestId('requirement-add-form');
+    await form.locator('#supplier-requirement-search').fill('sikkerhetskopi');
+    await expect(form.locator('#supplier-requirement-link option')).toHaveCount(2);
+    await form.locator('#supplier-requirement-link').selectOption({ label: `${requirement.reference} ${requirement.title} – ${requirement.source_label}` });
+    await expectReadable(page, '60-requirement-add-form');
+    await form.getByRole('button', { name: 'Legg til', exact: true }).click();
+    await expect(page.getByText('Kravet er lagt til for leverandøren.', { exact: true })).toBeVisible();
+
+    // Reference, title and kravkilde — and nothing that reads as the supplier's compliance.
+    const entry = section.getByTestId('requirement-entry');
+    await expect(entry).toHaveCount(1);
+    for (const text of [requirement.reference, requirement.title, requirement.source_label]) {
+        await expect(entry).toContainText(text);
+    }
+    await expect(entry).not.toContainText(requirement.other_title);
+    await expect(section).not.toContainText('Oppfylt');
+    await expectReadable(page, '61-supplier-requirements');
+
+    // The requirement lives in Etterlevelse og revisjon.
+    await entry.getByRole('link', { name: requirement.title }).click();
+    await page.waitForURL(/\/app\/compliance\/requirements\/\d+$/);
+    await expect(page.getByRole('heading', { name: requirement.title, level: 1 })).toBeVisible();
+
+    // And back: Fjern krav removes only the link.
+    await page.goBack();
+    await page.waitForURL(new RegExp(`/app/supplier-management/${supplier.id}$`));
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByTestId('supplier-requirements').getByRole('button', { name: 'Fjern krav' }).click();
+    await expect(page.getByText('Kravet er fjernet fra leverandøren. Det er fortsatt i Etterlevelse og revisjon.', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('supplier-requirements').getByTestId('requirements-none')).toBeVisible();
+});

@@ -2804,6 +2804,28 @@ return [
             'linked' => 'Koblet til senere',
             'reopen_to_follow_up' => 'Leverandøren er avsluttet. Gjenåpne den for å opprette eller koble risikoer.',
         ],
+        'requirements' => [
+            'heading' => 'Krav som gjelder leverandøren',
+            'intro' => 'Krav i Etterlevelse og revisjon som gjelder leverandøren. Kravet håndteres videre der – vurdering av etterlevelse og revisjon følges opp i Etterlevelse og revisjon.',
+            'not_status' => 'At et krav gjelder leverandøren, sier ikke om leverandøren oppfyller det. Det vurderer du i leverandørvurderingen.',
+            'none' => 'Ingen krav i Etterlevelse og revisjon er lagt til for leverandøren.',
+            'add' => 'Legg til krav',
+            'remove' => 'Fjern krav',
+            'remove_confirm' => 'Fjerne kravet fra leverandøren? Kravet blir værende i Etterlevelse og revisjon.',
+            'add_heading' => 'Legg til krav',
+            'add_intro' => 'Velg et krav som allerede er registrert i Etterlevelse og revisjon. Nye krav registreres der.',
+            'search' => 'Søk etter krav',
+            'search_hint' => 'Søk på referanse, tittel eller kravkilde.',
+            'requirement' => 'Krav',
+            'choose_requirement' => 'Velg krav',
+            'no_matches' => 'Ingen krav passer søket.',
+            'submit' => 'Legg til',
+            'no_options' => 'Det finnes ingen andre aktive krav du kan legge til.',
+            'col_reference' => 'Referanse',
+            'col_source' => 'Kravkilde',
+            'retired' => 'Utgått i Etterlevelse og revisjon',
+            'reopen_to_follow_up' => 'Leverandøren er avsluttet. Gjenåpne den for å legge til eller fjerne krav.',
+        ],
         'fields' => [
             'name' => 'Navn',
             'name_hint' => 'Virksomhetens navn.',
@@ -2884,6 +2906,8 @@ return [
             'risk_created' => 'Risikoen er opprettet i Risiko.',
             'risk_linked' => 'Risikoen er koblet til leverandøren.',
             'risk_unlinked' => 'Koblingen er fjernet. Risikoen er fortsatt i Risiko.',
+            'requirement_linked' => 'Kravet er lagt til for leverandøren.',
+            'requirement_unlinked' => 'Kravet er fjernet fra leverandøren. Det er fortsatt i Etterlevelse og revisjon.',
         ],
         'validation' => [
             'reason_required' => 'Skriv en begrunnelse.',
@@ -2906,6 +2930,8 @@ return [
             'assessment_not_for_follow_up' => 'Bare en vurdering med resultatet Delvis eller Ikke tilfredsstillende kan følges opp herfra.',
             'risk_not_available' => 'Velg en risiko du kan redigere i Risiko.',
             'risk_already_linked' => 'Risikoen er allerede koblet til leverandøren.',
+            'requirement_not_available' => 'Velg et aktivt krav du har tilgang til i Etterlevelse og revisjon.',
+            'requirement_already_linked' => 'Kravet er allerede lagt til for leverandøren.',
             'rules' => [
                 'required' => ':attribute må fylles ut.',
                 'choose' => 'Velg en gyldig verdi for :attribute.',
@@ -2940,6 +2966,7 @@ return [
                 'valid_from' => 'Gyldig fra',
                 'valid_until' => 'Gyldig til',
                 'comment' => 'Kommentar',
+                'requirement_id' => 'Krav',
             ],
         ],
         'help' => [
@@ -3026,6 +3053,14 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Krav',
+                        'items' => [
+                            ['title' => 'Legg til krav', 'text' => 'Krav som gjelder leverandøren, legges til fra Etterlevelse og revisjon. Du kan velge blant aktive krav du har tilgang til der. Nye krav registreres i Etterlevelse og revisjon.'],
+                            ['title' => 'Hva vises her', 'text' => 'Leverandørsiden viser kravene som gjelder leverandøren og som du selv har tilgang til, med referanse, tittel og kravkilde. Krav du ikke har tilgang til, vises ikke.'],
+                            ['title' => 'Ingen kravstatus her', 'text' => 'At et krav gjelder leverandøren, sier ikke om leverandøren oppfyller det. Kravets etterlevelsesstatus i Etterlevelse og revisjon gjelder virksomheten, ikke leverandøren. Om leverandøren følger kravene, vurderer du i leverandørvurderingen.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Avvik og forbedringer',
                         'items' => [
                             ['title' => 'Følg opp i Avvik og forbedringer', 'text' => 'Når noe hos leverandøren må følges opp, oppretter du en sak i Avvik og forbedringer. Du velger sakstype, fagområde, ansvarlig og frist. Saken behandles der, med tiltak, status og lukking.'],
@@ -3043,7 +3078,7 @@ return [
                         'title' => 'Avslutte eller slette?',
                         'items' => [
                             ['title' => 'Avslutt', 'text' => 'Den vanlige måten å ta en leverandør ut av bruk. Historikken beholdes.'],
-                            ['title' => 'Slett', 'text' => 'Bare for en leverandør som ble registrert ved en feil og aldri har endret status eller kritikalitet, blitt vurdert, fått registrert dokumentasjon eller blitt koblet til en sak i Avvik og forbedringer eller en risiko i Risiko. Sletting kan ikke angres.'],
+                            ['title' => 'Slett', 'text' => 'Bare for en leverandør som ble registrert ved en feil og aldri har endret status eller kritikalitet, blitt vurdert, fått registrert dokumentasjon eller blitt koblet til en sak i Avvik og forbedringer, en risiko i Risiko eller et krav i Etterlevelse og revisjon. Sletting kan ikke angres.'],
                         ],
                     ],
                 ],

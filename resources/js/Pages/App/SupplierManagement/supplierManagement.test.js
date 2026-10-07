@@ -10,6 +10,8 @@ import {
     assessmentNeedsFollowUp,
     caseHandoffPrefill,
     caseOriginText,
+    filterRequirementOptions,
+    requirementOptionLabel,
     riskLevelText,
     riskOriginText,
     RESULT_TONES,
@@ -216,6 +218,27 @@ describe('Risikoer som gjelder leverandøren', () => {
         assert.match(section, /canCreate = Boolean\(handoff\) && \(handoff\.area_options \?\? \[\]\)\.length > 0/, 'Opprett risiko needs an area to create in');
         assert.match(section, /cause: '',\s*event: '',\s*consequence: '',\s*business_area_id: '',/, 'årsak, hendelse, konsekvens and fagområde start empty');
         assert.match(section, /entry\.can_unlink/, 'Fjern koblingen only where the server allows it');
+    });
+});
+
+describe('Krav som gjelder leverandøren', () => {
+    test('an offered requirement reads as reference, title and kravkilde, and the search matches every word', () => {
+        const options = [
+            { id: 1, reference: 'A.5.15', title: 'Tilgangsstyring', source_label: 'ISO 27001 (2022)' },
+            { id: 2, reference: null, title: 'Sikkerhetskopi hver natt', source_label: 'Driftsavtale Acme' },
+        ];
+        assert.equal(requirementOptionLabel(options[0]), 'A.5.15 Tilgangsstyring – ISO 27001 (2022)');
+        assert.equal(requirementOptionLabel(options[1]), 'Sikkerhetskopi hver natt – Driftsavtale Acme');
+        assert.deepEqual(filterRequirementOptions(options, '  ').map((o) => o.id), [1, 2]);
+        assert.deepEqual(filterRequirementOptions(options, 'iso tilgang').map((o) => o.id), [1]);
+        assert.deepEqual(filterRequirementOptions(options, 'acme natt').map((o) => o.id), [2]);
+    });
+
+    test('the section says nothing without access, never shows a compliance status and adds or removes only when allowed', () => {
+        const section = source('./SupplierRequirements.jsx');
+        assert.match(section, /if \(requirements === null \|\| requirements === undefined\) \{\s*return null;/);
+        assert.doesNotMatch(section, /StatusBadge|entry\.status|entry\.result|compliance_status/, 'no compliance status on the supplier page');
+        assert.match(section, /\{linking && ! adding && \(\s*<button type="button" onClick=\{\(\) => remove\(entry\)\}/, 'Fjern krav only with linking rights on an open supplier');
     });
 });
 

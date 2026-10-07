@@ -34,6 +34,7 @@ use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
+use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierImprovementController;
@@ -487,6 +488,10 @@ Route::prefix('app')
             Route::post('/{supplierId}/risks', [SupplierRiskController::class, 'store'])->whereNumber('supplierId')->name('risks.store');
             Route::post('/{supplierId}/risks/link', [SupplierRiskController::class, 'link'])->whereNumber('supplierId')->name('risks.link');
             Route::delete('/{supplierId}/risks/{linkId}', [SupplierRiskController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('risks.unlink');
+            // Krav som gjelder leverandøren: an existing requirement in Etterlevelse og revisjon added or
+            // removed; the requirement itself, and its status, stay there.
+            Route::post('/{supplierId}/requirements', [SupplierComplianceRequirementController::class, 'link'])->whereNumber('supplierId')->name('requirements.link');
+            Route::delete('/{supplierId}/requirements/{linkId}', [SupplierComplianceRequirementController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('requirements.unlink');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

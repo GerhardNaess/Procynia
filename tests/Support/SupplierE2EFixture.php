@@ -3,6 +3,8 @@
 namespace Tests\Support;
 
 use App\Models\BusinessArea;
+use App\Models\ComplianceRequirement;
+use App\Models\ComplianceSource;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
@@ -10,6 +12,7 @@ use App\Models\ImprovementCase;
 use App\Models\Risk;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
+use App\Models\SupplierComplianceRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierImprovementCase;
@@ -34,7 +37,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
  * assessments, their documentation, the run's fagområder, the cases created in Avvik og
- * forbedringer and the risks in Risiko, with the rows linking them to suppliers, go with it. Risks
+ * forbedringer, the risks in Risiko and the kravkilde and requirements in Etterlevelse og revisjon,
+ * with the rows linking them to suppliers, go with it. Risks
  * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
  * one delete (the customer going), so no trigger is switched off.
  */
@@ -196,7 +200,46 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, business_areas: int, roles: int, users: int} */
+    /**
+     * Gives the supplier manager compliance.view in Etterlevelse og revisjon and registers a kravkilde
+     * there with two active requirements, so the spec can add one to a supplier.
+     *
+     * @return array{source_label: string, reference: string, title: string, other_title: string}
+     */
+    public static function seedComplianceAccess(string $suffix): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $manager, $name): array {
+            self::role($customer, $name('Kravleser'), [CustomerPermissionCatalog::COMPLIANCE_VIEW], $manager);
+            $source = ComplianceSource::query()->create([
+                'customer_id' => $customer->id,
+                'name' => $name('Driftsavtale'),
+                'version' => null,
+                'kind' => ComplianceSource::KIND_CONTRACT,
+            ]);
+            $requirement = ComplianceRequirement::query()->create([
+                'customer_id' => $customer->id,
+                'source_id' => $source->id,
+                'reference' => '4.2',
+                'title' => $name('Sikkerhetskopi hver natt'),
+                'requirement_text' => 'Leverandøren skal ta sikkerhetskopi av alle data hver natt.',
+            ]);
+            $other = ComplianceRequirement::query()->create([
+                'customer_id' => $customer->id,
+                'source_id' => $source->id,
+                'reference' => '4.3',
+                'title' => $name('Varsling av hendelser'),
+                'requirement_text' => 'Leverandøren skal varsle sikkerhetshendelser innen 24 timer.',
+            ]);
+
+            return ['source_label' => $source->name, 'reference' => $requirement->reference, 'title' => $requirement->title, 'other_title' => $other->title];
+        });
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -217,6 +260,10 @@ class SupplierE2EFixture
                 ->whereIn('customer_id', $customerIds)
                 ->orWhere('title', 'like', '%'.strtoupper($suffix).'%'))->count(),
             'risk_links' => SupplierRisk::query()->whereIn('customer_id', $customerIds)->count(),
+            'requirements' => ComplianceRequirement::query()->where(fn (Builder $query) => $query
+                ->whereIn('customer_id', $customerIds)
+                ->orWhere('title', 'like', '%'.strtoupper($suffix).'%'))->count(),
+            'requirement_links' => SupplierComplianceRequirement::query()->whereIn('customer_id', $customerIds)->count(),
             'business_areas' => BusinessArea::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lev.'.strtolower($suffix).'.%')->count(),
@@ -240,7 +287,8 @@ class SupplierE2EFixture
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
                 // Before the fagområder they hold with RESTRICT; their links to suppliers cascade.
                 Risk::query()->where('customer_id', $customer->id)->delete();
-                // Suppliers, their history, assessments, documentation, the fagområde and the cases go with the customer.
+                // Suppliers, their history, assessments, documentation, the fagområde, the cases and the
+                // kravkilde with its requirements go with the customer.
                 $customer->delete();
             });
         }

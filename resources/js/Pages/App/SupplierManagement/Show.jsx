@@ -11,6 +11,7 @@ import SupplierDocuments from './SupplierDocuments';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
 import SupplierImprovementCases from './SupplierImprovementCases';
+import SupplierRequirements from './SupplierRequirements';
 import SupplierRisks from './SupplierRisks';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
 import { supplierHelp } from './supplierHelp';
@@ -53,6 +54,8 @@ export default function SupplierManagementShow() {
         improvement_handoff: improvementHandoff = null,
         risks = null,
         risk_handoff: riskHandoff = null,
+        requirements = null,
+        requirement_linking: requirementLinking = null,
         status_history: statusHistory = [],
         permissions = {},
         categories = [],
@@ -215,6 +218,14 @@ export default function SupplierManagementShow() {
                     hasEditRight={permissions.has_edit_right ?? false}
                     tr={tr}
                     trRisk={translations?.risk ?? {}}
+                />
+
+                <SupplierRequirements
+                    supplier={item}
+                    requirements={requirements}
+                    linking={requirementLinking}
+                    hasEditRight={permissions.has_edit_right ?? false}
+                    tr={tr}
                 />
 
                 <SupplierImprovementCases

@@ -2800,6 +2800,28 @@ return [
             'linked' => 'Linked later',
             'reopen_to_follow_up' => 'The supplier is ended. Reopen it to create or link risks.',
         ],
+        'requirements' => [
+            'heading' => 'Requirements that apply to the supplier',
+            'intro' => 'Requirements in Compliance and audit that apply to the supplier. The requirement is handled there – compliance assessment and audit are followed up in Compliance and audit.',
+            'not_status' => 'That a requirement applies to the supplier does not say whether the supplier meets it. You judge that in the supplier assessment.',
+            'none' => 'No requirements in Compliance and audit have been added for the supplier.',
+            'add' => 'Add requirement',
+            'remove' => 'Remove requirement',
+            'remove_confirm' => 'Remove the requirement from the supplier? The requirement stays in Compliance and audit.',
+            'add_heading' => 'Add requirement',
+            'add_intro' => 'Choose a requirement already registered in Compliance and audit. New requirements are registered there.',
+            'search' => 'Search requirements',
+            'search_hint' => 'Search by reference, title or requirement source.',
+            'requirement' => 'Requirement',
+            'choose_requirement' => 'Choose requirement',
+            'no_matches' => 'No requirements match the search.',
+            'submit' => 'Add',
+            'no_options' => 'There are no other active requirements you can add.',
+            'col_reference' => 'Reference',
+            'col_source' => 'Requirement source',
+            'retired' => 'Retired in Compliance and audit',
+            'reopen_to_follow_up' => 'The supplier is ended. Reopen it to add or remove requirements.',
+        ],
         'fields' => [
             'name' => 'Name',
             'name_hint' => 'The company\'s name.',
@@ -2880,6 +2902,8 @@ return [
             'risk_created' => 'The risk is created in Risk.',
             'risk_linked' => 'The risk is linked to the supplier.',
             'risk_unlinked' => 'The link is removed. The risk is still in Risk.',
+            'requirement_linked' => 'The requirement is added for the supplier.',
+            'requirement_unlinked' => 'The requirement is removed from the supplier. It is still in Compliance and audit.',
         ],
         'validation' => [
             'reason_required' => 'Write a reason.',
@@ -2902,6 +2926,8 @@ return [
             'assessment_not_for_follow_up' => 'Only an assessment with the result Partially or Not satisfactory can be followed up from here.',
             'risk_not_available' => 'Choose a risk you can edit in Risk.',
             'risk_already_linked' => 'The risk is already linked to the supplier.',
+            'requirement_not_available' => 'Choose an active requirement you have access to in Compliance and audit.',
+            'requirement_already_linked' => 'The requirement is already added for the supplier.',
             'rules' => [
                 'required' => ':attribute is required.',
                 'choose' => 'Choose a valid value for :attribute.',
@@ -2936,6 +2962,7 @@ return [
                 'valid_from' => 'Valid from',
                 'valid_until' => 'Valid until',
                 'comment' => 'Comment',
+                'requirement_id' => 'Requirement',
             ],
         ],
         'help' => [
@@ -3022,6 +3049,14 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Requirements',
+                        'items' => [
+                            ['title' => 'Add requirement', 'text' => 'Requirements that apply to the supplier are added from Compliance and audit. You can choose among active requirements you have access to there. New requirements are registered in Compliance and audit.'],
+                            ['title' => 'What is shown here', 'text' => 'The supplier page shows the requirements that apply to the supplier and that you have access to yourself, with reference, title and requirement source. Requirements you do not have access to are not shown.'],
+                            ['title' => 'No requirement status here', 'text' => 'That a requirement applies to the supplier does not say whether the supplier meets it. The requirement\'s compliance status in Compliance and audit applies to the organisation, not the supplier. Whether the supplier follows the requirements is judged in the supplier assessment.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Deviations and improvements',
                         'items' => [
                             ['title' => 'Follow up in Deviations and improvements', 'text' => 'When something at the supplier needs follow-up, you create a case in Deviations and improvements. You choose the case type, business area, responsible and deadline. The case is handled there, with actions, status and closing.'],
@@ -3039,7 +3074,7 @@ return [
                         'title' => 'End or delete?',
                         'items' => [
                             ['title' => 'End', 'text' => 'The usual way to take a supplier out of use. The history is kept.'],
-                            ['title' => 'Delete', 'text' => 'Only for a supplier registered by mistake that has never changed status or criticality, been assessed, had documentation registered or been linked to a case in Deviations and improvements or a risk in Risk. Deleting cannot be undone.'],
+                            ['title' => 'Delete', 'text' => 'Only for a supplier registered by mistake that has never changed status or criticality, been assessed, had documentation registered or been linked to a case in Deviations and improvements, a risk in Risk or a requirement in Compliance and audit. Deleting cannot be undone.'],
                         ],
                     ],
                 ],

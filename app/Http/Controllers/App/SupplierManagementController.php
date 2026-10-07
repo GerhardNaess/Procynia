@@ -11,6 +11,7 @@ use App\Models\SupplierDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Services\Suppliers\SupplierComplianceRequirementService;
 use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Services\Suppliers\SupplierLifecycleService;
@@ -42,7 +43,9 @@ use Inertia\Response;
  * (supplier.assess). The dokumentasjonsoversikt is shown here and written by
  * SupplierDocumentController (supplier.edit). Avvik og forbedringer hos leverandøren is read here
  * through SupplierImprovementHandoffService and written by SupplierImprovementController; Risikoer
- * som gjelder leverandøren likewise through SupplierRiskService and SupplierRiskController.
+ * som gjelder leverandøren likewise through SupplierRiskService and SupplierRiskController, and Krav
+ * som gjelder leverandøren through SupplierComplianceRequirementService and
+ * SupplierComplianceRequirementController — never with the requirement's compliance status.
  *
  * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
  * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
@@ -68,6 +71,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierReviewSchedule $schedule,
         private readonly SupplierImprovementHandoffService $improvements,
         private readonly SupplierRiskService $risks,
+        private readonly SupplierComplianceRequirementService $requirements,
     ) {}
 
     public function index(Request $request): Response
@@ -205,6 +209,11 @@ class SupplierManagementController extends Controller
             'risks' => $this->risks->risksFor($user, $supplier),
             'risk_handoff' => $canEdit && $open && $this->risks->canReadRisks($user) ? $this->risks->formOptions($user) + [
                 'link_options' => $this->risks->linkOptions($user, $supplier),
+            ] : null,
+            // null, not empty: the person cannot read Etterlevelse og revisjon. No compliance status.
+            'requirements' => $this->requirements->requirementsFor($user, $supplier),
+            'requirement_linking' => $canEdit && $open && $this->requirements->canReadRequirements($user) ? [
+                'link_options' => $this->requirements->linkOptions($user, $supplier),
             ] : null,
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,
