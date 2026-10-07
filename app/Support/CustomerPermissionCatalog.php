@@ -26,6 +26,8 @@ final class CustomerPermissionCatalog
 
     public const DOMAIN_COMPLIANCE = 'compliance';
 
+    public const DOMAIN_SUPPLIER = 'supplier';
+
     public const QUALITY_VIEW = 'quality.view';
 
     public const QUALITY_CREATE = 'quality.create';
@@ -130,6 +132,25 @@ final class CustomerPermissionCatalog
     /** Deleting a requirement or an audit registered by mistake, and a source nothing uses. */
     public const COMPLIANCE_DELETE = 'compliance.delete';
 
+    /*
+     * Leverandøroppfølging. Customer-wide like Etterlevelse og revisjon — no fagområde — and an
+     * explicit-grant domain: System Owner holds these keys only through a role of their own (see
+     * explicitGrantDomains()). See SupplierAccessService.
+     */
+    public const SUPPLIER_VIEW = 'supplier.view';
+
+    /**
+     * Registering and changing suppliers, their criticality and documentation, their lifecycle, and
+     * linking them to — or starting — risks, requirements and cases (with that module's own right).
+     */
+    public const SUPPLIER_EDIT = 'supplier.edit';
+
+    /** Registering supplier assessments. supplier.edit does not imply it, and it does not imply edit. */
+    public const SUPPLIER_ASSESS = 'supplier.assess';
+
+    /** Deleting a supplier registered by mistake, while nothing has been recorded on it. */
+    public const SUPPLIER_DELETE = 'supplier.delete';
+
     /**
      * Permission keys grouped by the domain they govern, in the order they should be presented.
      *
@@ -180,6 +201,12 @@ final class CustomerPermissionCatalog
                 self::COMPLIANCE_AUDIT,
                 self::COMPLIANCE_DELETE,
             ],
+            self::DOMAIN_SUPPLIER => [
+                self::SUPPLIER_VIEW,
+                self::SUPPLIER_EDIT,
+                self::SUPPLIER_ASSESS,
+                self::SUPPLIER_DELETE,
+            ],
         ];
     }
 
@@ -194,7 +221,7 @@ final class CustomerPermissionCatalog
      */
     public static function explicitGrantDomains(): array
     {
-        return [self::DOMAIN_COMPLIANCE];
+        return [self::DOMAIN_COMPLIANCE, self::DOMAIN_SUPPLIER];
     }
 
     /** Whether a key belongs to a domain System Owner only reaches through a role of their own. */

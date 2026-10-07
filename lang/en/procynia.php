@@ -741,6 +741,7 @@ return [
             'objectives' => 'Set objectives, follow results and see what needs attention.',
             'improvements' => 'Register, handle and follow up deviations and improvement opportunities.',
             'compliance' => 'The requirements the organisation must comply with, compliance assessments, and audits with findings and follow-up.',
+            'suppliers' => 'The suppliers the organisation depends on, who follows them up and how important they are.',
         ],
     ],
     'home' => [
@@ -2481,6 +2482,7 @@ return [
                 'objective' => 'Objectives & KPIs',
                 'improvement' => 'Deviations & improvements',
                 'compliance' => 'Compliance and audit',
+                'supplier' => 'Supplier follow-up',
             ],
             'permissions' => [
                 'quality_view' => 'View the quality system',
@@ -2513,6 +2515,41 @@ return [
                 'compliance_assess' => 'Assess compliance',
                 'compliance_audit' => 'Carry out audits',
                 'compliance_delete' => 'Delete mistakenly registered requirements and audits, and unused requirement sources',
+                'supplier_view' => 'View suppliers',
+                'supplier_edit' => 'Register and change suppliers',
+                'supplier_assess' => 'Assess suppliers',
+                'supplier_delete' => 'Delete mistakenly registered suppliers',
+            ],
+        ],
+    ],
+    'supplier_management' => [
+        'module_name' => 'Supplier follow-up',
+        'index_title' => 'Suppliers',
+        'index_heading' => 'Suppliers',
+        'index_intro' => 'The suppliers the organisation depends on, who in your organisation follows them up, and how important they are.',
+        'empty_title' => 'No suppliers registered yet',
+        'empty_text' => 'When suppliers are registered, they appear here with their internal owner, criticality and next assessment.',
+        'help' => [
+            'button' => 'Help',
+            'index' => [
+                'title' => 'About supplier follow-up',
+                'intro' => 'Supplier follow-up gives you an overview of the suppliers the organisation depends on, and traceable follow-up of them.',
+                'sections' => [
+                    [
+                        'title' => 'What you find here',
+                        'items' => [
+                            ['title' => 'Suppliers', 'text' => 'Each supplier is registered once, as the company it is – not once per contract, service or document.'],
+                            ['title' => 'Ownership and follow-up', 'text' => 'Each supplier has an internal owner. Risks, requirements and deviations concerning the supplier are followed up in the modules that own them.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Access',
+                        'items' => [
+                            ['title' => 'Permissions', 'text' => 'Who can view, register, assess and delete suppliers is decided by the roles under Access in the customer environment.'],
+                            ['title' => 'System Owner', 'text' => 'System Owner does not get access automatically. To work here, give yourself a role with the permissions.'],
+                        ],
+                    ],
+                ],
             ],
         ],
     ],
@@ -4939,7 +4976,7 @@ return [
                 'basis' => 'Wiki and quality management with deviations, actions and documented follow-up.',
                 'governance' => 'Everything in Basic, plus risk management and objectives and KPIs.',
                 'iso' => 'Everything in Governance, plus compliance and audit: requirements, assessments and audits.',
-                'grc' => 'Everything in ISO, and supplier follow-up once it is ready.',
+                'grc' => 'Everything in ISO, plus supplier follow-up.',
                 'tender' => 'The whole bid process from notice to submitted tender. Combines with any package.',
             ],
             'module_labels' => [
@@ -4950,8 +4987,7 @@ return [
                 'objectives' => 'Objectives & KPIs',
                 'improvements' => 'Deviations & improvements',
                 'compliance' => 'Compliance and audit',
-                // Not built yet; drop "(planned)" when the module ships.
-                'supplier' => 'Supplier follow-up (planned)',
+                'supplier' => 'Supplier follow-up',
                 'contracts' => 'Contracts',
             ],
         ],

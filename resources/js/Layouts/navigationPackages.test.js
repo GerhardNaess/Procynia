@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { APP_MODULES, railEntries } from '../Support/appModules.js';
+import { railEntries } from '../Support/appModules.js';
 
 /**
  * The rail for the commercial packages Procynia sells, as the rail actually receives them: the
@@ -15,11 +15,11 @@ import { APP_MODULES, railEntries } from '../Support/appModules.js';
 const BASIS = ['wiki', 'quality', 'improvements'];
 const STYRING = ['wiki', 'quality', 'risk', 'objectives', 'improvements'];
 const ISO = ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
-// GRC carries Leverandøroppfølging ahead of it being built.
+// GRC is ISO plus Leverandøroppfølging.
 const GRC = [...ISO, 'supplier'];
 const withTender = (modules) => [modules[0], 'tender', ...modules.slice(1)];
 
-const VIEW_ALL = ['wiki.view', 'quality.view', 'risk.view', 'objective.view', 'improvement.view', 'compliance.view'];
+const VIEW_ALL = ['wiki.view', 'quality.view', 'risk.view', 'objective.view', 'improvement.view', 'compliance.view', 'supplier.view'];
 
 function shape(activeModules, permissions = VIEW_ALL) {
     const { entries } = railEntries(activeModules, permissions);
@@ -59,35 +59,24 @@ describe('what each package puts on the rail', () => {
         ]);
     });
 
-    test('GRC: what ISO shows — Leverandører is not built, so a package carrying it shows nothing more', () => {
-        const rail = railEntries(GRC, VIEW_ALL);
-
-        assert.deepEqual(shape(GRC), shape(ISO));
-        assert.ok(rail.planned.some((module) => module.key === 'suppliers'), 'still planned');
+    test('GRC: everything in ISO, plus Leverandører under Styring', () => {
+        assert.deepEqual(shape(GRC), [
+            'home',
+            'wiki',
+            { governance: ['quality', 'risk', 'objectives', 'improvements', { compliance: ['compliance-requirements', 'compliance-audits'] }, 'suppliers'] },
+        ]);
+        assert.ok(! railEntries(GRC, VIEW_ALL).planned.some((module) => module.key === 'suppliers'));
+        // ISO does not carry it, however the person's permissions read.
+        assert.ok(! JSON.stringify(shape(ISO)).includes('suppliers'));
     });
 
-    test('the day Leverandører is built, GRC shows it under Styring — once, and no longer as planned', () => {
-        const suppliers = APP_MODULES.find((module) => module.key === 'suppliers');
-        const original = { ...suppliers };
-
-        try {
-            Object.assign(suppliers, { built: true, href: '/app/suppliers-follow-up' });
-
-            const rail = railEntries(GRC, VIEW_ALL);
-            const governance = rail.entries.find((entry) => entry.key === 'governance');
-
-            assert.deepEqual(governance.children.map((child) => child.key).filter((key) => key === 'suppliers'), ['suppliers']);
-            assert.ok(! rail.planned.some((module) => module.key === 'suppliers'));
-            // ISO does not carry it, so ISO is unchanged.
-            assert.ok(! JSON.stringify(shape(ISO)).includes('suppliers'));
-        } finally {
-            Object.keys(suppliers).forEach((key) => delete suppliers[key]);
-            Object.assign(suppliers, original);
-        }
-    });
-
-    test('GRC + Anbud: the same as ISO + Anbud', () => {
-        assert.deepEqual(shape(withTender(GRC)), shape(withTender(ISO)));
+    test('GRC + Anbud: the same as GRC, plus Anbud — whose own `suppliers` area stays inside Anbud', () => {
+        assert.deepEqual(shape(withTender(GRC)), [
+            'home',
+            'wiki',
+            'tenders',
+            { governance: ['quality', 'risk', 'objectives', 'improvements', { compliance: ['compliance-requirements', 'compliance-audits'] }, 'suppliers'] },
+        ]);
     });
 
     test('no package names on the rail — only arbeidsområder and modules', () => {

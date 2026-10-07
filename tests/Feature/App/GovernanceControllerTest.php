@@ -62,6 +62,7 @@ class GovernanceControllerTest extends TestCase
             'Mål og KPI' => [CustomerPermissionCatalog::OBJECTIVE_VIEW, 'objectives'],
             'Avvik og forbedringer' => [CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'improvements'],
             'Etterlevelse og revisjon' => [CustomerPermissionCatalog::COMPLIANCE_VIEW, 'compliance'],
+            'Leverandøroppfølging' => [CustomerPermissionCatalog::SUPPLIER_VIEW, 'suppliers'],
         ];
     }
 
@@ -83,6 +84,7 @@ class GovernanceControllerTest extends TestCase
         ['customer' => $customer] = $this->context('grc');
         $user = $this->member($customer);
         $this->grantAll($customer, $user, [
+            CustomerPermissionCatalog::SUPPLIER_VIEW,
             CustomerPermissionCatalog::COMPLIANCE_VIEW,
             CustomerPermissionCatalog::IMPROVEMENT_VIEW,
             CustomerPermissionCatalog::QUALITY_VIEW,
@@ -92,9 +94,9 @@ class GovernanceControllerTest extends TestCase
 
         $modules = $this->governancePage($user)['props']['modules'];
 
-        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'compliance'], array_column($modules, 'key'));
+        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'], array_column($modules, 'key'));
         $this->assertSame(
-            [route('app.quality.index'), route('app.risk.index'), route('app.objectives.index'), route('app.improvements.index'), route('app.compliance.requirements.index')],
+            [route('app.quality.index'), route('app.risk.index'), route('app.objectives.index'), route('app.improvements.index'), route('app.compliance.requirements.index'), route('app.supplier-management.index')],
             array_column($modules, 'href'),
         );
     }

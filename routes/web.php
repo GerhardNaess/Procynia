@@ -34,6 +34,7 @@ use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
@@ -447,6 +448,11 @@ Route::prefix('app')
             Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
             Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');
             Route::delete('/sources/{sourceId}', [ComplianceSourceController::class, 'destroy'])->whereNumber('sourceId')->name('sources.destroy');
+        });
+        // Leverandøroppfølging. Named under `app.supplier-management.`, mapped to the `supplier` module.
+        // Not /suppliers: that path and `app.suppliers.` are Anbud's Doffin competitor view.
+        Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
+            Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

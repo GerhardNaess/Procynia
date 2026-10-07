@@ -745,6 +745,7 @@ return [
             'objectives' => 'Sett mål, følg resultater og se hva som trenger oppmerksomhet.',
             'improvements' => 'Registrer, behandle og følg opp avvik og forbedringsmuligheter.',
             'compliance' => 'Kravene virksomheten skal etterleve, vurdering av etterlevelse og revisjoner med funn og oppfølging.',
+            'suppliers' => 'Leverandørene virksomheten er avhengig av, hvem som følger dem opp og hvor viktige de er.',
         ],
     ],
     'home' => [
@@ -2485,6 +2486,7 @@ return [
                 'objective' => 'Mål og KPI',
                 'improvement' => 'Avvik og forbedringer',
                 'compliance' => 'Etterlevelse og revisjon',
+                'supplier' => 'Leverandøroppfølging',
             ],
             'permissions' => [
                 'quality_view' => 'Se kvalitetssystemet',
@@ -2517,6 +2519,41 @@ return [
                 'compliance_assess' => 'Vurdere etterlevelse',
                 'compliance_audit' => 'Gjennomføre revisjoner',
                 'compliance_delete' => 'Slette feilregistrerte krav, revisjoner og ubrukte kravkilder',
+                'supplier_view' => 'Se leverandører',
+                'supplier_edit' => 'Registrere og endre leverandører',
+                'supplier_assess' => 'Vurdere leverandører',
+                'supplier_delete' => 'Slette feilregistrerte leverandører',
+            ],
+        ],
+    ],
+    'supplier_management' => [
+        'module_name' => 'Leverandøroppfølging',
+        'index_title' => 'Leverandører',
+        'index_heading' => 'Leverandører',
+        'index_intro' => 'Leverandørene virksomheten er avhengig av, hvem hos dere som følger dem opp, og hvor viktige de er.',
+        'empty_title' => 'Ingen leverandører er registrert ennå',
+        'empty_text' => 'Når leverandører registreres, vises de her med intern ansvarlig, kritikalitet og neste vurdering.',
+        'help' => [
+            'button' => 'Hjelp',
+            'index' => [
+                'title' => 'Om leverandøroppfølging',
+                'intro' => 'Leverandøroppfølging gir dere oversikt over leverandørene virksomheten er avhengig av, og en sporbar oppfølging av dem.',
+                'sections' => [
+                    [
+                        'title' => 'Hva du finner her',
+                        'items' => [
+                            ['title' => 'Leverandører', 'text' => 'Hver leverandør registreres én gang, som virksomheten den er – ikke én gang per avtale, tjeneste eller dokument.'],
+                            ['title' => 'Ansvar og oppfølging', 'text' => 'Hver leverandør har en intern ansvarlig. Risiko, krav og avvik som gjelder leverandøren, følges opp i modulene som eier dem.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Tilgang',
+                        'items' => [
+                            ['title' => 'Rettigheter', 'text' => 'Hvem som kan se, registrere, vurdere og slette leverandører, bestemmes av rollene under Tilganger i Kundemiljø.'],
+                            ['title' => 'System Owner', 'text' => 'System Owner får ikke tilgang automatisk. Skal du arbeide her, gi deg selv en rolle med rettighetene.'],
+                        ],
+                    ],
+                ],
             ],
         ],
     ],
@@ -4943,7 +4980,7 @@ return [
                 'basis' => 'Wiki og kvalitetsstyring med avvik, tiltak og dokumentert oppfølging.',
                 'governance' => 'Alt i Basis, pluss risikostyring og mål og KPI.',
                 'iso' => 'Alt i Styring, pluss etterlevelse og revisjon: krav, vurderinger og revisjoner.',
-                'grc' => 'Alt i ISO, og leverandøroppfølging når den er klar.',
+                'grc' => 'Alt i ISO, pluss leverandøroppfølging.',
                 'tender' => 'Hele tilbudsløpet fra kunngjøring til levert tilbud. Kan kombineres med alle pakkene.',
             ],
             'module_labels' => [
@@ -4954,8 +4991,7 @@ return [
                 'objectives' => 'Mål og KPI',
                 'improvements' => 'Avvik og forbedringer',
                 'compliance' => 'Etterlevelse og revisjon',
-                // Not built yet; drop «(planlagt)» when the module ships.
-                'supplier' => 'Leverandøroppfølging (planlagt)',
+                'supplier' => 'Leverandøroppfølging',
                 'contracts' => 'Kontrakter',
             ],
         ],

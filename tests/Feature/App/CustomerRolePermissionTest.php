@@ -189,21 +189,29 @@ class CustomerRolePermissionTest extends TestCase
         $this->assertTrue($service->has($owner->fresh(), CustomerPermissionCatalog::QUALITY_DELETE));
     }
 
-    public function test_the_catalogue_names_compliance_as_its_only_explicit_grant_domain(): void
+    public function test_the_catalogue_names_compliance_and_supplier_as_its_explicit_grant_domains(): void
     {
         $this->assertSame(
             ['compliance.view', 'compliance.edit', 'compliance.assess', 'compliance.audit', 'compliance.delete'],
             CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE],
         );
-        $this->assertSame([CustomerPermissionCatalog::DOMAIN_COMPLIANCE], CustomerPermissionCatalog::explicitGrantDomains());
+        $this->assertSame(
+            ['supplier.view', 'supplier.edit', 'supplier.assess', 'supplier.delete'],
+            CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_SUPPLIER],
+        );
+        $this->assertSame(
+            [CustomerPermissionCatalog::DOMAIN_COMPLIANCE, CustomerPermissionCatalog::DOMAIN_SUPPLIER],
+            CustomerPermissionCatalog::explicitGrantDomains(),
+        );
 
         foreach (CustomerPermissionCatalog::all() as $key) {
-            $this->assertSame(str_starts_with($key, 'compliance.'), CustomerPermissionCatalog::requiresExplicitGrant($key), $key);
-        }
+            $explicit = str_starts_with($key, 'compliance.') || str_starts_with($key, 'supplier.');
+            $this->assertSame($explicit, CustomerPermissionCatalog::requiresExplicitGrant($key), $key);
 
-        // Customer-wide in v1: no fagområde scopes it.
-        foreach (CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE] as $key) {
-            $this->assertFalse(CustomerPermissionCatalog::isAreaScoped($key), $key);
+            // Both are customer-wide in v1: no fagområde scopes them.
+            if ($explicit) {
+                $this->assertFalse(CustomerPermissionCatalog::isAreaScoped($key), $key);
+            }
         }
     }
 

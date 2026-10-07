@@ -48,6 +48,7 @@ class NavigationEntitlementMatrixTest extends TestCase
         CustomerPermissionCatalog::OBJECTIVE_VIEW,
         CustomerPermissionCatalog::IMPROVEMENT_VIEW,
         CustomerPermissionCatalog::COMPLIANCE_VIEW,
+        CustomerPermissionCatalog::SUPPLIER_VIEW,
     ];
 
     protected function setUp(): void
@@ -77,6 +78,7 @@ class NavigationEntitlementMatrixTest extends TestCase
     {
         $styring = ['quality', 'risk', 'objectives', 'improvements'];
         $iso = [...$styring, 'compliance'];
+        $grc = [...$iso, 'suppliers'];
 
         return [
             'Basis' => [['basis'], ['wiki', 'quality', 'improvements'], ['quality', 'improvements'], false],
@@ -85,9 +87,9 @@ class NavigationEntitlementMatrixTest extends TestCase
             'Styring + Anbud' => [['governance', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements'], $styring, true],
             'ISO' => [['iso'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, false],
             'ISO + Anbud' => [['iso', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, true],
-            // GRC already carries Leverandøroppfølging; the module is not built, so Styring shows ISO's.
-            'GRC' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $iso, false],
-            'GRC + Anbud' => [['grc', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $iso, true],
+            // GRC is ISO plus Leverandøroppfølging, and nothing else.
+            'GRC' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $grc, false],
+            'GRC + Anbud' => [['grc', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $grc, true],
             'Anbud alone' => [['tender'], ['wiki', 'tender'], [], true],
         ];
     }
@@ -122,6 +124,12 @@ class NavigationEntitlementMatrixTest extends TestCase
             $response = $this->actingAs($user)->get($url);
             in_array('compliance', $governance, true) ? $response->assertOk() : $response->assertRedirect();
         }
+
+        $response = $this->actingAs($user)->get('/app/supplier-management');
+        in_array('suppliers', $governance, true) ? $response->assertOk() : $response->assertRedirect();
+
+        // Anbud's Doffin competitor view keeps its own path, gated by Anbud alone.
+        $this->actingAs($user)->get('/app/suppliers')->assertStatus($tender ? 200 : 302);
     }
 
     /**
@@ -135,13 +143,14 @@ class NavigationEntitlementMatrixTest extends TestCase
             'Mål og KPI' => [CustomerPermissionCatalog::OBJECTIVE_VIEW, 'objectives'],
             'Avvik og forbedringer' => [CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'improvements'],
             'Etterlevelse og revisjon' => [CustomerPermissionCatalog::COMPLIANCE_VIEW, 'compliance'],
+            'Leverandøroppfølging' => [CustomerPermissionCatalog::SUPPLIER_VIEW, 'suppliers'],
         ];
     }
 
     #[DataProvider('viewPermissionProvider')]
     public function test_a_module_the_customer_holds_is_hidden_in_both_places_without_its_view_permission(string $permission, string $key): void
     {
-        $customer = $this->customerWith(['iso', 'tender']);
+        $customer = $this->customerWith(['grc', 'tender']);
         $user = $this->member($customer);
         $this->grantAll($customer, $user, array_values(array_diff(self::VIEW_ALL, [$permission])));
 
@@ -223,9 +232,9 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->assertNotContains('tender', $this->sharedProps($withoutAddOn)['entitlements']['modules']);
     }
 
-    public function test_system_owner_follows_each_domain_with_no_bypass_into_compliance(): void
+    public function test_system_owner_follows_each_domain_with_no_bypass_into_compliance_or_suppliers(): void
     {
-        $customer = $this->customerWith(['iso', 'tender']);
+        $customer = $this->customerWith(['grc', 'tender']);
         $owner = User::query()->where('customer_id', $customer->id)->where('bid_role', User::BID_ROLE_SYSTEM_OWNER)->firstOrFail();
 
         $props = $this->sharedProps($owner);
@@ -233,6 +242,8 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->assertSame(['quality', 'risk', 'objectives', 'improvements'], $this->railGovernance($props));
         $this->assertSame(['quality', 'risk', 'objectives', 'improvements'], $this->governanceKeys($owner));
         $this->assertNotContains(CustomerPermissionCatalog::COMPLIANCE_VIEW, $props['access']['permissions']);
+        $this->assertNotContains(CustomerPermissionCatalog::SUPPLIER_VIEW, $props['access']['permissions']);
+        $this->assertContains('supplier', $props['entitlements']['modules'], 'the entitlement alone grants nothing');
     }
 
     public function test_the_order_is_the_module_sort_order_in_config_for_both_the_rail_and_styring(): void

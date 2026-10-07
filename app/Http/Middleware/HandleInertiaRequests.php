@@ -142,6 +142,9 @@ class HandleInertiaRequests extends Middleware
                 // Avvik og forbedringer, shared as a block for the same reason.
                 'improvements' => __('procynia.improvements'),
                 'compliance' => __('procynia.compliance'),
+                // Leverandøroppfølging, shared as a block for the same reason as Kvalitet. Not `suppliers`:
+                // that key is Anbud's Doffin competitor view.
+                'supplier_management' => __('procynia.supplier_management'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
                 'customer_env' => __('procynia.customer_env'),
