@@ -171,6 +171,10 @@ class QualityController extends Controller
             ? $this->blueprints->publicationState((int) $customerId, $item)
             : null;
 
+        // Read here and handed on only through the domain props below. The page never receives the
+        // generic list: "Fra", "Til" and a relation type are the model's words, not the user's.
+        $relations = $this->relationsForItem($customerId, (int) $item->id);
+
         return Inertia::render('App/Quality/Item', [
             'item' => $this->itemDetail($item),
             'active_tab' => $tab,
@@ -241,7 +245,6 @@ class QualityController extends Controller
             'control_tool_options' => $isControl && $customerId !== null ? $this->tools->optionsForControl((int) $customerId, $item) : [],
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
-            'relations' => $relations = $this->relationsForItem($customerId, (int) $item->id),
             // A process's styrende dokumenter are the policies that govern it — the incoming side
             // of the same `governs` rows the overview edits, never a separate store. Linking and
             // unlinking post to storeRelation()/destroyRelation() like every other relation.
@@ -250,6 +253,11 @@ class QualityController extends Controller
                 : [],
             'governing_document_options' => $item->quality_type === QualityItem::TYPE_PROCESS
                 ? $this->governingDocumentOptions($customerId, $relations)
+                : [],
+            // The other end of the same rows: on a policy, the processes it governs. Read-only
+            // here; the link is made and removed on the process, under Styrende dokumenter.
+            'governed_processes' => $item->quality_type === QualityItem::TYPE_POLICY
+                ? $this->governedProcesses($relations)
                 : [],
         ]);
     }
@@ -2149,6 +2157,21 @@ class QualityController extends Controller
         return array_values(array_filter(
             $relations,
             static fn (array $relation): bool => $relation['direction'] === 'incoming'
+                && $relation['relation_type'] === QualityItemRelation::TYPE_GOVERNS,
+        ));
+    }
+
+    /**
+     * The processes one policy governs, read off its relations.
+     *
+     * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
+     * @return list<array<string, mixed>>
+     */
+    private function governedProcesses(array $relations): array
+    {
+        return array_values(array_filter(
+            $relations,
+            static fn (array $relation): bool => $relation['direction'] === 'outgoing'
                 && $relation['relation_type'] === QualityItemRelation::TYPE_GOVERNS,
         ));
     }

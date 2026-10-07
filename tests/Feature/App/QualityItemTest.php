@@ -469,9 +469,15 @@ class QualityItemTest extends TestCase
             ->viewData('page')['props'];
 
         $this->assertSame([], $policyProps['governing_documents']);
-        $this->assertCount(1, $policyProps['relations']);
-        $this->assertSame('outgoing', $policyProps['relations'][0]['direction']);
-        $this->assertSame((int) $process->id, $policyProps['relations'][0]['other_item_id']);
+        $this->assertCount(1, $policyProps['governed_processes']);
+        $this->assertSame((int) $process->id, $policyProps['governed_processes'][0]['other_item_id']);
+        $this->assertSame([], $props['governed_processes']);
+
+        // Neither page ships the generic relation list: "Fra", "Til" and a relation type are the
+        // model's words, not the user's.
+        $this->assertArrayNotHasKey('relations', $props);
+        $this->assertArrayNotHasKey('relations', $policyProps);
+        $this->assertArrayNotHasKey('relation_types', $this->app['translator']->get('procynia.quality'));
         $this->assertSame(1, QualityItemRelation::query()->where('customer_id', $customer->id)->count());
     }
 

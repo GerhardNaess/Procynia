@@ -74,9 +74,9 @@ export default function QualityItem() {
         document_options: documentOptions = [],
         document_relation_types: documentRelationTypes = [],
         document_search: documentSearch = '',
-        relations = [],
         governing_documents: governingDocuments = [],
         governing_document_options: governingDocumentOptions = [],
+        governed_processes: governedProcesses = [],
         active_tab: activeTab = 'document',
         has_flow: hasFlow = false,
         blueprint = null,
@@ -234,8 +234,8 @@ export default function QualityItem() {
                             />
                         )}
 
-                        {! isProcess && (
-                            <RelationsPanel tq={tq} relations={relations} typeLabels={typeLabels} />
+                        {item.quality_type === 'policy' && (
+                            <GovernedProcessesPanel td={td} processes={governedProcesses} />
                         )}
 
                         <DocumentsPanel
@@ -911,31 +911,28 @@ function RowEditor({
     );
 }
 
-function RelationsPanel({ tq, relations, typeLabels }) {
-    const outgoing = tq.relation_types ?? {};
-    const incoming = tq.relation_types_incoming ?? {};
-
+/**
+ * The processes a policy governs: the other end of the `governs` rows a process lists under
+ * Styrende dokumenter. Read-only here — the link is made and removed on the process — and said in
+ * the policy's own terms, never as a relation type.
+ */
+function GovernedProcessesPanel({ td, processes }) {
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tq.relations_heading ?? 'Relasjoner'}</h2>
+            <h2 className="text-xl font-semibold text-slate-950">{td.governed_heading ?? 'Styrer disse prosessene'}</h2>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.governed_help ?? ''}</p>
 
-            {relations.length === 0 ? (
-                <p className="mt-2 text-base text-slate-600">{tq.no_relations ?? 'Ingen relasjoner'}</p>
+            {processes.length === 0 ? (
+                <p className="mt-4 text-base text-slate-600">
+                    {td.governed_empty ?? 'Policyen er ikke koblet til noen prosess ennå.'}
+                </p>
             ) : (
-                <ul className="mt-3 space-y-2">
-                    {relations.map((relation) => (
-                        <li key={`${relation.id}-${relation.direction}`} className="flex flex-wrap items-center gap-2 text-base">
-                            <span className="text-slate-500">
-                                {relation.direction === 'outgoing'
-                                    ? (outgoing?.[relation.relation_type] ?? relation.relation_type)
-                                    : (incoming?.[relation.relation_type] ?? relation.relation_type)}
-                            </span>
-                            <Link href={relation.other_url} className="font-semibold text-slate-950 hover:underline">
-                                {relation.other_code ? `${relation.other_code} — ${relation.other_title}` : relation.other_title}
+                <ul className="mt-4 divide-y divide-slate-100">
+                    {processes.map((process) => (
+                        <li key={process.id} className="py-3 text-base">
+                            <Link href={process.other_url} className="font-semibold text-slate-950 hover:underline">
+                                {process.other_code ? `${process.other_code} — ${process.other_title}` : process.other_title}
                             </Link>
-                            <span className="text-sm text-slate-500">
-                                ({typeLabels?.[relation.other_quality_type] ?? relation.other_quality_type})
-                            </span>
                         </li>
                     ))}
                 </ul>
@@ -948,7 +945,7 @@ function RelationsPanel({ tq, relations, typeLabels }) {
  * The styrende dokumenter a process works inside.
  *
  * Not a store of its own: each row is a `governs` relation (policy -> process), the same row the
- * Kvalitet overview draws and the policy's own page lists as "styrer". Linking posts to the shared
+ * Kvalitet overview draws and the policy's own page lists under "Styrer disse prosessene". Linking posts to the shared
  * relations endpoint, which checks the tenant and the type matrix; nothing of the policy is copied.
  */
 function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, options, typeLabels }) {
