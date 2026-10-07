@@ -8,6 +8,7 @@ use App\Models\CustomerRole;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
+use App\Models\SupplierDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -26,9 +27,9 @@ use Illuminate\Support\Facades\DB;
  * nothing the run does can touch the shared E2E data, and the shared users are never given a
  * supplier role.
  *
- * Cleanup removes the run's customer; its suppliers, their status and criticality history and
- * their assessments go with it. The history triggers allow that one delete (the customer going), so
- * no trigger is switched off.
+ * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
+ * assessments and their documentation go with it. The history triggers allow that one delete (the
+ * customer going), so no trigger is switched off.
  */
 class SupplierE2EFixture
 {
@@ -126,7 +127,7 @@ class SupplierE2EFixture
         return ['id' => (int) $supplier->id, 'name' => $supplier->name];
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, roles: int, users: int} */
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -137,6 +138,7 @@ class SupplierE2EFixture
             'status_changes' => SupplierStatusChange::query()->whereIn('customer_id', $customerIds)->count(),
             'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
+            'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lev.'.strtolower($suffix).'.%')->count(),
         ];
@@ -157,7 +159,7 @@ class SupplierE2EFixture
                 CustomerRole::query()->where('customer_id', $customer->id)->delete();
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
-                // Suppliers, their history and their assessments go with the customer.
+                // Suppliers, their history, assessments and documentation go with the customer.
                 $customer->delete();
             });
         }

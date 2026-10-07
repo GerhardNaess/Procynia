@@ -288,3 +288,80 @@ test('an active supplier is assessed, reassessed, and the earlier assessment sta
     await page.goto(`/app/supplier-management?${new URLSearchParams({ search: supplier.name })}`);
     await expect(page.locator('tbody tr', { hasText: supplier.name })).toContainText(String(new Date().getFullYear() + 2));
 });
+
+/**
+ * Dokumentasjon: where a supplier's documentation is kept and how long it is valid — never a file.
+ * The rules — supplier.edit, the ended read-only rule, tenant isolation, validation and the delete
+ * rule — are PHP's (SupplierDocumentTest); this is the journey: documentation is added, corrected
+ * until it shows as expired, renewed, the replaced row deleted, and the section read-only once the
+ * supplier is ended — at desktop and 390 px.
+ */
+test('documentation is added, corrected, renewed and deleted, and is read-only once the supplier is ended', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Skydrift ${suffix} AS', 'critical', 12)`);
+    const year = new Date().getFullYear();
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-documents');
+    await expect(section.getByTestId('documents-none')).toHaveText('Ingen dokumentasjon er registrert.');
+
+    // Legg til dokumentasjon: a reference to where the document is, never an upload.
+    await section.getByRole('button', { name: 'Legg til dokumentasjon' }).click();
+    await expect(section.locator('input[type="file"]')).toHaveCount(0);
+    await section.locator('#supplier-document-type').selectOption({ label: 'Sertifikat' });
+    await section.locator('#supplier-document-title').fill('ISO 27001-sertifikat');
+    await section.locator('#supplier-document-location').fill('https://contoso.sharepoint.com/sites/innkjop/iso27001.pdf');
+    await section.locator('#supplier-document-valid-from').fill(`${year - 1}-01-01`);
+    await section.locator('#supplier-document-valid-until').fill(`${year + 1}-01-01`);
+    await expectReadable(page, '30-document-form');
+    await section.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
+    await expect(page.getByText('Dokumentasjonen er lagret.', { exact: true })).toBeVisible();
+
+    const entries = section.getByTestId('document-entry');
+    await expect(entries).toHaveCount(1);
+    for (const text of ['Sertifikat', 'ISO 27001-sertifikat', 'Gyldig', String(year + 1)]) {
+        await expect(entries.first()).toContainText(text);
+    }
+    await expect(entries.first().getByTestId('document-location').getByRole('link')).toHaveAttribute('href', 'https://contoso.sharepoint.com/sites/innkjop/iso27001.pdf');
+
+    // Rediger: the certificate in fact ran out at the end of last year.
+    await entries.first().getByRole('button', { name: 'Rediger' }).click();
+    await section.locator('#supplier-document-valid-until').fill(`${year - 1}-12-31`);
+    await section.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
+    await expect(page.getByText('Dokumentasjonen er oppdatert.', { exact: true })).toBeVisible();
+    await expect(entries.first()).toContainText('Utløpt');
+
+    // Registrer fornyet: same type, new validity and location; the old row stays as Erstattet.
+    await entries.first().getByRole('button', { name: 'Registrer fornyet' }).click();
+    await section.locator('#supplier-document-title').fill(`ISO 27001-sertifikat ${year}`);
+    await section.locator('#supplier-document-location').fill('Arkiv sak 2026/114');
+    await section.locator('#supplier-document-valid-until').fill(`${year + 2}-12-31`);
+    await section.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
+    await expect(page.getByText('Den fornyede dokumentasjonen er lagret. Den forrige er markert som erstattet.', { exact: true })).toBeVisible();
+    await expect(entries).toHaveCount(2);
+    await expect(entries.nth(0)).toContainText(`ISO 27001-sertifikat ${year}`);
+    await expect(entries.nth(0)).toContainText('Gyldig');
+    await expect(entries.nth(0).getByTestId('document-location')).toHaveText('Arkiv sak 2026/114');
+    await expect(entries.nth(1)).toContainText('Erstattet');
+    await expectReadable(page, '31-documents');
+
+    // Slett: the replaced row was only kept for reference; deleting it leaves the renewal.
+    page.once('dialog', (dialog) => dialog.accept());
+    await entries.nth(1).getByRole('button', { name: 'Slett' }).click();
+    await expect(page.getByText('Dokumentasjonen er slettet.', { exact: true })).toBeVisible();
+    await expect(entries).toHaveCount(1);
+
+    // Ended: the documentation stays visible, and nothing can be changed until it is reopened.
+    await page.getByRole('button', { name: 'Avslutt leverandør' }).click();
+    await page.locator('#supplier-end-reason').fill('Avtalen er sagt opp.');
+    await page.getByRole('button', { name: 'Avslutt leverandør', exact: true }).last().click();
+    await expect(page.getByText('Leverandøren er avsluttet.', { exact: true })).toBeVisible();
+    await expect(entries).toHaveCount(1);
+    await expect(section.getByTestId('documents-read-only')).toContainText('Gjenåpne den for å endre dokumentasjonen.');
+    await expect(section.getByRole('button')).toHaveCount(0);
+});

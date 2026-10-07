@@ -250,3 +250,81 @@ export function emptyAssessment(today) {
         assessed_on: today,
     };
 }
+
+/** The badge tone of each documentation status; the four differ, and only Utløpt warns. */
+export const DOCUMENT_STATUS_TONES = {
+    valid: 'emerald',
+    expired: 'rose',
+    no_expiry: 'blue',
+    replaced: 'slate',
+};
+
+const DOCUMENT_TYPE_FALLBACKS = {
+    agreement: 'Avtale',
+    data_processing_agreement: 'Databehandleravtale',
+    confidentiality_agreement: 'Taushetserklæring',
+    certificate: 'Sertifikat',
+    insurance_certificate: 'Forsikringsbevis',
+    security_documentation: 'Sikkerhetsdokumentasjon',
+    other: 'Annet',
+};
+
+const DOCUMENT_STATUS_FALLBACKS = {
+    valid: 'Gyldig',
+    expired: 'Utløpt',
+    no_expiry: 'Ingen utløpsdato',
+    replaced: 'Erstattet',
+};
+
+/** «Avtale», «Databehandleravtale» … */
+export function documentTypeLabel(type, tr = {}) {
+    return tr.documents?.types?.[type] ?? DOCUMENT_TYPE_FALLBACKS[type] ?? type;
+}
+
+/** «Gyldig», «Utløpt», «Ingen utløpsdato», «Erstattet» — the server decides which. */
+export function documentStatusLabel(status, tr = {}) {
+    return tr.documents?.statuses?.[status] ?? DOCUMENT_STATUS_FALLBACKS[status] ?? status;
+}
+
+/**
+ * Where a document is kept, as a link only when it is a plain web address; anything else — an
+ * archive reference, a case number, another scheme — stays text. The page only links; nothing
+ * fetches or previews the address.
+ *
+ * @param {string|null} location
+ * @returns {string|null}
+ */
+export function locationHref(location) {
+    const value = (location ?? '').trim();
+
+    return /^https?:\/\/[^\s]+$/i.test(value) ? value : null;
+}
+
+/**
+ * The form a documentation row starts from: empty for Legg til; the row as it is for Rediger; and
+ * for Registrer fornyet the same type and name, with a new location, validity and comment to fill in.
+ *
+ * @param {'create'|'edit'|'renew'} mode
+ * @param {object|null} document
+ */
+export function documentFormData(mode, document = null) {
+    if (mode === 'edit' && document) {
+        return {
+            document_type: document.document_type,
+            title: document.title ?? '',
+            location: document.location ?? '',
+            valid_from: document.valid_from ?? '',
+            valid_until: document.valid_until ?? '',
+            comment: document.comment ?? '',
+        };
+    }
+
+    return {
+        document_type: mode === 'renew' && document ? document.document_type : '',
+        title: mode === 'renew' && document ? document.title : '',
+        location: '',
+        valid_from: '',
+        valid_until: '',
+        comment: '',
+    };
+}

@@ -35,6 +35,7 @@ use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -469,6 +470,11 @@ Route::prefix('app')
             Route::post('/{supplierId}/assessments', [SupplierAssessmentController::class, 'store'])->whereNumber('supplierId')->name('assessments.store');
             // Vurder / Endre kritikalitet: the only way criticality changes after registration.
             Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
+            // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit).
+            Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
+            Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
+            Route::post('/{supplierId}/documents/{documentId}/renew', [SupplierDocumentController::class, 'renew'])->whereNumber(['supplierId', 'documentId'])->name('documents.renew');
+            Route::delete('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'destroy'])->whereNumber(['supplierId', 'documentId'])->name('documents.destroy');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

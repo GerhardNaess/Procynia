@@ -7,6 +7,7 @@ import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } 
 import SupplierAssessment from './SupplierAssessment';
 import SupplierCriticality from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
+import SupplierDocuments from './SupplierDocuments';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
@@ -44,6 +45,8 @@ export default function SupplierManagementShow() {
         ratings = [],
         results = [],
         today = '',
+        documents = [],
+        document_types: documentTypes = [],
         status_history: statusHistory = [],
         permissions = {},
         categories = [],
@@ -181,6 +184,16 @@ export default function SupplierManagementShow() {
                     ratings={ratings}
                     results={results}
                     today={today}
+                    locale={locale}
+                    tr={tr}
+                />
+
+                <SupplierDocuments
+                    supplierId={item.id}
+                    supplierStatus={item.status}
+                    documents={documents}
+                    types={documentTypes}
+                    permissions={permissions}
                     locale={locale}
                     tr={tr}
                 />

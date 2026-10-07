@@ -6,6 +6,7 @@ import { SUPPLIER_HELP_PAGES, supplierHelp } from './supplierHelp.js';
 import {
     ASSESSMENT_CRITERIA,
     CRITICALITY_TONES,
+    DOCUMENT_STATUS_TONES,
     RESULT_TONES,
     SUPPLIER_STATUS_TONES,
     categoryLabel,
@@ -17,10 +18,14 @@ import {
     describeCriticalityRegistration,
     describeHistoryEntry,
     describeRegistration,
+    documentFormData,
+    documentStatusLabel,
+    documentTypeLabel,
     emptyAssessment,
     emptyCriticality,
     intervalLabel,
     intervalRequired,
+    locationHref,
     nextReviewText,
     ratingLabel,
     resultLabel,
@@ -134,6 +139,33 @@ describe('Supplier assessment', () => {
         assert.doesNotMatch(form, /setData\('(criticality|review_interval_months)'/);
         assert.doesNotMatch(form, /CriticalityFields/);
         assert.match(form, /\[current, \.\.\.earlier\] = assessments/, 'the newest is the current one, the rest the history');
+    });
+});
+
+describe('Documentation', () => {
+    test('the types and statuses read as in the plan, and the four statuses differ', () => {
+        assert.deepEqual(
+            ['agreement', 'data_processing_agreement', 'confidentiality_agreement', 'certificate', 'insurance_certificate', 'security_documentation', 'other'].map((type) => documentTypeLabel(type)),
+            ['Avtale', 'Databehandleravtale', 'Taushetserklæring', 'Sertifikat', 'Forsikringsbevis', 'Sikkerhetsdokumentasjon', 'Annet'],
+        );
+        assert.deepEqual(Object.keys(DOCUMENT_STATUS_TONES).map((status) => documentStatusLabel(status)), ['Gyldig', 'Utløpt', 'Ingen utløpsdato', 'Erstattet']);
+        assert.equal(new Set(Object.values(DOCUMENT_STATUS_TONES)).size, 4);
+    });
+
+    test('a location is a link only when it is a web address, and the page never offers a file', () => {
+        assert.equal(locationHref('https://contoso.sharepoint.com/sites/innkjop/avtaler'), 'https://contoso.sharepoint.com/sites/innkjop/avtaler');
+        for (const text of ['Arkiv sak 2026/114', 'javascript:alert(1)', 'file:///C:/avtaler/dba.pdf', '', null]) {
+            assert.equal(locationHref(text), null, String(text));
+        }
+        const section = source('./SupplierDocuments.jsx');
+        assert.doesNotMatch(section, /type="file"|download|upload/i);
+    });
+
+    test('a renewal keeps the type and name, and asks for a new location and validity', () => {
+        const row = { id: 7, document_type: 'certificate', title: 'ISO 27001-sertifikat', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' };
+        assert.deepEqual(documentFormData('renew', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', location: '', valid_from: '', valid_until: '', comment: '' });
+        assert.deepEqual(documentFormData('edit', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' });
+        assert.equal(documentFormData('create').document_type, '');
     });
 });
 

@@ -170,20 +170,21 @@ class Supplier extends Model
     /**
      * Whether the supplier may be deleted at all, before any permission is considered. Deleting is
      * for a supplier registered by mistake and never used: one that has changed status or
-     * criticality, or has been assessed, has a history — a real decision was made about it — and
-     * is ended instead. The
-     * classification it was registered with is the supplier's own and does not count. The database refuses the delete as well (NO ACTION from every
-     * child table).
+     * criticality, has been assessed or has documentation registered has a history — a real
+     * decision was made about it — and is ended instead. The classification it was registered with
+     * is the supplier's own and does not count. The database refuses the delete as well (NO ACTION
+     * from every child table).
      *
-     * Each later part of the module that attaches something to a supplier — documentation, links
-     * to risks, requirements and cases — adds its check here, so the rule stays «completely
-     * unused» without changing.
+     * Each later part of the module that attaches something to a supplier — links to risks,
+     * requirements and cases — adds its check here, so the rule stays «completely unused» without
+     * changing.
      */
     public function isDeletable(): bool
     {
         return ! $this->statusChanges()->exists()
             && ! $this->criticalityChanges()->exists()
-            && ! $this->assessments()->exists();
+            && ! $this->assessments()->exists()
+            && ! $this->documents()->exists();
     }
 
     public function owner(): BelongsTo
@@ -218,5 +219,17 @@ class Supplier extends Model
         return $this->hasMany(SupplierAssessment::class, 'supplier_id')
             ->orderByDesc('assessed_on')
             ->orderByDesc('id');
+    }
+
+    /**
+     * The dokumentasjonsoversikt: current rows before replaced ones, then by name. Every row,
+     * replaced ones included — a renewal never removes the document it renewed.
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(SupplierDocument::class, 'supplier_id')
+            ->orderByRaw('replaced_by_document_id IS NOT NULL')
+            ->orderByRaw('lower(title)')
+            ->orderBy('id');
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
+use App\Models\SupplierDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
@@ -35,7 +36,8 @@ use Inertia\Response;
  * no exception — supplier is an explicit-grant domain.
  *
  * Leverandørvurderinger are shown here and registered by SupplierAssessmentController
- * (supplier.assess).
+ * (supplier.assess). The dokumentasjonsoversikt is shown here and written by
+ * SupplierDocumentController (supplier.edit).
  *
  * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
  * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
@@ -143,6 +145,8 @@ class SupplierManagementController extends Controller
         $changes = $supplier->statusChanges()->with('changedBy:id,name')->get();
         $criticalityChanges = $supplier->criticalityChanges()->with('changedBy:id,name')->get();
         $assessments = $supplier->assessments()->with('assessedBy:id,name')->get();
+        $documents = $supplier->documents()->with('updatedBy:id,name')->get();
+        $today = now();
         $canAssess = $this->access->canAssess($user);
         $canDelete = $this->access->canDelete($user);
 
@@ -172,6 +176,18 @@ class SupplierManagementController extends Controller
                 'review_interval_months' => $assessment->review_interval_months,
                 'recorded_at' => $assessment->recorded_at?->toIso8601String(),
             ])->all(),
+            'documents' => $documents->map(fn (SupplierDocument $document): array => [
+                'id' => (int) $document->id,
+                'document_type' => $document->document_type,
+                'title' => $document->title,
+                'location' => $document->location,
+                'valid_from' => $document->valid_from?->toDateString(),
+                'valid_until' => $document->valid_until?->toDateString(),
+                'comment' => $document->comment,
+                'status' => $document->validityStatus($today),
+                'updated_at' => $document->updated_at?->toIso8601String(),
+                'updated_by_name' => $document->updatedBy?->name,
+            ])->all(),
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,
                 'from_status' => $change->from_status,
@@ -187,6 +203,10 @@ class SupplierManagementController extends Controller
                 'can_end' => $canEdit && $open,
                 'can_reopen' => $canEdit && ! $open,
                 'can_change_criticality' => $canEdit && $open,
+                // Dokumentasjon: supplier.edit, and only while the supplier is not ended.
+                'can_manage_documents' => $canEdit && $open,
+                // Says why the documentation is read-only, for someone who could otherwise change it.
+                'has_edit_right' => $canEdit,
                 // Only an active supplier is assessed (plan §4.3).
                 'can_assess' => $canAssess && $supplier->status === Supplier::STATUS_ACTIVE,
                 // Says why Vurder leverandør is missing, for someone who could otherwise assess.
@@ -201,7 +221,8 @@ class SupplierManagementController extends Controller
             'ratings' => SupplierAssessment::RATINGS,
             'criteria' => SupplierAssessment::CRITERIA,
             'results' => SupplierAssessment::RESULTS,
-            'today' => now()->toDateString(),
+            'document_types' => SupplierDocument::TYPES,
+            'today' => $today->toDateString(),
             'owner_options' => $canEdit && $open ? $this->access->ownerCandidates($user) : [],
         ]);
     }
