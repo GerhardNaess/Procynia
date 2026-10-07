@@ -53,8 +53,8 @@ const STATUS_TONES = {
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
-const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
+const LABEL = 'block text-base font-semibold text-slate-700';
+const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-base font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 /** Matches the active tab on the Kvalitet index, so one tab strip does not read as two kinds. */
 const TAB_ACTIVE = 'inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700';
 
@@ -118,7 +118,7 @@ export default function QualityItem() {
     return (
         <CustomerAppLayout title={item.title} showPageTitle={false}>
             <div className="space-y-6">
-                <Link href="/app/quality" className="text-sm font-semibold text-slate-600 hover:underline">
+                <Link href="/app/quality" className="text-base font-semibold text-slate-600 hover:underline">
                     ← {tq.back_to_quality ?? 'Tilbake til Kvalitet'}
                 </Link>
 
@@ -349,7 +349,7 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{td.evidence_heading ?? 'Evidens'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.evidence_help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.evidence_help ?? ''}</p>
 
             {evidence.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
@@ -362,9 +362,9 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
                             <div className="min-w-0 flex-1 space-y-1">
                                 <p className="font-semibold text-slate-950">{entry.title}</p>
                                 {entry.description && (
-                                    <p className="whitespace-pre-line text-sm text-slate-700">{entry.description}</p>
+                                    <p className="whitespace-pre-line text-base text-slate-700">{entry.description}</p>
                                 )}
-                                <p className="text-sm text-slate-500">
+                                <p className="text-base text-slate-500">
                                     {entry.download_url && (
                                         <>
                                             <a
@@ -481,7 +481,7 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{td.tools_heading ?? 'Verktøy'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.tools_help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.tools_help ?? ''}</p>
 
             {tools.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
@@ -495,13 +495,13 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
                                 <div className="flex flex-wrap items-center gap-2">
                                     <p className="font-semibold text-slate-950">{tool.title}</p>
                                     {tool.category && (
-                                        <span className="text-sm text-slate-500">· {categoryLabels[tool.category] ?? tool.category}</span>
+                                        <span className="text-base text-slate-500">· {categoryLabels[tool.category] ?? tool.category}</span>
                                     )}
                                 </div>
                                 {tool.description && (
-                                    <p className="whitespace-pre-line text-sm text-slate-700">{tool.description}</p>
+                                    <p className="whitespace-pre-line text-base text-slate-700">{tool.description}</p>
                                 )}
-                                {tool.filename && <p className="break-all text-sm text-slate-500">{tool.filename}</p>}
+                                {tool.filename && <p className="break-all text-base text-slate-500">{tool.filename}</p>}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <a href={tool.open_url} target="_blank" rel="noreferrer" className={SECONDARY_ACTION}>
@@ -532,7 +532,7 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
             {canEdit && (
                 <div className="mt-6 border-t border-slate-100 pt-6">
                     {options.length === 0 ? (
-                        <p className="text-sm text-slate-500">
+                        <p className="text-base text-slate-500">
                             {tools.length === 0
                                 ? (td.tools_library_empty ?? 'Verktøybiblioteket er tomt. Verktøy registreres under Kvalitet → Verktøy.')
                                 : (td.tools_none_available ?? 'Alle verktøy i biblioteket er allerede koblet til.')}{' '}
@@ -697,7 +697,7 @@ function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOpt
                     <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
                         {tq.save ?? 'Lagre'}
                     </button>
-                    <span className="text-sm text-slate-500">
+                    <span className="text-base text-slate-500">
                         {(tq.field_next_review ?? 'Neste revisjon')}: {item.next_review_at ?? '—'}
                     </span>
                 </div>
@@ -846,13 +846,13 @@ function RowEditor({
             <h3 className="text-base font-semibold text-slate-900">{heading}</h3>
 
             {rows.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-600">{emptyText}</p>
+                <p className="mt-2 text-base text-slate-600">{emptyText}</p>
             ) : (
                 <ul className="mt-3 space-y-3">
                     {rows.map((row, index) => (
                         <li key={index} className="rounded-2xl border border-slate-200 p-4">
                             {numbered && (
-                                <p className="mb-2 text-sm font-semibold text-slate-500">{index + 1}</p>
+                                <p className="mb-2 text-base font-semibold text-slate-500">{index + 1}</p>
                             )}
                             <div className="grid gap-3 md:grid-cols-2">
                                 {fields.map((field) => (
@@ -966,7 +966,7 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{td.governing_heading ?? 'Styrende dokumenter'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{td.governing_help ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.governing_help ?? ''}</p>
 
             {governingDocuments.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
@@ -1002,7 +1002,7 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
 
             {canEdit && (
                 options.length === 0 ? (
-                    <p className="mt-4 text-sm text-slate-500">
+                    <p className="mt-4 text-base text-slate-500">
                         {td.governing_no_options ?? 'Alle registrerte policyer er allerede koblet til.'}
                     </p>
                 ) : (
@@ -1105,7 +1105,7 @@ function DocumentsPanel({
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tdoc.heading ?? 'Dokumenter'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{(isControl ? tdoc.help_control : tdoc.help) ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{(isControl ? tdoc.help_control : tdoc.help) ?? ''}</p>
 
             {documents.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
@@ -1133,11 +1133,11 @@ function DocumentsPanel({
                                     {statusLabels?.failed ?? 'Tekstuttrekk feilet'}
                                 </StatusBadge>
                             )}
-                            <span className="text-sm text-slate-500">
+                            <span className="text-base text-slate-500">
                                 {link.owner_name ?? (tdoc.no_owner ?? 'Ingen eier')}
                                 {link.uploaded_at ? ` · ${link.uploaded_at}` : ''}
                             </span>
-                            {link.note && <span className="text-sm text-slate-600">{link.note}</span>}
+                            {link.note && <span className="text-base text-slate-600">{link.note}</span>}
                             {canEdit && (
                                 <button
                                     type="button"
@@ -1188,7 +1188,7 @@ function DocumentsPanel({
                         </div>
 
                         {documentOptions.length === 0 ? (
-                            <p className="text-sm text-slate-500">
+                            <p className="text-base text-slate-500">
                                 {tdoc.no_candidates ?? 'Ingen dokumenter er lastet opp ennå, eller søket ga ingen treff.'}
                             </p>
                         ) : (
@@ -1240,7 +1240,7 @@ function DocumentsPanel({
                         <h3 className="text-base font-semibold text-slate-900">
                             {tdoc.upload_heading ?? 'Last opp nytt dokument'}
                         </h3>
-                        <p className="max-w-3xl text-sm leading-6 text-slate-600">{tdoc.upload_help ?? ''}</p>
+                        <p className="max-w-3xl text-base leading-6 text-slate-600">{tdoc.upload_help ?? ''}</p>
 
                         <form onSubmit={submitUpload} className="grid gap-4 md:grid-cols-4">
                             <div className="md:col-span-2">
@@ -1315,7 +1315,7 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
     return (
         <section className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tw.heading ?? 'Kunnskap i Wiki'}</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{(isControl ? tw.help_control : tw.help) ?? ''}</p>
+            <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{(isControl ? tw.help_control : tw.help) ?? ''}</p>
 
             {wikiLinks.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
@@ -1336,7 +1336,7 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
                             <StatusBadge tone="slate">
                                 {linkTypeLabels?.[link.link_type] ?? link.link_type}
                             </StatusBadge>
-                            {link.note && <span className="text-sm text-slate-600">{link.note}</span>}
+                            {link.note && <span className="text-base text-slate-600">{link.note}</span>}
                             {canEdit && (
                                 <button
                                     type="button"
@@ -1378,7 +1378,7 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
                     </div>
 
                     {wikiPageOptions.length === 0 ? (
-                        <p className="text-sm text-slate-500">
+                        <p className="text-base text-slate-500">
                             {tw.no_candidates ?? 'Ingen synlige Wiki-sider, eller søket ga ingen treff.'}
                         </p>
                     ) : (
@@ -1428,7 +1428,7 @@ function Field({ label, error, children }) {
         <label className="block space-y-1">
             <span className={LABEL}>{label}</span>
             {children}
-            {error && <span className="block text-sm text-rose-600">{error}</span>}
+            {error && <span className="block text-base text-rose-600">{error}</span>}
         </label>
     );
 }

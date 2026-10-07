@@ -163,7 +163,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
 
                     <dl className="mt-5 space-y-4">
                         <div>
-                            <dt className="text-sm font-semibold uppercase tracking-wide text-rose-700">
+                            <dt className="text-base font-semibold uppercase tracking-wide text-rose-700">
                                 {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
                             </dt>
                             <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -175,7 +175,7 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                             </dd>
                         </div>
                         <div>
-                            <dt className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                            <dt className="text-base font-semibold uppercase tracking-wide text-slate-500">
                                 {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
                             </dt>
                             <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -271,7 +271,7 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
 
     return (
         <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            <h3 className="text-base font-semibold uppercase tracking-wide text-slate-500">
                 {tq.delete_dialog_wiki_heading ?? 'Wiki-kunnskap fra denne prosessen'}
             </h3>
             <p className="mt-1 text-base leading-6 text-slate-700">{countText}</p>
@@ -298,7 +298,7 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
                             <span className="block text-base font-semibold text-slate-900">
                                 {tq.delete_dialog_wiki_keep ?? 'Behold Wiki-kunnskapen'}
                             </span>
-                            <span className="block text-sm leading-5 text-slate-600">
+                            <span className="block text-base leading-6 text-slate-600">
                                 {tq.delete_dialog_wiki_keep_hint ?? 'Sidene blir stående i Wiki. Kunnskapen er virksomhetens, ikke prosessens.'}
                             </span>
                         </span>
@@ -318,7 +318,7 @@ function WikiKnowledgeChoice({ tq, itemId, count, mayChoose, deleteWikiPages, on
                             <span className="block text-base font-semibold text-rose-700">
                                 {tq.delete_dialog_wiki_delete ?? 'Slett Wiki-sidene som denne prosessen har produsert'}
                             </span>
-                            <span className="block text-sm leading-5 text-slate-600">
+                            <span className="block text-base leading-6 text-slate-600">
                                 {tq.delete_dialog_wiki_delete_hint ?? 'Bare sider som kan spores til denne prosessen. Kildedokumentene og alle andre Wiki-sider beholdes.'}
                             </span>
                         </span>
