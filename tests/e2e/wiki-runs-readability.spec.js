@@ -1,18 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
-const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiRunsReadabilityE2EFixture';
-const CUSTOMER_ID = 4;
-
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+let CUSTOMER_ID;
 
 /**
  * Readability fix verification (see CLAUDE.md task "Increase Wiki run status text to readable
@@ -23,23 +14,18 @@ test.describe.serial('Kjøringer run row readability', () => {
     let runId;
 
     test.beforeAll(async () => {
-        const { stdout } = await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="echo ${FIXTURE}::seed(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        CUSTOMER_ID = await e2eWikiCustomerId();
+        const { stdout } = await tinker(`echo ${FIXTURE}::seed(${CUSTOMER_ID});`);
         runId = stdout.trim();
     });
 
     test.afterAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
     });
 
     test('main status pill and secondary "stille" pill are both readable', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
@@ -55,9 +41,9 @@ test.describe.serial('Kjøringer run row readability', () => {
         expect(await stalledPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(12);
     });
 
-    test('step timeline line (Kø/Beslutning/Sidestruktur/Sider/Verifisering/QA/Dokumenteiergodkjenning) is readable', async ({ page }) => {
+    test('step timeline line (Kø/Sideplanlegging/Sidestruktur/Sider/Verifisering/QA) is readable', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
@@ -71,9 +57,10 @@ test.describe.serial('Kjøringer run row readability', () => {
 
         const desktopTimeline = row.locator('[data-run-progress-row]');
         await expect(desktopTimeline).toBeVisible();
-        await expect(desktopTimeline.locator('[data-progress-step]')).toHaveCount(7);
-        await expect(desktopTimeline.locator('[data-progress-connector]')).toHaveCount(6);
-        for (const label of ['Kø', 'Beslutning', 'Sidestruktur', 'Sider', 'Verifisering', 'QA', 'Dokumenteiergodkjenning']) {
+        // Six steps since 5d26caf2 retired the document-owner step, which nothing could reach.
+        await expect(desktopTimeline.locator('[data-progress-step]')).toHaveCount(6);
+        await expect(desktopTimeline.locator('[data-progress-connector]')).toHaveCount(5);
+        for (const label of ['Kø', 'Sideplanlegging', 'Sidestruktur', 'Sider', 'Verifisering', 'QA']) {
             const chip = desktopTimeline.getByText(label, { exact: true });
             await expect(chip).toBeVisible();
             const size = await chip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
@@ -87,7 +74,7 @@ test.describe.serial('Kjøringer run row readability', () => {
         page.on('pageerror', (err) => errors.push(String(err)));
 
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
@@ -104,7 +91,7 @@ test.describe.serial('Kjøringer run row readability', () => {
         page.on('pageerror', (err) => errors.push(String(err)));
 
         await page.setViewportSize({ width: 390, height: 844 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();

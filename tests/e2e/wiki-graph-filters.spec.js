@@ -4,15 +4,36 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
-// This graph view is only populated with real Wiki data for the dev-seeded
-// customer (alisan@advania.no / customer_id=4) — the plain E2E-seeded USER has no
-// Enterprise Wiki content. Log in with the real dev-data user so the graph and its
-// two known source documents ("Masterdata ITIL.docx" — 9 pages, "Masterdata
-// Samhandling.docx" — 7 pages) are actually present to filter against.
-async function loginAsDevDataUser(page) {
+// The graph this spec filters is its own: WikiGraphFilterE2EFixture seeds a customer of its own
+// with two source documents — "Masterdata ITIL.docx" (9 pages, owned by Ola Nordmann) and
+// "Masterdata Samhandling.docx" (7 pages, owned by Kari Nordmann) — and the person who logs in to
+// read it. Every count below is therefore a count of what the fixture wrote, never of whatever a
+// development database happens to hold.
+const FIXTURE = '\\Tests\\Support\\WikiGraphFilterE2EFixture';
+const VIEWER = { email: 'e2e.wikigraph@procynia.test', password: 'e2e-wiki-graph-password' };
+const OWNER_ITIL = 'Ola Nordmann';
+const OWNER_SAMHANDLING = 'Kari Nordmann';
+const ROOT = { cwd: new URL('../..', import.meta.url).pathname };
+let graphCustomerId = null;
+
+async function tinker(code) {
+    const { stdout } = await execAsync(`docker compose exec -T app php artisan tinker --execute="${code}"`, ROOT);
+
+    return stdout.trim();
+}
+
+test.beforeAll(async () => {
+    graphCustomerId = Number(await tinker(`echo ${FIXTURE}::seed();`));
+});
+
+test.afterAll(async () => {
+    await tinker(`${FIXTURE}::cleanup();`);
+});
+
+async function loginAsGraphReader(page) {
     await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
+    await page.fill('#email', VIEWER.email);
+    await page.fill('#password', VIEWER.password);
     await page.click('button[type="submit"]');
     await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
 }
@@ -49,8 +70,8 @@ async function openOwnerDropdown(page) {
     await expect(ownerGroup(page)).toBeVisible();
 }
 
-// "Alisan Senel" (the logged-in dev user) also appears in the account menu button, so owner
-// checkbox clicks must be scoped to the owner dropdown panel to avoid ambiguity.
+// Owner checkbox clicks are scoped to the owner dropdown panel, so a name that also appears
+// elsewhere on the page can never be the one clicked.
 function ownerCheckbox(page, name) {
     return ownerGroup(page).getByText(name, { exact: true });
 }
@@ -60,7 +81,7 @@ function documentCheckbox(page, name) {
 }
 
 test.beforeEach(async ({ page }) => {
-    await loginAsDevDataUser(page);
+    await loginAsGraphReader(page);
 });
 
 test('full graph loads with no filters active', async ({ page }) => {
@@ -352,9 +373,9 @@ test('no console errors or failed requests while filtering', async ({ page }) =>
 });
 
 // ─── Document owner filter ───────────────────────────────────────────────────
-// Real dev data: "Gerhard Næss" owns Masterdata ITIL.docx (9 pages), "Alisan
-// Senel" owns Masterdata Samhandling.docx (7 pages) — a perfect 1:1 mapping onto
-// the document tests above.
+// The fixture's owners: Ola Nordmann owns Masterdata ITIL.docx (9 pages), Kari
+// Nordmann owns Masterdata Samhandling.docx (7 pages) — a 1:1 mapping onto the
+// document tests above.
 
 test('owner dropdown is closed by default and shows "Alle eiere"', async ({ page }) => {
     await page.goto('/app/wiki/graph');
@@ -373,8 +394,8 @@ test('opening the owner dropdown reveals owner names, never internal ids, with p
     await expect(ownerTrigger(page)).toHaveAttribute('aria-expanded', 'true');
 
     const panel = ownerGroup(page);
-    await expect(panel.getByText('Gerhard Næss')).toBeVisible();
-    await expect(panel.getByText('Alisan Senel')).toBeVisible();
+    await expect(panel.getByText(OWNER_ITIL)).toBeVisible();
+    await expect(panel.getByText(OWNER_SAMHANDLING)).toBeVisible();
     await expect(panel.getByLabel('Alle eiere')).toBeChecked();
 });
 
@@ -383,14 +404,14 @@ test('selecting one owner filters the graph to only their documents\' pages', as
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await page.waitForTimeout(300);
 
     await expect(page.getByText('9 av 16 sider')).toBeVisible();
     await expect(ownerGroup(page).getByLabel('Alle eiere')).not.toBeChecked();
 
     await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
-    await expect(ownerTrigger(page)).toHaveText('Gerhard Næss');
+    await expect(ownerTrigger(page)).toHaveText(OWNER_ITIL);
     // The document filter itself is untouched — owner and document are independent groups.
     await expect(documentTrigger(page)).toHaveText('Alle dokumenter');
 });
@@ -400,9 +421,9 @@ test('selecting two owners combines them with OR and shows a count on the closed
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await page.waitForTimeout(200);
-    await ownerCheckbox(page, 'Alisan Senel').click();
+    await ownerCheckbox(page, OWNER_SAMHANDLING).click();
     await page.waitForTimeout(300);
 
     await expect(page.getByText(/\d+ av 16 sider/)).toHaveCount(0);
@@ -416,7 +437,7 @@ test('"Alle eiere" restores the full owner set', async ({ page }) => {
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await page.waitForTimeout(200);
     await ownerGroup(page).getByLabel('Alle eiere').click();
     await page.waitForTimeout(300);
@@ -430,12 +451,12 @@ test('owner filter combines with document filter (independent conditions, both m
     await page.goto('/app/wiki/graph');
     await page.waitForTimeout(1000);
 
-    // Owner = Gerhard (9 pages via Masterdata ITIL.docx) AND document = Masterdata
-    // Samhandling.docx (7 pages, owned by Alisan) — no page satisfies both independent
+    // Owner = Ola Nordmann (9 pages via Masterdata ITIL.docx) AND document = Masterdata
+    // Samhandling.docx (7 pages, owned by Kari Nordmann) — no page satisfies both independent
     // conditions from the SAME two unrelated criteria, so this must show the empty state
     // even though each filter alone matches pages.
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
 
     await openDocumentDropdown(page);
@@ -450,7 +471,7 @@ test('owner filter combines with document filter (matching combination)', async 
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
 
     await openDocumentDropdown(page);
@@ -465,7 +486,7 @@ test('owner filter combines with page type filter', async ({ page }) => {
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
 
     await page.getByLabel('Sammendrag').uncheck();
@@ -481,7 +502,7 @@ test('owner filter combines with status filter (no warning-status pages in this 
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
 
     await page.getByLabel('OK – ingen åpne funn').uncheck();
@@ -497,7 +518,7 @@ test('owner filter combines with search', async ({ page }) => {
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Alisan Senel').click();
+    await ownerCheckbox(page, OWNER_SAMHANDLING).click();
     await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
 
     await page.getByLabel('Søk i Wiki-sider').fill('styring');
@@ -514,7 +535,7 @@ test('reset filters also clears the selected owners', async ({ page }) => {
     await page.waitForTimeout(1000);
 
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await page.waitForTimeout(300);
     await expect(page.getByRole('button', { name: 'Nullstill filtre' }).first()).toBeEnabled();
 
@@ -545,7 +566,7 @@ test('owner dropdown panel has no horizontal overflow on mobile (390px)', async 
     expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
 
     await openOwnerDropdown(page);
-    await expect(ownerGroup(page).getByText('Gerhard Næss')).toBeVisible();
+    await expect(ownerGroup(page).getByText(OWNER_ITIL)).toBeVisible();
 
     const scrollWidthOpen = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(scrollWidthOpen).toBeLessThanOrEqual(clientWidth + 1);
@@ -561,9 +582,9 @@ test('no console errors or failed requests while using the owner filter', async 
     await page.goto('/app/wiki/graph');
     await page.waitForTimeout(1000);
     await openOwnerDropdown(page);
-    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await ownerCheckbox(page, OWNER_ITIL).click();
     await page.waitForTimeout(200);
-    await ownerCheckbox(page, 'Alisan Senel').click();
+    await ownerCheckbox(page, OWNER_SAMHANDLING).click();
     await page.waitForTimeout(200);
     await page.getByRole('button', { name: 'Nullstill filtre' }).first().click();
     await page.waitForTimeout(200);
@@ -643,9 +664,9 @@ test('checkboxes inside an open dropdown are reachable via Tab', async ({ page }
 });
 
 // ─── Filter dropdowns at scale (20+ documents, 20+ owners) ───────────────────
-// Real dev data only has 2 documents/2 owners, which is below the internal search
-// threshold (>8 options). These tests seed synthetic documents/owners on top of the
-// existing dev data via a test-only fixture class (tests/Support/WikiGraphFilterScale
+// The graph fixture has 2 documents/2 owners, which is below the internal search
+// threshold (>8 options). These tests seed synthetic documents/owners on top of it
+// via a test-only fixture class (tests/Support/WikiGraphFilterScale
 // TestFixture.php — autoload-dev only, not an Artisan command, invoked here through
 // tinker) to exercise search, scrolling, and layout at the scale the task requires,
 // then remove exactly what they added.
@@ -657,17 +678,11 @@ test.describe.serial('scale: 20+ documents and 20+ owners', () => {
     // stalls Node's event loop for the seed command's full duration, which in practice was
     // enough to make the Playwright browser's IPC time out on the very next page.goto().
     test.beforeAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${SCALE_TEST_FIXTURE}::seed(4, 20);"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${SCALE_TEST_FIXTURE}::seed(${graphCustomerId}, 20);`);
     });
 
     test.afterAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${SCALE_TEST_FIXTURE}::cleanup(4);"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${SCALE_TEST_FIXTURE}::cleanup(${graphCustomerId});`);
     });
 
     test('document dropdown shows an internal search field once options exceed the threshold', async ({ page }) => {
@@ -711,7 +726,7 @@ test.describe.serial('scale: 20+ documents and 20+ owners', () => {
         await ownerGroup(page).getByPlaceholder('Søk i eiere …').fill('Skalatest Eier 10');
         await page.waitForTimeout(200);
         await expect(ownerGroup(page).getByText('Skalatest Eier 10')).toBeVisible();
-        await expect(ownerGroup(page).getByText('Gerhard Næss')).toHaveCount(0);
+        await expect(ownerGroup(page).getByText(OWNER_ITIL)).toHaveCount(0);
     });
 
     test('owner dropdown search with no matches shows a clear message', async ({ page }) => {
@@ -779,7 +794,7 @@ test.describe.serial('scale: 20+ documents and 20+ owners', () => {
         await page.waitForTimeout(1200);
 
         await openOwnerDropdown(page);
-        await ownerCheckbox(page, 'Gerhard Næss').click();
+        await ownerCheckbox(page, OWNER_ITIL).click();
         await ownerGroup(page).getByText('Skalatest Eier 01').click();
         await ownerGroup(page).getByText('Skalatest Eier 02').click();
         await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
@@ -796,7 +811,7 @@ test.describe.serial('scale: 20+ documents and 20+ owners', () => {
         await documentGroup(page).getByRole('button', { name: 'Ferdig' }).click();
 
         await openOwnerDropdown(page);
-        await ownerCheckbox(page, 'Gerhard Næss').click();
+        await ownerCheckbox(page, OWNER_ITIL).click();
         await ownerGroup(page).getByRole('button', { name: 'Ferdig' }).click();
         await page.waitForTimeout(300);
 
