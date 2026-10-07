@@ -1415,7 +1415,9 @@ function DecisionModal({ run, tw, onClose }) {
  */
 const PAGES_CONTROL_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
-const SELECT_CLS = 'h-9 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
+// max-w-full: a native select is as wide as its longest option, so one long document or owner
+// name in a filter would otherwise push the row past a phone's edge.
+const SELECT_CLS = 'h-9 rounded-lg max-w-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
 /**
  * How far the Wiki has come, in one line, plus the one thing worth saying when it has not started.
