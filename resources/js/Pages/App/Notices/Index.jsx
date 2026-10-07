@@ -1592,10 +1592,11 @@ export default function NoticeIndex({
                     <p className="text-base leading-6 text-slate-600">{pageSubtitle}</p>
                 </section>
 
-                <div className={classNames(
-                    'grid gap-5 xl:items-start',
-                    'xl:grid-cols-1',
-                )}>
+                {/* grid-cols-1 at every width, not only from xl: without it the implicit track is `auto`
+                    and grows to the widest result's min-content, so one long unbreakable word in a
+                    live Doffin notice pushed the whole column — filters included — past a phone's
+                    edge. grid-cols-1 is minmax(0, 1fr), which keeps the track at the container. */}
+                <div className="grid grid-cols-1 gap-5 xl:items-start">
                     <div className="space-y-5">
                         {isLiveMode ? (
                             <>
