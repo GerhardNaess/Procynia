@@ -7,11 +7,13 @@ use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\ImprovementCase;
+use App\Models\Risk;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierImprovementCase;
+use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -31,8 +33,9 @@ use Illuminate\Support\Facades\DB;
  * supplier role.
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
- * assessments, their documentation, the run's fagområde and the cases created in Avvik og
- * forbedringer, with the rows linking them to suppliers, go with it. The history triggers allow that
+ * assessments, their documentation, the run's fagområder, the cases created in Avvik og
+ * forbedringer and the risks in Risiko, with the rows linking them to suppliers, go with it. Risks
+ * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
  * one delete (the customer going), so no trigger is switched off.
  */
 class SupplierE2EFixture
@@ -156,7 +159,44 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, business_areas: int, roles: int, users: int} */
+    /**
+     * Gives the supplier manager Risiko — risk.view, .create and .edit in one fagområde of the run's
+     * customer — and registers one risk there, so the spec can both create a risk from a supplier
+     * and link an existing one.
+     *
+     * @return array{area_name: string, existing_title: string}
+     */
+    public static function seedRiskAccess(string $suffix): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $manager, $name): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customer->id, 'name' => $name('Drift')]);
+            $role = self::role($customer, $name('Risikoeier'), [
+                CustomerPermissionCatalog::RISK_VIEW,
+                CustomerPermissionCatalog::RISK_CREATE,
+                CustomerPermissionCatalog::RISK_EDIT,
+            ], $manager);
+            $role->syncBusinessAreas(false, [$area->id]);
+            $existing = Risk::query()->create([
+                'customer_id' => $customer->id,
+                'business_area_id' => $area->id,
+                'title' => $name('Tap av driftsleverandør'),
+                'cause' => 'Én leverandør drifter alle fagsystemene',
+                'event' => 'Leverandøren går konkurs',
+                'consequence' => 'Fagsystemene stopper',
+                'status' => Risk::STATUS_IDENTIFIED,
+                'created_by' => $manager->id,
+                'updated_by' => $manager->id,
+            ]);
+
+            return ['area_name' => $area->name, 'existing_title' => $existing->title];
+        });
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -173,6 +213,10 @@ class SupplierE2EFixture
                 ->whereIn('customer_id', $customerIds)
                 ->orWhere('title', 'like', '%'.strtoupper($suffix).'%'))->count(),
             'case_links' => SupplierImprovementCase::query()->whereIn('customer_id', $customerIds)->count(),
+            'risks' => Risk::query()->where(fn (Builder $query) => $query
+                ->whereIn('customer_id', $customerIds)
+                ->orWhere('title', 'like', '%'.strtoupper($suffix).'%'))->count(),
+            'risk_links' => SupplierRisk::query()->whereIn('customer_id', $customerIds)->count(),
             'business_areas' => BusinessArea::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lev.'.strtolower($suffix).'.%')->count(),
@@ -194,6 +238,8 @@ class SupplierE2EFixture
                 CustomerRole::query()->where('customer_id', $customer->id)->delete();
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
+                // Before the fagområder they hold with RESTRICT; their links to suppliers cascade.
+                Risk::query()->where('customer_id', $customer->id)->delete();
                 // Suppliers, their history, assessments, documentation, the fagområde and the cases go with the customer.
                 $customer->delete();
             });

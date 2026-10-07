@@ -15,6 +15,7 @@ use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Services\Suppliers\SupplierLifecycleService;
 use App\Services\Suppliers\SupplierReviewSchedule;
+use App\Services\Suppliers\SupplierRiskService;
 use App\Support\CustomerContext;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Illuminate\Database\Eloquent\Builder;
@@ -40,7 +41,8 @@ use Inertia\Response;
  * Leverandørvurderinger are shown here and registered by SupplierAssessmentController
  * (supplier.assess). The dokumentasjonsoversikt is shown here and written by
  * SupplierDocumentController (supplier.edit). Avvik og forbedringer hos leverandøren is read here
- * through SupplierImprovementHandoffService and written by SupplierImprovementController.
+ * through SupplierImprovementHandoffService and written by SupplierImprovementController; Risikoer
+ * som gjelder leverandøren likewise through SupplierRiskService and SupplierRiskController.
  *
  * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
  * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
@@ -65,6 +67,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierCriticalityService $criticality,
         private readonly SupplierReviewSchedule $schedule,
         private readonly SupplierImprovementHandoffService $improvements,
+        private readonly SupplierRiskService $risks,
     ) {}
 
     public function index(Request $request): Response
@@ -197,6 +200,11 @@ class SupplierManagementController extends Controller
             'improvement_handoff' => $canEdit && $open ? $this->improvements->formOptions($user) + [
                 'link_options' => $this->improvements->linkOptions($user, $supplier),
                 'types' => ImprovementCase::TYPES,
+            ] : null,
+            // null, not empty: the person cannot read Risiko, so nothing is said about it.
+            'risks' => $this->risks->risksFor($user, $supplier),
+            'risk_handoff' => $canEdit && $open && $this->risks->canReadRisks($user) ? $this->risks->formOptions($user) + [
+                'link_options' => $this->risks->linkOptions($user, $supplier),
             ] : null,
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,

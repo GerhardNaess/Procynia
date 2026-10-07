@@ -399,3 +399,48 @@ export function caseOriginText(entry, tr = {}, formatDate = (date) => date) {
 export function newHandoffKey() {
     return globalThis.crypto.randomUUID();
 }
+
+const RISK_STATUS_FALLBACKS = {
+    identified: 'Identifisert',
+    in_treatment: 'Under behandling',
+    monitored: 'Under oppfølging',
+    closed: 'Lukket',
+};
+
+const RISK_LEVEL_FALLBACKS = {
+    low: 'Lav',
+    moderate: 'Moderat',
+    high: 'Høy',
+    very_high: 'Svært høy',
+};
+
+/** A risk status as Risiko names it. */
+export function riskStatusLabel(status, trRisk = {}) {
+    return trRisk.statuses?.[status] ?? RISK_STATUS_FALLBACKS[status] ?? status;
+}
+
+/**
+ * A linked risk's level as the risk page shows it: «Restrisiko: Høy» when the latest assessment has
+ * a residual, otherwise «Iboende risiko: …», and «Restrisiko: Ikke vurdert» before any assessment.
+ * The level is Risiko's — never derived from the supplier's criticality.
+ */
+export function riskLevelText(level, trRisk = {}) {
+    if (! level) {
+        return (trRisk.level_residual ?? 'Restrisiko: :level').replace(':level', trRisk.level_none ?? 'Ikke vurdert');
+    }
+
+    const template = level.kind === 'residual'
+        ? (trRisk.level_residual ?? 'Restrisiko: :level')
+        : (trRisk.level_inherent ?? 'Iboende risiko: :level');
+
+    return template.replace(':level', trRisk.assessment?.levels?.[level.level] ?? RISK_LEVEL_FALLBACKS[level.level] ?? level.level);
+}
+
+/** How a listed risk came to concern the supplier: created here, or linked later. */
+export function riskOriginText(entry, tr = {}) {
+    const r = tr.risks ?? {};
+
+    return entry.origin === 'linked'
+        ? (r.linked ?? 'Koblet til senere')
+        : (r.from_supplier ?? 'Opprettet fra leverandøren');
+}

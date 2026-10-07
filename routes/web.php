@@ -38,6 +38,7 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
+use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
@@ -481,6 +482,11 @@ Route::prefix('app')
             Route::post('/{supplierId}/improvement-cases', [SupplierImprovementController::class, 'store'])->whereNumber('supplierId')->name('improvement-cases.store');
             Route::post('/{supplierId}/improvement-cases/link', [SupplierImprovementController::class, 'link'])->whereNumber('supplierId')->name('improvement-cases.link');
             Route::delete('/{supplierId}/improvement-cases/{linkId}', [SupplierImprovementController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('improvement-cases.unlink');
+            // Risikoer som gjelder leverandøren: a new risk through RiskCreator, or an existing one
+            // connected; the risk itself stays Risiko's.
+            Route::post('/{supplierId}/risks', [SupplierRiskController::class, 'store'])->whereNumber('supplierId')->name('risks.store');
+            Route::post('/{supplierId}/risks/link', [SupplierRiskController::class, 'link'])->whereNumber('supplierId')->name('risks.link');
+            Route::delete('/{supplierId}/risks/{linkId}', [SupplierRiskController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('risks.unlink');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

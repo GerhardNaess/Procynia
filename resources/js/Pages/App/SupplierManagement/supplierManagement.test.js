@@ -10,6 +10,8 @@ import {
     assessmentNeedsFollowUp,
     caseHandoffPrefill,
     caseOriginText,
+    riskLevelText,
+    riskOriginText,
     RESULT_TONES,
     SUPPLIER_STATUS_TONES,
     categoryLabel,
@@ -196,6 +198,24 @@ describe('Avvik og forbedringer hos leverandøren', () => {
         assert.equal(caseOriginText({ origin: 'handoff', assessed_on: null }), 'Opprettet fra leverandøren');
         assert.equal(caseOriginText({ origin: 'handoff', assessed_on: '2026-10-01' }, {}, (date) => `«${date}»`), 'Opprettet fra vurderingen «2026-10-01»');
         assert.equal(caseOriginText({ origin: 'linked', assessed_on: null }), 'Koblet til senere');
+    });
+});
+
+describe('Risikoer som gjelder leverandøren', () => {
+    test('the level is Risiko\'s — residual, else inherent, else not assessed — and the origin is named in domain words', () => {
+        assert.equal(riskLevelText({ kind: 'residual', level: 'high' }), 'Restrisiko: Høy');
+        assert.equal(riskLevelText({ kind: 'inherent', level: 'very_high' }), 'Iboende risiko: Svært høy');
+        assert.equal(riskLevelText(null), 'Restrisiko: Ikke vurdert');
+        assert.equal(riskOriginText({ origin: 'created_from_supplier' }), 'Opprettet fra leverandøren');
+        assert.equal(riskOriginText({ origin: 'linked' }), 'Koblet til senere');
+    });
+
+    test('the section says nothing without access to Risiko, prefills only the title and unlinks only where allowed', () => {
+        const section = source('./SupplierRisks.jsx');
+        assert.match(section, /if \(risks === null \|\| risks === undefined\) \{\s*return null;/);
+        assert.match(section, /canCreate = Boolean\(handoff\) && \(handoff\.area_options \?\? \[\]\)\.length > 0/, 'Opprett risiko needs an area to create in');
+        assert.match(section, /cause: '',\s*event: '',\s*consequence: '',\s*business_area_id: '',/, 'årsak, hendelse, konsekvens and fagområde start empty');
+        assert.match(section, /entry\.can_unlink/, 'Fjern koblingen only where the server allows it');
     });
 });
 

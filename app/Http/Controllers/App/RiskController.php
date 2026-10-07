@@ -17,6 +17,7 @@ use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Services\Risk\RiskTreatmentService;
 use App\Services\Risk\RiskWikiKnowledgeService;
+use App\Services\Suppliers\SupplierRiskService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Risk\RiskValidationMessages;
@@ -52,6 +53,7 @@ class RiskController extends Controller
         private readonly RiskAttentionService $attention,
         private readonly RiskWikiKnowledgeService $wikiKnowledge,
         private readonly RiskCreator $creator,
+        private readonly SupplierRiskService $supplierRisks,
     ) {}
 
     public function index(Request $request): Response
@@ -175,6 +177,10 @@ class RiskController extends Controller
             // Wiki knowledge handed over from this risk, read live from the Wiki. Links only for
             // someone who may read the Wiki; nothing of the risk was copied into it.
             'wiki_knowledge' => $this->wikiKnowledge->describeForRisk($risk, $this->wikiKnowledge->canReadWiki($user)),
+            // «Gjelder leverandør»: null unless the risk concerns a supplier, the customer holds
+            // Leverandøroppfølging *and* the person can read that supplier there. Nothing about the
+            // supplier otherwise.
+            'supplier_origin' => $this->supplierRisks->provenanceFor($user, $risk),
             'permissions' => [
                 'can_edit' => $canEdit,
                 'can_link_controls' => $canReadControls && $canEdit,
@@ -380,36 +386,11 @@ class RiskController extends Controller
     }
 
     /**
-     * People who could own a risk, each with the areas — among those offered to the acting user —
-     * in which they can read risks. The page narrows the list to the area chosen in the form; the
-     * server checks the same thing again in RiskCreator::assertValidOwner(). Areas the acting user cannot reach are
-     * never named here.
-     *
      * @param  Collection<int, BusinessArea>  $offeredAreas
      * @return list<array{id: int, name: string, area_ids: list<int>}>
      */
     private function ownerOptions(User $user, Collection $offeredAreas): array
     {
-        $offeredIds = $offeredAreas->pluck('id')->map(fn (mixed $id): int => (int) $id)->all();
-
-        if ($offeredIds === []) {
-            return [];
-        }
-
-        $viewerAreas = $this->access->viewerAreaIdsByUser((int) $user->customer_id);
-
-        return User::query()
-            ->where('customer_id', (int) $user->customer_id)
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn (User $candidate): array => [
-                'id' => (int) $candidate->id,
-                'name' => $candidate->name,
-                'area_ids' => array_values(array_intersect($viewerAreas[(int) $candidate->id] ?? [], $offeredIds)),
-            ])
-            ->filter(fn (array $option): bool => $option['area_ids'] !== [])
-            ->values()
-            ->all();
+        return $this->creator->ownerOptions($user, $offeredAreas->pluck('id')->map(fn (mixed $id): int => (int) $id)->all());
     }
 }

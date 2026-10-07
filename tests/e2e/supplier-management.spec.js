@@ -424,3 +424,75 @@ test('a supplier is followed up in Avvik og forbedringer, and each side links to
     await page.waitForURL(new RegExp(`/app/supplier-management/${supplier.id}$`));
     await expect(page.getByTestId('supplier-cases').getByTestId('case-entry')).toContainText(title);
 });
+
+/**
+ * Risikoer som gjelder leverandøren: a risk is created in Risiko from the supplier and an existing one
+ * linked; both are assessed and treated in Risiko. The rules — both modules' rights, the fagområde,
+ * ended read-only, the hidden risk and the hidden supplier — are PHP's (SupplierRiskTest); this is the
+ * journey: Opprett risiko, choose the fagområde, describe it, create it, open it in Risiko, see
+ * «Gjelder leverandør», and back to the supplier — the supplier page at desktop and 390 px.
+ */
+test('a risk is created from a supplier and an existing one linked, and each side links to the other', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Datasenter ${suffix} AS', 'critical', 12)`);
+    const { area_name: areaName, existing_title: existingTitle } = await supplierFixture(`seedRiskAccess('${suffix}')`);
+    const title = `Leverandør: ${supplier.name} – brudd i driften`;
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-risks');
+    await expect(section.getByTestId('risks-none')).toHaveText('Ingen risikoer i Risiko gjelder leverandøren.');
+
+    // Opprett risiko: Risiko's own fields; only the title is suggested.
+    await section.getByRole('button', { name: 'Opprett risiko' }).click();
+    const form = section.getByTestId('risk-create-form');
+    await expect(form.locator('#supplier-risk-title')).toHaveValue(`Leverandør: ${supplier.name}`);
+    for (const field of ['cause', 'event', 'consequence']) {
+        await expect(form.locator(`#supplier-risk-${field}`)).toHaveValue('');
+    }
+    await form.locator('#supplier-risk-area').selectOption({ label: areaName });
+    await form.locator('#supplier-risk-title').fill(title);
+    await form.locator('#supplier-risk-cause').fill('Leverandøren har ett datasenter');
+    await form.locator('#supplier-risk-event').fill('Strømbrudd i datasenteret');
+    await form.locator('#supplier-risk-consequence').fill('Innbyggertjenestene er nede');
+    await form.locator('#supplier-risk-owner').selectOption({ label: person.name });
+    await expectReadable(page, '50-risk-create-form');
+    await form.getByRole('button', { name: 'Opprett risiko' }).click();
+    await expect(page.getByText('Risikoen er opprettet i Risiko.', { exact: true })).toBeVisible();
+
+    // Koble til eksisterende risiko: one the person can edit in Risiko.
+    await section.getByRole('button', { name: 'Koble til eksisterende risiko' }).click();
+    await section.locator('#supplier-risk-link').selectOption({ label: `${existingTitle} (${areaName})` });
+    await section.getByTestId('risk-link-form').getByRole('button', { name: 'Koble til' }).click();
+    await expect(page.getByText('Risikoen er koblet til leverandøren.', { exact: true })).toBeVisible();
+
+    const entries = section.getByTestId('risk-entry');
+    await expect(entries).toHaveCount(2);
+    const created = entries.filter({ hasText: title });
+    for (const text of [areaName, 'Identifisert', 'Restrisiko: Ikke vurdert', 'Opprettet fra leverandøren']) {
+        await expect(created).toContainText(text);
+    }
+    await expect(entries.filter({ hasText: existingTitle })).toContainText('Koblet til senere');
+    await expectReadable(page, '51-supplier-risks');
+
+    // The risk lives in Risiko, and says which supplier it concerns.
+    await created.getByRole('link', { name: title }).click();
+    await page.waitForURL(/\/app\/risk\/risks\/\d+$/);
+    await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
+    const origin = page.getByTestId('risk-supplier-origin');
+    await expect(origin).toContainText(`Gjelder leverandør ${supplier.name}`);
+    await expect(origin).toContainText('Risikoen ble opprettet fra leverandøren.');
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await origin.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.setViewportSize(DESKTOP);
+
+    // And back.
+    await origin.getByRole('link', { name: supplier.name }).click();
+    await page.waitForURL(new RegExp(`/app/supplier-management/${supplier.id}$`));
+    await expect(page.getByTestId('supplier-risks').getByTestId('risk-entry')).toHaveCount(2);
+});

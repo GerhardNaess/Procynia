@@ -110,6 +110,38 @@ class RiskCreator
     }
 
     /**
+     * People who could own a risk, each with the areas — among those offered to the acting user —
+     * in which they can read risks. The page narrows the list to the area chosen in the form; the
+     * server checks the same thing again in assertValidOwner(). Areas the acting user cannot reach
+     * are never named here.
+     *
+     * @param  list<int>  $offeredAreaIds
+     * @return list<array{id: int, name: string, area_ids: list<int>}>
+     */
+    public function ownerOptions(User $actor, array $offeredAreaIds): array
+    {
+        if ($offeredAreaIds === []) {
+            return [];
+        }
+
+        $viewerAreas = $this->access->viewerAreaIdsByUser((int) $actor->customer_id);
+
+        return User::query()
+            ->where('customer_id', (int) $actor->customer_id)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (User $candidate): array => [
+                'id' => (int) $candidate->id,
+                'name' => $candidate->name,
+                'area_ids' => array_values(array_intersect($viewerAreas[(int) $candidate->id] ?? [], $offeredAreaIds)),
+            ])
+            ->filter(fn (array $option): bool => $option['area_ids'] !== [])
+            ->values()
+            ->all();
+    }
+
+    /**
      * The validated form as the columns shared by registering and editing. The review interval and
      * the treatment strategy are not among them: an edit changes those only when they were sent.
      *
