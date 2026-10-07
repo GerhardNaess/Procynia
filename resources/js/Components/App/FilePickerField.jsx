@@ -31,7 +31,7 @@ export default function FilePickerField({
     return (
         <div className="space-y-1">
             {label ? (
-                <span className="block text-sm font-semibold text-slate-700">{label}</span>
+                <span className="block text-base font-semibold text-slate-700">{label}</span>
             ) : null}
 
             <div className="flex flex-wrap items-center gap-3">
@@ -52,8 +52,8 @@ export default function FilePickerField({
                 </span>
             </div>
 
-            {help ? <span className="block text-sm text-slate-500">{help}</span> : null}
-            {error ? <span className="block text-sm text-rose-600">{error}</span> : null}
+            {help ? <span className="block text-base text-slate-500">{help}</span> : null}
+            {error ? <span className="block text-base text-rose-600">{error}</span> : null}
         </div>
     );
 }

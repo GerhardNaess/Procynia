@@ -464,7 +464,7 @@ class RiskWikiKnowledgeTest extends TestCase
         ]);
 
         CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'grc'],
+            ['customer_id' => $customer->id, 'package_key' => 'governance'],
             ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
         );
 

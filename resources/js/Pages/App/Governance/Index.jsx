@@ -14,6 +14,7 @@ const FALLBACK_DESCRIPTIONS = {
     risk: 'Identifiser, vurder og følg opp risiko.',
     objectives: 'Sett mål, følg resultater og se hva som trenger oppmerksomhet.',
     improvements: 'Registrer, behandle og følg opp avvik og forbedringsmuligheter.',
+    compliance: 'Kravene virksomheten skal etterleve, vurdering av etterlevelse og revisjoner med funn og oppfølging.',
 };
 
 /**
@@ -36,7 +37,7 @@ export default function GovernanceIndex({ modules = [] }) {
                     {tg.page_title ?? 'Styring'}
                 </h1>
                 <p className="mt-2 max-w-2xl text-base leading-7 text-slate-600">
-                    {tg.intro ?? 'Styring samler virksomhetens prosesser, risiko, mål og forbedringsarbeid på ett sted. Velg området du vil arbeide med.'}
+                    {tg.intro ?? 'Styring samler virksomhetens prosesser, risiko, mål, forbedringsarbeid og krav på ett sted. Velg området du vil arbeide med.'}
                 </p>
             </header>
 

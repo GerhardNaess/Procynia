@@ -21,19 +21,19 @@ describe('the rail shows the whole planned product structure', () => {
             APP_MODULES.map((module) => module.key),
             [
                 'home', 'wiki', 'tenders', 'quality',
-                'risk', 'objectives', 'improvements', 'suppliers', 'contracts', 'hse', 'compliance', 'services',
+                'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'contracts', 'hse', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
         );
     });
 
-    test('exactly seven are built, and they are the seven that have pages', () => {
+    test('exactly eight are built, and they are the eight that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements'],
         );
     });
 
@@ -58,7 +58,6 @@ describe('available and planned look different, and say why', () => {
     });
 
     test('planned modules are not links, are dimmed, and are marked disabled', () => {
-        // "Ikke bestilt" and "Planlagt" share one renderer, so its markup is what both groups get.
         const start = sidebar.indexOf('const renderUnavailableGroup');
         const unavailable = sidebar.slice(start, sidebar.indexOf('return (', sidebar.indexOf('));', start)));
 
@@ -69,16 +68,26 @@ describe('available and planned look different, and say why', () => {
         assert.match(unavailable, /cursor-not-allowed/);
         assert.match(unavailable, /text-slate-400/);
         assert.match(sidebar, /renderUnavailableGroup\(groups\.planned,/);
-        assert.match(sidebar, /renderUnavailableGroup\(groups\.not_ordered,/);
+    });
+
+    test('a built module the customer has not ordered is not on the rail at all, not even dimmed', () => {
+        assert.ok(! sidebar.includes('not_ordered'), 'the rail must not render an "Ikke bestilt" group');
+        assert.ok(! sidebar.includes('Ikke bestilt'));
+
+        const rail = railEntries(['wiki'], ['wiki.view', 'quality.view']);
+        const shown = [...rail.entries.map((entry) => entry.key), ...rail.planned.map((module) => module.key)];
+
+        for (const key of ['tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'governance']) {
+            assert.ok(! shown.includes(key), key);
+        }
+        assert.equal(rail.not_ordered, undefined);
     });
 
     test('dimming alone would read as a bug, so the group is captioned', () => {
         assert.match(sidebar, /data-testid=\{testId\}/);
         assert.match(sidebar, /testId: 'module-sidebar-planned-caption'/);
-        assert.match(sidebar, /testId: 'module-sidebar-not-ordered-caption'/);
         assert.match(sidebar, /modules\.planned_caption \?\? 'Planlagt'/);
         assert.match(sidebar, /modules\.planned_hint \?\? 'Ikke tilgjengelig ennå'/);
-        assert.match(sidebar, /modules\.not_ordered_caption \?\? 'Ikke bestilt'/);
     });
 });
 
@@ -120,14 +129,31 @@ describe('the rail does not take navigation away from anyone', () => {
         assert.match(layout, /flex max-w-\[1600px\] flex-col gap-6 .* lg:flex-row/);
     });
 
-    test('the rail picks modules and workspaces, never the work areas inside a module', () => {
+    test('the rail picks modules and workspaces; only a module that declares its work areas lists them', () => {
         // Anbud used to nest its four work areas here, which made one module structurally unlike
-        // every other. Wiki never did, and Wiki is the pattern. The only nesting is Styring, a
-        // level above modules.
-        assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a module\'s work areas');
+        // every other, and it still does not. Etterlevelse og revisjon is the one exception, chosen on
+        // purpose: Krav and Revisjoner are equal destinations, and the module entry only led to Krav.
+        assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a module\'s sections');
         assert.ok(! sidebar.includes('activeSectionKey'), 'the rail takes no section state');
-        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null \}\)/);
-        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}\s*\n\s*activeWorkspace=\{activeWorkspace\}/);
+        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, activeAreaKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null \}\)/);
+        assert.match(sidebar, /\{child\.subAreas && renderSubAreas\(child\)\}/);
+        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}\s*\n\s*activeAreaKey=\{activeSecondaryKey\}\s*\n\s*activeWorkspace=\{activeWorkspace\}/);
+
+        const withAreas = APP_MODULES.filter((module) => module.subAreas);
+        assert.deepEqual(withAreas.map((module) => module.key), ['compliance']);
+        assert.deepEqual(withAreas[0].subAreas.map((area) => [area.key, area.href, area.label({})]), [
+            ['compliance-requirements', '/app/compliance/requirements', 'Krav'],
+            ['compliance-audits', '/app/compliance/audits', 'Revisjoner'],
+        ]);
+    });
+
+    test('one current page: with a work area open, the area carries aria-current, not the module', () => {
+        assert.match(sidebar, /aria-current=\{isActive && ! areaOpen \? 'page' : undefined\}/);
+        assert.match(sidebar, /const isActive = activeAreaKey === area\.key;/);
+    });
+
+    test('the work areas fold away with the rail on desktop, never on a phone', () => {
+        assert.match(sidebar, /collapsed \? 'lg:hidden' : ''/);
     });
 });
 
@@ -256,21 +282,22 @@ describe('Avvik og forbedringer is on the rail once it has pages', () => {
 });
 
 /**
- * Styring is an arbeidsområde, not a module: it groups Kvalitet, Risiko, Mål og KPI and Avvik og
- * forbedringer, and it is derived entirely from them. No package grants it and no permission gates
- * it, so what these guard is that it can never show more than the four modules already would.
+ * Styring is an arbeidsområde, not a module: it groups Kvalitet, Risiko, Mål og KPI, Avvik og
+ * forbedringer and Etterlevelse og revisjon, and it is derived entirely from them. No package grants
+ * it and no permission gates it, so what these guard is that it can never show more than the
+ * modules themselves already would.
  */
 describe('Styring groups the governance modules, and only the ones the person can open', () => {
-    const ALL_MODULES = ['wiki_core', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'audit_compliance'];
+    const ALL_MODULES = ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'];
     const governance = (activeModules, permissions) => railEntries(activeModules, permissions)
         .entries.find((entry) => entry.key === 'governance');
     const topLevel = (activeModules, permissions) => railEntries(activeModules, permissions)
         .entries.map((entry) => entry.key);
 
-    test('the four governance modules sit under Styring, and nothing else does', () => {
+    test('the five governance modules sit under Styring, and nothing else does', () => {
         assert.deepEqual(
-            APP_MODULES.filter((module) => module.workspace === 'governance').map((module) => module.key),
-            ['quality', 'risk', 'objectives', 'improvements'],
+            APP_MODULES.filter((module) => module.built && module.workspace === 'governance').map((module) => module.key),
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
         );
         assert.deepEqual(APP_WORKSPACES.map((workspace) => workspace.key), ['governance']);
         assert.equal(APP_WORKSPACES[0].href, '/app/governance');
@@ -289,6 +316,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
         ['risk.view', 'risk'],
         ['objective.view', 'objectives'],
         ['improvement.view', 'improvements'],
+        ['compliance.view', 'compliance'],
     ]) {
         test(`only ${permission} shows Styring with ${key} under it, and nothing else there`, () => {
             const workspace = governance(ALL_MODULES, [permission]);
@@ -299,9 +327,9 @@ describe('Styring groups the governance modules, and only the ones the person ca
     }
 
     test('several permissions show every permitted module, in product order', () => {
-        const workspace = governance(ALL_MODULES, ['improvement.view', 'risk.view', 'quality.view']);
+        const workspace = governance(ALL_MODULES, ['compliance.view', 'improvement.view', 'risk.view', 'quality.view']);
 
-        assert.deepEqual(workspace.children.map((child) => child.key), ['quality', 'risk', 'improvements']);
+        assert.deepEqual(workspace.children.map((child) => child.key), ['quality', 'risk', 'improvements', 'compliance']);
     });
 
     test('none of the four permissions shows no Styring at all', () => {
@@ -309,29 +337,74 @@ describe('Styring groups the governance modules, and only the ones the person ca
         assert.deepEqual(topLevel(ALL_MODULES, ['wiki.view']), ['home', 'wiki', 'tenders']);
     });
 
-    test('a module the customer has not ordered stays in Ikke bestilt, not under Styring', () => {
-        const rail = railEntries(['wiki_core', 'tender', 'risk'], ['risk.view', 'quality.view']);
+    test('a module the customer has not ordered is neither under Styring nor anywhere else', () => {
+        const rail = railEntries(['wiki', 'tender', 'risk'], ['risk.view', 'quality.view']);
         const workspace = rail.entries.find((entry) => entry.key === 'governance');
 
         assert.deepEqual(workspace.children.map((child) => child.key), ['risk']);
-        assert.deepEqual(rail.not_ordered.map((module) => module.key), ['quality', 'objectives', 'improvements']);
+        assert.ok(! rail.planned.some((module) => module.key === 'quality'));
     });
 
     test('a permission without the module is not access, so Styring stays away', () => {
-        const rail = railEntries(['wiki_core', 'tender'], ['risk.view']);
+        const rail = railEntries(['wiki', 'tender'], ['risk.view']);
 
         assert.equal(rail.entries.find((entry) => entry.key === 'governance'), undefined);
     });
 
     test('planned modules keep their own group and never land under Styring', () => {
-        const rail = railEntries(ALL_MODULES, ['quality.view']);
+        // Even Leverandører, which already declares Styring as its workspace and is carried by a
+        // package that names `supplier`: until it is built it is planned, and only planned.
+        const rail = railEntries([...ALL_MODULES, 'supplier'], ['quality.view']);
+        const workspace = rail.entries.find((entry) => entry.key === 'governance');
 
-        assert.ok(rail.planned.every((module) => ! module.workspace));
-        assert.ok(rail.planned.some((module) => module.key === 'compliance'));
+        assert.ok(rail.planned.some((module) => module.key === 'contracts'));
+        assert.ok(rail.planned.some((module) => module.key === 'suppliers'));
+        assert.deepEqual(workspace.children.map((child) => child.key), ['quality']);
+        assert.ok(! rail.planned.some((module) => module.key === 'compliance'), 'Etterlevelse og revisjon is built');
+    });
+
+    test('a module that becomes built leaves Planlagt and lands under Styring, without a second entry', () => {
+        // The future of Leverandøroppfølging, simulated: built, entitled, and given a permission.
+        const suppliers = APP_MODULES.find((module) => module.key === 'suppliers');
+        const original = { ...suppliers };
+
+        try {
+            Object.assign(suppliers, { built: true, href: '/app/supplier-follow-up', permission: 'supplier.view', areas: ['supplier-follow-up'] });
+            const rail = railEntries([...ALL_MODULES, 'supplier'], ['quality.view', 'supplier.view']);
+            const workspace = rail.entries.find((entry) => entry.key === 'governance');
+
+            assert.deepEqual(workspace.children.map((child) => child.key), ['quality', 'suppliers']);
+            assert.ok(! rail.planned.some((module) => module.key === 'suppliers'));
+
+            // Without the package, it is nowhere — not dimmed, not planned.
+            const withoutPackage = railEntries(ALL_MODULES, ['quality.view', 'supplier.view']);
+            assert.deepEqual(withoutPackage.entries.find((entry) => entry.key === 'governance').children.map((child) => child.key), ['quality']);
+            assert.ok(! withoutPackage.planned.some((module) => module.key === 'suppliers'));
+        } finally {
+            for (const key of Object.keys(suppliers)) {
+                delete suppliers[key];
+            }
+            Object.assign(suppliers, original);
+        }
+    });
+
+    test('the order under Styring is the backend\'s module order, not the order of the catalog here', () => {
+        // entitlements.modules arrives sorted by config/procynia_modules.php sort_order; that is the
+        // one declared order, so the rail follows it rather than its own array.
+        const permissions = ['quality.view', 'risk.view', 'objective.view', 'improvement.view', 'compliance.view'];
+
+        assert.deepEqual(
+            governance(['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], permissions).children.map((child) => child.key),
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
+        );
+        assert.deepEqual(
+            governance(['wiki', 'compliance', 'improvements', 'objectives', 'risk', 'quality'], permissions).children.map((child) => child.key),
+            ['compliance', 'improvements', 'objectives', 'risk', 'quality'],
+        );
     });
 
     test('Styring is lit on its own page and on every page inside its modules', () => {
-        for (const area of ['governance', 'quality', 'risk', 'objectives', 'improvements']) {
+        for (const area of ['governance', 'quality', 'risk', 'objectives', 'improvements', 'compliance']) {
             assert.equal(activeWorkspaceKey(area), 'governance', area);
         }
 
@@ -343,7 +416,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
     test('the area comes from the path prefix, so detail, create and edit pages count too', () => {
         assert.match(layout, /if \(pathname === '\/app\/governance'\) \{\s*\n\s*return 'governance';/);
 
-        for (const prefix of ['quality', 'risk', 'objectives', 'improvements']) {
+        for (const prefix of ['quality', 'risk', 'objectives', 'improvements', 'compliance']) {
             assert.match(layout, new RegExp(`pathname\\.startsWith\\('/app/${prefix}'\\)`), prefix);
         }
 
@@ -356,9 +429,10 @@ describe('Styring groups the governance modules, and only the ones the person ca
         assert.match(sidebar, /\? 'font-semibold text-violet-700 hover:bg-slate-100'/);
     });
 
-    test('children are always listed — nothing to unfold, so nothing hidden on a phone', () => {
+    test('Styring\'s modules can be folded away with its own chevron, beside the link rather than on it', () => {
         assert.match(sidebar, /data-testid=\{`module-\$\{workspace\.key\}-children`\}/);
-        assert.ok(! /aria-expanded=\{[^}]*workspace/.test(sidebar), 'Styring must not fold its modules away');
+        assert.match(sidebar, /\{renderGroupToggle\(workspace\.key, label, `module-\$\{workspace\.key\}-children`\)\}/);
+        assert.match(sidebar, /groupListClass\(workspace\.key\)/);
     });
 
     test('Styring has its own icon, not one borrowed from Kvalitet or Risiko', () => {

@@ -24,6 +24,8 @@ final class CustomerPermissionCatalog
 
     public const DOMAIN_IMPROVEMENT = 'improvement';
 
+    public const DOMAIN_COMPLIANCE = 'compliance';
+
     public const QUALITY_VIEW = 'quality.view';
 
     public const QUALITY_CREATE = 'quality.create';
@@ -106,6 +108,28 @@ final class CustomerPermissionCatalog
 
     public const IMPROVEMENT_DELETE = 'improvement.delete';
 
+    /*
+     * Etterlevelse og revisjon. Customer-wide in v1 — no fagområde — and an explicit-grant domain:
+     * System Owner does not hold these keys by virtue of the administrator role, only through a
+     * role of their own (see explicitGrantDomains()). See ComplianceAccessService.
+     */
+    public const COMPLIANCE_VIEW = 'compliance.view';
+
+    /** Creating and changing requirements and their sources, and retiring and reopening requirements. */
+    public const COMPLIANCE_EDIT = 'compliance.edit';
+
+    /** Registering compliance assessments. compliance.edit does not imply it. */
+    public const COMPLIANCE_ASSESS = 'compliance.assess';
+
+    /**
+     * Planning and running audits: registering them, changing their fields and scope, and their
+     * lifecycle (Start, Fullfør, Avbryt, Gjenåpne). compliance.edit does not imply it.
+     */
+    public const COMPLIANCE_AUDIT = 'compliance.audit';
+
+    /** Deleting a requirement or an audit registered by mistake, and a source nothing uses. */
+    public const COMPLIANCE_DELETE = 'compliance.delete';
+
     /**
      * Permission keys grouped by the domain they govern, in the order they should be presented.
      *
@@ -149,7 +173,40 @@ final class CustomerPermissionCatalog
                 self::IMPROVEMENT_CLOSE,
                 self::IMPROVEMENT_DELETE,
             ],
+            self::DOMAIN_COMPLIANCE => [
+                self::COMPLIANCE_VIEW,
+                self::COMPLIANCE_EDIT,
+                self::COMPLIANCE_ASSESS,
+                self::COMPLIANCE_AUDIT,
+                self::COMPLIANCE_DELETE,
+            ],
         ];
+    }
+
+    /**
+     * The domains System Owner does not hold implicitly. Everywhere else System Owner holds the
+     * whole catalogue, so the person who administers roles can never lock themselves out; in these
+     * domains the data is sensitive enough that administering access is not the same as having it.
+     * System Owner still administers the roles that grant these keys, and may hand one to
+     * themselves — then they hold it like anyone else, through that role.
+     *
+     * @return list<string>
+     */
+    public static function explicitGrantDomains(): array
+    {
+        return [self::DOMAIN_COMPLIANCE];
+    }
+
+    /** Whether a key belongs to a domain System Owner only reaches through a role of their own. */
+    public static function requiresExplicitGrant(string $permissionKey): bool
+    {
+        foreach (self::explicitGrantDomains() as $domain) {
+            if (in_array($permissionKey, self::domains()[$domain], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

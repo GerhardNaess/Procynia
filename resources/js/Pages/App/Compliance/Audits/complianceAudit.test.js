@@ -1,0 +1,408 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { COMPLIANCE_HELP_PAGES, complianceHelp } from '../Requirements/complianceHelp.js';
+import {
+    AUDIT_STATUS_TONES,
+    auditStatusLabel,
+    auditTypeLabel,
+    FINDING_TYPE_TONES,
+    describeAuditHistoryEntry,
+    filterRequirementOptions,
+    findingFormData,
+    findingTypeLabel,
+    findingsNotice,
+    improvementTypeLabel,
+    lockedNotice,
+    splitByScope,
+    plannedPeriodLabel,
+    requirementLabel,
+} from './complianceAudit.js';
+
+const here = fileURLToPath(new URL('.', import.meta.url));
+const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
+const layout = source('../../../../Layouts/CustomerAppLayout.jsx');
+const lang = (locale) => readFileSync(new URL(`../../../../../../lang/${locale}/procynia.php`, import.meta.url), 'utf8');
+
+const block = (text, start, end) => {
+    const from = text.indexOf(start);
+    assert.ok(from > -1, `${start} must exist`);
+
+    return text.slice(from, text.indexOf(end, from));
+};
+
+describe('Etterlevelse og revisjon has two Level 2 areas: Krav | Revisjoner', () => {
+    test('exactly Krav and Revisjoner, in that order, with their own routes', () => {
+        const areas = block(layout, "if (activeMainArea === 'compliance') {\n            // Etterlevelse", '];');
+        const keys = [...areas.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+        const hrefs = [...areas.matchAll(/href: '([^']+)'/g)].map((m) => m[1]);
+
+        assert.deepEqual(keys, ['compliance-requirements', 'compliance-audits']);
+        assert.deepEqual(hrefs, ['/app/compliance/requirements', '/app/compliance/audits']);
+    });
+
+    test('no Oversikt, dashboard or third level is invented for the module', () => {
+        const items = block(layout, "if (activeMainArea === 'compliance') {\n            // Etterlevelse", '];').split('return [')[1];
+
+        for (const word of ['overview', 'dashboard', 'Oversikt', 'findings']) {
+            assert.ok(! items.includes(word), `${word} must not be an area`);
+        }
+    });
+
+    test('an audit page lights Revisjoner, everything else in the module lights Krav', () => {
+        const resolver = block(layout, "if (activeMainArea === 'compliance') {\n            return pathname", '}');
+
+        assert.match(resolver, /pathname\.startsWith\('\/app\/compliance\/audits'\) \? 'compliance-audits' : 'compliance-requirements'/);
+    });
+
+    test('the pages do not draw their own copy of the areas', () => {
+        for (const file of ['./Index.jsx', './Show.jsx', '../Requirements/Index.jsx', '../Requirements/Show.jsx']) {
+            const code = source(file);
+            assert.ok(! code.includes('<nav'), `${file} must not render its own navigation`);
+            assert.ok(! code.includes("href=\"/app/compliance/audits\" className=\"rounded"), file);
+        }
+    });
+});
+
+describe('PageHelp on both audit pages', () => {
+    test('the register and the audit page are help pages, rendered through PageHelpButton', () => {
+        assert.deepEqual(COMPLIANCE_HELP_PAGES.slice(2), ['audit_index', 'audit']);
+        assert.match(source('./Index.jsx'), /<PageHelpButton \{\.\.\.complianceHelp\(tr, 'audit_index'\)\} \/>/);
+        assert.match(source('./Show.jsx'), /<PageHelpButton \{\.\.\.complianceHelp\(tr, 'audit'\)\} \/>/);
+    });
+
+    test('the help is read from translations.compliance.help', () => {
+        const sections = [{ title: 'Scope', items: [{ title: 'Scope', text: 'Hva revisjonen omfatter.' }] }];
+        const help = complianceHelp({ help: { button: 'Hjelp', audit: { title: 'Om revisjonen', intro: 'Intro', sections } } }, 'audit');
+
+        assert.deepEqual(help, { buttonLabel: 'Hjelp', title: 'Om revisjonen', intro: 'Intro', sections });
+    });
+
+    test('both languages declare the same audit help pages and audit keys', () => {
+        for (const locale of ['no', 'en']) {
+            const text = lang(locale);
+            assert.match(text, /'audit_index' => \[/, locale);
+            assert.match(text, /'audit' => \[\n\s+'title' =>/, locale);
+            assert.match(text, /'audits' => \[\n\s+'nav' =>/, locale);
+        }
+    });
+});
+
+describe('No text below 16 px in the audit pages', () => {
+    test('no component uses text-xs or text-sm', () => {
+        for (const file of readdirSync(here).filter((name) => name.endsWith('.jsx'))) {
+            assert.doesNotMatch(source(`./${file}`), /\btext-(xs|sm)\b/, file);
+        }
+    });
+});
+
+describe('The register', () => {
+    const index = source('./Index.jsx');
+
+    test('shows title, type, responsible, planned period and status — on the table and on the phone cards', () => {
+        const table = block(index, 'data-testid="compliance-audit-table"', '</table>');
+        const cards = block(index, 'data-testid="compliance-audit-list"', '</ul>');
+
+        for (const column of ['col_title', 'col_type', 'col_responsible', 'col_period', 'col_status']) {
+            assert.ok(table.includes(column), `table: ${column}`);
+        }
+        for (const helper of ['auditTypeLabel', 'auditStatusLabel', 'plannedPeriodLabel', '<Responsible']) {
+            assert.ok(cards.includes(helper), `cards: ${helper}`);
+            assert.ok(table.includes(helper), `table: ${helper}`);
+        }
+    });
+
+    test('phones get cards, wider screens the table — never both, never sideways scrolling', () => {
+        assert.match(index, /className="mt-4 divide-y divide-slate-100 md:hidden" data-testid="compliance-audit-list"/);
+        assert.match(index, /className="mt-4 hidden overflow-x-auto md:block"/);
+    });
+
+    test('search, status and type are the filters, and Nullstill clears all three', () => {
+        assert.match(index, /router\.get\('\/app\/compliance\/audits', \{\n\s+search: search \|\| undefined,\n\s+status: status \|\| undefined,\n\s+type: type \|\| undefined,/);
+        assert.match(index, /setSearch\(''\);\n\s+setStatus\(''\);\n\s+setType\(''\);/);
+    });
+
+    test('Ny revisjon only with compliance.audit, and no status in the form', () => {
+        assert.match(index, /\{canAudit && ! creating && \(/);
+        const form = source('./AuditForm.jsx');
+        assert.ok(! /setData\('status'/.test(form), 'status is never a form field');
+        for (const field of ['title', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description']) {
+            assert.ok(form.includes(`setData('${field}'`), field);
+        }
+    });
+
+    test('no dashboard or chart in the register; findings live on the audit page', () => {
+        for (const word of ['Chart', 'findings', 'percent', 'score']) {
+            assert.ok(! index.includes(word), word);
+        }
+    });
+
+    test('Trenger oppmerksomhet: the shared panel over the audits, a filter, and the reasons on rows and phone cards', () => {
+        assert.match(index, /<ComplianceAttention attention=\{attention\} tr=\{ta\} testIdPrefix="compliance-audit-attention" \/>/);
+        assert.match(index, /attention: attentionOnly \? 1 : undefined,/);
+        assert.match(index, /setAttentionOnly\(false\);/);
+        assert.match(index, /filters\.search \|\| filters\.status \|\| filters\.type \|\| filters\.attention/);
+        const table = block(index, 'data-testid="compliance-audit-table"', '</table>');
+        const cards = block(index, 'data-testid="compliance-audit-list"', '</ul>');
+        assert.ok(table.includes('<AttentionReasons reasons={item.attention} tr={ta} withLabel />'));
+        assert.ok(cards.includes('<AttentionReasons reasons={item.attention ?? []} tr={ta} withLabel />'));
+        assert.match(source('./Show.jsx'), /<AttentionReasons reasons=\{attention\} tr=\{ta\} withLabel testId="compliance-audit-show-attention" \/>/);
+    });
+});
+
+describe('The audit page', () => {
+    const show = source('./Show.jsx');
+
+    test('reads top to bottom: status, information, scope, requirements, processes, findings, conclusion, history', () => {
+        const order = ['data-testid="compliance-audit-status"', 'compliance-audit-info-heading', 'compliance-audit-scope-heading', '<AuditRequirementScope', '<AuditProcessScope', '<AuditFindings', 'compliance-audit-conclusion-heading', '<AuditHistory'];
+        const positions = order.map((needle) => show.indexOf(needle));
+
+        positions.forEach((position, i) => assert.ok(position > -1, `${order[i]} must exist`));
+        assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+    });
+
+    test('every lifecycle action waits for the server\'s permission', () => {
+        for (const [permission, action] of [['can_start', 'start'], ['can_complete', 'complete'], ['can_reopen', 'reopen'], ['can_cancel', 'cancel']]) {
+            assert.match(show, new RegExp(`\\{permissions\\.${permission} && \\(\\n\\s+<button type="button" onClick=\\{\\(\\) => setPanel\\('${action}'\\)\\}`), permission);
+        }
+        assert.match(show, /\{permissions\.can_edit && panel === null && \(/);
+        assert.match(show, /\{permissions\.can_delete && \(/);
+    });
+
+    test('Rediger draws only the fields the server left open', () => {
+        assert.match(show, /fields=\{editableFields\}/);
+        assert.match(source('./AuditForm.jsx'), /const has = \(field\) => fields\.includes\(field\);/);
+    });
+
+    test('a completed audit says it is locked and how to change it; a cancelled one that it is read-only', () => {
+        assert.equal(lockedNotice('completed'), 'Revisjonen er fullført og låst. Gjenåpne den for å gjøre endringer.');
+        assert.equal(lockedNotice('cancelled'), 'Revisjonen er avbrutt og kan ikke endres.');
+        assert.equal(lockedNotice('planned'), null);
+        assert.equal(lockedNotice('in_progress'), null);
+        assert.match(show, /\{locked && \(/);
+    });
+
+    test('Fullfør asks for the conclusion, prefilled with what was saved underway', () => {
+        const forms = source('./AuditLifecycleForms.jsx');
+        assert.match(forms, /useForm\(\{ conclusion: audit\.conclusion \?\? '' \}\)/);
+        assert.match(forms, /\/app\/compliance\/audits\/\$\{audit\.id\}\/complete/);
+    });
+
+    test('Avbryt and Gjenåpne require a reason, Start does not', () => {
+        const forms = source('./AuditLifecycleForms.jsx');
+        assert.match(block(forms, 'export function AuditStartForm', '\n}\n'), /required=\{false\}/);
+        assert.match(block(forms, 'export function AuditCancelForm', '\n}\n'), /\n\s+required\n/);
+        assert.match(block(forms, 'export function AuditReopenForm', '\n}\n'), /\n\s+required\n/);
+    });
+
+    test('the processes are drawn only when the server sent them — never an empty or counted placeholder', () => {
+        assert.match(show, /\{processes !== null && \(\n\s+<AuditProcessScope/);
+        assert.ok(! /processes\?\.length|processes\.length/.test(show));
+    });
+
+    test('adding and removing scope waits for the server\'s permission', () => {
+        const scope = source('./AuditScope.jsx');
+        assert.match(show, /canManage=\{Boolean\(permissions\.can_manage_requirements\)\}/);
+        assert.match(show, /canManage=\{Boolean\(permissions\.can_manage_processes\)\}/);
+        assert.equal((scope.match(/\{canManage && ! adding && \(/g) ?? []).length, 2);
+        assert.equal((scope.match(/\{canManage && \(\n\s+<button type="button" onClick=\{\(\) => remove/g) ?? []).length, 2);
+    });
+
+    test('a retired requirement in scope says so, in the list and in the picker', () => {
+        const scope = source('./AuditScope.jsx');
+        assert.equal((scope.match(/status === 'retired' && /g) ?? []).length, 3);
+    });
+
+    test('scope lists stack as rows that wrap, so they read on a phone', () => {
+        const scope = source('./AuditScope.jsx');
+        assert.ok((scope.match(/flex flex-wrap items-start justify-between gap-3 py-3/g) ?? []).length >= 2);
+        assert.ok(scope.includes('break-words'));
+    });
+});
+
+describe('complianceAudit helpers', () => {
+    test('four statuses, each with a label and a tone of its own', () => {
+        assert.deepEqual(Object.keys(AUDIT_STATUS_TONES), ['planned', 'in_progress', 'completed', 'cancelled']);
+        assert.equal(new Set(Object.values(AUDIT_STATUS_TONES)).size, 4);
+        assert.equal(auditStatusLabel('in_progress'), 'Under arbeid');
+        assert.equal(auditStatusLabel('completed', { statuses: { completed: 'Completed' } }), 'Completed');
+    });
+
+    test('the type reads as Intern or Ekstern', () => {
+        assert.equal(auditTypeLabel('internal'), 'Intern');
+        assert.equal(auditTypeLabel('external'), 'Ekstern');
+        assert.equal(auditTypeLabel('external', { types: { external: 'External' } }), 'External');
+    });
+
+    test('the planned period, with or without a start', () => {
+        assert.equal(plannedPeriodLabel({ planned_start_date: '2026-11-01', planned_end_date: '2026-11-15' }), '01.11.2026–15.11.2026');
+        assert.equal(plannedPeriodLabel({ planned_start_date: null, planned_end_date: '2026-11-15' }), 'Til 15.11.2026');
+        assert.equal(plannedPeriodLabel({ planned_start_date: null, planned_end_date: '2026-11-15' }, { period_until: 'Until :date' }), 'Until 15.11.2026');
+    });
+
+    test('a history entry reads as a sentence, and Gjenåpnet is told apart from Startet', () => {
+        assert.equal(describeAuditHistoryEntry({ from_status: 'planned', to_status: 'in_progress', changed_by_name: 'Kari' }), 'Startet av Kari');
+        assert.equal(describeAuditHistoryEntry({ from_status: 'completed', to_status: 'in_progress', changed_by_name: 'Kari' }), 'Gjenåpnet av Kari');
+        assert.equal(describeAuditHistoryEntry({ from_status: 'in_progress', to_status: 'completed', changed_by_name: null }), 'Fullført av en tidligere bruker');
+        assert.equal(describeAuditHistoryEntry({ from_status: 'planned', to_status: 'cancelled', changed_by_name: 'Ola' }, { history: { planned_cancelled: 'Cancelled by :name' } }), 'Cancelled by Ola');
+    });
+
+    test('the requirement search matches every word, and keeps what is already ticked', () => {
+        const options = [
+            { id: 1, reference: 'A.5.15', title: 'Tilgangsstyring', source_label: 'ISO 27001 (2022)' },
+            { id: 2, reference: '§ 30', title: 'Behandlingsprotokoll', source_label: 'Personopplysningsloven' },
+            { id: 3, reference: null, title: 'Internt krav om tilgang', source_label: 'Interne krav' },
+        ];
+
+        assert.deepEqual(filterRequirementOptions(options, '').map((o) => o.id), [1, 2, 3]);
+        assert.deepEqual(filterRequirementOptions(options, 'tilgang').map((o) => o.id), [1, 3]);
+        assert.deepEqual(filterRequirementOptions(options, 'iso tilgang').map((o) => o.id), [1]);
+        assert.deepEqual(filterRequirementOptions(options, 'iso tilgang', [2]).map((o) => o.id), [1, 2]);
+        assert.equal(requirementLabel(options[0]), 'A.5.15 Tilgangsstyring');
+        assert.equal(requirementLabel(options[2]), 'Internt krav om tilgang');
+    });
+});
+
+describe('Funn on the audit page', () => {
+    const findings = source('./AuditFindings.jsx');
+    const card = block(findings, 'function FindingCard', '\n}\n');
+    const form = block(findings, 'function FindingForm', '\n}\n');
+    const handoff = block(findings, 'function HandoffForm', '\n}\n');
+
+    test('the section is fed by the server: findings, options, types, the record permission and the hand-off data', () => {
+        const show = source('./Show.jsx');
+        assert.match(show, /<AuditFindings\n\s+audit=\{audit\}\n\s+findings=\{findings\}\n\s+options=\{findingOptions\}\n\s+types=\{findingTypes\}\n\s+canRecord=\{Boolean\(permissions\.can_record_findings\)\}\n\s+handoff=\{handoff\}/);
+    });
+
+    test('a card shows type, title, description, the optional context and whether it was handed off', () => {
+        for (const needle of ['findingTypeLabel(finding.finding_type, ta)', '{finding.title}', '{finding.description}', 'finding.requirement &&', 'finding.quality_process &&', 'finding.control &&', 'finding.handed_off &&']) {
+            assert.ok(card.includes(needle), needle);
+        }
+    });
+
+    test('the case is linked only when the server sent the link, and its status is never read', () => {
+        assert.match(card, /\{finding\.case_link && \(\n\s+<Link href=\{finding\.case_link\.url\}/);
+        assert.ok(! /case_link\.(status|actions|verification|due_date|is_overdue)|case_status|is_overdue|verification/.test(card), 'no improvement status is mirrored');
+        // A handed-off finding without a readable case still says it was handed off.
+        assert.match(card, /tf\.handed_off_to \?\? 'Overført til Avvik og forbedringer'/);
+    });
+
+    test('Rediger, Slett and the hand-off wait for the server\'s permission on each finding', () => {
+        assert.match(card, /\{perms\.can_hand_off && \(/);
+        assert.match(card, /\{perms\.can_edit && \(/);
+        assert.match(card, /\{perms\.can_delete && \(/);
+        assert.match(findings, /\{canRecord && panel === null && \(/);
+        assert.match(findings, /\{canRecord && panel === 'create' && \(/);
+    });
+
+    test('the form asks for type, title and description — never severity, frist, owner or tiltak', () => {
+        for (const field of ['finding_type', 'title', 'description', 'requirement_id', 'quality_process_id', 'control_item_id']) {
+            assert.ok(form.includes(`'${field}'`), field);
+        }
+        for (const word of ['severity', 'due_date', 'owner', 'action', 'alvorlighet']) {
+            assert.ok(! form.includes(word), word);
+        }
+    });
+
+    test('Kvalitet fields are drawn only when the server sent Kvalitet options', () => {
+        assert.match(form, /const hasQuality = Array\.isArray\(options\?\.processes\) && 'quality_process_id' in form\.data;/);
+        assert.match(form, /\{hasQuality && \(/);
+    });
+
+    test('the hand-off form shows the type, prefills the text, asks for area, owner and frist, and proposes the process visibly', () => {
+        assert.match(handoff, /improvementTypeLabel\(finding\.improvement_type, ta\)/);
+        assert.match(handoff, /title: finding\.title,\n\s+description: finding\.description,\n\s+business_area_id: '',/);
+        assert.ok(! handoff.includes("setData('type'"), 'the type is not a choice');
+        for (const field of ['business_area_id', 'owner_user_id', 'due_date', 'link_process']) {
+            assert.ok(handoff.includes(field), field);
+        }
+        assert.match(handoff, /\{process !== null && \(/);
+        assert.match(handoff, /type="checkbox" checked=\{form\.data\.link_process\}/);
+        // Without an area to register in, the form says so and offers nothing to submit.
+        assert.match(handoff, /\{areaOptions\.length === 0 \? \(/);
+        assert.match(handoff, /data-testid="compliance-handoff-no-areas"/);
+    });
+
+    test('the owner list follows the chosen area', () => {
+        assert.match(handoff, /const owners = ownersForArea\(handoff\?\.owner_options \?\? \[\], form\.data\.business_area_id\);/);
+    });
+
+    test('cards stack and wrap on a phone; nothing below 16 px', () => {
+        assert.ok(findings.includes('divide-y divide-slate-100'));
+        assert.ok((findings.match(/break-words/g) ?? []).length >= 5);
+        assert.match(card, /className="grid gap-3 sm:grid-cols-3"/);
+        assert.match(handoff, /className="grid gap-4 sm:grid-cols-2"/);
+        assert.match(findings, /className="flex flex-wrap gap-2" data-testid="compliance-finding-actions"/);
+        assert.doesNotMatch(findings, /\btext-(xs|sm)\b/);
+    });
+});
+
+describe('Provenance on the case page', () => {
+    const caseShow = source('../../Improvements/Show.jsx');
+
+    test('«Fra revisjonsfunn i …» only when the server sent it', () => {
+        assert.match(caseShow, /audit_origin: auditOrigin = null,/);
+        assert.match(caseShow, /\{auditOrigin && \(/);
+        assert.match(caseShow, /<Link href=\{auditOrigin\.audit_url\}/);
+    });
+
+    test('both languages carry the provenance strings', () => {
+        for (const locale of ['no', 'en']) {
+            assert.match(lang(locale), /'audit_origin' => '/, locale);
+            assert.match(lang(locale), /'audit_origin_finding' => '/, locale);
+        }
+    });
+});
+
+describe('PageHelp explains findings', () => {
+    test('both languages have a findings section in the audit help', () => {
+        assert.match(lang('no'), /'title' => 'Funn',\n\s+'items' => \[/);
+        assert.match(lang('en'), /'title' => 'Findings',\n\s+'items' => \[/);
+        assert.ok(! lang('no').includes('Funn kommer senere'));
+        assert.ok(! lang('en').includes('Findings come later'));
+    });
+});
+
+describe('finding helpers', () => {
+    test('three kinds, each with a label and a tone of its own', () => {
+        assert.deepEqual(Object.keys(FINDING_TYPE_TONES), ['nonconformity', 'observation', 'opportunity']);
+        assert.equal(new Set(Object.values(FINDING_TYPE_TONES)).size, 3);
+        assert.equal(findingTypeLabel('nonconformity'), 'Avvik');
+        assert.equal(findingTypeLabel('observation'), 'Observasjon');
+        assert.equal(findingTypeLabel('opportunity'), 'Forbedringsmulighet');
+        assert.equal(findingTypeLabel('opportunity', { findings: { types: { opportunity: 'Improvement opportunity' } } }), 'Improvement opportunity');
+    });
+
+    test('the case type reads as Avvik or Forbedring', () => {
+        assert.equal(improvementTypeLabel('deviation'), 'Avvik');
+        assert.equal(improvementTypeLabel('improvement'), 'Forbedring');
+    });
+
+    test('findings lock with the audit: nothing said while it runs, locked but followable once completed, read-only when cancelled', () => {
+        assert.equal(findingsNotice('in_progress'), null);
+        assert.equal(findingsNotice('planned'), null);
+        assert.match(findingsNotice('completed'), /kan fortsatt følges opp i Avvik og forbedringer/);
+        assert.match(findingsNotice('cancelled'), /kan ikke endres eller følges opp herfra/);
+    });
+
+    test('options in the audit\'s scope come first, each group keeping the server\'s order', () => {
+        const { inScope, other } = splitByScope([{ id: 1, in_scope: false }, { id: 2, in_scope: true }, { id: 3 }, { id: 4, in_scope: true }]);
+        assert.deepEqual(inScope.map((o) => o.id), [2, 4]);
+        assert.deepEqual(other.map((o) => o.id), [1, 3]);
+    });
+
+    test('a new finding\'s form starts empty, with the Kvalitet fields', () => {
+        assert.deepEqual(findingFormData(), { finding_type: '', title: '', description: '', requirement_id: '', quality_process_id: '', control_item_id: '' });
+    });
+
+    test('an edited finding\'s form carries Kvalitet fields only when the server sent its Kvalitet context', () => {
+        const base = { finding_type: 'observation', title: 'T', description: 'D', requirement: { id: 7 } };
+
+        assert.deepEqual(findingFormData(base), { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7' });
+        assert.deepEqual(
+            findingFormData({ ...base, quality_process: { id: 3 }, control: null }),
+            { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7', quality_process_id: '3', control_item_id: '' },
+        );
+    });
+});

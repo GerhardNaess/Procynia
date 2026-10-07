@@ -301,7 +301,6 @@ export default function BillingIndex() {
     };
 
     const PACKAGE_STATUS_PRESENTATION = {
-        included: { tone: 'blue', label: modulesText.status_included ?? 'Inkludert, alltid aktiv' },
         active: { tone: 'green', label: modulesText.status_active ?? 'Aktiv' },
         requested: { tone: 'amber', label: modulesText.status_requested ?? 'Bestilt' },
         declined: { tone: 'slate', label: modulesText.status_declined ?? 'Ikke innvilget' },
@@ -542,7 +541,7 @@ export default function BillingIndex() {
                         <InfoHint size="sm" label="Vis forklaring for moduler og pakker" text={modulesText.hint} />
                     </div>
                     <p className="mt-2 text-base leading-6 text-slate-600">
-                        {modulesText.help ?? 'Pakkene bestemmer hvilke deler av Procynia kundemiljøet har tilgang til. Wiki/Core er grunnlaget og følger alltid med.'}
+                        {modulesText.help ?? 'Pakkene bestemmer hvilke deler av Procynia kundemiljøet har tilgang til. Basis, Styring, ISO og GRC bygger på hverandre; Anbud er et tillegg som kan kombineres med alle.'}
                     </p>
 
                     <div className="mt-4 overflow-x-auto">
@@ -615,10 +614,6 @@ export default function BillingIndex() {
                             </tbody>
                         </table>
                     </div>
-
-                    <p className="mt-4 text-base leading-6 text-slate-600">
-                        {modulesText.core_locked ?? 'Wiki/Core kan ikke bestilles eller slås av. Den er grunnlaget alle andre pakker bygger på.'}
-                    </p>
                 </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

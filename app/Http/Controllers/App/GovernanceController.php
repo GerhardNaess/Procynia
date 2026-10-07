@@ -13,23 +13,27 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Styring — the landing page of the arbeidsområde that groups Kvalitet, Risiko, Mål og KPI and
- * Avvik og forbedringer.
+ * Styring — the landing page of the arbeidsområde that groups Kvalitet, Risiko, Mål og KPI, Avvik og
+ * forbedringer and Etterlevelse og revisjon.
  *
  * Navigation and nothing else. It reads no domain data: no counts, no attention, no queries across
- * the four modules. Each card is a door into a module the person can already open, and the answer to
+ * the modules. Each card is a door into a module the person can already open, and the answer to
  * "can they" is exactly the one the module's own routes give — the customer holds the module
  * (EnsureModuleIsEnabled) and the person holds its view permission (the module's controller). There
- * is no Styring permission and no Styring package; a person with none of the four gets a 403 here,
- * just as the rail shows them no Styring.
+ * is no Styring permission, and no package is consulted — the Styring package (`governance`) is
+ * only one of the packages that resolve to these modules. A person with none of them gets a 403
+ * here, just as the rail shows them no Styring.
  *
- * The same four, in the same order, are declared for the rail in resources/js/Support/appModules.js
- * (`workspace: 'governance'`). GovernanceControllerTest holds the two lists together.
+ * The same modules are declared for the rail in resources/js/Support/appModules.js
+ * (`workspace: 'governance'`); GovernanceControllerTest holds the two lists together. Neither list
+ * decides the order: both follow the module `sort_order` in config/procynia_modules.php, the one
+ * place it is declared.
  */
 class GovernanceController extends Controller
 {
     /**
-     * key => [technical module, view permission, route name].
+     * key => [technical module, view permission, route name]. Listed in product order for the
+     * reader's sake only; orderedModules() is what the page follows.
      *
      * @var array<string, array{0: string, 1: string, 2: string}>
      */
@@ -38,6 +42,7 @@ class GovernanceController extends Controller
         'risk' => ['risk', CustomerPermissionCatalog::RISK_VIEW, 'app.risk.index'],
         'objectives' => ['objectives', CustomerPermissionCatalog::OBJECTIVE_VIEW, 'app.objectives.index'],
         'improvements' => ['improvements', CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'app.improvements.index'],
+        'compliance' => ['compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW, 'app.compliance.requirements.index'],
     ];
 
     public function __construct(
@@ -56,7 +61,7 @@ class GovernanceController extends Controller
 
         $modules = [];
 
-        foreach (self::MODULES as $key => [$module, $permission, $route]) {
+        foreach (self::orderedModules() as $key => [$module, $permission, $route]) {
             if ($this->moduleEntitlements->hasModule($customer, $module) && $this->customerPermissions->has($user, $permission)) {
                 $modules[] = ['key' => $key, 'href' => route($route)];
             }
@@ -67,5 +72,21 @@ class GovernanceController extends Controller
         return Inertia::render('App/Governance/Index', [
             'modules' => $modules,
         ]);
+    }
+
+    /**
+     * MODULES in the module order of config/procynia_modules.php — the order the backend also hands
+     * the rail through `entitlements.modules`, so the landing page and the rail cannot disagree.
+     *
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function orderedModules(): array
+    {
+        $catalog = config('procynia_modules.modules', []);
+        $modules = self::MODULES;
+
+        uasort($modules, fn (array $left, array $right): int => ($catalog[$left[0]]['sort_order'] ?? PHP_INT_MAX) <=> ($catalog[$right[0]]['sort_order'] ?? PHP_INT_MAX));
+
+        return $modules;
     }
 }

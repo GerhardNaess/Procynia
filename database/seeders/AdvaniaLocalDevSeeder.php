@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -115,7 +116,11 @@ class AdvaniaLocalDevSeeder extends Seeder
             return $customer;
         }
 
-        return Customer::query()->create($attributes);
+        $customer = Customer::query()->create($attributes);
+
+        app(ModuleEntitlementService::class)->grantDefaultPackage($customer);
+
+        return $customer;
     }
 
     /**

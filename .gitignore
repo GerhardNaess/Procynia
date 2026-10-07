@@ -20,6 +20,7 @@
 /public/storage
 /recovery-backups
 /test-results
+/playwright-report
 /storage/*.key
 /storage/pail
 /bootstrap/cache/testing-config.php

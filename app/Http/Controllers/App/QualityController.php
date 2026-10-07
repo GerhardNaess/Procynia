@@ -81,8 +81,10 @@ class QualityController extends Controller
     private const DETAIL_TABS = ['document', 'flow'];
 
     /**
-     * Which types each tab shows. Oversikt deliberately shows all of them: it is the whole document
-     * hierarchy in one place, and the only tab policies, procedures and arbeidsinstrukser appear on.
+     * Which types each tab shows. Oversikt deliberately shows all of them: it is the whole
+     * kvalitetssystem in one place, and the only tab policies, procedures and arbeidsinstrukser
+     * appear on. The page lists them in separate sections — styrende dokumenter, prosesser and
+     * kontroller are different kinds of object, even though all three are stored as quality items.
      *
      * @var array<string, list<string>>
      */
@@ -132,9 +134,10 @@ class QualityController extends Controller
             // Oversikt opens on what needs attention: fixed rules over the rows above, recomputed
             // on every read and never stored. See QualityAttentionService.
             'attention' => $tab === 'overview' && $customerId !== null ? $this->attention->findings((int) $customerId) : [],
-            // Kontroller is a register, not a list of documents: what each control checks and where
-            // in the processes it is applied. Read for that tab only.
-            'control_register' => $tab === 'controls' ? $this->controlRegister($customerId) : (object) [],
+            // A control is not a document: it is listed by what it checks, who carries it out, how
+            // often, how, and whether evidence has been recorded — on Kontroller, and in its own
+            // section on Oversikt.
+            'control_register' => in_array($tab, ['overview', 'controls'], true) ? $this->controlRegister($customerId) : (object) [],
             // Verktøy: the library, each tool with the controls carried out with it. The archive
             // picker lets a file the virksomhet already has become a tool without a second upload.
             'tools' => $tab === 'tools' && $customerId !== null ? $this->tools->library((int) $customerId) : [],
@@ -144,9 +147,6 @@ class QualityController extends Controller
             'type_counts' => $this->typeCounts($customerId),
             'quality_types' => QualityItem::TYPES,
             'statuses' => QualityItem::STATUSES,
-            'relation_types' => $this->relationTypeMatrix(),
-            'relations' => $tab === 'overview' ? $this->relationRows($customerId) : [],
-            'relation_item_options' => $tab === 'overview' ? $this->relationItemOptions($customerId) : [],
             'owner_options' => $this->ownerOptions($customerId),
         ]);
     }
@@ -170,6 +170,10 @@ class QualityController extends Controller
         $publication = $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS
             ? $this->blueprints->publicationState((int) $customerId, $item)
             : null;
+
+        // Read here and handed on only through the domain props below. The page never receives the
+        // generic list: "Fra", "Til" and a relation type are the model's words, not the user's.
+        $relations = $this->relationsForItem($customerId, (int) $item->id);
 
         return Inertia::render('App/Quality/Item', [
             'item' => $this->itemDetail($item),
@@ -241,7 +245,6 @@ class QualityController extends Controller
             'control_tool_options' => $isControl && $customerId !== null ? $this->tools->optionsForControl((int) $customerId, $item) : [],
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
-            'relations' => $relations = $this->relationsForItem($customerId, (int) $item->id),
             // A process's styrende dokumenter are the policies that govern it — the incoming side
             // of the same `governs` rows the overview edits, never a separate store. Linking and
             // unlinking post to storeRelation()/destroyRelation() like every other relation.
@@ -250,6 +253,11 @@ class QualityController extends Controller
                 : [],
             'governing_document_options' => $item->quality_type === QualityItem::TYPE_PROCESS
                 ? $this->governingDocumentOptions($customerId, $relations)
+                : [],
+            // The other end of the same rows: on a policy, the processes it governs. Read-only
+            // here; the link is made and removed on the process, under Styrende dokumenter.
+            'governed_processes' => $item->quality_type === QualityItem::TYPE_POLICY
+                ? $this->governedProcesses($relations)
                 : [],
         ]);
     }
@@ -296,7 +304,7 @@ class QualityController extends Controller
 
         return redirect()
             ->route('app.quality.items.show', $route)
-            ->with('success', __('procynia.quality.flash.item_created'));
+            ->with('success', __($this->itemFlashKey($item, 'created')));
     }
 
     /**
@@ -356,7 +364,7 @@ class QualityController extends Controller
 
         $this->items->updateItem((int) $customerId, $item, $validated, $user);
 
-        return back()->with('success', __('procynia.quality.flash.item_updated'));
+        return back()->with('success', __($this->itemFlashKey($item, 'updated')));
     }
 
     /**
@@ -413,7 +421,7 @@ class QualityController extends Controller
             return $backToIndex()->with('error', __('procynia.quality.errors.wiki_page_deletion_failed'));
         }
 
-        $message = __('procynia.quality.flash.item_deleted');
+        $message = __($this->itemFlashKey($item, 'deleted'));
 
         if ($result['wiki_pages_deleted'] > 0) {
             $message .= ' '.trans_choice(
@@ -1580,14 +1588,32 @@ class QualityController extends Controller
     }
 
     /**
-     * What each control checks and where it is applied, keyed by control id.
+     * The flash message for a created, updated or deleted item. A process and a control are not
+     * documents, so neither is ever confirmed as one; policy, procedure, work instruction and
+     * checklist are the governing documents and are.
+     */
+    private function itemFlashKey(QualityItem $item, string $verb): string
+    {
+        $subject = match ($item->quality_type) {
+            QualityItem::TYPE_PROCESS => 'process',
+            QualityItem::TYPE_CONTROL => 'control',
+            default => 'item',
+        };
+
+        return "procynia.quality.flash.{$subject}_{$verb}";
+    }
+
+    /**
+     * What each control checks, who carries it out, how often and how, whether evidence has been
+     * recorded, and where it is applied — keyed by control id.
      *
      * Every control of the customer has an entry, placed or not: a control that is on no activity
-     * any more is still in the register, with an empty list, until somebody deletes it.
+     * any more is still in the register, with an empty list, until somebody deletes it. Evidence is
+     * counted as QualityAttentionService counts it: any `evidence` row, file or no file.
      *
      * An object, so an empty register reaches the page as {} rather than [].
      *
-     * @return array<int, array{criterion: ?string, placements: list<array<string, mixed>>}>|object
+     * @return array<int, array{criterion: ?string, responsibility: ?string, frequency: ?string, method: ?string, evidence_count: int, placements: list<array<string, mixed>>}>|object
      */
     private function controlRegister(?int $customerId): array|object
     {
@@ -1601,12 +1627,23 @@ class QualityController extends Controller
             ->with('controlDetail')
             ->get();
         $placements = $this->activityControls->placementsByControl($customerId);
+        $evidenceCounts = QualityItemDocument::query()
+            ->where('customer_id', $customerId)
+            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)
+            ->whereIn('quality_item_id', $controls->modelKeys())
+            ->selectRaw('quality_item_id, count(*) as aggregate')
+            ->groupBy('quality_item_id')
+            ->pluck('aggregate', 'quality_item_id');
 
         $register = [];
 
         foreach ($controls as $control) {
             $register[(int) $control->id] = [
                 'criterion' => $control->controlDetail?->criterion,
+                'responsibility' => $control->controlDetail?->responsibility,
+                'frequency' => $control->controlDetail?->frequency,
+                'method' => $control->controlDetail?->method,
+                'evidence_count' => (int) ($evidenceCounts[$control->id] ?? 0),
                 'placements' => $placements[(int) $control->id] ?? [],
             ];
         }
@@ -2125,6 +2162,21 @@ class QualityController extends Controller
     }
 
     /**
+     * The processes one policy governs, read off its relations.
+     *
+     * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
+     * @return list<array<string, mixed>>
+     */
+    private function governedProcesses(array $relations): array
+    {
+        return array_values(array_filter(
+            $relations,
+            static fn (array $relation): bool => $relation['direction'] === 'outgoing'
+                && $relation['relation_type'] === QualityItemRelation::TYPE_GOVERNS,
+        ));
+    }
+
+    /**
      * The policies that may still be linked to a process: the customer's own, minus those already
      * governing it. The types come from the matrix, so widening `governs` widens the picker.
      *
@@ -2152,48 +2204,6 @@ class QualityController extends Controller
     }
 
     /**
-     * @return list<array<string, mixed>>
-     */
-    private function relationRows(?int $customerId): array
-    {
-        return QualityItemRelation::query()
-            ->where('customer_id', $customerId)
-            ->with(['fromItem:id,title,quality_type', 'toItem:id,title,quality_type'])
-            ->orderBy('relation_type')
-            ->orderBy('id')
-            ->get()
-            ->map(static fn (QualityItemRelation $relation): array => [
-                'id' => (int) $relation->id,
-                'relation_type' => $relation->relation_type,
-                'from_item_id' => (int) $relation->from_item_id,
-                'from_title' => $relation->fromItem?->title,
-                'to_item_id' => (int) $relation->to_item_id,
-                'to_title' => $relation->toItem?->title,
-            ])
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function relationItemOptions(?int $customerId): array
-    {
-        return QualityItem::query()
-            ->where('customer_id', $customerId)
-            ->orderBy('title')
-            ->get(['id', 'title', 'code', 'quality_type'])
-            ->map(static fn (QualityItem $item): array => [
-                'id' => (int) $item->id,
-                'title' => $item->title,
-                'code' => $item->code,
-                'quality_type' => $item->quality_type,
-            ])
-            ->values()
-            ->all();
-    }
-
-    /**
      * @return array<string, int>
      */
     private function typeCounts(?int $customerId): array
@@ -2211,26 +2221,6 @@ class QualityController extends Controller
         }
 
         return $result;
-    }
-
-    /**
-     * The relation matrix, shipped to the client so the relation form can offer only legal pairs.
-     * The backend still enforces it — this only keeps the form from proposing work the service will
-     * refuse.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function relationTypeMatrix(): array
-    {
-        return array_map(static fn (string $type): array => [
-            'key' => $type,
-            'pairs' => array_map(
-                static fn (array $pair): array => ['from' => $pair[0], 'to' => $pair[1]],
-                QualityItemRelation::TYPE_MATRIX[$type],
-            ),
-            'from_types' => QualityItemRelation::allowedFromTypes($type),
-            'to_types' => QualityItemRelation::allowedToTypes($type),
-        ], QualityItemRelation::TYPES);
     }
 
     /**

@@ -36,6 +36,8 @@ export default function QualityItemActions({ tq, item, tab = null }) {
     const cancelRef = useRef(null);
 
     const isProcess = item.quality_type === 'process';
+    // A control is not a document, and the dialog never calls it one.
+    const isControl = item.quality_type === 'control';
     const producedWikiPageCount = item.produced_wiki_page_count ?? 0;
     const hasProducedWikiPages = producedWikiPageCount > 0;
     // The choice is only offered when the backend says this reader may actually take it. Offering
@@ -91,7 +93,9 @@ export default function QualityItemActions({ tq, item, tab = null }) {
     const menuLabel = tq.actions_menu ?? 'Handlinger';
     const deleteLabel = isProcess
         ? (tq.delete_process ?? 'Slett prosess')
-        : (tq.delete_item ?? 'Slett dokument');
+        : isControl
+            ? (tq.delete_control ?? 'Slett kontroll')
+            : (tq.delete_item ?? 'Slett dokument');
 
     return (
         <>
@@ -151,7 +155,9 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                     >
                         {isProcess
                             ? (tq.delete_dialog_title_process ?? 'Slett prosessen?')
-                            : (tq.delete_dialog_title_item ?? 'Slett dokumentet?')}
+                            : isControl
+                                ? (tq.delete_dialog_title_control ?? 'Slett kontrollen?')
+                                : (tq.delete_dialog_title_item ?? 'Slett dokumentet?')}
                     </h2>
                     <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
 
@@ -163,7 +169,9 @@ export default function QualityItemActions({ tq, item, tab = null }) {
                             <dd className="mt-1 text-base leading-6 text-slate-700">
                                 {isProcess
                                     ? (tq.delete_dialog_removed_process ?? 'Prosessen, prosessflyten med aktivitetene sine, relasjonene og koblingene til Wiki-sider og filer — og prosessen med aktivitetene sine i kunnskapsgrafen.')
-                                    : (tq.delete_dialog_removed_item ?? 'Dokumentet, strukturen, relasjonene og koblingene til Wiki-sider og filer.')}
+                                    : isControl
+                                        ? (tq.delete_dialog_removed_control ?? 'Kontrollen, plasseringene på aktiviteter, evidensen som er registrert og koblingene til Wiki-sider og filer.')
+                                        : (tq.delete_dialog_removed_item ?? 'Dokumentet, strukturen, relasjonene og koblingene til Wiki-sider og filer.')}
                             </dd>
                         </div>
                         <div>

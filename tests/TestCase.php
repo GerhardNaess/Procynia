@@ -49,11 +49,14 @@ abstract class TestCase extends BaseTestCase
      * Whether a customer created during the test starts out holding the Tender package.
      *
      * Every customer that existed when packages were introduced was given Tender by
-     * 2026_10_01_000002_grant_tender_package_to_existing_customers; a customer created afterwards
-     * starts with Wiki/Core only. A test customer is always created after the migrations, so
-     * without this every Anbud route (app.ai.*, app.notices.*, app.bid-status, ...) redirects to
-     * Hjem from EnsureModuleIsEnabled before the behaviour under test is reached. The default
-     * therefore mirrors the customers Anbud actually serves today.
+     * 2026_10_01_000002_grant_tender_package_to_existing_customers. A customer created afterwards
+     * through a creation flow (registration, Filament) is handed Basis by
+     * ModuleEntitlementService::grantDefaultPackage(); one inserted directly, as test fixtures do,
+     * starts with no package at all. A test customer is always created after the migrations, so
+     * without this every Anbud route (app.ai.*, app.notices.*, app.bid-status, ...) and every Wiki
+     * route (app.wiki.*, which Anbud carries) redirects to Hjem from EnsureModuleIsEnabled before
+     * the behaviour under test is reached. The default therefore mirrors the customers Anbud
+     * actually serves today.
      *
      * A test about entitlements themselves sets this to false and grants what it needs.
      */

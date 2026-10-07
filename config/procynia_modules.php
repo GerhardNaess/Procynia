@@ -5,69 +5,92 @@
  *
  * Two layers, deliberately kept apart:
  *
- *  - A **technical module** is what the product is built out of (`tender`, `quality`, `risk`, ...).
+ *  - A **technical module** is what the product is built out of (`wiki`, `quality`, `risk`, ...).
  *    Code asks "does this customer have module X", never "did they buy package Y".
- *  - A **commercial package** is what a customer buys. One package can switch on several modules,
- *    and the same module can be reached through more than one package (GRC and Quality both carry
- *    `quality`).
+ *  - A **commercial package** is what a customer buys. One package switches on several modules,
+ *    and the same module is reached through more than one package.
+ *
+ * The governance packages form a ladder — Basis → Styring → ISO → GRC — and each one lists every
+ * module it carries, including those of the step below. That is written out rather than inherited:
+ * the mapping stays one plain list per package, and nothing has to resolve a chain to answer it.
+ * Anbud (`tender`) is not on the ladder. It is an add-on that combines with any step, or stands
+ * alone, and no governance package carries it.
+ *
+ * There is no mandatory package. Wiki is an ordinary module, carried by every package that needs
+ * it: the whole ladder, and Anbud, whose requirement answers are drawn from the Enterprise Wiki. A
+ * customer with no package holds no module at all — which is why a new customer is handed
+ * `default_package` when it is created.
  *
  * Because entitlements are stored per package and resolved through this mapping at read time,
- * extending a package here — GRC later gaining `supplier` and `contracts` — reaches every customer
- * who already holds it, with no data migration.
- *
- * `wiki_core` is the Wiki/Core module. It belongs to the mandatory `core` package, which is never
- * orderable and never stored as an entitlement row: every customer has it by definition.
+ * extending a package here reaches every customer who already holds it, with no data migration.
  */
 
 return [
 
+    // `sort_order` is the product order of the modules, and the one place it is declared: the
+    // left rail and the Styring landing page both list modules in this order
+    // (ModuleEntitlementService::modulesFor() hands it to the rail; GovernanceController reads it).
     'modules' => [
-        'wiki_core' => ['sort_order' => 0],
+        'wiki' => ['sort_order' => 0],
         'tender' => ['sort_order' => 10],
         'quality' => ['sort_order' => 20],
         'risk' => ['sort_order' => 30],
         // Mål og KPI. A general management area, not a part of Risiko or Kvalitet — which is why it
-        // is its own module, carried by both packages below.
+        // is its own module.
         'objectives' => ['sort_order' => 35],
-        // Avvik og forbedringer. Classic quality management, so Kvalitet carries it — and GRC,
-        // which carries Kvalitet. Its own module so the rail and the route guard name it directly.
+        // Avvik og forbedringer. Classic quality management, so it is on every step of the ladder
+        // from Basis up. Its own module so the rail and the route guard name it directly.
         'improvements' => ['sort_order' => 37],
-        'audit_compliance' => ['sort_order' => 40],
+        // Etterlevelse og revisjon (Krav and Revisjoner) — from ISO up.
+        'compliance' => ['sort_order' => 40],
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
     ],
 
+    /**
+     * The package a new customer is given when it is created. It is written as an ordinary active
+     * entitlement row at creation (ModuleEntitlementService::grantDefaultPackage()), never assumed
+     * at read time: a customer's modules are always exactly what its rows say.
+     */
+    'default_package' => 'basis',
+
     'packages' => [
 
-        'core' => [
-            'mandatory' => true,
-            'orderable' => false,
-            'sort_order' => 0,
-            'modules' => ['wiki_core'],
-        ],
-
-        'tender' => [
-            'mandatory' => false,
+        // Basis.
+        'basis' => [
             'orderable' => true,
             'sort_order' => 10,
-            'modules' => ['tender'],
+            'modules' => ['wiki', 'quality', 'improvements'],
         ],
 
-        'quality' => [
-            'mandatory' => false,
+        // Styring: Basis, plus Risiko and Mål og KPI.
+        'governance' => [
             'orderable' => true,
             'sort_order' => 20,
-            'modules' => ['quality', 'objectives', 'improvements'],
+            'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives'],
         ],
 
-        // GRC is the compound package: governance, risk and compliance are sold as one, and the
-        // module list is where it grows. `supplier` and `contracts` are expected to join it once
-        // those modules exist — adding them here is the whole change.
-        'grc' => [
-            'mandatory' => false,
+        // ISO: Styring, plus Etterlevelse og revisjon.
+        'iso' => [
             'orderable' => true,
             'sort_order' => 30,
-            'modules' => ['quality', 'risk', 'objectives', 'improvements', 'audit_compliance'],
+            'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance'],
+        ],
+
+        // GRC: ISO, plus Leverandøroppfølging. `supplier` is listed now so that a GRC customer gets
+        // it the day it is built; until then the rail keeps it under Planlagt (appModules.js
+        // `built: false`) and no route exists for it, so holding it opens nothing.
+        'grc' => [
+            'orderable' => true,
+            'sort_order' => 40,
+            'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance', 'supplier'],
+        ],
+
+        // Anbud: the add-on. It carries Wiki because the bid engine answers requirements from it.
+        'tender' => [
+            'orderable' => true,
+            'sort_order' => 50,
+            'modules' => ['wiki', 'tender'],
         ],
 
     ],
@@ -82,11 +105,12 @@ return [
      * without anyone remembering to come back here.
      *
      * Routes that are not listed are ungated. That is deliberate for `app.dashboard` (Hjem is
-     * where a blocked request is sent, so it can never be blocked itself), for administration
-     * (Kundemiljø, brukere, Abonnement — those are account functions, not product modules) and
-     * for Wiki, whose module is mandatory and therefore has nothing to refuse.
+     * where a blocked request is sent, so it can never be blocked itself) and for administration
+     * (Kundemiljø, brukere, Abonnement — those are account functions, not product modules, and
+     * Abonnement is where a customer without any package orders one).
      */
     'route_modules' => [
+        'app.wiki.' => 'wiki',
         'app.bid-status' => 'tender',
         'app.notices.' => 'tender',
         'app.suppliers.' => 'tender',
@@ -95,6 +119,7 @@ return [
         'app.risk.' => 'risk',
         'app.objectives.' => 'objectives',
         'app.improvements.' => 'improvements',
+        'app.compliance.' => 'compliance',
     ],
 
 ];

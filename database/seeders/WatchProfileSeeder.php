@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\WatchProfile;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Database\Seeder;
 
 class WatchProfileSeeder extends Seeder
@@ -68,12 +69,16 @@ class WatchProfileSeeder extends Seeder
             ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => '🇳🇴'],
         );
 
-        return Customer::query()->create([
+        $customer = Customer::query()->create([
             'name' => 'Demo Customer AS',
             'slug' => 'demo-customer-as',
             'nationality_id' => $nationality->id,
             'language_id' => $language->id,
             'is_active' => true,
         ]);
+
+        app(ModuleEntitlementService::class)->grantDefaultPackage($customer);
+
+        return $customer;
     }
 }

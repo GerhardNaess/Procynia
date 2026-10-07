@@ -4,6 +4,9 @@ use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\BusinessAreaController;
+use App\Http\Controllers\App\ComplianceAuditController;
+use App\Http\Controllers\App\ComplianceRequirementController;
+use App\Http\Controllers\App\ComplianceSourceController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\CustomerRoleController;
 use App\Http\Controllers\App\DashboardController;
@@ -398,6 +401,52 @@ Route::prefix('app')
             Route::post('/{caseId}/actions/{actionId}/reopen', [ImprovementActionController::class, 'reopen'])->whereNumber(['caseId', 'actionId'])->name('actions.reopen');
             // Effektverifisering of a completed tiltak: append-only, a new judgement never edits an old one.
             Route::post('/{caseId}/actions/{actionId}/verify', [ImprovementActionController::class, 'verify'])->whereNumber(['caseId', 'actionId'])->name('actions.verify');
+        });
+        // Etterlevelse og revisjon. Named under `app.compliance.`, mapped to the `compliance` module.
+        // Requirements and sources are addressed by a plain id and resolved through
+        // ComplianceAccessService, never by implicit model binding, so one of another customer is a 404.
+        Route::prefix('/compliance')->name('compliance.')->group(function (): void {
+            Route::get('/', [ComplianceRequirementController::class, 'home'])->name('index');
+            Route::get('/requirements', [ComplianceRequirementController::class, 'index'])->name('requirements.index');
+            Route::post('/requirements', [ComplianceRequirementController::class, 'store'])->name('requirements.store');
+            Route::get('/requirements/{requirementId}', [ComplianceRequirementController::class, 'show'])->whereNumber('requirementId')->name('requirements.show');
+            Route::patch('/requirements/{requirementId}', [ComplianceRequirementController::class, 'update'])->whereNumber('requirementId')->name('requirements.update');
+            Route::delete('/requirements/{requirementId}', [ComplianceRequirementController::class, 'destroy'])->whereNumber('requirementId')->name('requirements.destroy');
+            // Sett som utgått / Gjenåpne: the only ways status changes. Each writes an immutable history row.
+            Route::post('/requirements/{requirementId}/retire', [ComplianceRequirementController::class, 'retire'])->whereNumber('requirementId')->name('requirements.retire');
+            Route::post('/requirements/{requirementId}/reopen', [ComplianceRequirementController::class, 'reopen'])->whereNumber('requirementId')->name('requirements.reopen');
+            // Vurder etterlevelse: append-only, a correction is a new assessment.
+            Route::post('/requirements/{requirementId}/assessments', [ComplianceRequirementController::class, 'assess'])->whereNumber('requirementId')->name('requirements.assess');
+            // Hvordan kravet oppfylles: links to existing Kvalitet processes and controls, never copies.
+            Route::post('/requirements/{requirementId}/processes', [ComplianceRequirementController::class, 'linkProcess'])->whereNumber('requirementId')->name('requirements.processes.store');
+            Route::delete('/requirements/{requirementId}/processes/{processId}', [ComplianceRequirementController::class, 'unlinkProcess'])->whereNumber(['requirementId', 'processId'])->name('requirements.processes.destroy');
+            Route::post('/requirements/{requirementId}/controls', [ComplianceRequirementController::class, 'linkControl'])->whereNumber('requirementId')->name('requirements.controls.store');
+            Route::delete('/requirements/{requirementId}/controls/{controlId}', [ComplianceRequirementController::class, 'unlinkControl'])->whereNumber(['requirementId', 'controlId'])->name('requirements.controls.destroy');
+            // Revisjoner. Planned and run with compliance.audit; status changes only through the lifecycle
+            // actions, each writing an immutable history row.
+            Route::get('/audits', [ComplianceAuditController::class, 'index'])->name('audits.index');
+            Route::post('/audits', [ComplianceAuditController::class, 'store'])->name('audits.store');
+            Route::get('/audits/{auditId}', [ComplianceAuditController::class, 'show'])->whereNumber('auditId')->name('audits.show');
+            Route::patch('/audits/{auditId}', [ComplianceAuditController::class, 'update'])->whereNumber('auditId')->name('audits.update');
+            Route::delete('/audits/{auditId}', [ComplianceAuditController::class, 'destroy'])->whereNumber('auditId')->name('audits.destroy');
+            Route::post('/audits/{auditId}/start', [ComplianceAuditController::class, 'start'])->whereNumber('auditId')->name('audits.start');
+            Route::post('/audits/{auditId}/complete', [ComplianceAuditController::class, 'complete'])->whereNumber('auditId')->name('audits.complete');
+            Route::post('/audits/{auditId}/cancel', [ComplianceAuditController::class, 'cancel'])->whereNumber('auditId')->name('audits.cancel');
+            Route::post('/audits/{auditId}/reopen', [ComplianceAuditController::class, 'reopen'])->whereNumber('auditId')->name('audits.reopen');
+            // Scope as structure: fixed rows. «Fra kravkilde» is a shortcut that writes them, never a rule.
+            Route::post('/audits/{auditId}/requirements', [ComplianceAuditController::class, 'addRequirements'])->whereNumber('auditId')->name('audits.requirements.store');
+            Route::post('/audits/{auditId}/requirements/from-source', [ComplianceAuditController::class, 'addRequirementsFromSource'])->whereNumber('auditId')->name('audits.requirements.from-source');
+            Route::delete('/audits/{auditId}/requirements/{requirementId}', [ComplianceAuditController::class, 'removeRequirement'])->whereNumber(['auditId', 'requirementId'])->name('audits.requirements.destroy');
+            Route::post('/audits/{auditId}/processes', [ComplianceAuditController::class, 'addProcess'])->whereNumber('auditId')->name('audits.processes.store');
+            Route::delete('/audits/{auditId}/processes/{processId}', [ComplianceAuditController::class, 'removeProcess'])->whereNumber(['auditId', 'processId'])->name('audits.processes.destroy');
+            Route::post('/audits/{auditId}/findings', [ComplianceAuditController::class, 'storeFinding'])->whereNumber('auditId')->name('audits.findings.store');
+            Route::patch('/audits/{auditId}/findings/{findingId}', [ComplianceAuditController::class, 'updateFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.update');
+            Route::delete('/audits/{auditId}/findings/{findingId}', [ComplianceAuditController::class, 'destroyFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.destroy');
+            Route::post('/audits/{auditId}/findings/{findingId}/handoff', [ComplianceAuditController::class, 'handOffFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.handoff');
+            // Kravkilder, managed from the Krav register.
+            Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
+            Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');
+            Route::delete('/sources/{sourceId}', [ComplianceSourceController::class, 'destroy'])->whereNumber('sourceId')->name('sources.destroy');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

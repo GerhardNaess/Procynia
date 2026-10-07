@@ -310,4 +310,13 @@ describe('one navigation choice is rendered in one place', () => {
             assert.ok(! secondary.includes(`activeMainArea === '${area}'`), area);
         }
     });
+
+    test('Etterlevelse og revisjon has exactly two real areas now that Revisjoner exists — Krav | Revisjoner', () => {
+        const areas = block('if (activeMainArea === \'compliance\') {\n            // Etterlevelse', '];');
+        const keys = [...areas.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
+
+        assert.deepEqual(keys, ['compliance-requirements', 'compliance-audits']);
+        assert.match(areas, /href: '\/app\/compliance\/requirements'/);
+        assert.match(areas, /href: '\/app\/compliance\/audits'/);
+    });
 });

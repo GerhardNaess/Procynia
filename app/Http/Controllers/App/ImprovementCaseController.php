@@ -10,9 +10,11 @@ use App\Models\ImprovementActionVerification;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
+use App\Services\Compliance\ComplianceAuditFindingHandoffService;
 use App\Services\Improvements\ImprovementActionVerificationResolver;
 use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\Improvements\ImprovementCaseAccessService;
+use App\Services\Improvements\ImprovementCaseCreator;
 use App\Services\Improvements\ImprovementCaseLifecycleService;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
 use App\Support\CustomerContext;
@@ -22,8 +24,6 @@ use Carbon\CarbonInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -48,6 +48,8 @@ class ImprovementCaseController extends Controller
         private readonly ImprovementCaseQualityContextService $qualityContext,
         private readonly ImprovementActionVerificationResolver $verifications,
         private readonly ImprovementAttentionService $attention,
+        private readonly ImprovementCaseCreator $creator,
+        private readonly ComplianceAuditFindingHandoffService $auditFindings,
     ) {}
 
     public function index(Request $request): Response
@@ -214,6 +216,10 @@ class ImprovementCaseController extends Controller
             // null, not empty: the person cannot read Kvalitet, so nothing is said about context.
             'quality_context' => $canReadQuality ? $this->qualityContext->linkedContext($case) : null,
             'quality_context_options' => $canLinkContext ? $this->qualityContext->contextOptions($case) : [],
+            // «Fra revisjonsfunn i …»: null unless the case came from a finding, the customer holds
+            // Etterlevelse og revisjon *and* the person can read that audit there. Nothing about the
+            // audit otherwise.
+            'audit_origin' => $this->auditFindings->provenanceFor($user, $case),
             'today' => now()->toDateString(),
         ]);
     }
@@ -250,21 +256,10 @@ class ImprovementCaseController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $user = $this->authorizedUser();
-        $validated = $this->validated($request);
-        $areaId = (int) $validated['business_area_id'];
 
-        // The area is the scope the new case will live in, so the user must be allowed to edit in
-        // *that* area — not merely hold improvement.edit somewhere.
-        $this->authorizeArea($user, $areaId);
-        $this->guardOwner($user, (int) $validated['owner_user_id'], $areaId);
-
-        $case = ImprovementCase::query()->create($this->fields($validated) + [
-            'customer_id' => (int) $user->customer_id,
-            'business_area_id' => $areaId,
-            'reported_by_user_id' => $user->id,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]);
+        // The area is the scope the new case will live in, so the creator checks edit authority in
+        // *that* area — not merely improvement.edit somewhere — and the owner against it.
+        $case = $this->creator->create($user, $this->validated($request));
 
         return redirect()
             ->route('app.improvements.show', ['caseId' => $case->id])
@@ -289,14 +284,14 @@ class ImprovementCaseController extends Controller
         // Moving a case changes who can see it, so it takes edit authority on both sides: the old
         // area above, the new one here.
         if ($targetAreaId !== (int) $case->business_area_id) {
-            $this->authorizeArea($user, $targetAreaId);
+            $this->creator->assertCanEditIn($user, $targetAreaId);
         }
 
         // Against the area the case will be in, so a move cannot keep an owner who would no longer
         // be able to see it.
-        $this->guardOwner($user, (int) $validated['owner_user_id'], $targetAreaId);
+        $this->creator->assertValidOwner($user, (int) $validated['owner_user_id'], $targetAreaId);
 
-        $case->fill($this->fields($validated) + [
+        $case->fill($this->creator->fields($validated) + [
             'business_area_id' => $targetAreaId,
             'updated_by' => $user->id,
         ])->save();
@@ -405,65 +400,14 @@ class ImprovementCaseController extends Controller
     }
 
     /**
-     * A 422 rather than a 403 or 404: the area id came from a form, and whether it names an area of
-     * another tenant, an area outside the user's scope or nothing at all, the answer is the same.
-     */
-    private function authorizeArea(User $user, int $areaId): void
-    {
-        if (! $this->access->canInArea($user, CustomerPermissionCatalog::IMPROVEMENT_EDIT, (int) $user->customer_id, $areaId)) {
-            throw ValidationException::withMessages([
-                'business_area_id' => __('procynia.improvements.validation.area_not_allowed'),
-            ]);
-        }
-    }
-
-    private function guardOwner(User $user, int $ownerId, int $areaId): void
-    {
-        $owner = User::query()->where('customer_id', (int) $user->customer_id)->find($ownerId);
-
-        if (! $this->access->isValidOwner($owner, (int) $user->customer_id, $areaId)) {
-            throw ValidationException::withMessages([
-                'owner_user_id' => __('procynia.improvements.validation.owner_not_allowed'),
-            ]);
-        }
-    }
-
-    /**
-     * The same fields for registering and editing. Status is not among them: a case is created open
-     * and moves only through the lifecycle actions.
+     * The same fields for registering and editing (ImprovementCaseCreator::rules()). Status is not
+     * among them: a case is created open and moves only through the lifecycle actions.
      *
      * @return array<string, mixed>
      */
     private function validated(Request $request): array
     {
-        return $request->validate([
-            'type' => ['required', 'string', Rule::in(ImprovementCase::TYPES)],
-            'title' => ['required', 'string', 'max:255'],
-            'description' => ['required', 'string', 'max:10000'],
-            'business_area_id' => ['required', 'integer'],
-            'owner_user_id' => ['required', 'integer'],
-            // Hendelsesdato is when something happened, so it cannot lie ahead.
-            'occurred_at' => ['nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
-            'due_date' => ['nullable', 'date_format:Y-m-d'],
-        ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
-    }
-
-    /**
-     * The validated form as columns. A forbedring has no Hendelsesdato, whatever the form sent.
-     *
-     * @param  array<string, mixed>  $validated
-     * @return array<string, mixed>
-     */
-    private function fields(array $validated): array
-    {
-        return [
-            'type' => $validated['type'],
-            'title' => trim($validated['title']),
-            'description' => trim($validated['description']),
-            'owner_user_id' => (int) $validated['owner_user_id'],
-            'occurred_at' => $validated['type'] === ImprovementCase::TYPE_DEVIATION ? ($validated['occurred_at'] ?? null) : null,
-            'due_date' => $validated['due_date'] ?? null,
-        ];
+        return $request->validate(ImprovementCaseCreator::rules(), ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
     }
 
     /**

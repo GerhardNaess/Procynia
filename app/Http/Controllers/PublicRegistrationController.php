@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\PublicRegistrationRequest;
 use App\Models\Customer;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +52,8 @@ class PublicRegistrationController extends Controller
                     'customer_id' => $customer->id,
                 ]);
 
+                app(ModuleEntitlementService::class)->grantDefaultPackage($customer, $user);
+
                 return [
                     'customer' => $customer,
                     'user' => $user,
@@ -69,8 +72,10 @@ class PublicRegistrationController extends Controller
         Auth::login($result['user']);
         $request->session()->regenerate();
 
+        // Hjem, which every customer reaches whatever it holds. A new customer is given Basis, not
+        // Anbud, so a module page would only bounce them there; the rail takes it from Hjem.
         return redirect()
-            ->route('app.notices.index', ['mode' => 'saved'])
+            ->route('app.dashboard')
             ->with('success', __('procynia.public.registration.success'));
     }
 

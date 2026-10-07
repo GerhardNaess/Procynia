@@ -175,12 +175,12 @@ test('the rail lists the workspaces in product order, with Styring holding what 
 
     const rail = page.getByTestId('module-sidebar');
 
-    expect(await labels(rail.locator(':scope > ul').first().locator(':scope > li > a')))
+    expect(await labels(rail.locator(':scope > ul').first().locator(':scope > li > a, :scope > li > div > a')))
         .toEqual(['Hjem', 'Wiki', 'Anbud', 'Styring']);
-    // This user holds quality.view and none of the other three, so Styring holds Kvalitet only —
+    // This user holds quality.view and none of the others, so Styring holds Kvalitet only —
     // no dimmed or empty rows for the modules the virksomhet has but this person was not given.
     expect(await labels(page.getByTestId('module-governance-children').locator('a'))).toEqual(['Kvalitet']);
-    for (const hidden of ['module-risk', 'module-objectives', 'module-improvements']) {
+    for (const hidden of ['module-risk', 'module-objectives', 'module-improvements', 'module-compliance']) {
         await expect(page.getByTestId(hidden)).toHaveCount(0);
     }
 });
@@ -529,5 +529,137 @@ test.describe('one choice, one place', () => {
         await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kunngjøringer');
         await expect(page.getByTestId('page-navigation').locator('[aria-current="page"]')).toHaveText('Varsler');
         expect(await sidewaysOverflow(page)).toEqual([]);
+    });
+});
+
+/**
+ * Package → modules → rail, and folding.
+ *
+ * Each case is a customer of its own (Tests\Support\NavigationE2EFixture::packageCustomer) whose one
+ * person may view every module, so the only thing that differs between them is what the customer
+ * bought. The packages are the real ones from config/procynia_modules.php — Basis, ISO, GRC, and
+ * Anbud as an add-on; the full matrix (Styring included) is covered against the server in
+ * tests/Feature/App/NavigationEntitlementMatrixTest.php.
+ */
+test.describe('the rail follows what the customer bought, and folds', () => {
+    const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0').toUpperCase();
+    const password = 'E2eNav123!';
+
+    test.afterEach(async () => {
+        await tinker(`\\Tests\\Support\\NavigationE2EFixture::cleanup('${suffix}');`);
+    });
+
+    const seed = async (label, packages) => {
+        const list = packages.map((key) => `'${key}'`).join(', ');
+        const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\NavigationE2EFixture::packageCustomer('${suffix}', '${label}', [${list}], '${password}'));`);
+
+        return JSON.parse(stdout.match(/\{.*\}/)[0]).email;
+    };
+
+    const loginAsSeeded = async (page, email) => {
+        await page.context().clearCookies();
+        await loginAs(page, email, password);
+    };
+
+    const topLevel = async (page) => labels(page.getByTestId('module-sidebar').locator(':scope > ul').first().locator(':scope > li > a, :scope > li > div > a'));
+    const governanceChildren = async (page) => labels(page.getByTestId('module-governance-children').locator(':scope > li > div > a'));
+
+    test('Basis, ISO, ISO + Anbud and GRC: each its own rail', async ({ page }) => {
+        const iso = ['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Etterlevelse og revisjon'];
+        const cases = [
+            ['Basis', ['basis'], ['Hjem', 'Wiki', 'Styring'], ['Kvalitet', 'Avvik og forbedringer'], false],
+            ['ISO', ['iso'], ['Hjem', 'Wiki', 'Styring'], iso, true],
+            ['ISO Anbud', ['iso', 'tender'], ['Hjem', 'Wiki', 'Anbud', 'Styring'], iso, true],
+            // GRC carries Leverandøroppfølging, which is not built: the same rail as ISO.
+            ['GRC', ['grc'], ['Hjem', 'Wiki', 'Styring'], iso, true],
+        ];
+
+        for (const [label, packages, top, children, compliance] of cases) {
+            await loginAsSeeded(page, await seed(label, packages));
+            await page.goto('/app/dashboard');
+
+            expect(await topLevel(page), label).toEqual(top);
+            expect(await governanceChildren(page), label).toEqual(children);
+
+            if (compliance) {
+                await expect(page.getByTestId('module-compliance-areas').locator('a'), label).toHaveText(['Krav', 'Revisjoner']);
+            } else {
+                await expect(page.getByTestId('module-compliance'), label).toHaveCount(0);
+            }
+
+            // Not ordered is not shown — no dimmed Anbud, no «Ikke bestilt».
+            await expect(page.getByTestId('module-sidebar'), label).not.toContainText('Ikke bestilt');
+            if (! top.includes('Anbud')) {
+                await expect(page.getByTestId('module-tenders'), label).toHaveCount(0);
+            }
+
+            // Only entries with something under them have a chevron.
+            await expect(page.getByTestId('module-governance-toggle'), label).toBeVisible();
+            await expect(page.getByTestId('module-compliance-toggle'), label).toHaveCount(compliance ? 1 : 0);
+            await expect(page.getByTestId('module-sidebar').locator('button[aria-controls]'), label).toHaveCount(compliance ? 2 : 1);
+        }
+    });
+
+    test('Styring folds, stays folded after a reload, and opens itself for a page inside it', async ({ page }) => {
+        await loginAsSeeded(page, await seed('ISO Anbud', ['iso', 'tender']));
+        await page.goto('/app/wiki');
+
+        const toggle = page.getByTestId('module-governance-toggle');
+        const children = page.getByTestId('module-governance-children');
+
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(children).toBeVisible();
+
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(children).toBeHidden();
+        await expect(page.getByTestId('module-governance')).toBeVisible();
+
+        await page.reload();
+        await expect(page.getByTestId('module-governance-toggle')).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.getByTestId('module-governance-children')).toBeHidden();
+
+        // Straight to Revisjoner: both parents open, and the page is the current one.
+        await page.goto('/app/compliance/audits');
+        await expect(page.getByTestId('module-governance-children')).toBeVisible();
+        await expect(page.getByTestId('module-compliance-areas')).toBeVisible();
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Revisjoner');
+        await expect(page.getByTestId('module-compliance')).toHaveAttribute('data-active', 'true');
+        await page.screenshot({ path: 'test-results/navigation-folding-audits.png', fullPage: true });
+    });
+
+    test('Etterlevelse og revisjon folds on its own; the name still navigates', async ({ page }) => {
+        await loginAsSeeded(page, await seed('ISO', ['iso']));
+        await page.goto('/app/quality');
+
+        const toggle = page.getByTestId('module-compliance-toggle');
+
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.getByTestId('module-compliance-areas')).toBeHidden();
+        await expect(page.getByTestId('module-governance-children')).toBeVisible();
+        await expect(page).toHaveURL(/\/app\/quality$/);
+
+        await toggle.click();
+        await expect(page.getByTestId('module-compliance-areas')).toBeVisible();
+
+        await page.getByTestId('module-compliance').click();
+        await expect(page).toHaveURL(/\/app\/compliance\/requirements$/);
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Krav');
+    });
+
+    test('on a phone the folding rail fits without a sideways scrollbar', async ({ page }) => {
+        await loginAsSeeded(page, await seed('ISO Anbud', ['iso', 'tender']));
+        await page.setViewportSize(PHONE);
+        await page.goto('/app/compliance/requirements');
+
+        await expect(page.getByTestId('module-compliance-areas')).toBeVisible();
+        await expect(page.getByTestId('module-governance-toggle')).toBeVisible();
+        expect(await sidewaysOverflow(page)).toEqual([]);
+
+        await page.getByTestId('module-governance-toggle').click();
+        await expect(page.getByTestId('module-governance-children')).toBeHidden();
+        expect(await sidewaysOverflow(page)).toEqual([]);
+        await page.screenshot({ path: 'test-results/navigation-folding-phone.png', fullPage: true });
     });
 });

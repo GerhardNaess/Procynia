@@ -39,6 +39,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         business_areas: businessAreas = [],
         business_areas_store_url: businessAreasStoreUrl,
         area_scoped_domains: areaScopedDomains = [],
+        explicit_grant_domains: explicitGrantDomains = [],
     } = customerRoles;
     const tba = t.business_areas ?? {};
     const isAreaScoped = (domain) => areaScopedDomains.includes(domain.key);
@@ -201,6 +202,11 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                             return (
                                 <div key={domain.key}>
                                     <h3 className="text-base font-semibold text-slate-900">{domain.label}</h3>
+                                    {explicitGrantDomains.includes(domain.key) ? (
+                                        <p className="mt-1 text-base leading-6 text-slate-600" data-testid={`explicit-grant-note-${domain.key}`}>
+                                            {t.explicit_grant_note ?? 'System Owner får ikke disse rettighetene automatisk. Skal du arbeide her, gi deg selv en rolle med rettighetene.'}
+                                        </p>
+                                    ) : null}
                                     {domainRoles.length === 0 ? (
                                         <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-base leading-6 text-slate-600">
                                             {t.domain_no_roles ?? 'Ingen av rollene har rettigheter her ennå. Rediger en rolle for å gi den rettigheter i dette området.'}

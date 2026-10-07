@@ -105,12 +105,14 @@ class QualityItemTest extends TestCase
         $this->assertSame(0, QualityItem::query()->count());
     }
 
-    public function test_the_grc_package_opens_quality_too(): void
+    public function test_every_step_of_the_ladder_opens_quality(): void
     {
-        ['customer' => $customer, 'owner' => $owner] = $this->context(grantQuality: false);
-        $this->grant($customer, 'grc');
+        foreach (['basis', 'governance', 'iso', 'grc'] as $package) {
+            ['customer' => $customer, 'owner' => $owner] = $this->context(grantQuality: false);
+            $this->grant($customer, $package);
 
-        $this->actingAs($owner)->get('/app/quality')->assertOk();
+            $this->actingAs($owner)->get('/app/quality')->assertOk();
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -467,9 +469,15 @@ class QualityItemTest extends TestCase
             ->viewData('page')['props'];
 
         $this->assertSame([], $policyProps['governing_documents']);
-        $this->assertCount(1, $policyProps['relations']);
-        $this->assertSame('outgoing', $policyProps['relations'][0]['direction']);
-        $this->assertSame((int) $process->id, $policyProps['relations'][0]['other_item_id']);
+        $this->assertCount(1, $policyProps['governed_processes']);
+        $this->assertSame((int) $process->id, $policyProps['governed_processes'][0]['other_item_id']);
+        $this->assertSame([], $props['governed_processes']);
+
+        // Neither page ships the generic relation list: "Fra", "Til" and a relation type are the
+        // model's words, not the user's.
+        $this->assertArrayNotHasKey('relations', $props);
+        $this->assertArrayNotHasKey('relations', $policyProps);
+        $this->assertArrayNotHasKey('relation_types', $this->app['translator']->get('procynia.quality'));
         $this->assertSame(1, QualityItemRelation::query()->where('customer_id', $customer->id)->count());
     }
 
@@ -1262,7 +1270,7 @@ class QualityItemTest extends TestCase
         ]);
 
         if ($grantQuality) {
-            $this->grant($customer, 'quality');
+            $this->grant($customer, 'basis');
         }
 
         return ['customer' => $customer, 'owner' => $owner];

@@ -40,6 +40,7 @@ export default function ImprovementShow() {
         action_owner_options: actionOwnerOptions = [],
         quality_context: qualityContext = null,
         quality_context_options: qualityContextOptions = [],
+        audit_origin: auditOrigin = null,
         today = '',
     } = usePage().props;
 
@@ -128,6 +129,14 @@ export default function ImprovementShow() {
                             </dd>
                         </div>
                     </dl>
+
+                    {auditOrigin && (
+                        <p className="break-words rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" data-testid="improvement-audit-origin">
+                            {tr.audit_origin ?? 'Fra revisjonsfunn i'}{' '}
+                            <Link href={auditOrigin.audit_url} className="font-semibold text-violet-700 hover:text-violet-900">{auditOrigin.audit_title}</Link>
+                            <span className="block text-slate-600">{(tr.audit_origin_finding ?? 'Funn: :title').replace(':title', auditOrigin.finding_title)}</span>
+                        </p>
+                    )}
                 </header>
 
                 <ImprovementAttentionNote attention={attention} tr={tr} />

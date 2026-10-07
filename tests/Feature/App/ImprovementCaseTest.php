@@ -367,9 +367,9 @@ class ImprovementCaseTest extends TestCase
         $this->actingAs($user)->delete("/app/improvements/{$case->id}")->assertForbidden();
     }
 
-    public function test_the_module_comes_with_kvalitet_or_grc_and_not_without_one(): void
+    public function test_the_module_comes_with_every_step_of_the_ladder_and_not_without_one(): void
     {
-        foreach (['quality' => true, 'grc' => true, 'tender' => false, null => false] as $package => $reachable) {
+        foreach (['basis' => true, 'governance' => true, 'iso' => true, 'grc' => true, 'tender' => false, null => false] as $package => $reachable) {
             ['customer' => $customer] = $this->context($package === '' ? null : $package);
             $hr = $this->area($customer, 'HR');
             $user = $this->member($customer);

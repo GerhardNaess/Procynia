@@ -14,23 +14,17 @@ use InvalidArgumentException;
  * The frontend never decides activation; it renders what this service resolved. Two questions are
  * kept apart on purpose:
  *
- *  - Which commercial packages does the customer hold? (entitlement rows, plus the mandatory ones)
+ *  - Which commercial packages does the customer hold? (active entitlement rows)
  *  - Which technical modules does that give them? (the package -> module mapping in config)
  *
  * Everything downstream asks the second question. Nothing should branch on a package key.
  */
 class ModuleEntitlementService
 {
-    /** The package every customer holds unconditionally. It is not orderable and has no row. */
-    public const CORE_PACKAGE = 'core';
-
-    /** Wiki/Core — the module the mandatory package carries. */
-    public const MODULE_WIKI_CORE = 'wiki_core';
-
     /**
      * The commercial catalog, sorted, with each package's technical modules resolved.
      *
-     * @return array<string, array{key: string, mandatory: bool, orderable: bool, sort_order: int, modules: list<string>}>
+     * @return array<string, array{key: string, orderable: bool, sort_order: int, modules: list<string>}>
      */
     public function packages(): array
     {
@@ -39,7 +33,6 @@ class ModuleEntitlementService
         foreach (config('procynia_modules.packages', []) as $key => $package) {
             $packages[$key] = [
                 'key' => (string) $key,
-                'mandatory' => (bool) ($package['mandatory'] ?? false),
                 'orderable' => (bool) ($package['orderable'] ?? false),
                 'sort_order' => (int) ($package['sort_order'] ?? 0),
                 'modules' => $this->knownModules(array_values($package['modules'] ?? [])),
@@ -52,7 +45,7 @@ class ModuleEntitlementService
     }
 
     /**
-     * @return array{key: string, mandatory: bool, orderable: bool, sort_order: int, modules: list<string>}|null
+     * @return array{key: string, orderable: bool, sort_order: int, modules: list<string>}|null
      */
     public function package(string $packageKey): ?array
     {
@@ -70,20 +63,8 @@ class ModuleEntitlementService
     }
 
     /**
-     * Packages that carry access no matter what the customer has ordered.
-     *
-     * @return list<string>
-     */
-    public function mandatoryPackageKeys(): array
-    {
-        return array_values(array_keys(array_filter(
-            $this->packages(),
-            fn (array $package): bool => $package['mandatory'],
-        )));
-    }
-
-    /**
-     * Every package the customer currently holds: the mandatory ones, plus active entitlements.
+     * Every package the customer currently holds: its active entitlements. There is no package a
+     * customer holds without a row.
      *
      * @return list<string>
      */
@@ -96,11 +77,9 @@ class ModuleEntitlementService
             ->pluck('package_key')
             ->all();
 
-        $keys = array_merge($this->mandatoryPackageKeys(), $granted);
-
         // An entitlement row for a package that has since left the catalog grants nothing.
         $keys = array_values(array_unique(array_filter(
-            $keys,
+            $granted,
             fn (string $key): bool => isset($catalog[$key]),
         )));
 
@@ -212,11 +191,38 @@ class ModuleEntitlementService
     }
 
     /**
+     * Give a newly created customer the default package (config `procynia_modules.default_package`).
+     *
+     * Called explicitly wherever a customer is created, so the grant is an ordinary active row and
+     * never a read-time assumption. It never overrides an explicit choice: if the customer already
+     * holds a package that carries every module of the default one (Styring, ISO, GRC — or the
+     * default itself), nothing is written. An add-on such as Anbud carries less, so it does not
+     * stand in for the default. Re-running it is a no-op, so there is never a second row.
+     */
+    public function grantDefaultPackage(Customer $customer, ?User $grantedBy = null): ?CustomerPackageEntitlement
+    {
+        $defaultKey = (string) config('procynia_modules.default_package', '');
+        $defaultModules = $this->modulesForPackage($defaultKey);
+
+        if ($defaultModules === []) {
+            return null;
+        }
+
+        foreach ($this->activePackageKeys($customer) as $heldKey) {
+            if (array_diff($defaultModules, $this->modulesForPackage($heldKey)) === []) {
+                return null;
+            }
+        }
+
+        return $this->activatePackage($customer, $defaultKey, $grantedBy);
+    }
+
+    /**
      * The catalog as the Abonnement page needs it: one entry per package, each already told
-     * whether it is included, active, ordered or orderable. The page renders this verdict; it does
+     * whether it is active, ordered or orderable. The page renders this verdict; it does
      * not compute one of its own.
      *
-     * @return list<array{key: string, mandatory: bool, orderable: bool, status: string, can_order: bool, modules: list<string>, requested_at: ?string, activated_at: ?string}>
+     * @return list<array{key: string, orderable: bool, status: string, can_order: bool, modules: list<string>, requested_at: ?string, activated_at: ?string}>
      */
     public function overviewFor(Customer $customer): array
     {
@@ -228,7 +234,6 @@ class ModuleEntitlementService
             $entitlement = $entitlements->get($key);
 
             $status = match (true) {
-                $package['mandatory'] => 'included',
                 in_array($key, $activeKeys, true) => 'active',
                 $entitlement?->status === CustomerPackageEntitlement::STATUS_REQUESTED => 'requested',
                 $entitlement?->status === CustomerPackageEntitlement::STATUS_DECLINED => 'declined',
@@ -237,7 +242,6 @@ class ModuleEntitlementService
 
             $overview[] = [
                 'key' => $key,
-                'mandatory' => $package['mandatory'],
                 'orderable' => $package['orderable'],
                 'status' => $status,
                 'can_order' => $package['orderable'] && in_array($status, ['available', 'declined'], true),

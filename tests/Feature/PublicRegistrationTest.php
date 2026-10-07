@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Customer;
+use App\Models\CustomerPackageEntitlement;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -64,7 +65,7 @@ class PublicRegistrationTest extends TestCase
 
         $response = $this->postRegistration($payload);
 
-        $response->assertRedirect(route('app.notices.index', ['mode' => 'saved']));
+        $response->assertRedirect(route('app.dashboard'));
         $response->assertSessionHas('success', __('procynia.public.registration.success'));
         $this->assertAuthenticated();
 
@@ -92,6 +93,33 @@ class PublicRegistrationTest extends TestCase
         $this->assertDatabaseMissing('subscriptions', [
             'customer_id' => $customer->id,
         ]);
+    }
+
+    public function test_public_registration_gives_the_new_customer_basis_and_lands_on_home(): void
+    {
+        $payload = $this->validPayload();
+
+        $response = $this->postRegistration($payload);
+
+        // Hjem, not Anbud: a Basis customer has no notices to land on.
+        $response->assertRedirect(route('app.dashboard'));
+        $this->assertStringNotContainsString(route('app.notices.index'), (string) $response->headers->get('Location'));
+        $this->get((string) $response->headers->get('Location'))->assertOk();
+
+        $customer = Customer::query()->where('name', $payload['company_name'])->firstOrFail();
+        $owner = User::query()->where('email', $payload['owner_email'])->firstOrFail();
+
+        $basis = $customer->packageEntitlements()->where('package_key', 'basis')->sole();
+        $this->assertSame(CustomerPackageEntitlement::STATUS_ACTIVE, $basis->status);
+        $this->assertSame($owner->id, $basis->requested_by);
+
+        foreach (['wiki', 'quality', 'improvements'] as $module) {
+            $this->assertTrue($customer->hasModule($module), $module);
+        }
+
+        foreach (['risk', 'objectives', 'compliance'] as $module) {
+            $this->assertFalse($customer->hasModule($module), $module);
+        }
     }
 
     public function test_private_email_domains_are_rejected_without_creating_records(): void

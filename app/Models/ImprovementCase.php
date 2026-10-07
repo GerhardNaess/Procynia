@@ -118,7 +118,7 @@ class ImprovementCase extends Model
      * Whether the case may be deleted at all, before any permission is considered. Deleting is for
      * a case registered by mistake that nobody has started on: still open, no status change ever
      * written, and no tiltak. Once it has been in progress, closed or cancelled — even if it was
-     * reopened since — or has tiltak, it is cancelled instead.
+     * reopened since — or has tiltak, or came from a revisjonsfunn, it is cancelled instead.
      */
     public function isDeletable(): bool
     {
@@ -128,7 +128,10 @@ class ImprovementCase extends Model
 
         return $this->status === self::STATUS_OPEN
             && ! ImprovementCaseStatusChange::query()->where('improvement_case_id', $this->id)->exists()
-            && ! ImprovementAction::query()->where('improvement_case_id', $this->id)->exists();
+            && ! ImprovementAction::query()->where('improvement_case_id', $this->id)->exists()
+            // Created from a revisjonsfunn: the finding points here, so the case is cancelled, never
+            // deleted. The database refuses it as well.
+            && ! ComplianceAuditFinding::query()->where('improvement_case_id', $this->id)->exists();
     }
 
     public function customer(): BelongsTo
