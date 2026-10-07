@@ -7,7 +7,8 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import SupplierForm from './SupplierForm';
 import { supplierHelp } from './supplierHelp';
-import { SUPPLIER_STATUS_TONES, categoryLabel, countLabel, statusLabel } from './supplierManagement';
+import SupplierCriticalityBadge from './SupplierCriticalityBadge';
+import { SUPPLIER_STATUS_TONES, categoryLabel, countLabel, criticalityLabel, emptyCriticality, statusLabel } from './supplierManagement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -36,6 +37,8 @@ export default function SupplierManagementIndex() {
         statuses = [],
         initial_statuses: initialStatuses = [],
         categories = [],
+        criticalities = [],
+        review_intervals: reviewIntervals = [],
         permissions = {},
         owner_options: ownerOptions = [],
     } = usePage().props;
@@ -47,6 +50,7 @@ export default function SupplierManagementIndex() {
     const [search, setSearch] = useState(filters.search ?? '');
     const [status, setStatus] = useState(filters.status ?? '');
     const [category, setCategory] = useState(filters.category ?? '');
+    const [criticality, setCriticality] = useState(filters.criticality ?? '');
 
     const form = useForm({
         name: '',
@@ -59,6 +63,7 @@ export default function SupplierManagementIndex() {
         contact_phone: '',
         note: '',
         initial_status: 'active',
+        ...emptyCriticality(),
     });
 
     const submitSearch = (event) => {
@@ -67,6 +72,7 @@ export default function SupplierManagementIndex() {
             search: search || undefined,
             status: status || undefined,
             category: category || undefined,
+            criticality: criticality || undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -74,6 +80,7 @@ export default function SupplierManagementIndex() {
         setSearch('');
         setStatus('');
         setCategory('');
+        setCriticality('');
         router.get(REGISTER_URL, {}, { replace: true });
     };
 
@@ -82,7 +89,7 @@ export default function SupplierManagementIndex() {
         form.post(REGISTER_URL, { preserveScroll: true });
     };
 
-    const filtered = Boolean(filters.search || filters.status || filters.category);
+    const filtered = Boolean(filters.search || filters.status || filters.category || filters.criticality);
 
     return (
         <CustomerAppLayout title={tr.index_title ?? 'Leverandører'} showPageTitle={false}>
@@ -115,6 +122,7 @@ export default function SupplierManagementIndex() {
                             categories={categories}
                             ownerOptions={ownerOptions}
                             initialStatuses={initialStatuses}
+                            reviewIntervals={reviewIntervals}
                             tr={tr}
                         />
                     </section>
@@ -158,6 +166,15 @@ export default function SupplierManagementIndex() {
                                     ))}
                                 </select>
                             </div>
+                            <div className="min-w-0">
+                                <label htmlFor="supplier-criticality-filter" className={FILTER_LABEL}>{tr.criticality_filter ?? 'Kritikalitet'}</label>
+                                <select id="supplier-criticality-filter" value={criticality} onChange={(event) => setCriticality(event.target.value)} className={`mt-1 ${INPUT}`}>
+                                    <option value="">{tr.all_criticalities ?? 'Alle nivåer'}</option>
+                                    {criticalities.map((value) => (
+                                        <option key={value} value={value}>{criticalityLabel(value, tr)}</option>
+                                    ))}
+                                </select>
+                            </div>
                             <div className="flex flex-wrap gap-2">
                                 <button type="submit" className={SECONDARY_ACTION}>{tr.search ?? 'Søk'}</button>
                                 {filtered && (
@@ -186,6 +203,8 @@ export default function SupplierManagementIndex() {
                                             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-base">
                                                 <dt className="font-semibold text-slate-600">{tr.col_category ?? 'Kategori'}</dt>
                                                 <dd className="min-w-0 break-words text-slate-800">{categoryLabel(item.category, tr)}</dd>
+                                                <dt className="font-semibold text-slate-600">{tr.col_criticality ?? 'Kritikalitet'}</dt>
+                                                <dd className="min-w-0 break-words text-slate-800"><SupplierCriticalityBadge level={item.criticality} tr={tr} /></dd>
                                                 <dt className="font-semibold text-slate-600">{tr.col_owner ?? 'Intern ansvarlig'}</dt>
                                                 <dd className="min-w-0 break-words text-slate-800"><Owner item={item} tr={tr} /></dd>
                                             </dl>
@@ -199,6 +218,7 @@ export default function SupplierManagementIndex() {
                                             <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
                                                 <th className="pb-3 pr-4">{tr.col_name ?? 'Leverandør'}</th>
                                                 <th className="px-4 pb-3">{tr.col_category ?? 'Kategori'}</th>
+                                                <th className="px-4 pb-3">{tr.col_criticality ?? 'Kritikalitet'}</th>
                                                 <th className="px-4 pb-3">{tr.col_deliverable ?? 'Leverer'}</th>
                                                 <th className="px-4 pb-3">{tr.col_owner ?? 'Intern ansvarlig'}</th>
                                                 <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
@@ -212,6 +232,7 @@ export default function SupplierManagementIndex() {
                                                         {item.organization_number && <p className="text-base text-slate-600">{item.organization_number}</p>}
                                                     </td>
                                                     <td className="px-4 py-3 align-top text-slate-700">{categoryLabel(item.category, tr)}</td>
+                                                    <td className="px-4 py-3 align-top"><SupplierCriticalityBadge level={item.criticality} tr={tr} /></td>
                                                     <td className="max-w-md px-4 py-3 align-top text-slate-700"><span className="line-clamp-2 break-words">{item.deliverable_description}</span></td>
                                                     <td className="px-4 py-3 align-top text-slate-700"><Owner item={item} tr={tr} /></td>
                                                     <td className="py-3 pl-4 align-top">

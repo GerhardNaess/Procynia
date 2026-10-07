@@ -2552,6 +2552,8 @@ return [
         'status_filter_all' => 'Alle statuser',
         'category_filter' => 'Kategori',
         'all_categories' => 'Alle kategorier',
+        'criticality_filter' => 'Kritikalitet',
+        'all_criticalities' => 'Alle nivåer',
         'count_one' => '1 leverandør',
         'count' => ':count leverandører',
         'no_matches' => 'Ingen leverandører passer søket.',
@@ -2561,6 +2563,7 @@ return [
         'col_deliverable' => 'Leverer',
         'col_owner' => 'Intern ansvarlig',
         'col_status' => 'Status',
+        'col_criticality' => 'Kritikalitet',
         'no_owner' => 'Mangler ansvarlig',
         'statuses' => [
             'onboarding' => 'Under vurdering',
@@ -2575,6 +2578,59 @@ return [
             'transport_logistics' => 'Transport og logistikk',
             'operations_facilities' => 'Drift og fasilitet',
             'other' => 'Annet',
+        ],
+        'not_classified' => 'Ikke vurdert',
+        'criticalities' => [
+            'standard' => 'Standard',
+            'important' => 'Viktig',
+            'critical' => 'Kritisk',
+        ],
+        'criticality' => [
+            'heading' => 'Kritikalitet',
+            'intro' => 'Hvor viktig leverandøren er for virksomheten – ikke hvor godt den fungerer.',
+            'not_classified' => 'Kritikalitet er ikke vurdert ennå.',
+            'assess' => 'Vurder kritikalitet',
+            'change' => 'Endre kritikalitet',
+            'form_heading' => 'Hvor kritisk er leverandøren?',
+            'form_intro' => 'Svar på de fire spørsmålene, og velg deretter nivået selv. Svarene er grunnlaget for valget ditt og lagres sammen med det.',
+            'registration_heading' => 'Hvor viktig er leverandøren for oss?',
+            'questions_heading' => 'Beslutningsgrunnlag',
+            'questions' => [
+                'processes_personal_data' => 'Behandler leverandøren personopplysninger på våre vegne?',
+                'has_system_access' => 'Har leverandøren tilgang til våre systemer eller vår informasjon?',
+                'supports_critical_delivery' => 'Vil bortfall av leverandøren stoppe eller svekke en kritisk leveranse hos oss?',
+                'hard_to_replace' => 'Er leverandøren vanskelig å erstatte på kort sikt?',
+            ],
+            'yes' => 'Ja',
+            'no' => 'Nei',
+            'level_label' => 'Kritikalitet',
+            'level_hints' => [
+                'standard' => 'Begrenset betydning; lett å erstatte.',
+                'important' => 'Bortfall eller svikt merkes, men kan håndteres innen rimelig tid.',
+                'critical' => 'Bortfall eller svikt rammer kjernevirksomheten eller sensitive opplysninger direkte.',
+            ],
+            'interval_label' => 'Hvor ofte skal leverandøren vurderes?',
+            'interval_hint_required' => 'Viktige og kritiske leverandører må ha et vurderingsintervall.',
+            'interval_hint_optional' => 'Valgfritt for standard leverandører.',
+            'interval_none' => 'Ingen fast vurdering',
+            'interval_option' => 'Hver :months. måned',
+            'reason_label' => 'Begrunnelse',
+            'reason_hint' => 'Hvorfor er leverandøren vurdert slik? For eksempel «Leverandøren drifter en forretningskritisk integrasjon, og bortfall vil stoppe ordrebehandlingen.»',
+            'submit' => 'Lagre vurdering',
+            'interval' => 'Vurderingsintervall',
+            'no_interval' => 'Ingen fast vurdering',
+            'last_decided' => 'Sist vurdert',
+            'decided_by' => 'Vurdert av',
+            'reason' => 'Begrunnelse',
+            'history_heading' => 'Endringer i kritikalitet',
+            'history' => [
+                'first' => 'Vurdert som :level av :name',
+                'changed' => 'Endret fra :from til :to av :name',
+                'kept' => 'Fortsatt :level – endret av :name',
+                'registered' => 'Vurdert som :level ved registrering av :name',
+                'interval_changed' => 'Vurderingsintervall: :from → :to',
+                'answer_was' => 'var :answer',
+            ],
         ],
         'fields' => [
             'name' => 'Navn',
@@ -2644,6 +2700,7 @@ return [
             'ended' => 'Leverandøren er avsluttet.',
             'reopened' => 'Leverandøren er gjenåpnet.',
             'deleted' => 'Leverandøren er slettet.',
+            'criticality_changed' => 'Kritikaliteten er lagret.',
         ],
         'validation' => [
             'reason_required' => 'Skriv en begrunnelse.',
@@ -2652,6 +2709,9 @@ return [
             'not_deletable' => 'Leverandøren har historikk og kan ikke slettes. Avslutt den i stedet.',
             'owner_not_allowed' => 'Velg en aktiv person med tilgang til Leverandøroppfølging.',
             'organization_number_taken' => 'En leverandør med dette organisasjonsnummeret er allerede registrert.',
+            'interval_required' => 'Velg hvor ofte leverandøren skal vurderes. Viktige og kritiske leverandører må ha et vurderingsintervall.',
+            'answer_required' => 'Svar ja eller nei.',
+            'criticality_unchanged' => 'Ingenting er endret. Endre nivå, vurderingsintervall eller svar – eller avbryt.',
             'rules' => [
                 'required' => ':attribute må fylles ut.',
                 'choose' => 'Velg en gyldig verdi for :attribute.',
@@ -2670,6 +2730,8 @@ return [
                 'note' => 'Notat',
                 'initial_status' => 'Er leverandøren i bruk?',
                 'reason' => 'Begrunnelse',
+                'criticality' => 'Kritikalitet',
+                'review_interval_months' => 'Vurderingsintervall',
             ],
         ],
         'help' => [
@@ -2695,6 +2757,13 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Kritikalitet',
+                        'items' => [
+                            ['title' => 'Standard, Viktig eller Kritisk', 'text' => 'Kritikaliteten sier hvor viktig leverandøren er for virksomheten. Dere velger nivået selv; fire ja/nei-spørsmål er grunnlaget for valget, men regnes ikke om til noe nivå.'],
+                            ['title' => 'Ikke vurdert', 'text' => 'Leverandøren har ennå ingen kritikalitet. Åpne leverandøren og velg «Vurder kritikalitet».'],
+                        ],
+                    ],
+                    [
                         'title' => 'Tilgang',
                         'items' => [
                             ['title' => 'Rettigheter', 'text' => 'Hvem som kan se, registrere og slette leverandører, bestemmes av rollene under Tilganger i Kundemiljø.'],
@@ -2716,6 +2785,14 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Kritikalitet',
+                        'items' => [
+                            ['title' => 'Hvor viktig er leverandøren?', 'text' => 'Velg Standard, Viktig eller Kritisk. De fire ja/nei-spørsmålene er grunnlaget for valget og lagres sammen med det, men systemet regner ikke ut eller foreslår noe nivå.'],
+                            ['title' => 'Vurderingsintervall', 'text' => 'Hvor ofte leverandøren skal vurderes. Viktige og kritiske leverandører må ha et intervall.'],
+                            ['title' => 'Endre kritikalitet', 'text' => 'Hver endring krever en begrunnelse og lagres i historikken med nivå, intervall og svar før og etter. Historikken kan ikke endres eller slettes.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Historikk',
                         'items' => [
                             ['title' => 'Hva som lagres', 'text' => 'Hver statusendring lagres med hvem som gjorde den, når og hvorfor. Historikken kan ikke endres eller slettes.'],
@@ -2725,7 +2802,7 @@ return [
                         'title' => 'Avslutte eller slette?',
                         'items' => [
                             ['title' => 'Avslutt', 'text' => 'Den vanlige måten å ta en leverandør ut av bruk. Historikken beholdes.'],
-                            ['title' => 'Slett', 'text' => 'Bare for en leverandør som ble registrert ved en feil og aldri har endret status. Sletting kan ikke angres.'],
+                            ['title' => 'Slett', 'text' => 'Bare for en leverandør som ble registrert ved en feil og aldri har endret status eller kritikalitet. Sletting kan ikke angres.'],
                         ],
                     ],
                 ],

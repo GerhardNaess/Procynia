@@ -16,6 +16,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * active (Aktiv), and from then on moves only through SupplierLifecycleService (Ta i bruk, Avslutt
  * leverandør, Gjenåpne leverandør). How it got there is in statusChanges(), which nothing edits.
  *
+ * Criticality (Standard, Viktig, Kritisk), the review interval and the four ja/nei answers the
+ * choice was made on are not mass assignable either. They are set when the supplier is registered
+ * and from then on change only through SupplierCriticalityService, which writes every change to
+ * criticalityChanges(). The values here are the current classification; there is no other.
+ * A supplier registered before criticality existed has none of them until it is classified.
+ *
  * Customer-wide. Never query this model for a user without going through
  * SupplierAccessService::visibleSuppliers().
  */
@@ -50,6 +56,34 @@ class Supplier extends Model
         'other',
     ];
 
+    public const CRITICALITY_STANDARD = 'standard';
+
+    public const CRITICALITY_IMPORTANT = 'important';
+
+    public const CRITICALITY_CRITICAL = 'critical';
+
+    /** Chosen by the user, never computed (plan §4.2). */
+    public const CRITICALITIES = [
+        self::CRITICALITY_STANDARD,
+        self::CRITICALITY_IMPORTANT,
+        self::CRITICALITY_CRITICAL,
+    ];
+
+    /** The review intervals in months; Viktig and Kritisk require one, Standard may be without. */
+    public const REVIEW_INTERVALS = [6, 12, 24, 36];
+
+    /**
+     * The four ja/nei questions shown as the basis for the choice, each its own boolean column:
+     * personal data on our behalf, access to our systems or information, a critical delivery
+     * stopping without them, hard to replace at short notice. Stored, never summed.
+     */
+    public const CRITICALITY_QUESTIONS = [
+        'processes_personal_data',
+        'has_system_access',
+        'supports_critical_delivery',
+        'hard_to_replace',
+    ];
+
     /** @var array<string, mixed> */
     protected $attributes = [
         'status' => self::STATUS_ONBOARDING,
@@ -70,6 +104,17 @@ class Supplier extends Model
         'updated_by',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'review_interval_months' => 'integer',
+            'processes_personal_data' => 'boolean',
+            'has_system_access' => 'boolean',
+            'supports_critical_delivery' => 'boolean',
+            'hard_to_replace' => 'boolean',
+        ];
+    }
+
     protected static function booted(): void
     {
         // The database refuses these too; this says so before the query is sent.
@@ -81,6 +126,10 @@ class Supplier extends Model
             if (! in_array($supplier->category, self::CATEGORIES, true)) {
                 throw new DomainException("Unknown supplier category [{$supplier->category}].");
             }
+
+            if ($supplier->criticality !== null && ! in_array($supplier->criticality, self::CRITICALITIES, true)) {
+                throw new DomainException("Unknown supplier criticality [{$supplier->criticality}].");
+            }
         });
     }
 
@@ -89,19 +138,49 @@ class Supplier extends Model
         return $this->status === self::STATUS_ENDED;
     }
 
+    public function isClassified(): bool
+    {
+        return $this->criticality !== null;
+    }
+
+    /**
+     * The current classification as one value — level, interval and the four answers — or null when
+     * the supplier has not been classified.
+     *
+     * @return array{criticality: string, review_interval_months: int|null, processes_personal_data: bool, has_system_access: bool, supports_critical_delivery: bool, hard_to_replace: bool}|null
+     */
+    public function classification(): ?array
+    {
+        if (! $this->isClassified()) {
+            return null;
+        }
+
+        $classification = [
+            'criticality' => $this->criticality,
+            'review_interval_months' => $this->review_interval_months,
+        ];
+
+        foreach (self::CRITICALITY_QUESTIONS as $question) {
+            $classification[$question] = (bool) $this->{$question};
+        }
+
+        return $classification;
+    }
+
     /**
      * Whether the supplier may be deleted at all, before any permission is considered. Deleting is
-     * for a supplier registered by mistake and never used: one that has changed status has a
-     * history and is ended instead. The database refuses the delete as well (NO ACTION from every
+     * for a supplier registered by mistake and never used: one that has changed status or
+     * criticality has a history — a real decision was made about it — and is ended instead. The
+     * classification it was registered with is the supplier's own and does not count. The database refuses the delete as well (NO ACTION from every
      * child table).
      *
-     * Each later part of the module that attaches something to a supplier — criticality changes,
-     * assessments, documentation, links to risks, requirements and cases — adds its check here,
+     * Each later part of the module that attaches something to a supplier — assessments, documentation, links to risks, requirements and cases — adds its check here,
      * so the rule stays «completely unused» without changing.
      */
     public function isDeletable(): bool
     {
-        return ! $this->statusChanges()->exists();
+        return ! $this->statusChanges()->exists()
+            && ! $this->criticalityChanges()->exists();
     }
 
     public function owner(): BelongsTo
@@ -118,6 +197,14 @@ class Supplier extends Model
     public function statusChanges(): HasMany
     {
         return $this->hasMany(SupplierStatusChange::class, 'supplier_id')
+            ->orderByDesc('changed_at')
+            ->orderByDesc('id');
+    }
+
+    /** Newest first. */
+    public function criticalityChanges(): HasMany
+    {
+        return $this->hasMany(SupplierCriticalityChange::class, 'supplier_id')
             ->orderByDesc('changed_at')
             ->orderByDesc('id');
     }

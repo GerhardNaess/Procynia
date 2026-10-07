@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
 import { DESKTOP, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
-import { SUPPLIER_E2E_PASSWORD, cleanUpSupplierE2eData, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
+import { SUPPLIER_E2E_PASSWORD, answerCriticality, cleanUpSupplierE2eData, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
 
 const suffix = supplierE2eSuffix();
 cleanUpSupplierE2eData(suffix);
@@ -49,6 +49,9 @@ test('a supplier is registered, edited, taken into use, ended and reopened, with
     await page.locator('#supplier-contact-name').fill('Kari Kontakt');
     await page.locator('#supplier-contact-email').fill('kari@driftspartner.example');
     await page.getByLabel('Vi vurderer leverandøren').check();
+    // Hvor viktig er leverandøren for oss?: the person chooses; Viktig fills in its interval.
+    await answerCriticality(page, 'Viktig', ['has_system_access']);
+    await expect(page.locator('#supplier-registration-interval')).toHaveValue('24');
     await expectReadable(page, '02-register-form');
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
 
@@ -62,6 +65,8 @@ test('a supplier is registered, edited, taken into use, ended and reopened, with
     }
     await expect(page.getByTestId('supplier-contact')).toContainText('kari@driftspartner.example');
     await expect(page.getByTestId('supplier-status')).toContainText('ikke tatt i bruk');
+    await expect(page.getByTestId('supplier-badges')).toContainText('Viktig');
+    await expect(page.getByTestId('criticality-current')).toContainText('Hver 24. måned');
     await expect(page.getByTestId('supplier-history')).toContainText(`Registrert som Under vurdering av ${person.name}`);
     // Never used: it could be deleted, and the page says what deleting is for.
     await expect(page.getByTestId('supplier-delete')).toContainText('registrert ved en feil');
@@ -71,7 +76,7 @@ test('a supplier is registered, edited, taken into use, ended and reopened, with
     // The register lists it; open it from there.
     await page.goto(`/app/supplier-management?${new URLSearchParams({ search: name })}`);
     const row = page.locator('tbody tr', { hasText: name });
-    for (const text of ['IT og skytjenester', 'Drift av lønnssystem', person.colleague_name, 'Under vurdering']) {
+    for (const text of ['IT og skytjenester', 'Viktig', 'Drift av lønnssystem', person.colleague_name, 'Under vurdering']) {
         await expect(row).toContainText(text);
     }
     await expectReadable(page, '04-register-with-supplier');
@@ -146,6 +151,7 @@ test('a supplier registered by mistake is deleted after a confirmation that says
     await page.locator('#supplier-category').selectOption({ label: 'Annet' });
     await page.locator('#supplier-deliverable').fill('Ingenting');
     await page.locator('#supplier-owner').selectOption({ label: person.name });
+    await answerCriticality(page, 'Standard');
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/supplier-management\/\d+$/);
 
@@ -156,4 +162,70 @@ test('a supplier registered by mistake is deleted after a confirmation that says
     expect(message).toContain('registrert ved en feil');
     await expect(page.getByText('Leverandøren er slettet.', { exact: true })).toBeVisible();
     await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
+});
+
+/**
+ * Kritikalitet: how important a supplier is. The rules — the three levels, the required interval,
+ * the edit right, the ended lock, the immutable history and the delete rule — are PHP's
+ * (SupplierCriticalityTest); this is the journey: a supplier not yet assessed is assessed, the level
+ * shows, it is changed with a reason, and the history tells the story — at desktop and 390 px.
+ */
+test('a supplier is assessed for criticality, reassessed, and the history shows both decisions', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const supplier = await supplierFixture(`unclassifiedSupplier('${suffix}', 'Ordreintegrasjon ${suffix} AS')`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-criticality');
+    await expect(section.getByTestId('criticality-none')).toHaveText('Kritikalitet er ikke vurdert ennå.');
+
+    // Vurder kritikalitet: the interval is asked for once a level is chosen, and optional for Standard.
+    await section.getByRole('button', { name: 'Vurder kritikalitet' }).click();
+    await expect(page.locator('#supplier-criticality-interval')).toHaveCount(0);
+    await answerCriticality(section, 'Standard', ['processes_personal_data']);
+    await expect(page.locator('#supplier-criticality-interval')).toHaveValue('');
+    await page.locator('#supplier-criticality-reason').fill('Lett å erstatte; bare et fåtall ordre går gjennom integrasjonen.');
+    await expectReadable(page, '10-criticality-form');
+    await section.getByRole('button', { name: 'Lagre vurdering' }).click();
+    await expect(page.getByText('Kritikaliteten er lagret.', { exact: true })).toBeVisible();
+
+    await expect(page.getByTestId('supplier-badges')).toContainText('Standard');
+    const current = section.getByTestId('criticality-current');
+    for (const text of ['Standard', 'Ingen fast vurdering', person.name]) {
+        await expect(current).toContainText(text);
+    }
+
+    // Endre kritikalitet: Kritisk fills in 12 months, and the reason says why.
+    await section.getByRole('button', { name: 'Endre kritikalitet' }).click();
+    await answerCriticality(section, 'Kritisk', ['processes_personal_data', 'supports_critical_delivery', 'hard_to_replace']);
+    await expect(page.locator('#supplier-criticality-interval')).toHaveValue('12');
+    await page.locator('#supplier-criticality-reason').fill('Leverandøren drifter en forretningskritisk integrasjon, og bortfall vil stoppe ordrebehandlingen.');
+    await section.getByRole('button', { name: 'Lagre vurdering' }).click();
+    await expect(page.getByText('Kritikaliteten er lagret.', { exact: true })).toBeVisible();
+
+    await expect(page.getByTestId('supplier-badges')).toContainText('Kritisk');
+    await expect(current).toContainText('Hver 12. måned');
+    await expect(section.getByTestId('criticality-reason')).toContainText('forretningskritisk integrasjon');
+
+    // The history: newest first, each decision with its reason and the answers it was made on.
+    const entries = section.getByTestId('criticality-history-entry');
+    await expect(entries).toHaveCount(2);
+    await expect(entries.nth(0)).toContainText(`Endret fra Standard til Kritisk av ${person.name}`);
+    await expect(entries.nth(0)).toContainText('Vurderingsintervall: Ingen fast vurdering → Hver 12. måned');
+    await entries.nth(0).getByText('Beslutningsgrunnlag').click();
+    await expect(entries.nth(0)).toContainText('(var nei)');
+    await expect(entries.nth(1)).toContainText(`Vurdert som Standard av ${person.name}`);
+    await expect(entries.nth(1)).toContainText('Lett å erstatte');
+    await expectReadable(page, '11-criticality-history');
+
+    // A real decision was made: the supplier is ended, never deleted.
+    await expect(page.getByRole('button', { name: 'Slett leverandør' })).toHaveCount(0);
+
+    // The register shows the level and filters on it.
+    await page.goto(`/app/supplier-management?${new URLSearchParams({ criticality: 'critical' })}`);
+    await expect(page.locator('tbody tr', { hasText: supplier.name })).toContainText('Kritisk');
 });

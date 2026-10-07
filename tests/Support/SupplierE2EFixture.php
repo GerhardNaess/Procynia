@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Supplier;
+use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -24,8 +25,9 @@ use Illuminate\Support\Facades\DB;
  * nothing the run does can touch the shared E2E data, and the shared users are never given a
  * supplier role.
  *
- * Cleanup removes the run's customer; its suppliers and their history go with it. The history
- * trigger allows that one delete (the customer going), so no trigger is switched off.
+ * Cleanup removes the run's customer; its suppliers and their status and criticality history go
+ * with it. The history triggers allow that one delete (the customer going), so no trigger is
+ * switched off.
  */
 class SupplierE2EFixture
 {
@@ -79,7 +81,33 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, roles: int, users: int} */
+    /**
+     * A supplier of the run's customer as one registered before criticality existed: active, owned
+     * by the supplier manager, and not yet classified — the starting point for «Vurder kritikalitet».
+     *
+     * @return array{id: int, name: string}
+     */
+    public static function unclassifiedSupplier(string $suffix, string $name): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        $supplier = new Supplier([
+            'customer_id' => $customer->id,
+            'name' => $name,
+            'category' => 'it_cloud',
+            'deliverable_description' => 'Drift av ordreintegrasjon',
+            'owner_user_id' => $manager->id,
+            'created_by' => $manager->id,
+            'updated_by' => $manager->id,
+        ]);
+        $supplier->status = Supplier::STATUS_ACTIVE;
+        $supplier->save();
+
+        return ['id' => (int) $supplier->id, 'name' => $supplier->name];
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -88,6 +116,7 @@ class SupplierE2EFixture
             'customers' => $customerIds->count(),
             'suppliers' => Supplier::query()->whereIn('customer_id', $customerIds)->count(),
             'status_changes' => SupplierStatusChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lev.'.strtolower($suffix).'.%')->count(),
         ];
@@ -108,7 +137,7 @@ class SupplierE2EFixture
                 CustomerRole::query()->where('customer_id', $customer->id)->delete();
                 User::query()->where('customer_id', $customer->id)->delete();
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
-                // Suppliers and their history go with the customer.
+                // Suppliers and their status and criticality history go with the customer.
                 $customer->delete();
             });
         }

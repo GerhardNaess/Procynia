@@ -1,5 +1,6 @@
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
+import CriticalityFields from './CriticalityFields';
 import { categoryLabel, statusLabel } from './supplierManagement';
 
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -18,8 +19,11 @@ function FieldError({ message }) {
  * There is no status field. Only when registering does the form ask whether the supplier is
  * already in use (initialStatuses given): that decides whether it starts as Aktiv or Under
  * vurdering. After that, status moves only through Ta i bruk, Avslutt and Gjenåpne.
+ *
+ * Likewise criticality: registering asks how important the supplier is (reviewIntervals given);
+ * Rediger never does. After that it changes only through Endre kritikalitet, with a begrunnelse.
  */
-export default function SupplierForm({ form, onSubmit, onCancel, categories = [], ownerOptions = [], initialStatuses = null, tr }) {
+export default function SupplierForm({ form, onSubmit, onCancel, categories = [], ownerOptions = [], initialStatuses = null, reviewIntervals = null, tr }) {
     const fields = tr.fields ?? {};
     const errors = form.errors;
 
@@ -197,6 +201,18 @@ export default function SupplierForm({ form, onSubmit, onCancel, categories = []
                     ))}
                     <FieldError message={errors.initial_status} />
                 </fieldset>
+            )}
+
+            {reviewIntervals && (
+                <section className="space-y-3 border-t border-slate-100 pt-5" aria-labelledby="supplier-criticality-registration-heading">
+                    <h3 id="supplier-criticality-registration-heading" className="text-lg font-semibold text-slate-950">
+                        {tr.criticality?.registration_heading ?? 'Hvor viktig er leverandøren for oss?'}
+                    </h3>
+                    <p className="text-base text-slate-600">
+                        {tr.criticality?.form_intro ?? 'Svar på de fire spørsmålene, og velg deretter nivået selv. Svarene er grunnlaget for valget ditt og lagres sammen med det.'}
+                    </p>
+                    <CriticalityFields form={form} reviewIntervals={reviewIntervals} idPrefix="supplier-registration" tr={tr} />
+                </section>
             )}
 
             <p className="text-base text-slate-600">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>

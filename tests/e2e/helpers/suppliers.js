@@ -37,7 +37,21 @@ export function cleanUpSupplierE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await supplierFixture(`remaining('${suffix}')`)).toEqual({
-            customers: 0, suppliers: 0, status_changes: 0, roles: 0, users: 0,
+            customers: 0, suppliers: 0, status_changes: 0, criticality_changes: 0, roles: 0, users: 0,
         });
     });
+}
+
+/**
+ * Answers the four ja/nei questions and chooses the level in a Kritikalitet form — the registration
+ * section or Vurder/Endre kritikalitet. `answers` lists the questions answered «Ja»; the rest get «Nei».
+ */
+export async function answerCriticality(scope, level, answers = []) {
+    for (const question of ['processes_personal_data', 'has_system_access', 'supports_critical_delivery', 'hard_to_replace']) {
+        await scope.getByTestId(`criticality-question-${question}`)
+            .getByRole('radio', { name: answers.includes(question) ? 'Ja' : 'Nei', exact: true })
+            .check();
+    }
+
+    await scope.getByTestId('criticality-level').getByRole('radio', { name: new RegExp(`^${level}`) }).check();
 }

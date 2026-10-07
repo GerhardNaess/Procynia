@@ -4,9 +4,11 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\Supplier;
+use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierLifecycleService;
 use App\Support\CustomerContext;
 use App\Support\Suppliers\SupplierValidationMessages;
@@ -14,6 +16,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -28,9 +31,12 @@ use Inertia\Response;
  * an id that does not exist; a user without supplier.view gets a 403 on everything. System Owner is
  * no exception — supplier is an explicit-grant domain.
  *
- * supplier.edit registers and changes suppliers and moves them through Ta i bruk, Avslutt and
- * Gjenåpne (SupplierLifecycleService, the only writer of a status change); supplier.delete deletes
- * one registered by mistake and never used. supplier.assess is not used here.
+ * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
+ * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
+ * through Ta i bruk, Avslutt and Gjenåpne (SupplierLifecycleService, the only writer of a status
+ * change); supplier.delete deletes one registered by mistake and never used. supplier.assess — the
+ * supplier assessment of how a supplier performs — is not used here: criticality is how important
+ * the supplier is, a register decision (plan §9.2).
  *
  * An ended supplier is read-only until it is reopened.
  */
@@ -45,6 +51,7 @@ class SupplierManagementController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly SupplierAccessService $access,
         private readonly SupplierLifecycleService $lifecycle,
+        private readonly SupplierCriticalityService $criticality,
     ) {}
 
     public function index(Request $request): Response
@@ -55,6 +62,7 @@ class SupplierManagementController extends Controller
         $status = (string) $request->query('status', self::STATUS_FILTER_OPEN);
         $status = in_array($status, [self::STATUS_FILTER_ALL, ...Supplier::STATUSES], true) ? $status : self::STATUS_FILTER_OPEN;
         $category = in_array($request->query('category'), Supplier::CATEGORIES, true) ? (string) $request->query('category') : '';
+        $criticality = in_array($request->query('criticality'), Supplier::CRITICALITIES, true) ? (string) $request->query('criticality') : '';
 
         $query = $this->access->visibleSuppliers($user);
 
@@ -76,6 +84,10 @@ class SupplierManagementController extends Controller
             $query->where('suppliers.category', $category);
         }
 
+        if ($criticality !== '') {
+            $query->where('suppliers.criticality', $criticality);
+        }
+
         $suppliers = $query
             ->with('owner:id,name')
             ->orderByRaw('lower(suppliers.name)')
@@ -92,10 +104,13 @@ class SupplierManagementController extends Controller
                 'search' => $search,
                 'status' => $status,
                 'category' => $category,
+                'criticality' => $criticality,
             ],
             'statuses' => Supplier::STATUSES,
             'initial_statuses' => Supplier::INITIAL_STATUSES,
             'categories' => Supplier::CATEGORIES,
+            'criticalities' => Supplier::CRITICALITIES,
+            'review_intervals' => Supplier::REVIEW_INTERVALS,
             'permissions' => [
                 'can_edit' => $canEdit,
             ],
@@ -113,6 +128,7 @@ class SupplierManagementController extends Controller
         $open = ! $supplier->isEnded();
         // Reached through visibleSuppliers(); the history carries no access of its own.
         $changes = $supplier->statusChanges()->with('changedBy:id,name')->get();
+        $criticalityChanges = $supplier->criticalityChanges()->with('changedBy:id,name')->get();
         $canDelete = $this->access->canDelete($user);
 
         return Inertia::render('App/SupplierManagement/Show', [
@@ -129,6 +145,7 @@ class SupplierManagementController extends Controller
                 // still is.
                 'status' => $changes->last()?->from_status ?? $supplier->status,
             ],
+            'criticality' => $this->criticalityPayload($supplier, $criticalityChanges),
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,
                 'from_status' => $change->from_status,
@@ -143,11 +160,14 @@ class SupplierManagementController extends Controller
                 'can_activate' => $canEdit && $supplier->status === Supplier::STATUS_ONBOARDING,
                 'can_end' => $canEdit && $open,
                 'can_reopen' => $canEdit && ! $open,
+                'can_change_criticality' => $canEdit && $open,
                 'can_delete' => $canDelete && $supplier->isDeletable(),
                 // Says why the delete button is missing, for someone who could otherwise delete.
                 'has_delete_right' => $canDelete,
             ],
             'categories' => Supplier::CATEGORIES,
+            'criticalities' => Supplier::CRITICALITIES,
+            'review_intervals' => Supplier::REVIEW_INTERVALS,
             'owner_options' => $canEdit && $open ? $this->access->ownerCandidates($user) : [],
         ]);
     }
@@ -157,19 +177,25 @@ class SupplierManagementController extends Controller
         $user = $this->authorizedUser();
         abort_unless($this->access->canEdit($user), 403);
 
-        $fields = $this->validatedFields($request, $user, null);
-        $initialStatus = $request->validate([
+        // Registering asks, besides the master data, whether the supplier is in use and how important
+        // it is — all checked at once, so every missing answer is shown together.
+        [$fields, $validated] = $this->validatedFields($request, $user, null, [
             'initial_status' => ['required', 'string', Rule::in(Supplier::INITIAL_STATUSES)],
-        ], SupplierValidationMessages::messages(), SupplierValidationMessages::attributes())['initial_status'];
+            ...SupplierCriticalityService::rules(),
+        ]);
+        $initialStatus = $validated['initial_status'];
+        $classification = SupplierCriticalityService::classification($validated);
 
-        $supplier = $this->guardOrganizationNumberRace(function () use ($fields, $user, $initialStatus): Supplier {
+        $supplier = $this->guardOrganizationNumberRace(function () use ($fields, $user, $initialStatus, $classification): Supplier {
             $supplier = new Supplier($fields + [
                 'customer_id' => (int) $user->customer_id,
                 'created_by' => $user->id,
                 'updated_by' => $user->id,
             ]);
-            // The status it is registered with is the supplier's own; it is no status change.
+            // The status and classification it is registered with are the supplier's own; neither is
+            // a change.
             $supplier->status = $initialStatus;
+            $supplier->forceFill($classification);
             $supplier->save();
 
             return $supplier;
@@ -190,11 +216,36 @@ class SupplierManagementController extends Controller
             return back()->with('error', __('procynia.supplier_management.validation.reopen_before_edit'));
         }
 
-        $fields = $this->validatedFields($request, $user, $supplier);
+        [$fields] = $this->validatedFields($request, $user, $supplier);
 
         $this->guardOrganizationNumberRace(fn () => $supplier->fill($fields + ['updated_by' => $user->id])->save());
 
         return back()->with('success', __('procynia.supplier_management.flash.updated'));
+    }
+
+    /**
+     * Vurder kritikalitet / Endre kritikalitet: the level the user chose, the review interval, the
+     * four answers it was decided on, and why. Written to the history; refused for an ended
+     * supplier.
+     */
+    public function changeCriticality(Request $request, int $supplierId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $supplier = $this->visibleSupplierOrFail($user, $supplierId);
+        abort_unless($this->access->canEdit($user), 403);
+
+        if ($supplier->isEnded()) {
+            return back()->with('error', __('procynia.supplier_management.validation.reopen_before_edit'));
+        }
+
+        $validated = $request->validate([
+            ...SupplierCriticalityService::rules(),
+            'reason' => ['required', 'string', 'max:5000'],
+        ], SupplierCriticalityService::messages(), SupplierValidationMessages::attributes());
+
+        $this->criticality->change($supplier, $user, SupplierCriticalityService::classification($validated), $validated['reason']);
+
+        return back()->with('success', __('procynia.supplier_management.flash.criticality_changed'));
     }
 
     /** Ta i bruk: Under vurdering → Aktiv. */
@@ -264,12 +315,13 @@ class SupplierManagementController extends Controller
 
     /**
      * The same master data for registering and editing, checked against what the user can reach.
-     * Status is not among them: it is chosen once at registration and then moves only through the
-     * lifecycle.
+     * Status and criticality are not among them: both are chosen at registration (passed in as
+     * $extraRules) and then move only through the lifecycle and Endre kritikalitet.
      *
-     * @return array<string, mixed>
+     * @param  array<string, mixed>  $extraRules
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>} the master data, and everything validated
      */
-    private function validatedFields(Request $request, User $user, ?Supplier $current): array
+    private function validatedFields(Request $request, User $user, ?Supplier $current, array $extraRules = []): array
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -281,7 +333,8 @@ class SupplierManagementController extends Controller
             'contact_email' => ['nullable', 'string', 'email', 'max:255'],
             'contact_phone' => ['nullable', 'string', 'max:50'],
             'note' => ['nullable', 'string', 'max:10000'],
-        ], SupplierValidationMessages::messages(), SupplierValidationMessages::attributes());
+            ...$extraRules,
+        ], SupplierCriticalityService::messages(), SupplierValidationMessages::attributes());
 
         // A 422 rather than a 404: the id came from a form, and whether it names another customer's
         // user or nobody at all, the answer is the same.
@@ -299,7 +352,7 @@ class SupplierManagementController extends Controller
             throw ValidationException::withMessages(['organization_number' => __('procynia.supplier_management.validation.organization_number_taken')]);
         }
 
-        return [
+        return [[
             'name' => trim($validated['name']),
             'organization_number' => $organizationNumber,
             'category' => $validated['category'],
@@ -309,7 +362,7 @@ class SupplierManagementController extends Controller
             'contact_email' => $this->optional($validated['contact_email'] ?? null),
             'contact_phone' => $this->optional($validated['contact_phone'] ?? null),
             'note' => $this->optional($validated['note'] ?? null),
-        ];
+        ], $validated];
     }
 
     private function optional(?string $value): ?string
@@ -364,9 +417,64 @@ class SupplierManagementController extends Controller
             'category' => $supplier->category,
             'deliverable_description' => $supplier->deliverable_description,
             'status' => $supplier->status,
+            'criticality' => $supplier->criticality,
             'owner_user_id' => $supplier->owner_user_id !== null ? (int) $supplier->owner_user_id : null,
             'owner_name' => $supplier->owner?->name,
             'url' => route('app.supplier-management.show', ['supplierId' => $supplier->id]),
         ];
+    }
+
+    /**
+     * Hvor viktig er leverandøren for oss?: the current classification, when and by whom it was last
+     * decided and why, and every change before it — newest first, each with the four answers before
+     * and after. The classification the supplier was registered with closes the list; the oldest
+     * change's from_* says what it was, or the supplier itself when nothing has changed since.
+     *
+     * @param  Collection<int, SupplierCriticalityChange>  $changes
+     * @return array<string, mixed>
+     */
+    private function criticalityPayload(Supplier $supplier, $changes): array
+    {
+        $latest = $changes->first();
+        $oldest = $changes->last();
+
+        $registered = $oldest !== null
+            ? ($oldest->from_criticality !== null ? $this->classificationFrom($oldest, 'from_') : null)
+            : $supplier->classification();
+
+        return [
+            'current' => $supplier->classification(),
+            'decided_at' => $latest !== null ? $latest->changed_at?->toIso8601String() : ($registered !== null ? $supplier->created_at?->toIso8601String() : null),
+            'decided_by_name' => $latest !== null ? $latest->changedBy?->name : ($registered !== null ? $supplier->createdBy?->name : null),
+            'reason' => $latest?->reason,
+            'history' => $changes->map(fn (SupplierCriticalityChange $change): array => [
+                'id' => (int) $change->id,
+                'from' => $change->from_criticality !== null ? $this->classificationFrom($change, 'from_') : null,
+                'to' => $this->classificationFrom($change, 'to_'),
+                'reason' => $change->reason,
+                'changed_at' => $change->changed_at?->toIso8601String(),
+                'changed_by_name' => $change->changedBy?->name,
+            ])->all(),
+            'registered' => $registered !== null ? [
+                'classification' => $registered,
+                'at' => $supplier->created_at?->toIso8601String(),
+                'by_name' => $supplier->createdBy?->name,
+            ] : null,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function classificationFrom(SupplierCriticalityChange $change, string $side): array
+    {
+        $classification = [
+            'criticality' => $change->{$side.'criticality'},
+            'review_interval_months' => $change->{$side.'review_interval_months'},
+        ];
+
+        foreach (Supplier::CRITICALITY_QUESTIONS as $question) {
+            $classification[$question] = (bool) $change->{$side.$question};
+        }
+
+        return $classification;
     }
 }

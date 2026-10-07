@@ -5,15 +5,14 @@ namespace Tests\Feature\App;
 use App\Models\Customer;
 use App\Models\Supplier;
 use App\Models\SupplierStatusChange;
-use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerPermissionCatalog;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use LogicException;
 use Tests\Concerns\CreatesImprovementCaseScenarios;
+use Tests\Concerns\CreatesSupplierScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
@@ -34,6 +33,7 @@ use Tests\TestCase;
 class SupplierRegisterTest extends TestCase
 {
     use CreatesImprovementCaseScenarios;
+    use CreatesSupplierScenarios;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -61,7 +61,7 @@ class SupplierRegisterTest extends TestCase
         ['customer' => $customer] = $this->context('grc');
         $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
 
-        $this->actingAs($editor)->post('/app/supplier-management', $this->payload($editor, ['initial_status' => Supplier::STATUS_ONBOARDING]))
+        $this->actingAs($editor)->post('/app/supplier-management', $this->supplierPayload($editor, ['initial_status' => Supplier::STATUS_ONBOARDING]))
             ->assertRedirect();
         $supplier = Supplier::query()->where('customer_id', $customer->id)->sole();
         $this->assertSame(Supplier::STATUS_ONBOARDING, $supplier->status);
@@ -82,7 +82,7 @@ class SupplierRegisterTest extends TestCase
         $this->assertSame(Supplier::STATUS_ENDED, $supplier->fresh()->status);
 
         // Ended: read-only. Nothing changes until it is reopened, and it cannot be ended or activated again.
-        $this->actingAs($editor)->patch($url, $this->payload($editor, ['name' => 'Nytt navn']))->assertSessionHas('error');
+        $this->actingAs($editor)->patch($url, $this->supplierPayload($editor, ['name' => 'Nytt navn']))->assertSessionHas('error');
         $this->assertSame('Drift AS', $supplier->fresh()->name);
         $this->actingAs($editor)->post("{$url}/end", ['reason' => 'Igjen'])->assertSessionHasErrors('reason');
         $this->actingAs($editor)->post("{$url}/activate")->assertSessionHasErrors('reason');
@@ -95,7 +95,7 @@ class SupplierRegisterTest extends TestCase
         // Gjenåpne: active and editable again; the ending stays in the history.
         $this->actingAs($editor)->post("{$url}/reopen", ['reason' => ''])->assertSessionHasErrors('reason');
         $this->actingAs($editor)->post("{$url}/reopen", ['reason' => 'Ny avtale.'])->assertSessionHasNoErrors();
-        $this->actingAs($editor)->patch($url, $this->payload($editor, ['name' => 'Nytt navn']))->assertSessionHasNoErrors();
+        $this->actingAs($editor)->patch($url, $this->supplierPayload($editor, ['name' => 'Nytt navn']))->assertSessionHasNoErrors();
         $this->assertSame(['active', 'Nytt navn'], [$supplier->fresh()->status, $supplier->fresh()->name]);
 
         $page = $this->actingAs($editor)->get($url)->assertOk()->viewData('page');
@@ -125,7 +125,7 @@ class SupplierRegisterTest extends TestCase
 
         $url = "/app/supplier-management/{$foreign->id}";
         $this->actingAs($editor)->get($url)->assertNotFound();
-        $this->actingAs($editor)->patch($url, $this->payload($editor))->assertNotFound();
+        $this->actingAs($editor)->patch($url, $this->supplierPayload($editor))->assertNotFound();
         $this->actingAs($editor)->post("{$url}/activate")->assertNotFound();
         $this->actingAs($editor)->post("{$url}/end", ['reason' => 'x'])->assertNotFound();
         $this->actingAs($editor)->post("{$url}/reopen", ['reason' => 'x'])->assertNotFound();
@@ -153,7 +153,7 @@ class SupplierRegisterTest extends TestCase
         $withoutView = $this->member($customer);
         $this->grantAll($customer, $withoutView, [CustomerPermissionCatalog::SUPPLIER_EDIT, CustomerPermissionCatalog::SUPPLIER_ASSESS, CustomerPermissionCatalog::SUPPLIER_DELETE]);
         $this->actingAs($withoutView)->get($url)->assertForbidden();
-        $this->actingAs($withoutView)->post('/app/supplier-management', $this->payload($owner))->assertForbidden();
+        $this->actingAs($withoutView)->post('/app/supplier-management', $this->supplierPayload($owner))->assertForbidden();
 
         // view alone, and view + assess: read, never write.
         foreach ([[], [CustomerPermissionCatalog::SUPPLIER_ASSESS]] as $extra) {
@@ -163,8 +163,8 @@ class SupplierRegisterTest extends TestCase
             $this->assertSame([], $page['props']['owner_options']);
             $this->actingAs($reader)->get($url)->assertOk();
 
-            $this->actingAs($reader)->post('/app/supplier-management', $this->payload($owner))->assertForbidden();
-            $this->actingAs($reader)->patch($url, $this->payload($owner))->assertForbidden();
+            $this->actingAs($reader)->post('/app/supplier-management', $this->supplierPayload($owner))->assertForbidden();
+            $this->actingAs($reader)->patch($url, $this->supplierPayload($owner))->assertForbidden();
             $this->actingAs($reader)->post("{$url}/end", ['reason' => 'x'])->assertForbidden();
             $this->actingAs($reader)->post("{$url}/reopen", ['reason' => 'x'])->assertForbidden();
             $this->actingAs($reader)->post("{$url}/activate")->assertForbidden();
@@ -175,7 +175,7 @@ class SupplierRegisterTest extends TestCase
         $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
         $this->actingAs($editor)->delete($url)->assertForbidden();
         $deleter = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_DELETE]);
-        $this->actingAs($deleter)->patch($url, $this->payload($owner))->assertForbidden();
+        $this->actingAs($deleter)->patch($url, $this->supplierPayload($owner))->assertForbidden();
         $this->actingAs($deleter)->delete($url)->assertRedirect('/app/supplier-management');
         $this->assertNull(Supplier::query()->find($supplier->id));
     }
@@ -192,7 +192,7 @@ class SupplierRegisterTest extends TestCase
         $inactive->forceFill(['is_active' => false])->save();
 
         foreach ([$foreign, $noAccess, $inactive] as $candidate) {
-            $this->actingAs($editor)->post('/app/supplier-management', $this->payload($candidate))
+            $this->actingAs($editor)->post('/app/supplier-management', $this->supplierPayload($candidate))
                 ->assertSessionHasErrors('owner_user_id');
         }
         $this->assertFalse(Supplier::query()->where('customer_id', $customer->id)->exists());
@@ -201,10 +201,10 @@ class SupplierRegisterTest extends TestCase
         $this->assertEqualsCanonicalizing([$editor->id, $reader->id], $candidates);
 
         // Being responsible is not a permission.
-        $this->actingAs($editor)->post('/app/supplier-management', $this->payload($reader))->assertSessionHasNoErrors();
+        $this->actingAs($editor)->post('/app/supplier-management', $this->supplierPayload($reader))->assertSessionHasNoErrors();
         $supplier = Supplier::query()->where('customer_id', $customer->id)->sole();
         $this->assertSame($reader->id, (int) $supplier->owner_user_id);
-        $this->actingAs($reader)->patch("/app/supplier-management/{$supplier->id}", $this->payload($reader))->assertForbidden();
+        $this->actingAs($reader)->patch("/app/supplier-management/{$supplier->id}", $this->supplierPayload($reader))->assertForbidden();
     }
 
     public function test_the_organization_number_is_unique_within_the_customer_only(): void
@@ -214,12 +214,12 @@ class SupplierRegisterTest extends TestCase
         $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
         $otherEditor = $this->supplierUser($other, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
 
-        $this->actingAs($editor)->post('/app/supplier-management', $this->payload($editor, ['organization_number' => '987 654 321']))->assertSessionHasNoErrors();
+        $this->actingAs($editor)->post('/app/supplier-management', $this->supplierPayload($editor, ['organization_number' => '987 654 321']))->assertSessionHasNoErrors();
         $this->assertSame('987654321', Supplier::query()->where('customer_id', $customer->id)->value('organization_number'));
 
-        $this->actingAs($editor)->post('/app/supplier-management', $this->payload($editor, ['name' => 'Kopi AS', 'organization_number' => '987654321']))
+        $this->actingAs($editor)->post('/app/supplier-management', $this->supplierPayload($editor, ['name' => 'Kopi AS', 'organization_number' => '987654321']))
             ->assertSessionHasErrors('organization_number');
-        $this->actingAs($otherEditor)->post('/app/supplier-management', $this->payload($otherEditor, ['organization_number' => '987654321']))
+        $this->actingAs($otherEditor)->post('/app/supplier-management', $this->supplierPayload($otherEditor, ['organization_number' => '987654321']))
             ->assertSessionHasNoErrors();
     }
 
@@ -282,61 +282,5 @@ class SupplierRegisterTest extends TestCase
         $customer->delete();
         $this->assertFalse(SupplierStatusChange::query()->where('supplier_id', $used->id)->exists());
         $this->assertNull(Supplier::query()->find($used->id));
-    }
-
-    /**
-     * A person of the customer whose role holds supplier.view plus the given keys.
-     *
-     * @param  list<string>  $extra
-     */
-    private function supplierUser(Customer $customer, array $extra): User
-    {
-        $user = $this->member($customer);
-        $this->grantAll($customer, $user, [CustomerPermissionCatalog::SUPPLIER_VIEW, ...$extra]);
-
-        return $user->fresh();
-    }
-
-    private function supplier(Customer $customer, User $owner, string $name, string $status = Supplier::STATUS_ACTIVE): Supplier
-    {
-        $supplier = new Supplier([
-            'customer_id' => $customer->id,
-            'name' => $name,
-            'category' => 'it_cloud',
-            'deliverable_description' => 'Drift av lønnssystem',
-            'owner_user_id' => $owner->id,
-        ]);
-        $supplier->status = $status;
-        $supplier->save();
-
-        return $supplier;
-    }
-
-    /** @return array<string, mixed> */
-    private function payload(User $owner, array $overrides = []): array
-    {
-        return array_merge([
-            'name' => 'Drift AS',
-            'organization_number' => '',
-            'category' => 'it_cloud',
-            'deliverable_description' => 'Drift av lønnssystem',
-            'owner_user_id' => $owner->id,
-            'contact_name' => 'Kari Kontakt',
-            'contact_email' => 'kari@drift.example',
-            'contact_phone' => '+47 900 00 000',
-            'note' => '',
-            'initial_status' => Supplier::STATUS_ACTIVE,
-        ], $overrides);
-    }
-
-    /** Runs the write in a savepoint, so the refusal does not poison the test's transaction. */
-    private function assertDatabaseRefuses(callable $write, string $what): void
-    {
-        try {
-            DB::transaction(fn () => $write());
-            $this->fail("The database must refuse {$what}.");
-        } catch (QueryException) {
-            $this->addToAssertionCount(1);
-        }
     }
 }

@@ -5,6 +5,32 @@ export const SUPPLIER_STATUS_TONES = {
     ended: 'slate',
 };
 
+/** The badge tone of each criticality level; the three differ, and none is a status tone of its own. */
+export const CRITICALITY_TONES = {
+    standard: 'blue',
+    important: 'amber',
+    critical: 'rose',
+};
+
+/**
+ * The review interval a level fills in when it is chosen (plan §4.2). Only a starting point: the
+ * person may choose another, and Standard starts without one.
+ */
+export const DEFAULT_REVIEW_INTERVALS = {
+    standard: null,
+    important: 24,
+    critical: 12,
+};
+
+/** The four ja/nei questions, in the order the form asks them. */
+export const CRITICALITY_QUESTIONS = ['processes_personal_data', 'has_system_access', 'supports_critical_delivery', 'hard_to_replace'];
+
+const CRITICALITY_FALLBACKS = {
+    standard: 'Standard',
+    important: 'Viktig',
+    critical: 'Kritisk',
+};
+
 const STATUS_FALLBACKS = {
     onboarding: 'Under vurdering',
     active: 'Aktiv',
@@ -67,4 +93,85 @@ export function countLabel(count, tr = {}) {
     return count === 1
         ? (tr.count_one ?? '1 leverandør')
         : (tr.count ?? ':count leverandører').replace(':count', String(count));
+}
+
+/** A criticality level as the page names it: «Standard», «Viktig», «Kritisk». */
+export function criticalityLabel(level, tr = {}) {
+    return tr.criticalities?.[level] ?? CRITICALITY_FALLBACKS[level] ?? level;
+}
+
+/** The classification a form starts from: nothing answered, nothing chosen. */
+export function emptyCriticality() {
+    return {
+        criticality: '',
+        review_interval_months: '',
+        processes_personal_data: null,
+        has_system_access: null,
+        supports_critical_delivery: null,
+        hard_to_replace: null,
+    };
+}
+
+/** Viktig and Kritisk must have a review interval; Standard may be without. */
+export function intervalRequired(level) {
+    return level === 'important' || level === 'critical';
+}
+
+/**
+ * The form data after choosing a level: the level, and the interval that level starts with. The
+ * answers are left exactly as they were — they never decide the level, and the level never changes
+ * them.
+ */
+export function chooseCriticality(data, level) {
+    const interval = DEFAULT_REVIEW_INTERVALS[level];
+
+    return { ...data, criticality: level, review_interval_months: interval ? String(interval) : '' };
+}
+
+/** «Hver 12. måned», or «Ingen fast vurdering» without an interval. */
+export function intervalLabel(months, tr = {}) {
+    const c = tr.criticality ?? {};
+
+    return months
+        ? (c.interval_option ?? 'Hver :months. måned').replace(':months', String(months))
+        : (c.no_interval ?? 'Ingen fast vurdering');
+}
+
+/** «Ja» / «Nei». */
+export function answerLabel(answer, tr = {}) {
+    return answer ? (tr.criticality?.yes ?? 'Ja') : (tr.criticality?.no ?? 'Nei');
+}
+
+/**
+ * One criticality change as a sentence: the first classification («Vurdert som Viktig av Kari»), a
+ * new level («Endret fra Standard til Viktig av Kari»), or the same level with another interval or
+ * other answers («Fortsatt Viktig – endret av Kari»).
+ *
+ * @param {{from: object|null, to: object, changed_by_name: string|null}} entry
+ * @param {object} tr  translations.supplier_management
+ */
+export function describeCriticalityChange(entry, tr = {}) {
+    const history = tr.criticality?.history ?? {};
+    const name = entry.changed_by_name ?? (tr.unknown_user ?? 'en tidligere bruker');
+    const to = criticalityLabel(entry.to.criticality, tr);
+
+    if (! entry.from) {
+        return (history.first ?? 'Vurdert som :level av :name').replace(':level', to).replace(':name', name);
+    }
+
+    if (entry.from.criticality === entry.to.criticality) {
+        return (history.kept ?? 'Fortsatt :level – endret av :name').replace(':level', to).replace(':name', name);
+    }
+
+    return (history.changed ?? 'Endret fra :from til :to av :name')
+        .replace(':from', criticalityLabel(entry.from.criticality, tr))
+        .replace(':to', to)
+        .replace(':name', name);
+}
+
+/** The classification a supplier was registered with: «Vurdert som Kritisk ved registrering av Kari». */
+export function describeCriticalityRegistration(registered, tr = {}) {
+    return (tr.criticality?.history?.registered ?? 'Vurdert som :level ved registrering av :name')
+        .replace(':level', criticalityLabel(registered.classification.criticality, tr))
+        .replace(':name', registered.by_name ?? (tr.unknown_user ?? 'en tidligere bruker'));
 }

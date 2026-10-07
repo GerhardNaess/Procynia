@@ -464,6 +464,8 @@ Route::prefix('app')
             Route::post('/{supplierId}/activate', [SupplierManagementController::class, 'activate'])->whereNumber('supplierId')->name('activate');
             Route::post('/{supplierId}/end', [SupplierManagementController::class, 'end'])->whereNumber('supplierId')->name('end');
             Route::post('/{supplierId}/reopen', [SupplierManagementController::class, 'reopen'])->whereNumber('supplierId')->name('reopen');
+            // Vurder / Endre kritikalitet: the only way criticality changes after registration.
+            Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

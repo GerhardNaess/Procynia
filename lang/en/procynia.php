@@ -2548,6 +2548,8 @@ return [
         'status_filter_all' => 'All statuses',
         'category_filter' => 'Category',
         'all_categories' => 'All categories',
+        'criticality_filter' => 'Criticality',
+        'all_criticalities' => 'All levels',
         'count_one' => '1 supplier',
         'count' => ':count suppliers',
         'no_matches' => 'No suppliers match the search.',
@@ -2557,6 +2559,7 @@ return [
         'col_deliverable' => 'Delivers',
         'col_owner' => 'Internal owner',
         'col_status' => 'Status',
+        'col_criticality' => 'Criticality',
         'no_owner' => 'No owner',
         'statuses' => [
             'onboarding' => 'Under review',
@@ -2571,6 +2574,59 @@ return [
             'transport_logistics' => 'Transport and logistics',
             'operations_facilities' => 'Operations and facilities',
             'other' => 'Other',
+        ],
+        'not_classified' => 'Not assessed',
+        'criticalities' => [
+            'standard' => 'Standard',
+            'important' => 'Important',
+            'critical' => 'Critical',
+        ],
+        'criticality' => [
+            'heading' => 'Criticality',
+            'intro' => 'How important the supplier is to the organisation – not how well it performs.',
+            'not_classified' => 'Criticality has not been assessed yet.',
+            'assess' => 'Assess criticality',
+            'change' => 'Change criticality',
+            'form_heading' => 'How critical is the supplier?',
+            'form_intro' => 'Answer the four questions, then choose the level yourself. The answers are the basis for your choice and are saved with it.',
+            'registration_heading' => 'How important is the supplier to us?',
+            'questions_heading' => 'Basis for the decision',
+            'questions' => [
+                'processes_personal_data' => 'Does the supplier process personal data on our behalf?',
+                'has_system_access' => 'Does the supplier have access to our systems or our information?',
+                'supports_critical_delivery' => 'Would losing the supplier stop or weaken a critical delivery of ours?',
+                'hard_to_replace' => 'Is the supplier hard to replace at short notice?',
+            ],
+            'yes' => 'Yes',
+            'no' => 'No',
+            'level_label' => 'Criticality',
+            'level_hints' => [
+                'standard' => 'Limited importance; easy to replace.',
+                'important' => 'Loss or failure is noticed, but can be handled within reasonable time.',
+                'critical' => 'Loss or failure directly affects the core business or sensitive information.',
+            ],
+            'interval_label' => 'How often should the supplier be reviewed?',
+            'interval_hint_required' => 'Important and critical suppliers must have a review interval.',
+            'interval_hint_optional' => 'Optional for standard suppliers.',
+            'interval_none' => 'No fixed review',
+            'interval_option' => 'Every :months months',
+            'reason_label' => 'Reason',
+            'reason_hint' => 'Why is the supplier assessed this way? For example «The supplier runs a business-critical integration, and losing it would stop order processing.»',
+            'submit' => 'Save assessment',
+            'interval' => 'Review interval',
+            'no_interval' => 'No fixed review',
+            'last_decided' => 'Last assessed',
+            'decided_by' => 'Assessed by',
+            'reason' => 'Reason',
+            'history_heading' => 'Changes in criticality',
+            'history' => [
+                'first' => 'Assessed as :level by :name',
+                'changed' => 'Changed from :from to :to by :name',
+                'kept' => 'Still :level – changed by :name',
+                'registered' => 'Assessed as :level at registration by :name',
+                'interval_changed' => 'Review interval: :from → :to',
+                'answer_was' => 'was :answer',
+            ],
         ],
         'fields' => [
             'name' => 'Name',
@@ -2640,6 +2696,7 @@ return [
             'ended' => 'The supplier is ended.',
             'reopened' => 'The supplier is reopened.',
             'deleted' => 'The supplier is deleted.',
+            'criticality_changed' => 'The criticality is saved.',
         ],
         'validation' => [
             'reason_required' => 'Write a reason.',
@@ -2648,6 +2705,9 @@ return [
             'not_deletable' => 'The supplier has a history and cannot be deleted. End it instead.',
             'owner_not_allowed' => 'Choose an active person with access to Supplier follow-up.',
             'organization_number_taken' => 'A supplier with this organisation number is already registered.',
+            'interval_required' => 'Choose how often the supplier should be reviewed. Important and critical suppliers must have a review interval.',
+            'answer_required' => 'Answer yes or no.',
+            'criticality_unchanged' => 'Nothing has changed. Change the level, the review interval or an answer – or cancel.',
             'rules' => [
                 'required' => ':attribute is required.',
                 'choose' => 'Choose a valid value for :attribute.',
@@ -2666,6 +2726,8 @@ return [
                 'note' => 'Note',
                 'initial_status' => 'Is the supplier in use?',
                 'reason' => 'Reason',
+                'criticality' => 'Criticality',
+                'review_interval_months' => 'Review interval',
             ],
         ],
         'help' => [
@@ -2691,6 +2753,13 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Criticality',
+                        'items' => [
+                            ['title' => 'Standard, Important or Critical', 'text' => 'Criticality says how important the supplier is to the organisation. You choose the level yourselves; four yes/no questions are the basis for the choice, but are not turned into any level.'],
+                            ['title' => 'Not assessed', 'text' => 'The supplier has no criticality yet. Open the supplier and choose «Assess criticality».'],
+                        ],
+                    ],
+                    [
                         'title' => 'Access',
                         'items' => [
                             ['title' => 'Permissions', 'text' => 'Who can view, register and delete suppliers is decided by the roles under Access in the customer environment.'],
@@ -2712,6 +2781,14 @@ return [
                         ],
                     ],
                     [
+                        'title' => 'Criticality',
+                        'items' => [
+                            ['title' => 'How important is the supplier?', 'text' => 'Choose Standard, Important or Critical. The four yes/no questions are the basis for the choice and are saved with it, but the system neither calculates nor suggests a level.'],
+                            ['title' => 'Review interval', 'text' => 'How often the supplier should be reviewed. Important and critical suppliers must have an interval.'],
+                            ['title' => 'Change criticality', 'text' => 'Every change requires a reason and is saved in the history with the level, interval and answers before and after. The history cannot be changed or deleted.'],
+                        ],
+                    ],
+                    [
                         'title' => 'History',
                         'items' => [
                             ['title' => 'What is saved', 'text' => 'Every status change is saved with who made it, when and why. The history cannot be changed or deleted.'],
@@ -2721,7 +2798,7 @@ return [
                         'title' => 'End or delete?',
                         'items' => [
                             ['title' => 'End', 'text' => 'The usual way to take a supplier out of use. The history is kept.'],
-                            ['title' => 'Delete', 'text' => 'Only for a supplier registered by mistake that has never changed status. Deleting cannot be undone.'],
+                            ['title' => 'Delete', 'text' => 'Only for a supplier registered by mistake that has never changed status or criticality. Deleting cannot be undone.'],
                         ],
                     ],
                 ],

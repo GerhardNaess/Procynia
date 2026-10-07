@@ -4,6 +4,8 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
+import SupplierCriticality from './SupplierCriticality';
+import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
@@ -34,6 +36,8 @@ export default function SupplierManagementShow() {
         translations = {},
         supplier: item,
         registered = null,
+        criticality = null,
+        review_intervals: reviewIntervals = [],
         status_history: statusHistory = [],
         permissions = {},
         categories = [],
@@ -88,7 +92,10 @@ export default function SupplierManagementShow() {
 
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-3">
-                        <StatusBadge tone={SUPPLIER_STATUS_TONES[item.status] ?? 'slate'}>{statusLabel(item.status, tr)}</StatusBadge>
+                        <div className="flex flex-wrap gap-2" data-testid="supplier-badges">
+                            <StatusBadge tone={SUPPLIER_STATUS_TONES[item.status] ?? 'slate'}>{statusLabel(item.status, tr)}</StatusBadge>
+                            {item.criticality && <SupplierCriticalityBadge level={item.criticality} tr={tr} />}
+                        </div>
                         <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{item.name}</h1>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -150,6 +157,15 @@ export default function SupplierManagementShow() {
                         )}
                     </section>
                 )}
+
+                <SupplierCriticality
+                    supplierId={item.id}
+                    criticality={criticality}
+                    canChange={permissions.can_change_criticality ?? false}
+                    reviewIntervals={reviewIntervals}
+                    locale={locale}
+                    tr={tr}
+                />
 
                 <section className={CARD} aria-labelledby="supplier-status-heading" data-testid="supplier-status">
                     <h2 id="supplier-status-heading" className="text-xl font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h2>
