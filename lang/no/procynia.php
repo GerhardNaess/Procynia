@@ -888,6 +888,7 @@ return [
         'overview' => 'Oversikt',
         'worklist' => 'I arbeid',
         'ai_instructions' => 'AI instrukser',
+        'company_vocabulary' => 'Standardvokabular',
         'live_search' => 'Live søk',
         'registered_notices' => 'Lagrede kunngjøringer',
         'history' => 'Historikk',
