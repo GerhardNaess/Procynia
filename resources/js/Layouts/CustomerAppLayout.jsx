@@ -292,6 +292,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'compliance';
         }
 
+        // Leverandøroppfølging. Its own area, never `suppliers` — that is Anbud's /app/suppliers.
+        if (pathname.startsWith('/app/supplier-management')) {
+            return 'supplier-management';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }

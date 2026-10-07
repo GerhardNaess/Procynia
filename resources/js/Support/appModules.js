@@ -138,11 +138,20 @@ export const APP_MODULES = [
             { key: 'compliance-audits', href: '/app/compliance/audits', label: (m) => m.compliance_audits ?? 'Revisjoner' },
         ],
     },
-    // Leverandøroppfølging belongs under Styring once it is built. Declaring the workspace now is
-    // the whole move: while `built` is false it stays in Planlagt, and the day it flips it leaves
-    // Planlagt and appears under Styring — for customers whose package carries `supplier`, and
-    // (once it declares one) for people who hold its view permission.
-    { key: 'suppliers', built: false, workspace: 'governance', module: 'supplier', label: (m) => m.suppliers ?? 'Leverandører' },
+    {
+        key: 'suppliers',
+        href: '/app/supplier-management',
+        built: true,
+        workspace: 'governance',
+        module: 'supplier',
+        // SupplierManagementController refuses the page without this key. supplier is an
+        // explicit-grant domain: System Owner holds it only through a role of their own, so the rail
+        // does not offer the module to a System Owner without one.
+        permission: 'supplier.view',
+        label: (m) => m.suppliers ?? 'Leverandører',
+        // Never `suppliers`: that area is Anbud's Doffin competitor view (/app/suppliers).
+        areas: ['supplier-management'],
+    },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
     { key: 'services', built: false, module: null, label: (m) => m.services ?? 'Tjenester & SLA' },

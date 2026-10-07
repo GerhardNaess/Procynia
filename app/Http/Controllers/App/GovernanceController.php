@@ -43,6 +43,7 @@ class GovernanceController extends Controller
         'objectives' => ['objectives', CustomerPermissionCatalog::OBJECTIVE_VIEW, 'app.objectives.index'],
         'improvements' => ['improvements', CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'app.improvements.index'],
         'compliance' => ['compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW, 'app.compliance.requirements.index'],
+        'suppliers' => ['supplier', CustomerPermissionCatalog::SUPPLIER_VIEW, 'app.supplier-management.index'],
     ];
 
     public function __construct(

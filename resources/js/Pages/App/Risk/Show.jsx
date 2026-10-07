@@ -44,6 +44,7 @@ export default function RiskShow() {
         risk_acceptance: riskAcceptance = null,
         review_schedule: reviewSchedule = null,
         wiki_knowledge: wikiKnowledge = [],
+        supplier_origin: supplierOrigin = null,
         permissions = {},
         area_options: areaOptions = [],
         owner_options: ownerOptions = [],
@@ -137,6 +138,15 @@ export default function RiskShow() {
                         <p className="text-sm text-slate-600">
                             {tr.status_hint ?? 'Status sier hvor risikoen er i livsløpet. Risikovurderingen sier hvor alvorlig den er.'}
                         </p>
+                        {supplierOrigin && supplierOrigin.map((origin) => (
+                            <p key={origin.url} className="break-words rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" data-testid="risk-supplier-origin">
+                                {tr.supplier_origin ?? 'Gjelder leverandør'}{' '}
+                                <Link href={origin.url} className="font-semibold text-violet-700 hover:text-violet-900">{origin.name}</Link>
+                                {origin.from_supplier && (
+                                    <span className="block text-slate-600">{tr.supplier_origin_created ?? 'Risikoen ble opprettet fra leverandøren.'}</span>
+                                )}
+                            </p>
+                        ))}
                     </div>
                     <div className="flex flex-wrap gap-2">
                         {permissions.can_edit && ! editing && (

@@ -43,6 +43,8 @@ return [
         'improvements' => ['sort_order' => 37],
         // Etterlevelse og revisjon (Krav and Revisjoner) — from ISO up.
         'compliance' => ['sort_order' => 40],
+        // Leverandøroppfølging — GRC only. Its routes are `app.supplier-management.`, never
+        // `app.suppliers.`, which is Anbud's.
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
     ],
@@ -77,9 +79,7 @@ return [
             'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance'],
         ],
 
-        // GRC: ISO, plus Leverandøroppfølging. `supplier` is listed now so that a GRC customer gets
-        // it the day it is built; until then the rail keeps it under Planlagt (appModules.js
-        // `built: false`) and no route exists for it, so holding it opens nothing.
+        // GRC: ISO, plus Leverandøroppfølging — the module that makes GRC more than ISO.
         'grc' => [
             'orderable' => true,
             'sort_order' => 40,
@@ -120,6 +120,9 @@ return [
         'app.objectives.' => 'objectives',
         'app.improvements.' => 'improvements',
         'app.compliance.' => 'compliance',
+        // Leverandøroppfølging. Not `app.suppliers.`: that name, and /app/suppliers, are Anbud's
+        // Doffin competitor view (Konkurrenter) above.
+        'app.supplier-management.' => 'supplier',
     ],
 
 ];

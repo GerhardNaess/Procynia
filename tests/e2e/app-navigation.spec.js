@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginAs, SYSTEM_OWNER, USER } from './helpers/auth.js';
-import { DESKTOP, PHONE, sidewaysOverflow } from './helpers/readability.js';
+import { DESKTOP, PHONE, expectPageHelp, expectReadable, sidewaysOverflow } from './helpers/readability.js';
 import { tinker } from './helpers/risk.js';
 
 test.beforeEach(async ({ page }) => {
@@ -245,9 +245,9 @@ test('a collapsed rail still shows which module you are in, and what the icons m
     // Planned modules stay inert and dimmed, and say so on hover. (Risiko is built now; a built
     // module the person holds no permission in is left off the rail rather than dimmed, so a
     // module that is still planned is the one to check here.)
-    await expect(page.getByTestId('module-suppliers')).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.getByTestId('module-suppliers')).toHaveClass(/text-slate-400/);
-    await expect(page.getByTestId('module-suppliers')).toHaveAttribute('title', /Leverandører — /);
+    await expect(page.getByTestId('module-contracts')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByTestId('module-contracts')).toHaveClass(/text-slate-400/);
+    await expect(page.getByTestId('module-contracts')).toHaveAttribute('title', /Kontrakter — /);
 
     // Expanding puts the labels back and drops the now-redundant tooltips.
     await page.getByTestId('module-sidebar-toggle').click();
@@ -279,7 +279,7 @@ test('a phone never gets a collapsed rail, and never gets a sideways scrollbar',
     await expect(page.getByTestId('module-wiki')).toContainText('Wiki');
     // A module every E2E user reaches, rather than Risiko, which this user holds no permission in.
     await expect(page.getByTestId('module-tenders')).toContainText('Anbud');
-    await expect(page.getByTestId('module-suppliers')).toContainText('Leverandører');
+    await expect(page.getByTestId('module-contracts')).toContainText('Kontrakter');
 
     const railWidth = (await page.getByTestId('module-rail').boundingBox()).width;
     expect(railWidth).toBeGreaterThan(200);
@@ -570,8 +570,8 @@ test.describe('the rail follows what the customer bought, and folds', () => {
             ['Basis', ['basis'], ['Hjem', 'Wiki', 'Styring'], ['Kvalitet', 'Avvik og forbedringer'], false],
             ['ISO', ['iso'], ['Hjem', 'Wiki', 'Styring'], iso, true],
             ['ISO Anbud', ['iso', 'tender'], ['Hjem', 'Wiki', 'Anbud', 'Styring'], iso, true],
-            // GRC carries Leverandøroppfølging, which is not built: the same rail as ISO.
-            ['GRC', ['grc'], ['Hjem', 'Wiki', 'Styring'], iso, true],
+            // GRC is ISO plus Leverandører, last under Styring.
+            ['GRC', ['grc'], ['Hjem', 'Wiki', 'Styring'], [...iso, 'Leverandører'], true],
         ];
 
         for (const [label, packages, top, children, compliance] of cases) {
@@ -598,6 +598,35 @@ test.describe('the rail follows what the customer bought, and folds', () => {
             await expect(page.getByTestId('module-compliance-toggle'), label).toHaveCount(compliance ? 1 : 0);
             await expect(page.getByTestId('module-sidebar').locator('button[aria-controls]'), label).toHaveCount(compliance ? 2 : 1);
         }
+    });
+
+    test('GRC: Leverandører opens from Styring, is the current page, and is readable with its help', async ({ page }) => {
+        await loginAsSeeded(page, await seed('GRC Leverandorer', ['grc', 'tender']));
+        await page.setViewportSize(DESKTOP);
+
+        await page.goto('/app/governance');
+        await page.getByTestId('governance-module-suppliers').click();
+        await expect(page).toHaveURL(/\/app\/supplier-management$/);
+
+        const rail = page.getByTestId('module-sidebar');
+        await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
+        await expect(page.getByText('Leverandøroppfølging', { exact: true })).toBeVisible();
+        await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
+        await expect(rail.locator('[aria-current="page"]')).toHaveCount(1);
+        await expect(rail.locator('[aria-current="page"]')).toHaveText('Leverandører');
+        await expect(page.getByTestId('module-governance')).toHaveAttribute('data-active', 'true');
+        // Anbud's own `suppliers` area (Konkurrenter) is a different place, and is not lit.
+        await expect(page.getByTestId('module-tenders')).not.toHaveAttribute('aria-current', 'page');
+
+        await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Tilgang']);
+        await expectReadable(page, 'supplier-management', '01-register');
+
+        // A folded Styring opens itself when the page is reached directly.
+        await page.getByTestId('module-governance-toggle').click();
+        await expect(page.getByTestId('module-governance-children')).toBeHidden();
+        await page.goto('/app/wiki');
+        await page.goto('/app/supplier-management');
+        await expect(page.getByTestId('module-governance-children')).toBeVisible();
     });
 
     test('Styring folds, stays folded after a reload, and opens itself for a page inside it', async ({ page }) => {

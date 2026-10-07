@@ -27,13 +27,13 @@ describe('the rail shows the whole planned product structure', () => {
         );
     });
 
-    test('exactly eight are built, and they are the eight that have pages', () => {
+    test('exactly nine are built, and they are the nine that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements', '/app/supplier-management'],
         );
     });
 
@@ -98,7 +98,9 @@ describe('the selected module follows the page', () => {
         assert.equal(activeModuleKey('procurements'), 'tenders');
         assert.equal(activeModuleKey('worklist'), 'tenders');
         assert.equal(activeModuleKey('ai'), 'tenders');
+        // Anbud's Doffin competitor view keeps the `suppliers` area; Leverandøroppfølging has its own.
         assert.equal(activeModuleKey('suppliers'), 'tenders');
+        assert.equal(activeModuleKey('supplier-management'), 'suppliers');
         assert.equal(activeModuleKey('wiki'), 'wiki');
         assert.equal(activeModuleKey('wiki-ask'), 'wiki');
         assert.equal(activeModuleKey('quality'), 'quality');
@@ -297,7 +299,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
     test('the five governance modules sit under Styring, and nothing else does', () => {
         assert.deepEqual(
             APP_MODULES.filter((module) => module.built && module.workspace === 'governance').map((module) => module.key),
-            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'],
         );
         assert.deepEqual(APP_WORKSPACES.map((workspace) => workspace.key), ['governance']);
         assert.equal(APP_WORKSPACES[0].href, '/app/governance');
@@ -352,39 +354,27 @@ describe('Styring groups the governance modules, and only the ones the person ca
     });
 
     test('planned modules keep their own group and never land under Styring', () => {
-        // Even Leverandører, which already declares Styring as its workspace and is carried by a
-        // package that names `supplier`: until it is built it is planned, and only planned.
         const rail = railEntries([...ALL_MODULES, 'supplier'], ['quality.view']);
         const workspace = rail.entries.find((entry) => entry.key === 'governance');
 
         assert.ok(rail.planned.some((module) => module.key === 'contracts'));
-        assert.ok(rail.planned.some((module) => module.key === 'suppliers'));
         assert.deepEqual(workspace.children.map((child) => child.key), ['quality']);
         assert.ok(! rail.planned.some((module) => module.key === 'compliance'), 'Etterlevelse og revisjon is built');
+        assert.ok(! rail.planned.some((module) => module.key === 'suppliers'), 'Leverandører is built');
     });
 
-    test('a module that becomes built leaves Planlagt and lands under Styring, without a second entry', () => {
-        // The future of Leverandøroppfølging, simulated: built, entitled, and given a permission.
-        const suppliers = APP_MODULES.find((module) => module.key === 'suppliers');
-        const original = { ...suppliers };
+    test('Leverandører is under Styring only with both the `supplier` module and supplier.view', () => {
+        const children = (modules, permissions) => railEntries(modules, permissions)
+            .entries.find((entry) => entry.key === 'governance').children.map((child) => child.key);
 
-        try {
-            Object.assign(suppliers, { built: true, href: '/app/supplier-follow-up', permission: 'supplier.view', areas: ['supplier-follow-up'] });
-            const rail = railEntries([...ALL_MODULES, 'supplier'], ['quality.view', 'supplier.view']);
-            const workspace = rail.entries.find((entry) => entry.key === 'governance');
+        assert.deepEqual(children([...ALL_MODULES, 'supplier'], ['quality.view', 'supplier.view']), ['quality', 'suppliers']);
+        // Without supplier.view — System Owner without a role of their own included — or without the
+        // package it is nowhere: not dimmed, not planned.
+        assert.deepEqual(children([...ALL_MODULES, 'supplier'], ['quality.view']), ['quality']);
+        assert.deepEqual(children(ALL_MODULES, ['quality.view', 'supplier.view']), ['quality']);
 
-            assert.deepEqual(workspace.children.map((child) => child.key), ['quality', 'suppliers']);
-            assert.ok(! rail.planned.some((module) => module.key === 'suppliers'));
-
-            // Without the package, it is nowhere — not dimmed, not planned.
-            const withoutPackage = railEntries(ALL_MODULES, ['quality.view', 'supplier.view']);
-            assert.deepEqual(withoutPackage.entries.find((entry) => entry.key === 'governance').children.map((child) => child.key), ['quality']);
-            assert.ok(! withoutPackage.planned.some((module) => module.key === 'suppliers'));
-        } finally {
-            for (const key of Object.keys(suppliers)) {
-                delete suppliers[key];
-            }
-            Object.assign(suppliers, original);
+        for (const [modules, permissions] of [[[...ALL_MODULES, 'supplier'], ['quality.view']], [ALL_MODULES, ['quality.view', 'supplier.view']]]) {
+            assert.ok(! railEntries(modules, permissions).planned.some((module) => module.key === 'suppliers'));
         }
     });
 
@@ -404,11 +394,11 @@ describe('Styring groups the governance modules, and only the ones the person ca
     });
 
     test('Styring is lit on its own page and on every page inside its modules', () => {
-        for (const area of ['governance', 'quality', 'risk', 'objectives', 'improvements', 'compliance']) {
+        for (const area of ['governance', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier-management']) {
             assert.equal(activeWorkspaceKey(area), 'governance', area);
         }
 
-        for (const area of ['overview', 'wiki', 'procurements', 'environment', 'info-center', 'billing']) {
+        for (const area of ['overview', 'wiki', 'procurements', 'suppliers', 'environment', 'info-center', 'billing']) {
             assert.equal(activeWorkspaceKey(area), null, area);
         }
     });
@@ -416,9 +406,11 @@ describe('Styring groups the governance modules, and only the ones the person ca
     test('the area comes from the path prefix, so detail, create and edit pages count too', () => {
         assert.match(layout, /if \(pathname === '\/app\/governance'\) \{\s*\n\s*return 'governance';/);
 
-        for (const prefix of ['quality', 'risk', 'objectives', 'improvements', 'compliance']) {
+        for (const prefix of ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier-management']) {
             assert.match(layout, new RegExp(`pathname\\.startsWith\\('/app/${prefix}'\\)`), prefix);
         }
+
+        assert.match(layout, /pathname\.startsWith\('\/app\/supplier-management'\)\) \{\s*\n\s*return 'supplier-management';/);
 
         assert.match(layout, /const activeWorkspace = activeWorkspaceKey\(activeMainArea\);/);
     });

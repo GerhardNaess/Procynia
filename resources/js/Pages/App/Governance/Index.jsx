@@ -15,6 +15,7 @@ const FALLBACK_DESCRIPTIONS = {
     objectives: 'Sett mål, følg resultater og se hva som trenger oppmerksomhet.',
     improvements: 'Registrer, behandle og følg opp avvik og forbedringsmuligheter.',
     compliance: 'Kravene virksomheten skal etterleve, vurdering av etterlevelse og revisjoner med funn og oppfølging.',
+    suppliers: 'Leverandørene virksomheten er avhengig av, hvem som følger dem opp og hvor viktige de er.',
 };
 
 /**

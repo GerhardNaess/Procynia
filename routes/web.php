@@ -33,7 +33,13 @@ use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
+use App\Http\Controllers\App\SupplierAssessmentController;
+use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\SupplierDocumentController;
+use App\Http\Controllers\App\SupplierImprovementController;
+use App\Http\Controllers\App\SupplierManagementController;
+use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
@@ -447,6 +453,45 @@ Route::prefix('app')
             Route::post('/sources', [ComplianceSourceController::class, 'store'])->name('sources.store');
             Route::patch('/sources/{sourceId}', [ComplianceSourceController::class, 'update'])->whereNumber('sourceId')->name('sources.update');
             Route::delete('/sources/{sourceId}', [ComplianceSourceController::class, 'destroy'])->whereNumber('sourceId')->name('sources.destroy');
+        });
+        // Leverandøroppfølging. Named under `app.supplier-management.`, mapped to the `supplier` module.
+        // Not /suppliers: that path and `app.suppliers.` are Anbud's Doffin competitor view.
+        // Suppliers are addressed by a plain id and resolved through SupplierAccessService, never by
+        // implicit model binding, so one of another customer is a 404.
+        Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
+            Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
+            Route::post('/', [SupplierManagementController::class, 'store'])->name('store');
+            Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
+            Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');
+            Route::delete('/{supplierId}', [SupplierManagementController::class, 'destroy'])->whereNumber('supplierId')->name('destroy');
+            // Ta i bruk / Avslutt leverandør / Gjenåpne leverandør: the only ways status changes. Each
+            // writes an immutable history row.
+            Route::post('/{supplierId}/activate', [SupplierManagementController::class, 'activate'])->whereNumber('supplierId')->name('activate');
+            Route::post('/{supplierId}/end', [SupplierManagementController::class, 'end'])->whereNumber('supplierId')->name('end');
+            Route::post('/{supplierId}/reopen', [SupplierManagementController::class, 'reopen'])->whereNumber('supplierId')->name('reopen');
+            // Vurder leverandør: a new, immutable supplier assessment (supplier.assess).
+            Route::post('/{supplierId}/assessments', [SupplierAssessmentController::class, 'store'])->whereNumber('supplierId')->name('assessments.store');
+            // Vurder / Endre kritikalitet: the only way criticality changes after registration.
+            Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
+            // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit).
+            Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
+            Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
+            Route::post('/{supplierId}/documents/{documentId}/renew', [SupplierDocumentController::class, 'renew'])->whereNumber(['supplierId', 'documentId'])->name('documents.renew');
+            Route::delete('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'destroy'])->whereNumber(['supplierId', 'documentId'])->name('documents.destroy');
+            // Avvik og forbedringer hos leverandøren: a new case through ImprovementCaseCreator, or an
+            // existing one connected; the case itself stays Avvik og forbedringer's.
+            Route::post('/{supplierId}/improvement-cases', [SupplierImprovementController::class, 'store'])->whereNumber('supplierId')->name('improvement-cases.store');
+            Route::post('/{supplierId}/improvement-cases/link', [SupplierImprovementController::class, 'link'])->whereNumber('supplierId')->name('improvement-cases.link');
+            Route::delete('/{supplierId}/improvement-cases/{linkId}', [SupplierImprovementController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('improvement-cases.unlink');
+            // Risikoer som gjelder leverandøren: a new risk through RiskCreator, or an existing one
+            // connected; the risk itself stays Risiko's.
+            Route::post('/{supplierId}/risks', [SupplierRiskController::class, 'store'])->whereNumber('supplierId')->name('risks.store');
+            Route::post('/{supplierId}/risks/link', [SupplierRiskController::class, 'link'])->whereNumber('supplierId')->name('risks.link');
+            Route::delete('/{supplierId}/risks/{linkId}', [SupplierRiskController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('risks.unlink');
+            // Krav som gjelder leverandøren: an existing requirement in Etterlevelse og revisjon added or
+            // removed; the requirement itself, and its status, stay there.
+            Route::post('/{supplierId}/requirements', [SupplierComplianceRequirementController::class, 'link'])->whereNumber('supplierId')->name('requirements.link');
+            Route::delete('/{supplierId}/requirements/{linkId}', [SupplierComplianceRequirementController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('requirements.unlink');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

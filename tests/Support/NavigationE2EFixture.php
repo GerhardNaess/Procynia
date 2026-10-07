@@ -122,6 +122,7 @@ class NavigationE2EFixture
                 CustomerPermissionCatalog::OBJECTIVE_VIEW,
                 CustomerPermissionCatalog::IMPROVEMENT_VIEW,
                 CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::SUPPLIER_VIEW,
             ]);
             $role->syncBusinessAreas(true, []);
             $person->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
