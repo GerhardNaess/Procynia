@@ -1,0 +1,159 @@
+import { expect, test } from '@playwright/test';
+import { loginAs } from './helpers/auth.js';
+import { DESKTOP, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
+import { SUPPLIER_E2E_PASSWORD, cleanUpSupplierE2eData, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
+
+const suffix = supplierE2eSuffix();
+cleanUpSupplierE2eData(suffix);
+
+const expectReadable = (page, name) => expectReadableAt(page, 'suppliers', name);
+
+/**
+ * Leverandøroppfølging, end to end, in a GRC customer of the run's own. Access, tenant isolation,
+ * the transition rules and the delete rule are PHP's (SupplierRegisterTest); this is the journey
+ * a person actually takes: register a supplier under review, open it, edit it, take it into use,
+ * end it with a reason, and reopen it — with the history kept and every page and form checked for
+ * text under 16 px and sideways scrolling at desktop and 390 px.
+ */
+test('a supplier is registered, edited, taken into use, ended and reopened, with its history kept', async ({ page }) => {
+    test.setTimeout(180_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const name = `Driftspartner ${suffix} AS`;
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+
+    // Styring → Leverandører: an empty register that says how to begin.
+    await page.goto('/app/governance');
+    await page.getByTestId('governance-module-suppliers').click();
+    await page.waitForURL(/\/app\/supplier-management$/);
+    await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
+    await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
+    await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Tilgang']);
+    await expectReadable(page, '01-empty-register');
+
+    // Registrer leverandør: no status select, the server's own messages first.
+    await page.getByRole('button', { name: 'Registrer leverandør' }).click();
+    await expect(page.locator('#supplier-status')).toHaveCount(0);
+    await page.locator('form [required]').evaluateAll((elements) => elements.forEach((element) => element.removeAttribute('required')));
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await expect(page.getByText('Navn må fylles ut.')).toBeVisible();
+    await expect(page.getByText('Intern ansvarlig må fylles ut.')).toBeVisible();
+
+    await page.locator('#supplier-name').fill(name);
+    await page.locator('#supplier-organization-number').fill('987 654 321');
+    await page.locator('#supplier-category').selectOption({ label: 'IT og skytjenester' });
+    await page.locator('#supplier-deliverable').fill('Drift av lønnssystem');
+    await page.locator('#supplier-owner').selectOption({ label: person.colleague_name });
+    await page.locator('#supplier-contact-name').fill('Kari Kontakt');
+    await page.locator('#supplier-contact-email').fill('kari@driftspartner.example');
+    await page.getByLabel('Vi vurderer leverandøren').check();
+    await expectReadable(page, '02-register-form');
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+
+    await page.waitForURL(/\/app\/supplier-management\/\d+$/);
+    const supplierUrl = page.url();
+    await expect(page.getByText('Leverandøren er registrert.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+    const facts = page.getByTestId('supplier-facts');
+    for (const text of ['IT og skytjenester', '987654321', person.colleague_name]) {
+        await expect(facts).toContainText(text);
+    }
+    await expect(page.getByTestId('supplier-contact')).toContainText('kari@driftspartner.example');
+    await expect(page.getByTestId('supplier-status')).toContainText('ikke tatt i bruk');
+    await expect(page.getByTestId('supplier-history')).toContainText(`Registrert som Under vurdering av ${person.name}`);
+    // Never used: it could be deleted, and the page says what deleting is for.
+    await expect(page.getByTestId('supplier-delete')).toContainText('registrert ved en feil');
+    await expectPageHelp(page, 'Om leverandøren', ['Fra registrert til avsluttet', 'Historikk', 'Avslutte eller slette?']);
+    await expectReadable(page, '03-supplier');
+
+    // The register lists it; open it from there.
+    await page.goto(`/app/supplier-management?${new URLSearchParams({ search: name })}`);
+    const row = page.locator('tbody tr', { hasText: name });
+    for (const text of ['IT og skytjenester', 'Drift av lønnssystem', person.colleague_name, 'Under vurdering']) {
+        await expect(row).toContainText(text);
+    }
+    await expectReadable(page, '04-register-with-supplier');
+    await row.getByRole('link', { name }).click();
+    await page.waitForURL(supplierUrl);
+
+    // Rediger: master data changes, the status does not.
+    await page.getByRole('button', { name: 'Rediger' }).click();
+    await expect(page.getByTestId('supplier-initial-status')).toHaveCount(0);
+    await page.locator('#supplier-deliverable').fill('Drift av lønns- og personalsystem');
+    await expectReadable(page, '05-edit');
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await expect(page.getByText('Leverandøren er oppdatert.', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('supplier-deliverable')).toHaveText('Drift av lønns- og personalsystem');
+
+    // Ta i bruk: Aktiv, and with a history it can no longer be deleted.
+    await page.getByRole('button', { name: 'Ta i bruk' }).click();
+    await expect(page.getByText('Leverandøren er tatt i bruk.', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('supplier-history')).toContainText(`Tatt i bruk av ${person.name}`);
+    await expect(page.getByRole('button', { name: 'Slett leverandør' })).toHaveCount(0);
+    await expect(page.getByTestId('supplier-delete')).toContainText('Avslutt den i stedet');
+
+    // Avslutt leverandør: the reason is required, and the server says so in Norwegian.
+    await page.getByRole('button', { name: 'Avslutt leverandør' }).click();
+    await expectReadable(page, '06-end-form');
+    await page.locator('#supplier-end-reason').evaluate((element) => element.removeAttribute('required'));
+    await page.getByRole('button', { name: 'Avslutt leverandør', exact: true }).last().click();
+    await expect(page.getByText('Begrunnelse må fylles ut.')).toBeVisible();
+    await page.locator('#supplier-end-reason').fill('Avtalen er sagt opp.');
+    await page.getByRole('button', { name: 'Avslutt leverandør', exact: true }).last().click();
+    await expect(page.getByText('Leverandøren er avsluttet.', { exact: true })).toBeVisible();
+
+    // Ended: read-only — no Rediger, no Ta i bruk; only Gjenåpne.
+    await expect(page.getByRole('button', { name: 'Rediger' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Avslutt leverandør' })).toHaveCount(0);
+    await expect(page.getByTestId('supplier-history')).toContainText('Avtalen er sagt opp.');
+    await expectReadable(page, '07-ended');
+
+    // It leaves the default register, and comes back under «Avsluttet».
+    await page.goto(`/app/supplier-management?${new URLSearchParams({ search: name })}`);
+    await expect(page.locator('tbody tr', { hasText: name })).toHaveCount(0);
+    await page.locator('#supplier-status-filter').selectOption({ label: 'Avsluttet' });
+    await page.getByRole('button', { name: 'Søk', exact: true }).click();
+    await expect(page.locator('tbody tr', { hasText: name })).toContainText('Avsluttet');
+    await page.goto(supplierUrl);
+
+    // Gjenåpne leverandør: Aktiv and editable again, the ending still in the history.
+    await page.getByRole('button', { name: 'Gjenåpne leverandør' }).click();
+    await page.locator('#supplier-reopen-reason').fill('Ny avtale inngått.');
+    await page.getByRole('button', { name: 'Gjenåpne leverandør', exact: true }).last().click();
+    await expect(page.getByText('Leverandøren er gjenåpnet.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Rediger' })).toBeVisible();
+    const entries = page.getByTestId('supplier-history-entry');
+    await expect(entries).toHaveCount(3);
+    await expect(entries.nth(0)).toContainText(`Gjenåpnet av ${person.name}`);
+    await expect(entries.nth(1)).toContainText('Avtalen er sagt opp.');
+    await expectReadable(page, '08-reopened');
+});
+
+/**
+ * Sletting is for a supplier registered by mistake. PHP proves the rule; this proves the person
+ * meets the confirmation that says so, and that the supplier is gone afterwards.
+ */
+test('a supplier registered by mistake is deleted after a confirmation that says what deleting is for', async ({ page }) => {
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const name = `Feilregistrert ${suffix} AS`;
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.goto('/app/supplier-management');
+    await page.getByRole('button', { name: 'Registrer leverandør' }).click();
+    await page.locator('#supplier-name').fill(name);
+    await page.locator('#supplier-category').selectOption({ label: 'Annet' });
+    await page.locator('#supplier-deliverable').fill('Ingenting');
+    await page.locator('#supplier-owner').selectOption({ label: person.name });
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await page.waitForURL(/\/app\/supplier-management\/\d+$/);
+
+    let message = '';
+    page.once('dialog', (dialog) => { message = dialog.message(); dialog.accept(); });
+    await page.getByRole('button', { name: 'Slett leverandør' }).click();
+    await page.waitForURL(/\/app\/supplier-management$/);
+    expect(message).toContain('registrert ved en feil');
+    await expect(page.getByText('Leverandøren er slettet.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
+});

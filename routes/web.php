@@ -451,8 +451,19 @@ Route::prefix('app')
         });
         // Leverandøroppfølging. Named under `app.supplier-management.`, mapped to the `supplier` module.
         // Not /suppliers: that path and `app.suppliers.` are Anbud's Doffin competitor view.
+        // Suppliers are addressed by a plain id and resolved through SupplierAccessService, never by
+        // implicit model binding, so one of another customer is a 404.
         Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
             Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
+            Route::post('/', [SupplierManagementController::class, 'store'])->name('store');
+            Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
+            Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');
+            Route::delete('/{supplierId}', [SupplierManagementController::class, 'destroy'])->whereNumber('supplierId')->name('destroy');
+            // Ta i bruk / Avslutt leverandør / Gjenåpne leverandør: the only ways status changes. Each
+            // writes an immutable history row.
+            Route::post('/{supplierId}/activate', [SupplierManagementController::class, 'activate'])->whereNumber('supplierId')->name('activate');
+            Route::post('/{supplierId}/end', [SupplierManagementController::class, 'end'])->whereNumber('supplierId')->name('end');
+            Route::post('/{supplierId}/reopen', [SupplierManagementController::class, 'reopen'])->whereNumber('supplierId')->name('reopen');
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

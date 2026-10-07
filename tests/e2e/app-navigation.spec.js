@@ -618,7 +618,7 @@ test.describe('the rail follows what the customer bought, and folds', () => {
         // Anbud's own `suppliers` area (Konkurrenter) is a different place, and is not lit.
         await expect(page.getByTestId('module-tenders')).not.toHaveAttribute('aria-current', 'page');
 
-        await expectPageHelp(page, 'Om leverandøroppfølging', ['Hva du finner her', 'Tilgang']);
+        await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Tilgang']);
         await expectReadable(page, 'supplier-management', '01-register');
 
         // A folded Styring opens itself when the page is reached directly.
