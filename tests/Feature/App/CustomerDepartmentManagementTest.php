@@ -346,14 +346,14 @@ class CustomerDepartmentManagementTest extends TestCase
     {
         $customer = $this->createCustomer('Procynia AS');
         $sales = $this->createDepartment($customer->id, 'Salg');
-        $delivery = $this->createDepartment($customer->id, 'Leveranse');
+        $delivery = $this->createDepartment($customer->id, 'Leveranseavdeling');
         $manager = $this->departmentScopedBidManager($customer, [$sales->id]);
 
         $response = $this->actingAs($manager)->get('/app/departments');
 
         $response->assertOk();
         $response->assertSee('Salg');
-        $response->assertDontSee('Leveranse');
+        $response->assertDontSee('Leveranseavdeling');
 
         $this->actingAs($manager)->get("/app/departments/{$sales->id}/edit")->assertForbidden();
         $this->actingAs($manager)->get("/app/departments/{$delivery->id}/edit")->assertForbidden();
