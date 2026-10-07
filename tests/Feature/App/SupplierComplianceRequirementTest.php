@@ -138,6 +138,8 @@ class SupplierComplianceRequirementTest extends TestCase
         $this->actingAs($manager)->post($url, ['requirement_id' => $requirement->id])->assertSessionHasNoErrors();
         $this->actingAs($manager)->post("/app/supplier-management/{$supplier->id}/end", ['reason' => 'Avtalen er sagt opp.'])->assertSessionHasNoErrors();
         $this->actingAs($manager)->delete("{$url}/".$supplier->requirementLinks()->value('id'))->assertSessionHasErrors('requirement_id');
+        $late = $this->complianceRequirement($this->complianceSource($customer, 'Ny kilde'), 'Registrert etter avslutning');
+        $this->actingAs($manager)->post($url, ['requirement_id' => $late->id])->assertSessionHasErrors('requirement_id');
         $page = $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props'];
         $this->assertSame([null, ['Tilgangsstyring']], [$page['requirement_linking'], array_column($page['requirements'], 'title')]);
 

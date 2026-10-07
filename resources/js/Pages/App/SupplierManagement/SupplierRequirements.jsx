@@ -90,7 +90,7 @@ export default function SupplierRequirements({ supplier, requirements, linking, 
             <p className="mt-1 text-base text-slate-600">{r.not_status ?? 'At et krav gjelder leverandøren, sier ikke om leverandøren oppfyller det. Det vurderer du i leverandørvurderingen.'}</p>
 
             {requirements.length === 0 ? (
-                <p className="mt-4 text-base text-slate-800" data-testid="requirements-none">{r.none ?? 'Ingen krav i Etterlevelse og revisjon er lagt til for leverandøren.'}</p>
+                <p className="mt-4 text-base text-slate-800" data-testid="requirements-none">{r.none ?? 'Ingen krav i Etterlevelse og revisjon gjelder leverandøren.'}</p>
             ) : (
                 <ul className="mt-4 space-y-3" data-testid="requirements-list">
                     {requirements.map((entry) => (

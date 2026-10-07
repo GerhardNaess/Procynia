@@ -5,6 +5,7 @@ import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import SupplierAttention from './SupplierAttention';
 import SupplierForm from './SupplierForm';
 import { supplierHelp } from './supplierHelp';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
@@ -42,18 +43,21 @@ export default function SupplierManagementIndex() {
         review_intervals: reviewIntervals = [],
         permissions = {},
         owner_options: ownerOptions = [],
+        attention = null,
         locale = 'no',
     } = usePage().props;
 
     const tr = translations?.supplier_management ?? {};
     const canEdit = permissions.can_edit ?? false;
-    const nextReview = (item) => nextReviewText(item, tr, (date) => formatLongDate(date, locale));
+    const formatDate = (date) => formatLongDate(date, locale);
+    const nextReview = (item) => nextReviewText(item, tr, formatDate);
 
     const [creating, setCreating] = useState(false);
     const [search, setSearch] = useState(filters.search ?? '');
     const [status, setStatus] = useState(filters.status ?? '');
     const [category, setCategory] = useState(filters.category ?? '');
     const [criticality, setCriticality] = useState(filters.criticality ?? '');
+    const [attentionOnly, setAttentionOnly] = useState(Boolean(filters.attention));
 
     const form = useForm({
         name: '',
@@ -76,6 +80,7 @@ export default function SupplierManagementIndex() {
             status: status || undefined,
             category: category || undefined,
             criticality: criticality || undefined,
+            attention: attentionOnly ? 1 : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -84,6 +89,7 @@ export default function SupplierManagementIndex() {
         setStatus('');
         setCategory('');
         setCriticality('');
+        setAttentionOnly(false);
         router.get(REGISTER_URL, {}, { replace: true });
     };
 
@@ -92,7 +98,7 @@ export default function SupplierManagementIndex() {
         form.post(REGISTER_URL, { preserveScroll: true });
     };
 
-    const filtered = Boolean(filters.search || filters.status || filters.category || filters.criticality);
+    const filtered = Boolean(filters.search || filters.status || filters.category || filters.criticality || filters.attention);
 
     return (
         <CustomerAppLayout title={tr.index_title ?? 'Leverandører'} showPageTitle={false}>
@@ -130,6 +136,8 @@ export default function SupplierManagementIndex() {
                         />
                     </section>
                 )}
+
+                <SupplierAttention attention={attention} tr={tr} formatDate={formatDate} />
 
                 {visibleCount === 0 ? (
                     <EmptyStateBox
@@ -178,6 +186,16 @@ export default function SupplierManagementIndex() {
                                     ))}
                                 </select>
                             </div>
+                            <label className="flex min-h-10 items-center gap-2 text-base font-semibold text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={attentionOnly}
+                                    onChange={(event) => setAttentionOnly(event.target.checked)}
+                                    className="h-5 w-5 rounded border-slate-300"
+                                    data-testid="supplier-attention-filter"
+                                />
+                                {tr.attention?.filter ?? 'Bare leverandører som trenger oppmerksomhet'}
+                            </label>
                             <div className="flex flex-wrap gap-2">
                                 <button type="submit" className={SECONDARY_ACTION}>{tr.search ?? 'Søk'}</button>
                                 {filtered && (
@@ -234,7 +252,7 @@ export default function SupplierManagementIndex() {
                                             {suppliers.map((item) => (
                                                 <tr key={item.id}>
                                                     <td className="py-3 pr-4 align-top">
-                                                        <Link href={item.url} className="font-semibold text-violet-700 hover:text-violet-900">{item.name}</Link>
+                                                        <Link href={item.url} className="break-words font-semibold text-violet-700 hover:text-violet-900">{item.name}</Link>
                                                         {item.organization_number && <p className="text-base text-slate-600">{item.organization_number}</p>}
                                                     </td>
                                                     <td className="px-4 py-3 align-top text-slate-700">{categoryLabel(item.category, tr)}</td>

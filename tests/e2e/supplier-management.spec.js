@@ -30,7 +30,7 @@ test('a supplier is registered, edited, taken into use, ended and reopened, with
     await page.waitForURL(/\/app\/supplier-management$/);
     await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
     await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
-    await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Tilgang']);
+    await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Trenger oppmerksomhet', 'Tilgang']);
     await expectReadable(page, '01-empty-register');
 
     // Registrer leverandør: no status select, the server's own messages first.
@@ -242,10 +242,22 @@ test('an active supplier is assessed, reassessed, and the earlier assessment sta
 
     const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
     const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Lønnsdrift ${suffix} AS', 'important', 24)`);
+    const notAssessed = 'Leverandøren er Viktig og mangler leverandørvurdering.';
 
     await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
     await page.setViewportSize(DESKTOP);
-    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    // Trenger oppmerksomhet: an important supplier never assessed — on the register, and inline on
+    // the supplier page with the way to the assessment.
+    await page.goto('/app/supplier-management');
+    const panel = page.getByTestId('supplier-attention');
+    await expect(panel.getByTestId('supplier-attention-total')).toHaveText('1 leverandør trenger oppmerksomhet');
+    await expect(panel.getByTestId('supplier-attention-item')).toContainText(notAssessed);
+    await expectReadable(page, '19-attention-register');
+    await panel.getByRole('link', { name: supplier.name }).click();
+    await page.waitForURL(new RegExp(`/app/supplier-management/${supplier.id}$`));
+    await expect(page.getByTestId('supplier-attention')).toContainText(notAssessed);
+    await expect(page.getByTestId('supplier-attention').getByRole('link', { name: 'Gå til leverandørvurdering' })).toBeVisible();
 
     const section = page.getByTestId('supplier-assessment');
     await expect(section.getByTestId('assessment-none')).toHaveText('Leverandøren er ikke vurdert ennå.');
@@ -260,6 +272,7 @@ test('an active supplier is assessed, reassessed, and the earlier assessment sta
     await expectReadable(page, '20-assessment-form');
     await section.getByRole('button', { name: 'Lagre vurdering' }).click();
     await expect(page.getByText('Vurderingen er lagret.', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('supplier-attention')).toHaveCount(0);
 
     const current = section.getByTestId('assessment-current');
     for (const text of ['Tilfredsstillende', person.name, 'Leveringspresisjon og respons', 'Akseptabelt', 'Kritikalitet på tidspunktet: Viktig']) {
@@ -335,6 +348,8 @@ test('documentation is added, corrected, renewed and deleted, and is read-only o
     await section.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
     await expect(page.getByText('Dokumentasjonen er oppdatert.', { exact: true })).toBeVisible();
     await expect(entries.first()).toContainText('Utløpt');
+    // Trenger oppmerksomhet names the expired certificate until it is renewed.
+    await expect(page.getByTestId('supplier-attention')).toContainText('Sertifikatet «ISO 27001-sertifikat» er utløpt');
 
     // Registrer fornyet: same type, new validity and location; the old row stays as Erstattet.
     await entries.first().getByRole('button', { name: 'Registrer fornyet' }).click();
@@ -348,6 +363,7 @@ test('documentation is added, corrected, renewed and deleted, and is read-only o
     await expect(entries.nth(0)).toContainText('Gyldig');
     await expect(entries.nth(0).getByTestId('document-location')).toHaveText('Arkiv sak 2026/114');
     await expect(entries.nth(1)).toContainText('Erstattet');
+    await expect(page.getByTestId('supplier-attention')).not.toContainText('Sertifikatet');
     await expectReadable(page, '31-documents');
 
     // Slett: the replaced row was only kept for reference; deleting it leaves the renewal.
@@ -518,7 +534,7 @@ test('a requirement is added to a supplier, opened in Etterlevelse og revisjon a
     await page.goto(`/app/supplier-management/${supplier.id}`);
 
     const section = page.getByTestId('supplier-requirements');
-    await expect(section.getByTestId('requirements-none')).toHaveText('Ingen krav i Etterlevelse og revisjon er lagt til for leverandøren.');
+    await expect(section.getByTestId('requirements-none')).toHaveText('Ingen krav i Etterlevelse og revisjon gjelder leverandøren.');
 
     // Legg til krav: search among the active requirements, choose one.
     await section.getByRole('button', { name: 'Legg til krav' }).click();

@@ -156,10 +156,12 @@ class SupplierRiskTest extends TestCase
         // Ended: nothing new and nothing removed until reopened; the risk already there is still shown.
         $this->actingAs($manager)->post("/app/supplier-management/{$supplier->id}/end", ['reason' => 'Avtalen er sagt opp.'])->assertSessionHasNoErrors();
         $this->actingAs($manager)->post($url, $this->riskPayload($area, null))->assertSessionHasErrors('title');
+        $late = $this->risk($customer, $area, 'Registrert etter avslutning');
+        $this->actingAs($manager)->post("{$url}/link", ['risk_id' => $late->id])->assertSessionHasErrors('risk_id');
         $this->actingAs($manager)->delete("{$url}/".$supplier->riskLinks()->value('id'))->assertSessionHasErrors('risk_id');
         $page = $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props'];
         $this->assertSame([null, ['Registrert i Risiko']], [$page['risk_handoff'], array_column($page['risks'], 'title')]);
-        $this->assertSame(3, Risk::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame([4, 1], [Risk::query()->where('customer_id', $customer->id)->count(), $supplier->riskLinks()->count()]);
 
         // Another customer's supplier: 404; no row can cross customers.
         $foreign = $this->supplier($other, $this->supplierUser($other, []), 'Fremmed AS');

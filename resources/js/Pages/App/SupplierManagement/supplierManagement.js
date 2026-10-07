@@ -466,3 +466,92 @@ export function filterRequirementOptions(options, search) {
         return words.every((word) => text.includes(word));
     });
 }
+
+const ATTENTION_FALLBACKS = {
+    not_assessed: 'Leverandøren er :level og mangler leverandørvurdering.',
+    review_overdue: 'Neste leverandørvurdering var :date og er forfalt.',
+    missing_owner: 'Leverandøren mangler intern ansvarlig.',
+    document_expired: ':document «:title» er utløpt (gyldig til :date).',
+    document_expiring: ':document «:title» utløper om :days dager (:date).',
+    document_expiring_one: ':document «:title» utløper i morgen (:date).',
+    document_expiring_today: ':document «:title» utløper i dag.',
+};
+
+const ATTENTION_CATEGORY_FALLBACKS = {
+    not_assessed: 'Ikke vurdert',
+    review_overdue: 'Vurdering forfalt',
+    missing_owner: 'Mangler ansvarlig',
+    document_expired: 'Dokumentasjon utløpt',
+    document_expiring: 'Dokumentasjon utløper snart',
+};
+
+/** Where on the supplier page a finding is followed up. */
+export const ATTENTION_TARGETS = {
+    not_assessed: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
+    review_overdue: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
+    missing_owner: { anchor: 'supplier-details-heading', label: 'go_to_details', fallback: 'Gå til Om leverandøren' },
+    document_expired: { anchor: 'supplier-documents-heading', label: 'go_to_documents', fallback: 'Gå til dokumentasjon' },
+    document_expiring: { anchor: 'supplier-documents-heading', label: 'go_to_documents', fallback: 'Gå til dokumentasjon' },
+};
+
+/** A «Trenger oppmerksomhet» category as the panel counts it. */
+export function attentionCategoryLabel(key, tr = {}) {
+    return tr.attention?.categories?.[key] ?? ATTENTION_CATEGORY_FALLBACKS[key] ?? key;
+}
+
+/** «1 leverandør trenger oppmerksomhet» / «3 leverandører trenger oppmerksomhet». */
+export function attentionTotalLabel(total, tr = {}) {
+    return total === 1
+        ? (tr.attention?.total_one ?? '1 leverandør trenger oppmerksomhet')
+        : (tr.attention?.total_many ?? ':count leverandører trenger oppmerksomhet').replace(':count', String(total));
+}
+
+/**
+ * One finding in a sentence: «Leverandøren er Kritisk og mangler leverandørvurdering.»,
+ * «Sertifikatet «ISO 27001» utløper om 18 dager (21. november 2026).» The rule was decided by the
+ * server; this only words it.
+ */
+export function attentionFindingText(finding, tr = {}, formatDate = (date) => date) {
+    const a = tr.attention ?? {};
+    let key = finding.key;
+
+    if (key === 'document_expiring' && finding.days <= 1) {
+        key = finding.days === 0 ? 'document_expiring_today' : 'document_expiring_one';
+    }
+
+    const template = a[key] ?? ATTENTION_FALLBACKS[key] ?? key;
+    const values = {
+        level: criticalityLabel(finding.criticality, tr),
+        date: formatDate(finding.next_review_on ?? finding.valid_until ?? ''),
+        document: a.documents?.[finding.document_type] ?? 'Dokumentet',
+        title: finding.title ?? '',
+        days: String(finding.days ?? ''),
+    };
+
+    return template.replace(/:(level|date|document|title|days)/g, (match, name) => values[name]);
+}
+
+/** How many suppliers the panel lists before «Vis alle». */
+export const ATTENTION_PREVIEW = 5;
+
+/**
+ * What the register's «Trenger oppmerksomhet» panel draws: nothing when no supplier needs attention,
+ * else the first ATTENTION_PREVIEW suppliers — or all of them once expanded — and whether there are more.
+ */
+export function attentionPanel(attention, expanded = false) {
+    const all = attention?.suppliers ?? [];
+    const total = attention?.total ?? 0;
+
+    if (total === 0 || all.length === 0) {
+        return { visible: false, total: 0, categories: [], items: [], hasMore: false, count: 0 };
+    }
+
+    return {
+        visible: true,
+        total,
+        categories: attention.categories ?? [],
+        items: expanded ? all : all.slice(0, ATTENTION_PREVIEW),
+        hasMore: all.length > ATTENTION_PREVIEW,
+        count: all.length,
+    };
+}

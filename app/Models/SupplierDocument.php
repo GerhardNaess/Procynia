@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -40,6 +41,12 @@ class SupplierDocument extends Model
 
     public const STATUS_REPLACED = 'replaced';
 
+    /**
+     * «Utløper snart»: «Gyldig til» within this many days from today, today and the last day included
+     * (docs/supplier-management-v1-plan.md §8). The one place the window is set.
+     */
+    public const EXPIRING_SOON_DAYS = 60;
+
     protected $fillable = [
         'customer_id',
         'supplier_id',
@@ -69,7 +76,7 @@ class SupplierDocument extends Model
     /**
      * Erstattet once renewed; otherwise Utløpt when «Gyldig til» is before today (the last day is
      * still valid), Gyldig with a date not yet passed, and Ingen utløpsdato without one. Computed on
-     * read, never stored. Whether one is about to expire belongs to Trenger oppmerksomhet.
+     * read, never stored. Whether one is about to expire is isExpiringSoon().
      */
     public function validityStatus(CarbonInterface $today): string
     {
@@ -79,6 +86,26 @@ class SupplierDocument extends Model
             $this->valid_until->toDateString() < $today->toDateString() => self::STATUS_EXPIRED,
             default => self::STATUS_VALID,
         };
+    }
+
+    /**
+     * Still valid, not replaced, and «Gyldig til» no more than EXPIRING_SOON_DAYS away. A replaced row
+     * never counts; if its renewal is deleted it is the current row again and counts once more.
+     */
+    public function isExpiringSoon(CarbonInterface $today): bool
+    {
+        return $this->validityStatus($today) === self::STATUS_VALID
+            && $this->daysUntilExpiry($today) <= self::EXPIRING_SOON_DAYS;
+    }
+
+    /** Whole days from today to «Gyldig til» (0 on the last valid day); null without a date. */
+    public function daysUntilExpiry(CarbonInterface $today): ?int
+    {
+        if ($this->valid_until === null) {
+            return null;
+        }
+
+        return (int) CarbonImmutable::parse($today->toDateString())->diffInDays(CarbonImmutable::parse($this->valid_until->toDateString()), false);
     }
 
     public function supplier(): BelongsTo

@@ -11,6 +11,7 @@ use App\Models\SupplierDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Services\Suppliers\SupplierAttentionService;
 use App\Services\Suppliers\SupplierComplianceRequirementService;
 use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
@@ -54,6 +55,9 @@ use Inertia\Response;
  * supplier assessment of how a supplier performs — is not used here: criticality is how important
  * the supplier is, a register decision (plan §9.2).
  *
+ * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
+ * reasons inline on the supplier page — read from the supplier's own data only.
+ *
  * An ended supplier is read-only until it is reopened.
  */
 class SupplierManagementController extends Controller
@@ -72,6 +76,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierImprovementHandoffService $improvements,
         private readonly SupplierRiskService $risks,
         private readonly SupplierComplianceRequirementService $requirements,
+        private readonly SupplierAttentionService $attention,
     ) {}
 
     public function index(Request $request): Response
@@ -83,6 +88,7 @@ class SupplierManagementController extends Controller
         $status = in_array($status, [self::STATUS_FILTER_ALL, ...Supplier::STATUSES], true) ? $status : self::STATUS_FILTER_OPEN;
         $category = in_array($request->query('category'), Supplier::CATEGORIES, true) ? (string) $request->query('category') : '';
         $criticality = in_array($request->query('criticality'), Supplier::CRITICALITIES, true) ? (string) $request->query('criticality') : '';
+        $attentionOnly = $request->boolean('attention');
 
         $query = $this->access->visibleSuppliers($user);
 
@@ -120,17 +126,25 @@ class SupplierManagementController extends Controller
             ->orderBy('suppliers.id')
             ->get();
 
+        if ($attentionOnly) {
+            $findings = $this->attention->findingsForSuppliers($suppliers);
+            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $findings[(int) $supplier->id] !== [])->values();
+        }
+
         $canEdit = $this->access->canEdit($user);
 
         return Inertia::render('App/SupplierManagement/Index', [
             'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier))->all(),
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleSuppliers($user)->count(),
+            // The worklist of the whole register the user can see, whatever the filters above.
+            'attention' => $this->attention->overview($user),
             'filters' => [
                 'search' => $search,
                 'status' => $status,
                 'category' => $category,
                 'criticality' => $criticality,
+                'attention' => $attentionOnly,
             ],
             'statuses' => Supplier::STATUSES,
             'initial_statuses' => Supplier::INITIAL_STATUSES,
@@ -176,6 +190,7 @@ class SupplierManagementController extends Controller
                 'status' => $changes->last()?->from_status ?? $supplier->status,
             ],
             'criticality' => $this->criticalityPayload($supplier, $criticalityChanges),
+            'attention' => $this->attention->findingsForSupplier($supplier),
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
                 'id' => (int) $assessment->id,
                 'assessed_on' => $assessment->assessed_on?->toDateString(),

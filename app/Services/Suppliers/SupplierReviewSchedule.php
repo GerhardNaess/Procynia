@@ -18,7 +18,7 @@ use Carbon\CarbonInterface;
  *    month clamps to that month's last day (31 Aug + 6 months = 28/29 Feb), the same convention as
  *    RiskReviewSchedule.
  *
- * Whether a review is overdue (from the day after) belongs to Trenger oppmerksomhet, a later phase.
+ * Overdue from the day after the next review date: due today is not overdue, as in RiskReviewSchedule.
  */
 class SupplierReviewSchedule
 {
@@ -29,5 +29,11 @@ class SupplierReviewSchedule
         }
 
         return CarbonImmutable::parse($lastAssessedOn->toDateString())->addMonthsNoOverflow($intervalMonths);
+    }
+
+    /** Whether the next review date has passed. No date — no interval or no assessment — is never overdue. */
+    public function isOverdue(?CarbonInterface $nextReviewOn, ?CarbonInterface $today = null): bool
+    {
+        return $nextReviewOn !== null && $nextReviewOn->toDateString() < ($today ?? now())->toDateString();
     }
 }

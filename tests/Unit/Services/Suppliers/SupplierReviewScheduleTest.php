@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Neste vurdering = the current assessment's day + the supplier's interval, in calendar months that
- * clamp to the month's last day; no interval or no assessment gives no date.
+ * clamp to the month's last day; no interval or no assessment gives no date; overdue from the day after.
  */
 class SupplierReviewScheduleTest extends TestCase
 {
@@ -24,5 +24,17 @@ class SupplierReviewScheduleTest extends TestCase
         $this->assertSame('2028-02-29', $next(6, '2027-08-31'));
         $this->assertNull($next(null, '2026-10-07'));
         $this->assertNull($next(12, null));
+
+        // Overdue from the day after: due today is not overdue, and no date never is.
+        $today = CarbonImmutable::parse('2026-10-07');
+        $this->assertSame(
+            [true, false, false, false],
+            [
+                $schedule->isOverdue(CarbonImmutable::parse('2026-10-06'), $today),
+                $schedule->isOverdue(CarbonImmutable::parse('2026-10-07'), $today),
+                $schedule->isOverdue(CarbonImmutable::parse('2026-10-08'), $today),
+                $schedule->isOverdue(null, $today),
+            ],
+        );
     }
 }

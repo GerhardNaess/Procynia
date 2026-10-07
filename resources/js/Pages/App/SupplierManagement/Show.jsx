@@ -4,7 +4,9 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
+import { formatLongDate } from '../Improvements/improvementStatus';
 import SupplierAssessment from './SupplierAssessment';
+import { SupplierAttentionFindings } from './SupplierAttention';
 import SupplierCriticality from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import SupplierDocuments from './SupplierDocuments';
@@ -42,6 +44,7 @@ export default function SupplierManagementShow() {
         supplier: item,
         registered = null,
         criticality = null,
+        attention = [],
         review_intervals: reviewIntervals = [],
         assessments = [],
         criteria = [],
@@ -126,6 +129,15 @@ export default function SupplierManagementShow() {
                         )}
                     </div>
                 </header>
+
+                {attention.length > 0 && (
+                    <section className="rounded-[24px] border border-amber-200 bg-amber-50 p-6 shadow-sm" aria-labelledby="supplier-attention-heading" data-testid="supplier-attention">
+                        <h2 id="supplier-attention-heading" className="text-xl font-semibold text-slate-950">{tr.attention?.heading ?? 'Trenger oppmerksomhet'}</h2>
+                        <div className="mt-3">
+                            <SupplierAttentionFindings findings={attention} tr={tr} formatDate={(date) => formatLongDate(date, locale)} withLinks />
+                        </div>
+                    </section>
+                )}
 
                 {panel === 'edit' ? (
                     <section className={CARD} aria-labelledby="supplier-edit-heading">

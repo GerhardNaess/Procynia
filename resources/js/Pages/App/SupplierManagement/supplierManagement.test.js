@@ -9,6 +9,9 @@ import {
     DOCUMENT_STATUS_TONES,
     assessmentNeedsFollowUp,
     caseHandoffPrefill,
+    attentionFindingText,
+    attentionPanel,
+    attentionTotalLabel,
     caseOriginText,
     filterRequirementOptions,
     requirementOptionLabel,
@@ -218,6 +221,24 @@ describe('Risikoer som gjelder leverandøren', () => {
         assert.match(section, /canCreate = Boolean\(handoff\) && \(handoff\.area_options \?\? \[\]\)\.length > 0/, 'Opprett risiko needs an area to create in');
         assert.match(section, /cause: '',\s*event: '',\s*consequence: '',\s*business_area_id: '',/, 'årsak, hendelse, konsekvens and fagområde start empty');
         assert.match(section, /entry\.can_unlink/, 'Fjern koblingen only where the server allows it');
+    });
+});
+
+describe('Trenger oppmerksomhet', () => {
+    test('each finding reads as a sentence in domain words, and the panel shows five before «Vis alle»', () => {
+        assert.equal(attentionFindingText({ key: 'not_assessed', criticality: 'critical' }), 'Leverandøren er Kritisk og mangler leverandørvurdering.');
+        assert.equal(attentionFindingText({ key: 'review_overdue', next_review_on: '2026-10-06' }), 'Neste leverandørvurdering var 2026-10-06 og er forfalt.');
+        assert.equal(attentionFindingText({ key: 'missing_owner' }), 'Leverandøren mangler intern ansvarlig.');
+        const tr = { attention: { documents: { insurance_certificate: 'Forsikringsbeviset', certificate: 'Sertifikatet' } } };
+        assert.equal(attentionFindingText({ key: 'document_expired', document_type: 'insurance_certificate', title: 'Ansvar 2025', valid_until: '2026-10-06', days: -1 }, tr), 'Forsikringsbeviset «Ansvar 2025» er utløpt (gyldig til 2026-10-06).');
+        assert.equal(attentionFindingText({ key: 'document_expiring', document_type: 'certificate', title: 'ISO 27001', valid_until: '2026-10-25', days: 18 }, tr), 'Sertifikatet «ISO 27001» utløper om 18 dager (2026-10-25).');
+        assert.equal(attentionFindingText({ key: 'document_expiring', document_type: 'certificate', title: 'ISO 27001', valid_until: '2026-10-07', days: 0 }, tr), 'Sertifikatet «ISO 27001» utløper i dag.');
+
+        assert.equal(attentionPanel(null).visible, false);
+        const suppliers = Array.from({ length: 7 }, (_, id) => ({ id, name: `L${id}`, findings: [] }));
+        assert.deepEqual([attentionPanel({ total: 7, suppliers }).items.length, attentionPanel({ total: 7, suppliers }, true).items.length, attentionPanel({ total: 7, suppliers }).hasMore], [5, 7, true]);
+        assert.equal(attentionTotalLabel(1), '1 leverandør trenger oppmerksomhet');
+        assert.equal(attentionTotalLabel(3), '3 leverandører trenger oppmerksomhet');
     });
 });
 

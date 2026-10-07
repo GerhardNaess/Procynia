@@ -153,11 +153,13 @@ class SupplierImprovementHandoffTest extends TestCase
         $this->actingAs($manager)->post("{$url}/link", ['improvement_case_id' => $visible->id])->assertSessionHasNoErrors();
         $this->actingAs($manager)->post("/app/supplier-management/{$supplier->id}/end", ['reason' => 'Avtalen er sagt opp.'])->assertSessionHasNoErrors();
         $this->actingAs($manager)->post($url, $this->handoffPayload($area, $manager))->assertSessionHasErrors('title');
+        $late = $this->improvementCase($customer, $area, 'Registrert etter avslutning');
+        $this->actingAs($manager)->post("{$url}/link", ['improvement_case_id' => $late->id])->assertSessionHasErrors('improvement_case_id');
         $this->actingAs($manager)->delete("{$url}/".$supplier->improvementCaseLinks()->where('origin', 'linked')->value('id'))->assertSessionHasErrors('improvement_case_id');
         $page = $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props'];
         $this->assertSame([null, 2], [$page['improvement_handoff'], count($page['improvement_cases'])]);
-        // No case was created by the refused hand-off: the two registered directly and the one handed off.
-        $this->assertSame(3, ImprovementCase::query()->where('customer_id', $customer->id)->count());
+        // No case was created by the refused hand-off: the three registered directly and the one handed off.
+        $this->assertSame(4, ImprovementCase::query()->where('customer_id', $customer->id)->count());
 
         // Another customer's supplier: 404; no row can cross customers.
         $foreign = $this->supplier($other, $this->supplierUser($other, []), 'Fremmed AS');
