@@ -11,6 +11,7 @@ use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskAttentionService;
 use App\Services\Risk\RiskControlService;
+use App\Services\Risk\RiskCreator;
 use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
@@ -23,8 +24,6 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -52,6 +51,7 @@ class RiskController extends Controller
         private readonly RiskReviewSchedule $reviewSchedule,
         private readonly RiskAttentionService $attention,
         private readonly RiskWikiKnowledgeService $wikiKnowledge,
+        private readonly RiskCreator $creator,
     ) {}
 
     public function index(Request $request): Response
@@ -193,28 +193,7 @@ class RiskController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $user = $this->authorizedUser();
-        $validated = $this->validated($request);
-
-        // The area is the scope the new risk will live in, so the user must be allowed to create
-        // in *that* area — not merely hold risk.create somewhere.
-        $this->authorizeArea($user, CustomerPermissionCatalog::RISK_CREATE, (int) $validated['business_area_id']);
-        $this->guardOwner($user, $validated);
-
-        $risk = Risk::query()->create([
-            'customer_id' => (int) $user->customer_id,
-            'business_area_id' => (int) $validated['business_area_id'],
-            'title' => trim($validated['title']),
-            'cause' => trim($validated['cause']),
-            'event' => trim($validated['event']),
-            'consequence' => trim($validated['consequence']),
-            'description' => $this->normalizedText($validated['description'] ?? null),
-            'owner_user_id' => $validated['owner_user_id'] ?? null,
-            'status' => $validated['status'],
-            'review_interval_months' => $validated['review_interval_months'] ?? null,
-            'treatment_strategy' => $validated['treatment_strategy'] ?? null,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]);
+        $risk = $this->creator->create($user, $this->validated($request));
 
         return redirect()
             ->route('app.risk.show', ['riskId' => $risk->id])
@@ -233,22 +212,12 @@ class RiskController extends Controller
 
         // Moving a risk changes who can see it, so it takes edit authority on both sides.
         if ($targetAreaId !== (int) $risk->business_area_id) {
-            $this->authorizeArea($user, CustomerPermissionCatalog::RISK_EDIT, $targetAreaId);
+            $this->creator->assertAreaAllows($user, CustomerPermissionCatalog::RISK_EDIT, $targetAreaId);
         }
 
-        $this->guardOwner($user, $validated);
+        $this->creator->assertValidOwner($user, $validated);
 
-        $risk->fill([
-            'business_area_id' => $targetAreaId,
-            'title' => trim($validated['title']),
-            'cause' => trim($validated['cause']),
-            'event' => trim($validated['event']),
-            'consequence' => trim($validated['consequence']),
-            'description' => $this->normalizedText($validated['description'] ?? null),
-            'owner_user_id' => $validated['owner_user_id'] ?? null,
-            'status' => $validated['status'],
-            'updated_by' => $user->id,
-        ]);
+        $risk->fill($this->creator->fields($validated) + ['updated_by' => $user->id]);
 
         // Only when sent, so a client that does not know the field never clears the cycle.
         if (array_key_exists('review_interval_months', $validated)) {
@@ -299,67 +268,13 @@ class RiskController extends Controller
     }
 
     /**
-     * A 422 rather than a 403 or 404: the area id came from a form, and whether it names an area
-     * of another tenant, an area outside the user's scope or nothing at all, the answer is the
-     * same and says nothing about which.
-     */
-    private function authorizeArea(User $user, string $permissionKey, int $areaId): void
-    {
-        if (! $this->access->canInArea($user, $permissionKey, (int) $user->customer_id, $areaId)) {
-            throw ValidationException::withMessages([
-                'business_area_id' => __('procynia.risk.validation.area_not_allowed'),
-            ]);
-        }
-    }
-
-    /**
-     * The owner must be an active person in the same customer who can read risks in the chosen
-     * area. An owner who cannot open the risk they own is not an owner.
-     *
-     * @param  array<string, mixed>  $validated
-     */
-    private function guardOwner(User $user, array $validated): void
-    {
-        $ownerId = $validated['owner_user_id'] ?? null;
-
-        if ($ownerId === null) {
-            return;
-        }
-
-        $owner = User::query()
-            ->where('customer_id', (int) $user->customer_id)
-            ->where('is_active', true)
-            ->find((int) $ownerId);
-
-        if ($owner === null
-            || ! $this->access->canInArea($owner, CustomerPermissionCatalog::RISK_VIEW, (int) $user->customer_id, (int) $validated['business_area_id'])) {
-            throw ValidationException::withMessages([
-                'owner_user_id' => __('procynia.risk.validation.owner_not_allowed'),
-            ]);
-        }
-    }
-
-    /**
-     * Årsak, hendelse and konsekvens are required on every save, edits included: an older risk
-     * without them opens as before, but cannot be saved again until they are filled in.
-     * `description` is the optional «Utfyllende informasjon».
+     * The fields of a risk and their rules are RiskCreator's, for registering and editing alike.
      *
      * @return array<string, mixed>
      */
     private function validated(Request $request): array
     {
-        return $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'cause' => ['required', 'string', 'max:1000'],
-            'event' => ['required', 'string', 'max:1000'],
-            'consequence' => ['required', 'string', 'max:1000'],
-            'description' => ['nullable', 'string', 'max:5000'],
-            'business_area_id' => ['required', 'integer'],
-            'owner_user_id' => ['nullable', 'integer'],
-            'status' => ['required', 'string', Rule::in(Risk::STATUSES)],
-            'review_interval_months' => ['sometimes', 'nullable', 'integer', Rule::in(Risk::REVIEW_INTERVALS)],
-            'treatment_strategy' => ['sometimes', 'nullable', 'string', Rule::in(Risk::TREATMENT_STRATEGIES)],
-        ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
+        return $request->validate(RiskCreator::rules(), RiskValidationMessages::messages(), RiskValidationMessages::attributes());
     }
 
     /** @return array<string, mixed> */
@@ -467,7 +382,7 @@ class RiskController extends Controller
     /**
      * People who could own a risk, each with the areas — among those offered to the acting user —
      * in which they can read risks. The page narrows the list to the area chosen in the form; the
-     * server checks the same thing again in guardOwner(). Areas the acting user cannot reach are
+     * server checks the same thing again in RiskCreator::assertValidOwner(). Areas the acting user cannot reach are
      * never named here.
      *
      * @param  Collection<int, BusinessArea>  $offeredAreas
@@ -496,12 +411,5 @@ class RiskController extends Controller
             ->filter(fn (array $option): bool => $option['area_ids'] !== [])
             ->values()
             ->all();
-    }
-
-    private function normalizedText(?string $value): ?string
-    {
-        $text = trim((string) $value);
-
-        return $text !== '' ? $text : null;
     }
 }
