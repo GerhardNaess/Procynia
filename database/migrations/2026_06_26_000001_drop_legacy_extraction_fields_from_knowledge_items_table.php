@@ -32,6 +32,8 @@ return new class extends Migration
 
             if (! Schema::hasColumn('knowledge_items', 'extraction_status')) {
                 $table->string('extraction_status', 32)->nullable();
+                // up() took the index with the column; 2026_04_07_140001's down() drops it again.
+                $table->index('extraction_status');
             }
 
             if (! Schema::hasColumn('knowledge_items', 'extraction_error')) {

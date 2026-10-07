@@ -9,28 +9,22 @@ use Illuminate\Support\Str;
 
 /**
  * Test-only fixture for the stalled-indicator E2E spec (tests/e2e/wiki-runs-stalled-indicator.spec.js).
- * Seeds two long-idle runs with the SAME old last-activity timestamp but different statuses, to
- * prove the "Ser ut til å stå stille" warning is gated on status (expects_automatic_progress),
- * not merely on elapsed time:
- *
- *   - one genuinely active status (generating_pages) — MUST still show the stalled warning;
- *   - awaiting_document_owner_approval (mirrors real production run 488) — must NOT.
+ * Seeds one long-idle run in a genuinely active status (generating_pages), which must show the
+ * "Ser ut til å stå stille" warning. The waiting run it used to seed beside it was in
+ * awaiting_document_owner_approval, a status 5d26caf2 retired; nothing can enter it any more.
  */
 class WikiRunsStalledIndicatorE2EFixture
 {
     private const ACTIVE_DOCUMENT_FILENAME = 'E2E Stalled Indicator Active Check.docx';
 
-    private const WAITING_DOCUMENT_FILENAME = 'E2E Stalled Indicator Waiting Check.docx';
-
     /**
-     * @return array{active_run_id: int, waiting_run_id: int}
+     * @return array{active_run_id: int}
      */
     public static function seed(int $customerId): array
     {
-        $activeRunId = self::createIdleRun($customerId, self::ACTIVE_DOCUMENT_FILENAME, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES);
-        $waitingRunId = self::createIdleRun($customerId, self::WAITING_DOCUMENT_FILENAME, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        self::cleanup($customerId);
 
-        return ['active_run_id' => $activeRunId, 'waiting_run_id' => $waitingRunId];
+        return ['active_run_id' => self::createIdleRun($customerId, self::ACTIVE_DOCUMENT_FILENAME, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES)];
     }
 
     private static function createIdleRun(int $customerId, string $filename, string $status): int
@@ -67,7 +61,7 @@ class WikiRunsStalledIndicatorE2EFixture
 
     public static function cleanup(int $customerId): void
     {
-        foreach ([self::ACTIVE_DOCUMENT_FILENAME, self::WAITING_DOCUMENT_FILENAME] as $filename) {
+        foreach ([self::ACTIVE_DOCUMENT_FILENAME] as $filename) {
             $documents = EnterpriseWikiDocument::query()
                 ->where('customer_id', $customerId)
                 ->where('original_filename', $filename)

@@ -63,11 +63,11 @@ describe('the "Tilbake til funn" button reuses Procynia\'s shared primary action
     });
 
     test('it is no larger than the page\'s other action buttons', () => {
-        // "Send til gjennomgang" is min-h-9 / px-4 py-2 / text-sm — the button must not exceed it.
+        // "Send til gjennomgang" is min-h-9 / px-4 py-2 / text-base — the button must not exceed it.
         assert.ok(buttonClass.includes('min-h-9'));
         assert.ok(buttonClass.includes('px-4'));
         assert.ok(buttonClass.includes('py-2 '), 'py-2, not a taller variant');
-        assert.ok(buttonClass.includes('text-sm'));
+        assert.ok(buttonClass.includes('text-base'));
     });
 
     test('"Tilbake til Wiki" is untouched and stays visually subordinate', () => {

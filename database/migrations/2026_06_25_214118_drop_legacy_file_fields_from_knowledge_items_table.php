@@ -36,6 +36,8 @@ return new class extends Migration
 
             if (! Schema::hasColumn('knowledge_items', 'storage_path')) {
                 $table->string('storage_path')->nullable()->after('original_filename');
+                // up() took the index with the column; 2026_04_07_140001's down() drops it again.
+                $table->index('storage_path');
             }
 
             if (! Schema::hasColumn('knowledge_items', 'mime_type')) {

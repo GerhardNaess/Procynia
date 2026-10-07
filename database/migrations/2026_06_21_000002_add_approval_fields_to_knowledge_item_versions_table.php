@@ -29,6 +29,8 @@ return new class extends Migration
             $table->dropIndex('kiv_ki_approval_status_index');
             $table->dropIndex('kiv_approval_status_index');
 
+            // dropConstrainedForeignId() drops the column with its key, so the three *_by_user_id
+            // columns are gone by here and must not be named again below.
             $table->dropConstrainedForeignId('submitted_for_review_by_user_id');
             $table->dropConstrainedForeignId('approved_by_user_id');
             $table->dropConstrainedForeignId('rejected_by_user_id');
@@ -37,7 +39,6 @@ return new class extends Migration
                 'approval_status',
                 'submitted_for_review_at',
                 'approved_at',
-                'approved_by_user_id',
                 'rejected_at',
                 'rejection_reason',
             ]);

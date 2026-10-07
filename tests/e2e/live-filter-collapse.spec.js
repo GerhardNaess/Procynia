@@ -121,6 +121,17 @@ test('the collapsed filter panel is short on every viewport', async ({ page }) =
         await expect(page.locator('#live-filter-panel-body')).toBeHidden();
 
         const section = page.locator('section', { has: toggle }).first();
+
+        // The results are a live Doffin search, so what they contain differs from run to run. Put
+        // the worst case in on purpose — one long unbreakable word, as a notice title or URL can
+        // be — so the layout is held to it every time rather than only when Doffin happens to
+        // send one.
+        await section.evaluate((element) => {
+            const word = document.createElement('p');
+            word.textContent = 'Rammeavtale'.repeat(30);
+            element.parentElement.appendChild(word);
+        });
+
         const box = await section.boundingBox();
 
         expect(box.height, `collapsed filter panel is compact on ${viewport.name}`).toBeLessThan(200);

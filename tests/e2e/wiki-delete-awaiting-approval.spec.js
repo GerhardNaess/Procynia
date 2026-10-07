@@ -1,18 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
-const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiDeleteAwaitingApprovalE2EFixture';
-const CUSTOMER_ID = 4;
-
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+let CUSTOMER_ID;
 
 /**
  * Verifies "Rett sletting av kildedokumenter som venter på dokumenteiergodkjenning": a document
@@ -23,22 +14,17 @@ async function loginAsDevDataUser(page) {
  */
 test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_approval', () => {
     test.beforeAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::seed(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        CUSTOMER_ID = await e2eWikiCustomerId();
+        await tinker(`${FIXTURE}::seed(${CUSTOMER_ID});`);
     });
 
     test.afterAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
     });
 
     test('1&2. the Delete button is active (not disabled) for awaiting_document_owner_approval, with no active-run tooltip', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Delete Awaiting Approval Check.docx', { exact: true }) });
@@ -50,7 +36,7 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
     });
 
     test('9. the Delete button stays disabled with the active-run tooltip for a genuinely active run', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Delete Active Run Check.docx', { exact: true }) });
@@ -62,7 +48,7 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
     });
 
     test('3. clicking Delete opens the dialog with the approval-flow explanation and precise confirm text', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Delete Awaiting Approval Check.docx', { exact: true }) });
@@ -79,7 +65,7 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
     });
 
     test('1&4. confirming deletion ends the run and deletes the document in one step', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Delete Awaiting Approval Check.docx', { exact: true }) });
@@ -102,7 +88,7 @@ test.describe.serial('Kildedokumenter delete button for awaiting_document_owner_
         page.on('pageerror', (err) => errors.push(String(err)));
 
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
         await expect(page.getByText('E2E Delete Active Run Check.docx', { exact: true })).toBeVisible();
 

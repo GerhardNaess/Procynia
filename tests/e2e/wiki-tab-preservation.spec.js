@@ -1,18 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
-const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiTabPreservationE2EFixture';
-const CUSTOMER_ID = 4;
-
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+let CUSTOMER_ID;
 
 /**
  * Verifies "Rett fanebevaring i Enterprise Wiki": a write action performed from the Kjøringer tab
@@ -23,25 +14,20 @@ async function loginAsDevDataUser(page) {
  */
 test.describe.serial('Wiki tab preservation after actions', () => {
     test.beforeAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::seed(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        CUSTOMER_ID = await e2eWikiCustomerId();
+        await tinker(`${FIXTURE}::seed(${CUSTOMER_ID});`);
     });
 
     test.afterAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
     });
 
     test('cancelling a run from Kjøringer stays on Kjøringer, not Wiki-sider', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator('tr', { has: page.getByText('E2E Tab Preservation Run Check.docx', { exact: true }) });
+        const row = page.locator('[data-run-item]', { has: page.getByText('E2E Tab Preservation Run Check.docx', { exact: true }) }).first();
         await expect(row).toBeVisible();
 
         await row.getByRole('button', { name: 'Avbryt kjøring' }).click();
@@ -57,7 +43,7 @@ test.describe.serial('Wiki tab preservation after actions', () => {
     });
 
     test('assigning a document owner from Kildedokumenter stays on Kildedokumenter', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const row = page.locator('tr', { has: page.getByText('E2E Tab Preservation Source Check.docx', { exact: true }) });
@@ -83,7 +69,7 @@ test.describe.serial('Wiki tab preservation after actions', () => {
         page.on('pageerror', (err) => errors.push(String(err)));
 
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=runs');
         await expect(page.getByRole('link', { name: 'Kjøringer' })).toHaveAttribute('aria-current', 'page');
 

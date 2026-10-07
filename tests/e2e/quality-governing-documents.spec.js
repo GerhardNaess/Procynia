@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
-import { DESKTOP, PHONE, sidewaysOverflow } from './helpers/readability.js';
+import { DESKTOP, expectReadable } from './helpers/readability.js';
 
 /**
  * A process shows the styrende dokumenter that govern it, and a quality editor links and unlinks
@@ -41,7 +41,8 @@ test('a process links a governing document, the policy sees the process, and the
 
     const linked = panel.getByRole('link', { name: policyTitle });
     await expect(linked).toBeVisible();
-    await page.screenshot({ path: 'test-results/quality-governing-documents.png', fullPage: true });
+    await expectReadable(page, 'quality-governing', 'process');
+    await page.setViewportSize(DESKTOP);
 
     // From the policy, the process it governs — said in the policy's own terms.
     await linked.click();
@@ -50,8 +51,8 @@ test('a process links a governing document, the policy sees the process, and the
     await expect(governed).toBeVisible();
     await expect(governed.getByRole('link', { name: /E2E liten prosess/ })).toBeVisible();
     await expectNoRelationVocabulary(page);
-    expect(await sectionTextBelow16px(governed)).toEqual([]);
-    await expectNoSidewaysScrollOnPhone(page, 'policy');
+    await expectReadable(page, 'quality-governing', 'policy');
+    await page.setViewportSize(DESKTOP);
 
     // Back on the process, remove the link; the policy itself stays.
     await page.goto(processUrl);
@@ -82,44 +83,8 @@ test('a control page shows no generic relations and reads well on a phone', asyn
     await expect(page.getByRole('heading', { name: title })).toBeVisible();
 
     await expectNoRelationVocabulary(page);
-    await expectNoSidewaysScrollOnPhone(page, 'control');
+    await expectReadable(page, 'quality-governing', 'control');
 });
-
-/**
- * The page fits a 390 px phone. The Item page's form labels and help lines are still 14 px — older
- * than this spec and the whole page's concern — so 16 px is asserted on the section this spec owns.
- */
-async function expectNoSidewaysScrollOnPhone(page, name) {
-    await page.setViewportSize(PHONE);
-    expect(await sidewaysOverflow(page), `${name} scrolls sideways`).toEqual([]);
-    await page.screenshot({ path: `test-results/quality-governing-${name}-phone.png`, fullPage: true });
-    await page.setViewportSize(DESKTOP);
-}
-
-/** Visible text inside one section set below 16 px. */
-async function sectionTextBelow16px(section) {
-    return section.evaluate((root) => {
-        const found = [];
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-
-        while (walker.nextNode()) {
-            const node = walker.currentNode;
-            const element = node.parentElement;
-
-            if (node.textContent.trim() === '' || element.offsetParent === null) {
-                continue;
-            }
-
-            const size = parseFloat(getComputedStyle(element).fontSize);
-
-            if (size < 16) {
-                found.push(`${size}px «${node.textContent.trim().slice(0, 60)}»`);
-            }
-        }
-
-        return found;
-    });
-}
 
 /**
  * The words of the relation model — a heading «Relasjoner», a «Fra»/«Til» label, a relation type —

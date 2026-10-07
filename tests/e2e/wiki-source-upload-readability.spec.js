@@ -1,19 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
-const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiSourceUploadReadabilityE2EFixture';
-const CUSTOMER_ID = 4;
+let CUSTOMER_ID;
 const MIN_READABLE_PX = 16;
-
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
 
 async function fontSizePx(locator) {
     return locator.evaluate((el) => parseFloat(window.getComputedStyle(el).fontSize));
@@ -26,16 +17,20 @@ async function fontSizePx(locator) {
  * display, and every readable text in the upload area is at least 16px.
  */
 test.describe.serial('Wiki source upload readability', () => {
+    test.beforeAll(async () => {
+        CUSTOMER_ID = await e2eWikiCustomerId();
+        // A run stopped halfway leaves its upload behind, and the same file would then be refused
+        // as already uploaded.
+        await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
+    });
+
     test.afterAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
     });
 
     test('1&2&3. no native English file-input text; localized Velg fil button and Ingen fil valgt shown', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         await expect(page.getByRole('button', { name: 'Choose File', exact: false })).toHaveCount(0);
@@ -47,8 +42,8 @@ test.describe.serial('Wiki source upload readability', () => {
         await expect(page.getByText('Ingen fil valgt', { exact: true })).toBeVisible();
     });
 
-    test('4&6. selecting a file shows its filename and reaches the real hidden input', async ({ page }) => {
-        await loginAsDevDataUser(page);
+    test('4&6&7. selecting a file shows its filename, uploads it, and the document appears in the list', async ({ page }) => {
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const fileInput = page.locator('#wiki-source-file');
@@ -60,15 +55,25 @@ test.describe.serial('Wiki source upload readability', () => {
             buffer: Buffer.from('%PDF-1.4 e2e readability check content'),
         });
 
-        await expect(page.getByText('e2e-source-upload-readability.pdf', { exact: true })).toBeVisible();
+        // The filename on screen is what the real input's change handler read. The input itself is
+        // emptied straight after (208e30cf), so choosing the same file again — to retry a failed
+        // upload — still fires `change`; its files list is therefore not the thing to check.
+        await expect(page.getByText('e2e-source-upload-readability.pdf', { exact: true }).first()).toBeVisible();
         await expect(page.getByText('Ingen fil valgt', { exact: true })).toHaveCount(0);
 
-        const uploadedCount = await fileInput.evaluate((el) => el.files.length);
-        expect(uploadedCount).toBe(1);
+        // Choosing the file is the upload (208e30cf): there is no «Last opp kilde» to press. A dialog
+        // then says nothing is in the wiki until «Lag Wiki», and has to be dismissed.
+        const uploaded = page.getByRole('dialog', { name: 'Kildedokumentet er lastet opp' });
+        await expect(uploaded).toBeVisible();
+        await uploaded.getByRole('button', { name: 'OK, jeg forstår' }).click();
+        await expect(uploaded).toHaveCount(0);
+        expect(new URL(page.url()).searchParams.get('tab')).toBe('sources');
+
+        await expect(page.locator('tr', { has: page.getByText('e2e-source-upload-readability.pdf', { exact: true }) }).first()).toBeVisible();
     });
 
     test('5. clicking Velg fil opens the native file chooser', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const [chooser] = await Promise.all([
@@ -80,40 +85,23 @@ test.describe.serial('Wiki source upload readability', () => {
         expect(await chooser.isMultiple()).toBe(false);
     });
 
-    test('6&7. upload submits through the real input and document appears in the list', async ({ page }) => {
-        await loginAsDevDataUser(page);
-        await page.goto('/app/wiki?tab=sources');
-
-        await page.locator('#wiki-source-file').setInputFiles({
-            name: 'e2e-source-upload-readability.pdf',
-            mimeType: 'application/pdf',
-            buffer: Buffer.from('%PDF-1.4 e2e readability check content'),
-        });
-
-        await page.getByRole('button', { name: 'Last opp kilde' }).click();
-        await page.waitForURL((url) => url.searchParams.get('tab') === 'sources');
-
-        await expect(page.getByText('e2e-source-upload-readability.pdf', { exact: true })).toBeVisible();
-    });
-
     test('8. every readable text in the upload area is at least 16px', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const chooseButton = page.locator('label[for="wiki-source-file"]');
         const noFileText = page.getByText('Ingen fil valgt', { exact: true });
         const hint = page.getByText('PDF eller DOCX', { exact: false });
         const ownerLabel = page.getByText('Dokumenteier', { exact: true }).first();
-        const uploadButton = page.getByRole('button', { name: 'Last opp kilde' });
 
-        for (const locator of [chooseButton, noFileText, hint, ownerLabel, uploadButton]) {
+        for (const locator of [chooseButton, noFileText, hint, ownerLabel]) {
             await expect(locator).toBeVisible();
             expect(await fontSizePx(locator)).toBeGreaterThanOrEqual(MIN_READABLE_PX);
         }
     });
 
     test('9. Velg fil uses the violet primary action style', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         const readStyles = (el) => {
@@ -122,20 +110,29 @@ test.describe.serial('Wiki source upload readability', () => {
         };
 
         const chooseButton = page.locator('label[for="wiki-source-file"]');
-        const uploadButton = page.getByRole('button', { name: 'Last opp kilde' });
         const chooseStyles = await chooseButton.evaluate(readStyles);
-        const uploadStyles = await uploadButton.evaluate(readStyles);
 
-        // Same violet primary palette as the upload submit button (Tailwind's bg-violet-600 /
-        // white text) — compared against that button rather than a hardcoded color string, since
-        // Tailwind 4 emits oklch() rather than rgb().
-        expect(chooseStyles.background).toBe(uploadStyles.background);
-        expect(chooseStyles.color).toBe(uploadStyles.color);
+        // The shared primary palette (actionStyles.js PRIMARY_COLOURS: violet-50 fill, violet-700
+        // text), read off a probe that carries exactly those classes rather than a hardcoded color
+        // string, since Tailwind 4 emits oklch() rather than rgb(). It used to be compared against
+        // the «Last opp kilde» button, which carried the same palette and is gone since 208e30cf.
+        const primaryStyles = await page.evaluate((read) => {
+            const probe = document.createElement('span');
+            probe.className = 'border border-violet-200 bg-violet-50 text-violet-700';
+            document.body.appendChild(probe);
+            const styles = new Function(`return (${read})`)()(probe);
+            probe.remove();
+
+            return styles;
+        }, readStyles.toString());
+
+        expect(chooseStyles.background).toBe(primaryStyles.background);
+        expect(chooseStyles.color).toBe(primaryStyles.color);
         expect(chooseStyles.color).not.toBe(chooseStyles.background);
     });
 
     test('10. focus-visible is shown when the hidden input is focused via keyboard', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
 
         await page.locator('#wiki-source-file').focus();
@@ -151,7 +148,7 @@ test.describe.serial('Wiki source upload readability', () => {
         page.on('pageerror', (err) => errors.push(String(err)));
 
         await page.setViewportSize({ width: 1440, height: 900 });
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki?tab=sources');
         await expect(page.locator('label[for="wiki-source-file"]')).toBeVisible();
 

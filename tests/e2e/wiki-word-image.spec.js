@@ -1,36 +1,22 @@
 import { test, expect } from '@playwright/test';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
-const execAsync = promisify(exec);
 const FIXTURE = '\\Tests\\Support\\WikiWordImageE2EFixture';
-const CUSTOMER_ID = 4;
-
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+let CUSTOMER_ID;
 
 test.describe.serial('Word image (figure) rendering in a Wiki page', () => {
     test.beforeAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="echo ${FIXTURE}::seed(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        CUSTOMER_ID = await e2eWikiCustomerId();
+        await tinker(`echo ${FIXTURE}::seed(${CUSTOMER_ID});`);
     });
 
     test.afterAll(async () => {
-        await execAsync(
-            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
-            { cwd: new URL('../..', import.meta.url).pathname },
-        );
+        await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
     });
 
     test('renders a genuine semantic figure with image, caption, and citation', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki/e2e-word-image-verifisering');
         await page.waitForTimeout(1000);
 
@@ -46,7 +32,7 @@ test.describe.serial('Word image (figure) rendering in a Wiki page', () => {
     });
 
     test('the decorative logo never appears as ordinary Wiki content', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki/e2e-word-image-verifisering');
         await page.waitForTimeout(1000);
 
@@ -57,7 +43,7 @@ test.describe.serial('Word image (figure) rendering in a Wiki page', () => {
     });
 
     test('the image loads through the authenticated route, not a raw storage path', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki/e2e-word-image-verifisering');
         await page.waitForTimeout(1000);
 
@@ -74,7 +60,7 @@ test.describe.serial('Word image (figure) rendering in a Wiki page', () => {
     });
 
     test('mobile viewport (390px): figure scales down, page does not scroll horizontally', async ({ page }) => {
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto('/app/wiki/e2e-word-image-verifisering');
         await page.waitForTimeout(1000);
@@ -93,7 +79,7 @@ test.describe.serial('Word image (figure) rendering in a Wiki page', () => {
         page.on('requestfailed', (req) => failedRequests.push(`${req.method()} ${req.url()}`));
         page.on('response', (res) => { if (res.status() >= 500) failedRequests.push(`${res.status()} ${res.url()}`); });
 
-        await loginAsDevDataUser(page);
+        await loginAsWikiReader(page);
         await page.goto('/app/wiki/e2e-word-image-verifisering');
         await page.waitForTimeout(1000);
 

@@ -94,16 +94,27 @@ test('an answered clarification does not come back', async ({ page }) => {
     await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
     await page.goto('/app/quality');
 
-    const link = page.getByRole('link', { name: 'E2E liten prosess' });
+    // A process of its own. Step 5 adopts a new flow, and adopting onto a seeded process would hand
+    // every later spec in the run a different flow from the one the seeder wrote (zoom and
+    // subprocess read «E2E liten prosess» by its size and its steps).
+    const xsrf = async () => decodeURIComponent((await page.context().cookies()).find((cookie) => cookie.name === 'XSRF-TOKEN').value);
+    const created = await page.request.post('/app/quality/items', {
+        headers: { 'X-XSRF-TOKEN': await xsrf(), Accept: 'text/html' },
+        form: { quality_type: 'process', title: `E2E avklaring ${Date.now()}` },
+    });
+    expect(created.ok()).toBeTruthy();
 
-    if (await link.count() === 0) {
-        test.skip(true, 'No seeded quality process in this environment.');
+    const itemId = Number(created.url().match(/items\/(\d+)/)[1]);
+
+    try {
+        await answerAndAdopt(page, itemId, errors);
+    } finally {
+        await page.request.delete(`/app/quality/items/${itemId}`, { headers: { 'X-XSRF-TOKEN': await xsrf() } });
     }
+});
 
-    await link.first().click();
-    await page.waitForURL(/\/app\/quality\/items\/\d+/);
-
-    const itemId = Number(page.url().match(/items\/(\d+)/)[1]);
+async function answerAndAdopt(page, itemId, errors) {
+    await page.goto(`/app/quality/items/${itemId}?tab=document`);
     const flowTab = /\/app\/quality\/items\/\d+\?tab=flow/;
 
     // The Inertia visit to the Flyt tab, answered with a proposal on it. A client-side visit rather
@@ -169,4 +180,4 @@ test('an answered clarification does not come back', async ({ page }) => {
     await expect(clarifications(page).filter({ hasText: /kritisk/i })).toHaveCount(0);
 
     expect(errors).toEqual([]);
-});
+}
