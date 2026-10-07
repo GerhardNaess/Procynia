@@ -1,17 +1,21 @@
 import { test, expect } from '@playwright/test';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
-// This graph view is only populated with real Wiki data for the dev-seeded customer
-// (alisan@advania.no / customer_id=4) — the plain E2E-seeded USER has no Enterprise Wiki
-// content. The real dataset (16 pages, ~110 edges) already gives a genuinely dense graph
-// with at least one long page title ("Styringsnivåer: strategisk, taktisk og operativt"),
-// so no synthetic fixtures are needed for this test file.
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+// The graph is the spec's own: WikiGraphFocusE2EFixture seeds a dense neighbourhood (a hub with
+// more than twenty neighbours) and one long page title into the E2E customer, so the labels are
+// drawn crowded and at least one of them has to be truncated on the canvas.
+const FIXTURE = '\\Tests\\Support\\WikiGraphFocusE2EFixture';
+let CUSTOMER_ID;
+
+test.beforeAll(async () => {
+    CUSTOMER_ID = await e2eWikiCustomerId();
+    await tinker(`echo ${FIXTURE}::seed(${CUSTOMER_ID});`);
+});
+
+test.afterAll(async () => {
+    await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
+});
 
 // Node labels render on Sigma's own canvas layer (class "sigma-labels"), not as DOM text —
 // there is no element to run getComputedStyle() against. The label canvas's 2D context
@@ -22,7 +26,7 @@ function labelCanvasFont(page) {
 }
 
 test.beforeEach(async ({ page }) => {
-    await loginAsDevDataUser(page);
+    await loginAsWikiReader(page);
 });
 
 test('node label font size is at least 16px in the normal view', async ({ page }) => {

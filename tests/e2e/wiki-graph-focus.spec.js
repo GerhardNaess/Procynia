@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { tinker } from './helpers/risk.js';
+import { e2eWikiCustomerId, loginAsWikiReader } from './helpers/wiki.js';
 
 /**
  * The focus view, drawn for real.
@@ -8,21 +10,25 @@ import { test, expect } from '@playwright/test';
  * result is actually readable once Sigma has drawn it: a label is painted on a canvas, so "is any
  * title cut off at the edge of the picture" is a question about PIXELS, and only a browser has them.
  *
- * Like wiki-graph-labels.spec.js, this file runs against the dev-seeded customer, which is the only
- * one with real Enterprise Wiki content — including a genuine hub (Security Operations Center, with
- * more than twenty neighbours) that is exactly the case a single ring could not hold.
+ * The graph is the spec's own (WikiGraphFocusE2EFixture, seeded into the E2E customer): a hub with
+ * more than twenty neighbours — exactly the case a single ring could not hold — and a focus page
+ * with a middling neighbourhood that includes the hub, so a second hop has more to draw.
  */
 
-const FOCUS_PAGE_ID = 82;  // Hybrid SOC-arkitektur — a middling neighbourhood
-const HUB_PAGE_ID = 67;    // Security Operations Center (SOC) — the dense one
+const FIXTURE = '\\Tests\\Support\\WikiGraphFocusE2EFixture';
+let CUSTOMER_ID;
+let FOCUS_PAGE_ID; // four neighbours, one of them the hub
+let HUB_PAGE_ID;   // twenty-two neighbours — the dense one
 
-async function loginAsDevDataUser(page) {
-    await page.goto('/login');
-    await page.fill('#email', 'alisan@advania.no');
-    await page.fill('#password', 'Opaque01');
-    await page.click('button[type="submit"]');
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-}
+test.beforeAll(async () => {
+    CUSTOMER_ID = await e2eWikiCustomerId();
+    const { stdout } = await tinker(`echo ${FIXTURE}::seed(${CUSTOMER_ID});`);
+    ({ focus_page_id: FOCUS_PAGE_ID, hub_page_id: HUB_PAGE_ID } = JSON.parse(stdout.trim()));
+});
+
+test.afterAll(async () => {
+    await tinker(`${FIXTURE}::cleanup(${CUSTOMER_ID});`);
+});
 
 /**
  * Open the graph on a page and switch to focus mode.
@@ -77,7 +83,7 @@ function labelInkExtent(canvas) {
 }
 
 test.beforeEach(async ({ page }) => {
-    await loginAsDevDataUser(page);
+    await loginAsWikiReader(page);
 });
 
 test('focus mode draws a neighbourhood with no title clipped at either side', async ({ page }) => {
