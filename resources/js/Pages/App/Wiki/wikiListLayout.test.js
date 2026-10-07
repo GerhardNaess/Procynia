@@ -59,8 +59,8 @@ describe('search and filters are one toolbar', () => {
     test('every control is the same height, and readable', () => {
         assert.match(index, /const PAGES_CONTROL_CLS = 'h-11 rounded-lg[^']*text-base/);
         assert.ok(! pagesTab.includes('className={SELECT_CLS}'), 'the toolbar has its own control class');
-        // Shared with the other tabs, so it must survive untouched.
-        assert.match(index, /const SELECT_CLS = 'h-9 rounded-lg/);
+        // The Kildedokumenter filters' class: the same height and 16 px.
+        assert.match(index, /const SELECT_CLS = 'h-11 rounded-lg[^']*text-base/);
     });
 
     test('search leads and can breathe; the count stays out of the way', () => {

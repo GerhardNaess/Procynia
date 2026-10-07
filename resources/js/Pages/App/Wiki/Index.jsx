@@ -717,7 +717,7 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
             )}
 
             {statusSetAt && (
-                <p className="text-xs leading-5 text-slate-400">
+                <p className="text-base leading-6 text-slate-500">
                     {(tw.ingest_activity_last_progress ?? 'Siste fremdrift')} {formatRelativeProgress(progressAt, locale)}
                 </p>
             )}
@@ -1410,14 +1410,13 @@ function DecisionModal({ run, tw, onClose }) {
 
 /**
  * The Wiki page list's own controls: one height for everything on the toolbar row, and 16px text,
- * so a filter reads like something you operate rather than fine print. Deliberately separate from
- * SELECT_CLS, which the other tabs share.
+ * so a filter reads like something you operate rather than fine print.
  */
 const PAGES_CONTROL_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
 // max-w-full: a native select is as wide as its longest option, so one long document or owner
 // name in a filter would otherwise push the row past a phone's edge.
-const SELECT_CLS = 'h-9 rounded-lg max-w-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
+const SELECT_CLS = 'h-11 rounded-lg max-w-full border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
 /**
  * How far the Wiki has come, in one line, plus the one thing worth saying when it has not started.
@@ -2141,7 +2140,7 @@ function SourcesTab({
                             />
                             <button
                                 type="submit"
-                                className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                                className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-base font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                     <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
@@ -2181,7 +2180,7 @@ function SourcesTab({
                             <button
                                 type="button"
                                 onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '', src_owner: '' }); }}
-                                className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
+                                className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                     <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -2414,26 +2413,28 @@ function SourcesTab({
                 />
             )}
             {deletePreview && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
-                    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                // Above the sticky app header (z-[60]); at 16 px the preview can outgrow a phone
+                // screen, so the panel scrolls within it.
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
                         <h2 className="mb-4 text-base font-semibold text-slate-900">
                             {tw.delete_preview_title ?? 'Bekreft sletting av kildedokument'}
                         </h2>
 
                         {deletePreview.loading && (
-                            <p className="text-sm text-slate-500">{tw.delete_preview_loading ?? 'Laster forhåndsvisning...'}</p>
+                            <p className="text-base text-slate-500">{tw.delete_preview_loading ?? 'Laster forhåndsvisning...'}</p>
                         )}
 
                         {!deletePreview.loading && deletePreview.error && (
-                            <p className="text-sm text-rose-600">Kunne ikke laste forhåndsvisning. Prøv igjen.</p>
+                            <p className="text-base text-rose-600">Kunne ikke laste forhåndsvisning. Prøv igjen.</p>
                         )}
 
                         {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
                             <div className="space-y-2">
-                                <p className="text-sm text-rose-600">
+                                <p className="text-base text-rose-600">
                                     {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
                                 </p>
-                                <p className="text-xs text-slate-500">
+                                <p className="text-base text-slate-500">
                                     {tw.cancel_blocking_runs_confirm_body ?? 'Dette avbryter kjøringen(e) som blokkerer sletting av dette dokumentet, slik at dokumentet kan slettes. Wiki-innhold som allerede er generert blir beholdt. Handlingen kan ikke angres.'}
                                 </p>
                             </div>
@@ -2441,74 +2442,74 @@ function SourcesTab({
 
                         {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && deletePreview.data && (
                             <div className="space-y-3">
-                                <p className="text-sm font-medium text-slate-800 break-all">
+                                <p className="text-base font-medium text-slate-800 break-all">
                                     {deletePreview.data.document_name}
                                 </p>
-                                <p className="text-sm text-slate-600">
+                                <p className="text-base text-slate-600">
                                     {tw.delete_preview_intro ?? 'Dette sletter kildedokumentet og Enterprise Wiki-innhold som kun er generert fra dette dokumentet. Handlingen kan ikke angres.'}
                                 </p>
                                 {deletePreview.data.pending_approval_run_count > 0 && (
-                                    <p className="text-sm font-medium text-amber-700">
+                                    <p className="text-base font-medium text-amber-700">
                                         {tw.delete_preview_pending_approval ?? 'Dokumentet har en åpen godkjenningsflyt som venter på dokumenteiergodkjenning. Denne avsluttes automatisk dersom du sletter dokumentet nå.'}
                                     </p>
                                 )}
-                                <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm space-y-1.5">
-                                    <div className="flex justify-between">
+                                <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-base space-y-1.5">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
                                         <dd className="font-semibold text-slate-800">
                                             {deletePreview.data.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
                                         </dd>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.delete_preview_runs ?? 'Kjøringer som slettes'}</dt>
                                         <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.delete_preview_sole_source_pages ?? 'Sider som bare tilhører dokumentet'}</dt>
                                         <dd className="font-semibold text-rose-600">{deletePreview.data.sole_source_page_count}</dd>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.delete_preview_page_versions ?? 'Sideversjoner som slettes'}</dt>
                                         <dd className="font-semibold text-slate-800">{deletePreview.data.page_version_count}</dd>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.delete_preview_claims ?? 'Claims som slettes'}</dt>
                                         <dd className="font-semibold text-slate-800">{deletePreview.data.claim_count}</dd>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.delete_preview_findings ?? 'Funn som slettes'}</dt>
                                         <dd className="font-semibold text-slate-800">{deletePreview.data.finding_count}</dd>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between gap-4">
                                         <dt className="text-slate-500">{tw.delete_preview_shared_pages ?? 'Delte sider som beholdes'}</dt>
                                         <dd className="font-semibold text-emerald-600">{deletePreview.data.shared_page_count}</dd>
                                     </div>
                                 </dl>
                                 {deletePreview.data.sole_source_page_count === 0 && (
-                                    <p className="text-xs text-slate-400">{tw.delete_preview_no_pages ?? 'Ingen wiki-sider vil bli slettet.'}</p>
+                                    <p className="text-base text-slate-500">{tw.delete_preview_no_pages ?? 'Ingen wiki-sider vil bli slettet.'}</p>
                                 )}
                                 {deletePreview.data.shared_page_count > 0 && (
-                                    <p className="text-xs text-emerald-600">
+                                    <p className="text-base text-emerald-600">
                                         {(tw.delete_preview_shared_pages_note ?? '{count} sider beholdes fordi de også bygger på andre kildedokumenter.')
                                             .replace('{count}', deletePreview.data.shared_page_count)}
                                     </p>
                                 )}
                                 {!deletePreview.data.storage_file_exists && (
-                                    <p className="text-xs text-amber-600">
+                                    <p className="text-base text-amber-600">
                                         {tw.delete_preview_storage_missing ?? 'Dokumentfilen finnes ikke lenger i lagring.'}
                                     </p>
                                 )}
-                                <p className="text-xs font-semibold text-rose-600">
+                                <p className="text-base font-semibold text-rose-600">
                                     {tw.delete_preview_irreversible ?? 'Handlingen kan ikke angres.'}
                                 </p>
                             </div>
                         )}
 
-                        <div className="mt-5 flex justify-end gap-3">
+                        <div className="mt-5 flex flex-wrap justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={handleDeleteCancel}
-                                className="inline-flex h-9 items-center rounded-full border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                                className="inline-flex min-h-11 items-center rounded-full py-2 text-left border border-slate-200 px-4 text-base font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                             >
                                 {tw.delete_cancel_button ?? 'Avbryt'}
                             </button>
@@ -2516,7 +2517,7 @@ function SourcesTab({
                                 <button
                                     type="button"
                                     onClick={handleDeleteConfirm}
-                                    className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
+                                    className="inline-flex min-h-11 items-center rounded-full py-2 text-left bg-rose-600 px-4 text-base font-semibold text-white transition hover:bg-rose-700"
                                 >
                                     {deletePreview.data?.pending_approval_run_count > 0
                                         ? (tw.delete_confirm_button_pending_approval ?? 'Avbryt godkjenningsflyt og slett dokument')
@@ -2527,7 +2528,7 @@ function SourcesTab({
                                 <button
                                     type="button"
                                     onClick={handleCancelBlockingRunsForDeletion}
-                                    className="inline-flex h-9 items-center rounded-full bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-700"
+                                    className="inline-flex min-h-11 items-center rounded-full py-2 text-left bg-amber-600 px-4 text-base font-semibold text-white transition hover:bg-amber-700"
                                 >
                                     {tw.cancel_blocking_runs_button ?? 'Avbryt kjøring og fortsett sletting'}
                                 </button>
@@ -2558,9 +2559,7 @@ function findingsCountToneClass(run) {
     return 'text-slate-500 hover:bg-slate-100 focus-visible:ring-slate-400';
 }
 
-// Readability pass: a Kjøringer-tab-specific select style, kept separate from the shared
-// SELECT_CLS (text-sm) so this fix stays scoped to this tab rather than resizing every filter
-// dropdown across Wiki-sider/Kvalitet too — same scoping precedent as FINDING_BADGE above.
+// The Kjøringer tab's select style; same size as SELECT_CLS, without its max-w-full.
 const RUNS_SELECT_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
 function RunsTab({ runs, runsFilters, tw, locale }) {

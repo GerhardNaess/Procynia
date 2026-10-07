@@ -475,7 +475,7 @@ describe('an unfinished page is not dressed as a warning', () => {
 
     test('the discreet AI marking on the article stays', () => {
         assert.match(show, /article_ai_label \?\? 'AI-generert'/);
-        assert.match(show, /bg-amber-100 px-2\.5 py-0\.5 text-xs font-semibold text-amber-700/);
+        assert.match(show, /bg-amber-100 px-2\.5 py-0\.5 text-base font-semibold text-amber-700/);
     });
 });
 

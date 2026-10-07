@@ -288,7 +288,7 @@ function ClaimSummary({ summary, tw }) {
 
     return (
         <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-base">
                 <span className="font-semibold text-slate-700">
                     {summary.total} {tw.claims ?? 'påstander'}
                 </span>
@@ -328,7 +328,7 @@ function ClaimSummary({ summary, tw }) {
                 )}
             </div>
             {summary.total > HIGH_VOLUME_THRESHOLD && (
-                <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-800">
                     <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                     <p>{tw.high_volume_warning ?? 'Denne siden har mange påstander. Gå gjennom seksjon for seksjon før godkjenning.'}</p>
                 </div>
@@ -359,10 +359,10 @@ const WIKI_INLINE_LINK_CLASS =
  * and must stay visually subordinate to the finding return.
  */
 const WIKI_FINDING_BACK_BUTTON_CLASS =
-    `inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition ${PRIMARY_COLOURS}`;
+    `inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-base font-semibold transition ${PRIMARY_COLOURS}`;
 
 const WIKI_SECONDARY_BACK_LINK_CLASS =
-    'inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-slate-950';
+    'inline-flex items-center gap-1.5 text-base text-slate-500 transition hover:text-slate-950';
 
 /**
  * One label per return context resolveWikiBackLink() can report, so the link never says "Tilbake
@@ -403,13 +403,13 @@ function LinkedPageList({ pages, label }) {
 
     return (
         <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-            <span className="shrink-0 text-xs font-semibold text-slate-500 mt-0.5">{label}:</span>
+            <span className="shrink-0 text-base font-semibold text-slate-500 mt-0.5">{label}:</span>
             <div className="flex flex-wrap gap-2">
                 {pages.map((p) => (
                     <Link
                         key={p.id}
                         href={`/app/wiki/${p.slug}`}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-medium text-slate-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-base font-medium text-slate-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
                     >
                         {p.page_type && (
                             <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
@@ -635,7 +635,7 @@ function StructureFindingContextPanel({
                         <dt className="text-base font-semibold text-slate-700">
                             {tw.quality_check_technical_reference_label ?? 'Teknisk referanse'}
                         </dt>
-                        <dd className="font-mono text-sm text-slate-500">{finding.code}</dd>
+                        <dd className="font-mono text-base text-slate-500">{finding.code}</dd>
                     </div>
                 </dl>
             </div>
@@ -929,7 +929,7 @@ function PageActionsMenu({ tw, page }) {
 
                 <dl className="mt-5 space-y-4">
                     <div>
-                        <dt className="text-sm font-semibold uppercase tracking-wide text-rose-700">
+                        <dt className="text-base font-semibold text-rose-700">
                             {tw.page_delete_dialog_removed_heading ?? 'Dette slettes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -937,7 +937,7 @@ function PageActionsMenu({ tw, page }) {
                         </dd>
                     </div>
                     <div>
-                        <dt className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                        <dt className="text-base font-semibold text-slate-500">
                             {tw.page_delete_dialog_kept_heading ?? 'Dette beholdes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -1785,7 +1785,7 @@ export default function WikiShow({
 
                         {canHandleClaim && !claim.user_decision && !isPendingDecision && (
                             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                <span className="text-sm text-slate-600">
+                                <span className="text-base text-slate-600">
                                     {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                         .replace(':name', claim.approved_by_name ?? '—')
                                         .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
@@ -1795,7 +1795,7 @@ export default function WikiShow({
                                     type="button"
                                     disabled={claimProcessing === claim.id}
                                     onClick={() => unapproveClaim(claim)}
-                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                                 >
                                     {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                                 </button>
@@ -1809,7 +1809,7 @@ export default function WikiShow({
                         )}
 
                         {findingIdForClaim(claim) && (
-                            <p className="font-mono text-[11px] text-slate-400">
+                            <p className="font-mono text-base text-slate-400">
                                 {(tw.claim_card_reference_label ?? 'Referanse #:id')
                                     .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
                             </p>
@@ -1829,17 +1829,17 @@ export default function WikiShow({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                         {isOpenGroup && (
-                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-rose-600">
+                            <p className="text-base font-semibold text-rose-600">
                                 {(tw.verification_worklist_position ?? 'Påstand :position av :total')
                                     .replace(':position', worklistPositionForCard(claim))
                                     .replace(':total', openClaims.length)}
                             </p>
                         )}
                         {showClaimText && (
-                            <p className="mt-1 text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+                            <p className="mt-1 text-base leading-7 text-slate-900">{claim.claim_text}</p>
                         )}
                         {showClaimText && resolveDistinctPageExcerpt(claim.claim_text, claim.page_excerpt) && (
-                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-base leading-6 text-slate-500">
                                 {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {resolveDistinctPageExcerpt(claim.claim_text, claim.page_excerpt)}
                             </p>
                         )}
@@ -1890,13 +1890,13 @@ export default function WikiShow({
                                 />
                             )}
                             {claim.conflict_flag && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-base font-semibold text-rose-600">
                                     <WarnIcon className="h-3 w-3" />
                                     {tw.conflict_detected ?? 'Mulig konflikt'}
                                 </span>
                             )}
                             {!isBestPracticeClaim && (
-                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-base font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
                                     {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
                                         <WarnIcon className="h-3 w-3" />
                                     ) : (
@@ -1908,7 +1908,7 @@ export default function WikiShow({
                         </div>
 
                         {groupedClaimCount > 1 && (
-                            <p className="mt-2 text-xs leading-5 text-slate-500">
+                            <p className="mt-2 text-base leading-6 text-slate-500">
                                 {(tw.claim_card_shared_decision ?? 'Én beslutning for :count påstander i samme avsnitt.')
                                     .replace(':count', groupedClaimCount)}
                             </p>
@@ -1922,17 +1922,17 @@ export default function WikiShow({
                     differs per suggestion. */}
                 {(problemLabel || isBestPracticeClaim) && (
                     <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <p className="text-base font-semibold text-slate-500">
                             {tw.claim_card_why_label ?? 'Hvorfor må du vurdere dette?'}
                         </p>
-                        <p className="mt-1 text-sm leading-6 text-slate-700">
+                        <p className="mt-1 text-base leading-6 text-slate-700">
                             {isBestPracticeClaim
                                 ? (tw.claim_card_best_practice_explanation
                                     ?? 'Procynia foreslår dette som beste praksis. Teksten finnes ikke i kundens kildedokumenter, derfor må du selv avgjøre om den skal beholdes.')
                                 : problemLabel}
                         </p>
                         {isBestPracticeClaim && claim.review_reason && (
-                            <p className="mt-1.5 text-xs leading-5 text-slate-500">
+                            <p className="mt-1.5 text-base leading-6 text-slate-500">
                                 {claim.review_reason}
                             </p>
                         )}
@@ -1940,7 +1940,7 @@ export default function WikiShow({
                 )}
 
                 {claim.finding_recommended_action && !isBestPracticeClaim && (
-                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                    <p className="mt-2 text-base leading-6 text-slate-500">
                         {claim.finding_recommended_action}
                     </p>
                 )}
@@ -1997,14 +1997,14 @@ export default function WikiShow({
                 <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
                     <div className="space-y-1.5">
                         {hasSourceReferences && (
-                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            <p className="text-base font-semibold text-slate-500">
                                 {tw.verification_basis_claim_source_basis_heading ?? 'Kildegrunnlag'}
                             </p>
                         )}
                         {sourceReferences.length === 0 ? (
                             <div className="space-y-2">
                                 {isClaimDefect && (
-                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs italic text-slate-500">
+                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base italic text-slate-500">
                                         {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
                                     </p>
                                 )}
@@ -2014,7 +2014,7 @@ export default function WikiShow({
                                 {canEditClaimText && canHandleClaim && isPendingDecision && (
                                     <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
                                         <label className="block space-y-1">
-                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                                            <span className="text-base font-semibold text-amber-700">
                                                 {isSourceFinding
                                                     ? (tw.claim_card_source_finding_edit_label ?? 'Rediger og godkjenn')
                                                     : (tw.verification_basis_best_practice_edit_label ?? 'Foreslått tekst')}
@@ -2028,10 +2028,10 @@ export default function WikiShow({
                                                     ...prev,
                                                     [claim.id]: e.target.value,
                                                 }))}
-                                                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-amber-400 focus:outline-none"
+                                                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
                                             />
                                         </label>
-                                        <p className="text-[11px] leading-5 text-amber-800">
+                                        <p className="text-base leading-6 text-amber-800">
                                             {!isSourceFinding
                                                 ? (tw.claim_card_best_practice_edit_hint ?? 'Du kan justere teksten før du beholder den.')
                                                 : showRemoveHint
@@ -2043,21 +2043,21 @@ export default function WikiShow({
 
                                 {canLinkSource && (
                                     <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+                                        <p className="text-base font-semibold text-sky-700">
                                             {tw.claim_source_link_heading ?? 'Koble kilde'}
                                         </p>
-                                        <p className="mt-1 text-xs leading-5 text-sky-800">
+                                        <p className="mt-1 text-base leading-6 text-sky-800">
                                             {tw.claim_source_link_intro ?? 'Velg et kildedokument og lim inn utdraget som dokumenterer påstanden.'}
                                         </p>
 
                                         {sourceDocuments.length === 0 ? (
-                                            <p className="mt-2 text-xs text-sky-700">
+                                            <p className="mt-2 text-base text-sky-700">
                                                 {tw.claim_source_no_documents ?? 'Ingen kildedokumenter er tilgjengelige for denne kunden.'}
                                             </p>
                                         ) : (
                                             <div className="mt-3 space-y-3">
                                                 <label className="block space-y-1">
-                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                    <span className="text-base font-semibold text-sky-700">
                                                         {tw.claim_source_document_label ?? 'Kildedokument'}
                                                     </span>
                                                     <select
@@ -2083,7 +2083,7 @@ export default function WikiShow({
                                                                 loadClaimSourceElements(claim, nextDocumentId);
                                                             }
                                                         }}
-                                                        className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                        className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                     >
                                                         <option value="">{tw.claim_source_document_placeholder ?? 'Velg et kildedokument'}</option>
                                                         {sourceDocuments.map((doc) => (
@@ -2100,7 +2100,7 @@ export default function WikiShow({
                                                         href={selectedSourceDocument.download_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 hover:text-sky-900 hover:underline"
+                                                        className="inline-flex items-center gap-1 text-base font-medium text-sky-700 hover:text-sky-900 hover:underline"
                                                     >
                                                         <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                             <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
@@ -2111,30 +2111,30 @@ export default function WikiShow({
                                                 )}
 
                                                 {selectedSourceCatalog?.loading && (
-                                                    <p className="text-xs text-sky-700">
+                                                    <p className="text-base text-sky-700">
                                                         {tw.action_confirming ?? 'Behandler...'}
                                                     </p>
                                                 )}
 
                                                 {selectedSourceCatalog?.error && (
-                                                    <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                                                    <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-base text-rose-700">
                                                         {selectedSourceCatalog.error}
                                                     </p>
                                                 )}
 
                                                 {selectedSourceDocument && !selectedSourceCatalog && (
-                                                    <p className="text-xs text-sky-700">
+                                                    <p className="text-base text-sky-700">
                                                         {tw.action_confirming ?? 'Behandler...'}
                                                     </p>
                                                 )}
 
                                                 {selectedSourceCatalog?.manual_source_allowed ? (
                                                     <>
-                                                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800">
                                                             {selectedSourceCatalog.manual_source_reason ?? 'Dette dokumentet har ikke strukturerte kildeelementer. Bruk et manuelt kilderutdrag.'}
                                                         </p>
                                                         <label className="block space-y-1">
-                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                            <span className="text-base font-semibold text-sky-700">
                                                                 {tw.claim_source_excerpt_label ?? 'Tekstutdrag'}
                                                             </span>
                                                             <textarea
@@ -2148,13 +2148,13 @@ export default function WikiShow({
                                                                         excerpt: e.target.value,
                                                                     },
                                                                 }))}
-                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                                 placeholder={tw.claim_source_excerpt_placeholder ?? 'Lim inn teksten som dokumenterer påstanden.'}
                                                             />
                                                         </label>
 
                                                         <label className="block space-y-1">
-                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                            <span className="text-base font-semibold text-sky-700">
                                                                 {tw.claim_source_page_reference_label ?? (tw.source_page_reference ?? 'Plassering i kilden')}
                                                             </span>
                                                             <input
@@ -2168,7 +2168,7 @@ export default function WikiShow({
                                                                         page_reference: e.target.value,
                                                                     },
                                                                 }))}
-                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                                 placeholder={tw.claim_source_page_reference_placeholder ?? 'Valgfri plassering, for eksempel avsnitt, tabellrad eller sidetall'}
                                                             />
                                                         </label>
@@ -2176,7 +2176,7 @@ export default function WikiShow({
                                                 ) : selectedSourceCatalog ? (
                                                     <>
                                                         <label className="block space-y-1">
-                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                            <span className="text-base font-semibold text-sky-700">
                                                                 {tw.claim_source_element_search_label ?? 'Søk i kilden'}
                                                             </span>
                                                             <input
@@ -2189,7 +2189,7 @@ export default function WikiShow({
                                                                         source_element_search: e.target.value,
                                                                     },
                                                                 }))}
-                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-base text-slate-700 focus:border-sky-400 focus:outline-none"
                                                                 placeholder={tw.claim_source_element_search_placeholder ?? 'Søk etter avsnitt, listepunkt eller tabellrad'}
                                                             />
                                                         </label>
@@ -2205,7 +2205,7 @@ export default function WikiShow({
                                                                         type="button"
                                                                         key={`${element.source_element_type}:${element.source_element_key}`}
                                                                         onClick={() => selectClaimSourceElement(claim, selectedSourceDocument.id, element)}
-                                                                        className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${isSelected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50'}`}
+                                                                        className={`w-full rounded-lg border px-3 py-2 text-left text-base transition ${isSelected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50'}`}
                                                                     >
                                                                         <div className="flex flex-wrap items-center gap-2">
                                                                             <span className="font-semibold text-slate-700">
@@ -2221,7 +2221,7 @@ export default function WikiShow({
                                                                     </button>
                                                                 );
                                                             }) : (
-                                                                <p className="px-2 py-3 text-xs italic text-slate-400">
+                                                                <p className="px-2 py-3 text-base italic text-slate-400">
                                                                     {tw.claim_source_no_element_match ?? 'Ingen kildeelementer matcher søket.'}
                                                                 </p>
                                                             )}
@@ -2229,13 +2229,13 @@ export default function WikiShow({
 
                                                         {sourceDraft.source_element_key && (
                                                             <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
-                                                                <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                                <p className="text-base font-semibold text-sky-700">
                                                                     {tw.claim_source_selected_element ?? 'Valgt element'}
                                                                 </p>
-                                                                <p className="mt-1 text-xs text-sky-900">
+                                                                <p className="mt-1 text-base text-sky-900">
                                                                     {selectedSourceElements.find((element) => String(element.source_element_key) === String(sourceDraft.source_element_key) && String(element.source_element_type) === String(sourceDraft.source_element_type))?.reference_text ?? ''}
                                                                 </p>
-                                                                <p className="mt-1 text-xs text-sky-700">
+                                                                <p className="mt-1 text-base text-sky-700">
                                                                     {tw.claim_source_page_reference_label ?? (tw.source_page_reference ?? 'Plassering i kilden')}: {sourceDraft.page_reference || '—'}
                                                                 </p>
                                                             </div>
@@ -2261,7 +2261,7 @@ export default function WikiShow({
                                                             )
                                                         }
                                                         onClick={() => linkClaimSource(claim)}
-                                                        className="rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                                                        className="rounded-full bg-sky-600 px-3 py-1.5 text-base font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
                                                     >
                                                         {claimSourceProcessing === claim.id ? (tw.action_confirming ?? 'Behandler...') : (tw.claim_source_link_submit ?? 'Koble kilde')}
                                                     </button>
@@ -2272,7 +2272,7 @@ export default function WikiShow({
                                 )}
 
                                 {!canHandleClaim && !isBestPracticeClaim && (
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base text-slate-600">
                                         {claimAccessNotice}
                                     </div>
                                 )}
@@ -2318,7 +2318,7 @@ export default function WikiShow({
                                                 href={ref.download_url}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                                                className="inline-flex items-center gap-1 text-base font-medium text-violet-600 hover:text-violet-800 hover:underline"
                                             >
                                                 <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                     <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
@@ -2335,7 +2335,7 @@ export default function WikiShow({
 
                     {canHandleClaim && isPendingDecision && (
                         <div className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            <p className="text-base font-semibold text-slate-500">
                                 {tw.claim_card_what_label ?? 'Hva skal du gjøre?'}
                             </p>
                             <div className="flex flex-wrap items-center gap-2">
@@ -2345,13 +2345,13 @@ export default function WikiShow({
                                     placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
                                     value={approvalComments[claim.id] ?? ''}
                                     onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                    className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-violet-300 focus:outline-none"
+                                    className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
                                 />
                                 <button
                                     type="button"
                                     disabled={claimProcessing === claim.id}
                                     onClick={() => approveClaim(claim)}
-                                    className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                    className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                                 >
                                     {keepTextLabel}
                                 </button>
@@ -2359,7 +2359,7 @@ export default function WikiShow({
                                     type="button"
                                     disabled={claimProcessing === claim.id}
                                     onClick={() => removeClaimText(claim)}
-                                    className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                                    className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                                 >
                                     {tw.claim_card_remove_text ?? 'Fjern teksten'}
                                 </button>
@@ -2368,7 +2368,7 @@ export default function WikiShow({
                     )}
 
                     {!isPendingDecision && canHandleClaim && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-3 text-sm text-sky-700">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-3 text-base text-sky-700">
                             <span>
                                 {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                     .replace(':name', claim.approved_by_name ?? '—')
@@ -2379,7 +2379,7 @@ export default function WikiShow({
                                 type="button"
                                 disabled={claimProcessing === claim.id}
                                 onClick={() => unapproveClaim(claim)}
-                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-base font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
                             >
                                 {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
@@ -2387,7 +2387,7 @@ export default function WikiShow({
                     )}
 
                     {!canHandleClaim && hasSourceReferences && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base text-slate-600">
                             {claimAccessNotice}
                         </div>
                     )}
@@ -2396,7 +2396,7 @@ export default function WikiShow({
                         so a support case can be matched — but no longer the reader's first clue to
                         what this card is about. */}
                     {findingIdForClaim(claim) && (
-                        <p className="font-mono text-[11px] text-slate-400">
+                        <p className="font-mono text-base text-slate-400">
                             {(tw.claim_card_reference_label ?? 'Referanse #:id')
                                 .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
                         </p>
@@ -2622,7 +2622,7 @@ export default function WikiShow({
                         )}
                     </div>
                     {current_version && (
-                        <p className="text-sm text-slate-400">
+                        <p className="text-base text-slate-400">
                             {tw.version ?? 'Versjon'} {current_version.version_number}
                         </p>
                     )}
@@ -2669,7 +2669,7 @@ export default function WikiShow({
                 {reviewReference?.status === 'superseded' && (
                     <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
                         <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <p className="text-sm text-amber-800">
+                        <p className="text-base text-amber-800">
                             {(tw.review_reference_superseded ?? 'Forslaget gjelder en eldre sideversjon (versjon :version) og er ikke lenger aktuelt for gjeldende innhold.')
                                 .replace(':version', reviewReference.version_number ?? '—')}
                         </p>
@@ -2679,14 +2679,14 @@ export default function WikiShow({
                 {(reviewReference?.status === 'block_missing' || reviewReference?.status === 'not_found') && (
                     <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
                         <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <div className="text-sm text-amber-800">
+                        <div className="text-base text-amber-800">
                             <p>
                                 {reviewReference.status === 'block_missing'
                                     ? (tw.review_reference_block_missing ?? 'Teksten kunne ikke lokaliseres på Wiki-siden.')
                                     : (tw.review_reference_not_found ?? 'Teksten kunne ikke lokaliseres på Wiki-siden.')}
                             </p>
                             {isSystemOwner && reviewReference.technical_block_key && (
-                                <p className="mt-1 text-xs text-amber-600">block_key: {reviewReference.technical_block_key}</p>
+                                <p className="mt-1 text-base text-amber-600">block_key: {reviewReference.technical_block_key}</p>
                             )}
                         </div>
                     </div>
@@ -2695,7 +2695,7 @@ export default function WikiShow({
                 {reviewReference?.status === 'ready' && reviewReference.block_key === null && (
                     <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
                         <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <p className="text-sm text-amber-800">
+                        <p className="text-base text-amber-800">
                             {tw.review_reference_no_confident_block ?? 'Systemet fant ingen sikker tekstblokk å markere for denne påstanden. Se hele siden under.'}
                         </p>
                     </div>
@@ -2710,7 +2710,7 @@ export default function WikiShow({
                                     <h2 className="text-base font-semibold text-slate-700">
                                         {tw.article_heading ?? 'Artikkelutkast'}
                                     </h2>
-                                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-base font-semibold text-amber-700">
                                         {tw.article_ai_label ?? 'AI-generert'}
                                     </span>
                                 </>
@@ -2723,7 +2723,7 @@ export default function WikiShow({
                                     disabled={!canEditArticle}
                                     title={canEditArticle ? undefined : (articleEditUnavailable ?? undefined)}
                                     data-testid="wiki-article-edit"
-                                    className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {tw.article_edit_button ?? 'Rediger artikkel'}
                                 </button>
@@ -2732,7 +2732,7 @@ export default function WikiShow({
                     )}
 
                     {showsArticleEdit && !canEditArticle && articleEditUnavailable !== null && (
-                        <p className="text-sm text-slate-500">{articleEditUnavailable}</p>
+                        <p className="text-base text-slate-500">{articleEditUnavailable}</p>
                     )}
 
                     {hasArticle ? (
@@ -2852,7 +2852,7 @@ export default function WikiShow({
                                                 ) : (
                                                     <>
                                                         {hasBestPracticeMetadataIssue && (
-                                                            <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
+                                                            <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-base font-medium text-rose-700">
                                                                 {tw.wiki_best_practice_metadata_missing ?? 'Beste-praksis-metadata mangler. Blokken merkes ikke som beste praksis før lagret opprinnelse og begrunnelse er konsistente.'}
                                                             </div>
                                                         )}
@@ -2903,7 +2903,7 @@ export default function WikiShow({
                                                     : 'space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3'}
                                             >
                                                 {!pageIsFinallyApproved && (
-                                                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                    <p className="text-base font-semibold text-amber-800">
                                                         {bestPracticeSectionLabelText(
                                                             tw.wiki_best_practice_section_label ?? 'Beste praksis',
                                                             resolveBestPracticeSectionFindingId(group.blocks, claims),
@@ -2949,7 +2949,7 @@ export default function WikiShow({
                                         type="button"
                                         onClick={cancelArticleEditing}
                                         disabled={isSavingArticle}
-                                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {tw.article_edit_cancel ?? 'Avbryt'}
                                     </button>
@@ -2957,7 +2957,7 @@ export default function WikiShow({
                                         type="button"
                                         onClick={saveArticleEditing}
                                         disabled={isSavingArticle}
-                                        className="inline-flex min-h-9 items-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="inline-flex min-h-9 items-center rounded-lg bg-sky-600 px-3 py-2 text-base font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isSavingArticle
                                             ? (tw.article_edit_saving ?? 'Lagrer...')
@@ -2967,7 +2967,7 @@ export default function WikiShow({
                             )}
                         </div>
                     ) : (
-                        <p className="text-sm text-slate-400">
+                        <p className="text-base text-slate-400">
                             {tw.article_empty ?? 'Ingen artikkelinnhold generert ennå.'}
                         </p>
                     )}
@@ -2979,13 +2979,13 @@ export default function WikiShow({
                             <h2 className="text-base font-semibold text-slate-700">
                                 {tw.best_practice_review_heading ?? 'Beste praksis — vurdering'}
                             </h2>
-                            <p className="text-sm text-slate-500">
+                            <p className="text-base text-slate-500">
                                 {(tw.best_practice_review_summary ?? ':reviewed vurdert · :gaps forbedring(er) foreslått')
                                     .replace(':reviewed', String(bestPracticeReview.length))
                                     .replace(':gaps', String(bestPracticeReview.filter((entry) => entry.gap_found).length))}
                             </p>
                         </div>
-                        <p className="text-sm text-slate-500">
+                        <p className="text-base text-slate-500">
                             {tw.best_practice_review_intro
                                 ?? 'Hva vurderingen konkluderte for hvert tema på denne siden. «Ingen forbedring funnet» er et resultat, ikke et avvik.'}
                         </p>
@@ -2993,22 +2993,22 @@ export default function WikiShow({
                             {bestPracticeReview.map((entry, index) => (
                                 <li key={`${entry.planned_topic}-${index}`} className="flex flex-col gap-1 p-4 sm:flex-row sm:items-start sm:gap-4">
                                     <span
-                                        className={`inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                            entry.gap_found ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
-                                        }`}
+                                        className={`inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-base font-medium ${
+ entry.gap_found ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+ }`}
                                     >
                                         {entry.gap_found
                                             ? (tw.best_practice_review_gap_found ?? 'Forbedring foreslått')
                                             : (tw.best_practice_review_no_gap ?? 'Ingen forbedring funnet')}
                                     </span>
                                     <div className="min-w-0">
-                                        <p className="text-sm font-medium text-slate-700">
+                                        <p className="text-base font-medium text-slate-700">
                                             {entry.planned_topic === '__page__'
                                                 ? (tw.best_practice_review_whole_page ?? 'Siden som helhet')
                                                 : entry.planned_topic}
                                         </p>
                                         {entry.assessment && (
-                                            <p className="mt-0.5 text-sm text-slate-500">{entry.assessment}</p>
+                                            <p className="mt-0.5 text-base text-slate-500">{entry.assessment}</p>
                                         )}
                                     </div>
                                 </li>
@@ -3027,7 +3027,7 @@ export default function WikiShow({
                         {backlinks.length > 0 ? (
                             <LinkedPageList pages={backlinks} label={tw.backlinks_label ?? 'Sider'} />
                         ) : (
-                            <p className="text-sm text-slate-400">
+                            <p className="text-base text-slate-400">
                                 {tw.backlinks_empty ?? 'Ingen andre sider lenker hit ennå.'}
                             </p>
                         )}
@@ -3065,7 +3065,7 @@ export default function WikiShow({
                                 />
                             </div>
                         ) : (
-                            <p className="text-sm text-slate-400">
+                            <p className="text-base text-slate-400">
                                 {tw.traversal_no_links ?? 'Ingen lenker registrert ennå.'}
                             </p>
                         )}
@@ -3077,22 +3077,22 @@ export default function WikiShow({
                     <button
                         type="button"
                         onClick={() => setVerificationOpen((v) => !v)}
-                        className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
+                        className="flex flex-wrap items-center gap-2 text-left text-base font-semibold text-slate-500 transition-colors hover:text-slate-700"
                     >
                         <ChevronIcon open={verificationOpen} />
                         {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
                         {openClaims.length > 0 && (
-                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-normal text-rose-700">
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-base font-normal text-rose-700">
                                 {openClaims.length} {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
                             </span>
                         )}
                         {verifiedClaims.length > 0 && (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-normal text-emerald-700">
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-base font-normal text-emerald-700">
                                 {verifiedClaims.length} {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
                             </span>
                         )}
                         {structuralFindings.length > 0 && (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-500">
                                 {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
                             </span>
                         )}
@@ -3104,11 +3104,11 @@ export default function WikiShow({
                                 second identical badge row only pushed the actual work list further
                                 down the page. */}
                             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                                <p className="text-sm leading-6 text-slate-600">
+                                <p className="text-base leading-6 text-slate-600">
                                     {claimAccessNotice}
                                 </p>
                                 {claimLintFindings.length > 0 && (
-                                    <p className="mt-3 text-xs text-slate-500">
+                                    <p className="mt-3 text-base text-slate-500">
                                         {tw.verification_basis_claim_findings_note ?? 'Påstandsrelaterte kontrollfunn vises direkte i påstandskortene nedenfor.'}
                                     </p>
                                 )}
@@ -3117,17 +3117,17 @@ export default function WikiShow({
                             <section className="space-y-3">
                                 {/* The access notice sits once, in the box above — repeating it here
                                     separated the heading from the work list it introduces. */}
-                                <h3 className="text-sm font-semibold text-slate-700">
+                                <h3 className="text-base font-semibold text-slate-700">
                                     {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
-                                    <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                                    <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-base font-medium text-rose-700">
                                         {openClaims.length}
                                     </span>
                                 </h3>
 
                                 {!current_version ? (
-                                    <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
+                                    <p className="text-base text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
                                 ) : openClaims.length === 0 ? (
-                                    <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                    <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-500">
                                         {tw.verification_basis_no_open_claims ?? 'Alle påstander som krever behandling, er ferdigbehandlet.'}
                                     </p>
                                 ) : (
@@ -3148,14 +3148,14 @@ export default function WikiShow({
                                                         aria-label={`${tw.verification_worklist_open_entry ?? 'Gå til påstanden'}: ${entry.title || (tw.verification_worklist_untitled ?? 'Påstand uten tekst')}`}
                                                         className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-violet-50 focus-visible:bg-violet-50 focus-visible:outline-none"
                                                     >
-                                                        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-100 text-xs font-semibold text-rose-700">
+                                                        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-100 text-base font-semibold text-rose-700">
                                                             {entry.position}
                                                         </span>
                                                         <span className="min-w-0 flex-1">
-                                                            <span className="block text-sm leading-6 text-slate-900">
+                                                            <span className="block text-base leading-6 text-slate-900">
                                                                 {entry.title || (tw.verification_worklist_untitled ?? 'Påstand uten tekst')}
                                                             </span>
-                                                            <span className="mt-0.5 block text-xs text-slate-500">
+                                                            <span className="mt-0.5 block text-base text-slate-500">
                                                                 {tw[`verification_worklist_reason_${entry.reasonKey}`]
                                                                     ?? tw.verification_worklist_reason_other
                                                                     ?? 'Krever en vurdering'}
@@ -3173,7 +3173,7 @@ export default function WikiShow({
                                             ))}
                                         </ol>
 
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                        <p className="text-base font-semibold text-slate-500">
                                             {tw.verification_worklist_intro ?? 'Slik behandler du dem:'}
                                         </p>
 
@@ -3186,11 +3186,11 @@ export default function WikiShow({
                                 <button
                                     type="button"
                                     onClick={() => setVerifiedClaimsOpen((v) => !v)}
-                                    className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
+                                    className="flex items-center gap-2 text-base font-semibold text-slate-500 transition-colors hover:text-slate-700"
                                 >
                                     <ChevronIcon open={verifiedClaimsOpen} />
                                     {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-500">
                                         {verifiedClaims.length}
                                     </span>
                                 </button>
@@ -3198,7 +3198,7 @@ export default function WikiShow({
                                 {verifiedClaimsOpen && (
                                     <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                         {verifiedClaims.length === 0 ? (
-                                            <p className="text-sm text-slate-400">
+                                            <p className="text-base text-slate-400">
                                                 {tw.verification_basis_no_verified_claims ?? 'Ingen verifiserte påstander ennå.'}
                                             </p>
                                         ) : (
@@ -3214,23 +3214,23 @@ export default function WikiShow({
                                 <button
                                     type="button"
                                     onClick={() => setStructuralFindingsOpen((v) => !v)}
-                                    className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
+                                    className="flex items-center gap-2 text-base font-semibold text-slate-500 transition-colors hover:text-slate-700"
                                 >
                                     <ChevronIcon open={structuralFindingsOpen} />
                                     {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-base font-normal text-slate-500">
                                         {structuralFindings.length}
                                     </span>
                                 </button>
 
                                 {structuralFindingsOpen && (
                                     <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                                        <p className="text-sm text-slate-500">
+                                        <p className="text-base text-slate-500">
                                             {tw.verification_basis_structural_intro ?? 'Disse funnene gjelder struktur og lenker på Wiki-siden, ikke den enkelte påstanden.'}
                                         </p>
 
                                         {structuralFindingGroups.length === 0 ? (
-                                            <p className="text-sm text-slate-400">
+                                            <p className="text-base text-slate-400">
                                                 {tw.verification_basis_no_structural_findings ?? 'Ingen strukturelle funn på denne siden.'}
                                             </p>
                                         ) : (
@@ -3247,7 +3247,7 @@ export default function WikiShow({
                                                             className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3"
                                                         >
                                                             <div className="flex items-start gap-3">
-                                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[first.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-base font-semibold ${LINT_SEVERITY_STYLES[first.severity] ?? 'bg-slate-100 text-slate-600'}`}>
                                                                     {first.severity === 'error'
                                                                         ? (tw.lint_severity_error ?? 'Feil')
                                                                         : first.severity === 'warning'
@@ -3256,28 +3256,28 @@ export default function WikiShow({
                                                                 </span>
                                                                 <div className="min-w-0 flex-1">
                                                                     <div className="flex flex-wrap items-center gap-2">
-                                                                        <p className="text-sm font-semibold text-slate-700">
+                                                                        <p className="text-base font-semibold text-slate-700">
                                                                             {checkCopy.label}
                                                                         </p>
-                                                                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">
+                                                                        <span className="rounded-full bg-white px-2 py-0.5 text-base font-medium text-slate-500 ring-1 ring-slate-200">
                                                                             ×{group.findings.length}
                                                                         </span>
                                                                     </div>
-                                                                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                                                                    <p className="mt-1 text-base leading-6 text-slate-600">
                                                                         {checkCopy.description}
                                                                     </p>
-                                                                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                    <p className="mt-2 text-base leading-6 text-slate-700">
                                                                         <span className="font-semibold">
                                                                             {tw.quality_check_action_label ?? 'Hva gjør du?'}
                                                                         </span>{' '}
                                                                         {checkCopy.action}
                                                                     </p>
                                                                     {first.message && first.message !== checkCopy.description && (
-                                                                        <p className="mt-2 text-xs leading-5 text-slate-500">
+                                                                        <p className="mt-2 text-base leading-6 text-slate-500">
                                                                             {first.message}
                                                                         </p>
                                                                     )}
-                                                                    <p className="mt-2 text-[11px] text-slate-400">
+                                                                    <p className="mt-2 text-base text-slate-400">
                                                                         {tw.quality_check_technical_reference_label ?? 'Teknisk referanse'}:{' '}
                                                                         <span className="font-mono">{first.code}</span>
                                                                     </p>
