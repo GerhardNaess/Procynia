@@ -625,6 +625,8 @@ Route::prefix('app')
         Route::post('/billing/change-plan', [BillingController::class, 'changePlan'])->name('billing.change-plan');
         Route::post('/billing/packages/{package}/request', [BillingController::class, 'requestPackage'])
             ->name('billing.packages.request');
+        Route::post('/billing/packages/{package}/cancel', [BillingController::class, 'cancelPackage'])
+            ->name('billing.packages.cancel');
 
         // Go/No-go template admin (System Owner only)
         Route::prefix('/go-no-go-templates')->name('go-no-go-templates.')->group(function (): void {

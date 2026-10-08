@@ -7,6 +7,7 @@ import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import { changeTargets, consequenceLines, fillTemplate, packageActionLabel, packageStatus } from '../../../Support/packagePresentation';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -68,9 +69,11 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-            <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
                 <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-                <p className="mt-2 text-base leading-6 text-slate-600">{message}</p>
+                {(Array.isArray(message) ? message : [message]).map((line) => (
+                    <p key={line} className="mt-2 text-base leading-6 text-slate-600">{line}</p>
+                ))}
                 <div className="mt-5 flex justify-end gap-3">
                     <button
                         onClick={onCancel}
@@ -134,6 +137,9 @@ export default function BillingIndex() {
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmResume, setConfirmResume] = useState(false);
     const [confirmPackageKey, setConfirmPackageKey] = useState(null);
+    const [cancelPackageKey, setCancelPackageKey] = useState(null);
+    // Endre pakke: 'select' lists the other steps, 'confirm' spells out what the chosen one changes.
+    const [packageChange, setPackageChange] = useState(null);
     const [planChangeOpen, setPlanChangeOpen] = useState(false);
     const [planChangeStep, setPlanChangeStep] = useState('selection');
     const [selectedPlanKey, setSelectedPlanKey] = useState('');
@@ -300,16 +306,47 @@ export default function BillingIndex() {
         });
     };
 
-    const PACKAGE_STATUS_PRESENTATION = {
-        active: { tone: 'green', label: modulesText.status_active ?? 'Aktiv' },
-        requested: { tone: 'amber', label: modulesText.status_requested ?? 'Bestilt' },
-        declined: { tone: 'slate', label: modulesText.status_declined ?? 'Ikke innvilget' },
-        available: { tone: 'slate', label: modulesText.status_available ?? 'Ikke bestilt' },
-    };
-
     const resolvePackageName = (key) => packageLabels[key] ?? key;
     const resolveModuleLabel = (key) => moduleLabels[key] ?? key;
     const confirmPackage = modulePackages.find((entry) => entry.key === confirmPackageKey) ?? null;
+    const cancelPackage = modulePackages.find((entry) => entry.key === cancelPackageKey) ?? null;
+    const activeMainPackage = modulePackages.find((entry) => entry.kind === 'main' && entry.status === 'active') ?? null;
+    const packageChangeTargets = changeTargets(modulePackages);
+    const packageChangeTarget = modulePackages.find((entry) => entry.key === packageChange?.target) ?? null;
+
+    const handlePackageAction = (entry) => {
+        if (entry.action === 'change') {
+            setPackageChange({ step: 'select', target: packageChangeTargets[0]?.key ?? null });
+        } else if (entry.action === 'upgrade') {
+            setPackageChange({ step: 'confirm', target: entry.key });
+        } else if (entry.action === 'cancel') {
+            setCancelPackageKey(entry.key);
+        } else if (entry.action === 'order') {
+            setConfirmPackageKey(entry.key);
+        }
+    };
+
+    const handlePackageChange = () => {
+        if (!packageChangeTarget) {
+            return;
+        }
+
+        router.post(`/app/billing/packages/${packageChangeTarget.key}/request`, {}, {
+            preserveScroll: true,
+            onFinish: () => setPackageChange(null),
+        });
+    };
+
+    const handlePackageCancel = () => {
+        if (!cancelPackageKey) {
+            return;
+        }
+
+        router.post(`/app/billing/packages/${cancelPackageKey}/cancel`, {}, {
+            preserveScroll: true,
+            onFinish: () => setCancelPackageKey(null),
+        });
+    };
 
     const handlePackageOrder = () => {
         if (!confirmPackageKey) {
@@ -533,7 +570,7 @@ export default function BillingIndex() {
                     </div>
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <section data-testid="module-packages" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
                             {modulesText.heading ?? 'Moduler og pakker'}
@@ -549,27 +586,40 @@ export default function BillingIndex() {
                             <thead>
                                 <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
                                     <th className="pb-2 pr-4">{modulesTableText.package ?? 'Pakke'}</th>
-                                    <th className="pb-2 pr-4">{modulesTableText.contents ?? 'Innhold'}</th>
+                                    <th className="hidden pb-2 pr-4 sm:table-cell">{modulesTableText.contents ?? 'Innhold'}</th>
                                     <th className="pb-2 pr-4">{modulesTableText.status ?? 'Status'}</th>
-                                    <th className="pb-2">{modulesTableText.action ?? 'Handling'}</th>
+                                    <th className="hidden pb-2 sm:table-cell">{modulesTableText.action ?? 'Handling'}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                                 {modulePackages.map((entry) => {
-                                    const presentation = PACKAGE_STATUS_PRESENTATION[entry.status]
-                                        ?? PACKAGE_STATUS_PRESENTATION.available;
+                                    const presentation = packageStatus(entry, modulesText, resolvePackageName);
+                                    const actionLabel = packageActionLabel(entry, modulesText);
+                                    const actionButton = actionLabel ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePackageAction(entry)}
+                                            className={`whitespace-nowrap rounded-lg px-4 py-2 text-base font-medium ${entry.action === 'cancel' || entry.action === 'change' ? SECONDARY_COLOURS : PRIMARY_COLOURS}`}
+                                        >
+                                            {actionLabel}
+                                        </button>
+                                    ) : null;
 
                                     return (
-                                        <tr key={entry.key}>
+                                        <tr key={entry.key} data-testid={`package-row-${entry.key}`}>
                                             <td className="py-3 pr-4 align-top">
                                                 <div className="font-medium text-slate-900">{resolvePackageName(entry.key)}</div>
                                                 {packageDescriptions[entry.key] && (
-                                                    <p className="mt-1 text-base leading-6 text-slate-600">
+                                                    <p className="mt-1 hidden text-base leading-6 text-slate-600 sm:block">
                                                         {packageDescriptions[entry.key]}
                                                     </p>
                                                 )}
+                                                {/* On a phone the Innhold column gives way, so status and action stay in view. */}
+                                                <p className="mt-1 text-base leading-6 text-slate-600 sm:hidden">
+                                                    {entry.modules.map(resolveModuleLabel).join(', ')}
+                                                </p>
                                             </td>
-                                            <td className="py-3 pr-4 align-top">
+                                            <td className="hidden py-3 pr-4 align-top sm:table-cell">
                                                 <div className="flex flex-wrap gap-1.5">
                                                     {entry.modules.map((moduleKey) => (
                                                         <span
@@ -581,7 +631,7 @@ export default function BillingIndex() {
                                                     ))}
                                                 </div>
                                             </td>
-                                            <td className="py-3 pr-4 align-top">
+                                            <td className="py-3 pr-4 align-top" data-testid={`package-status-${entry.key}`}>
                                                 <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>
                                                 {entry.status === 'requested' && entry.requested_at && (
                                                     <div className="mt-1 text-base leading-6 text-slate-600">
@@ -593,20 +643,11 @@ export default function BillingIndex() {
                                                         {(modulesText.activated_at ?? 'Aktivert :date').replace(':date', formatDate(entry.activated_at))}
                                                     </div>
                                                 )}
+                                                {/* On a phone the Handling column gives way too; the action sits under the status. */}
+                                                {actionButton && <div className="mt-2 sm:hidden">{actionButton}</div>}
                                             </td>
-                                            <td className="py-3 align-top">
-                                                {entry.can_order ? (
-                                                    <button
-                                                        onClick={() => setConfirmPackageKey(entry.key)}
-                                                        className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
-                                                    >
-                                                        {entry.status === 'declined'
-                                                            ? (modulesText.order_again ?? 'Bestill på nytt')
-                                                            : (modulesText.order ?? 'Bestill')}
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-base leading-6 text-slate-500">—</span>
-                                                )}
+                                            <td className="hidden py-3 align-top sm:table-cell">
+                                                {actionButton ?? <span className="text-base leading-6 text-slate-500">—</span>}
                                             </td>
                                         </tr>
                                     );
@@ -990,6 +1031,79 @@ export default function BillingIndex() {
                 onCancel={() => setConfirmPackageKey(null)}
                 confirmLabel={modulesText.order ?? 'Bestill'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
+            />
+
+            <ConfirmDialog
+                isOpen={Boolean(cancelPackage)}
+                title={fillTemplate(modulesText.cancel_confirm_title ?? 'Avbestill :package?', { package: resolvePackageName(cancelPackage?.key) })}
+                message={cancelPackage ? consequenceLines(cancelPackage, modulesText, resolveModuleLabel) : ''}
+                onConfirm={handlePackageCancel}
+                onCancel={() => setCancelPackageKey(null)}
+                confirmLabel={modulesText.cancel ?? 'Avbestill'}
+                cancelLabel={tb.cancel_button ?? 'Avbryt'}
+                warning
+            />
+
+            {packageChange?.step === 'select' && activeMainPackage && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+                    <div role="dialog" aria-modal="true" aria-labelledby="package-change-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+                        <h3 id="package-change-title" className="text-base font-semibold text-slate-900">
+                            {modulesText.change_dialog_title ?? 'Endre pakke'}
+                        </h3>
+                        <p className="mt-2 text-base leading-6 text-slate-600">
+                            {fillTemplate(modulesText.change_dialog_intro ?? 'Dere har :package i dag. Velg pakken dere vil bytte til.', { package: resolvePackageName(activeMainPackage.key) })}
+                        </p>
+                        <fieldset className="mt-4 space-y-2">
+                            <legend className="sr-only">{modulesText.change_dialog_title ?? 'Endre pakke'}</legend>
+                            {packageChangeTargets.map((target) => (
+                                <label key={target.key} className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-base text-slate-900 has-[:checked]:border-slate-900">
+                                    <input
+                                        type="radio"
+                                        name="package-change-target"
+                                        value={target.key}
+                                        checked={packageChange.target === target.key}
+                                        onChange={() => setPackageChange({ step: 'select', target: target.key })}
+                                    />
+                                    {fillTemplate(
+                                        target.direction === 'upgrade'
+                                            ? (modulesText.change_option_upgrade ?? 'Oppgrader til :package')
+                                            : (modulesText.change_option_downgrade ?? 'Bytt ned til :package'),
+                                        { package: resolvePackageName(target.key) },
+                                    )}
+                                </label>
+                            ))}
+                        </fieldset>
+                        <div className="mt-5 flex justify-end gap-3">
+                            <button type="button" onClick={() => setPackageChange(null)} className={`rounded-lg px-4 py-2 text-base font-medium ${SECONDARY_COLOURS}`}>
+                                {tb.cancel_button ?? 'Avbryt'}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!packageChangeTarget}
+                                onClick={() => setPackageChange({ step: 'confirm', target: packageChange.target })}
+                                className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
+                            >
+                                {modulesText.change_continue ?? 'Fortsett'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <ConfirmDialog
+                isOpen={packageChange?.step === 'confirm' && Boolean(packageChangeTarget)}
+                title={activeMainPackage
+                    ? fillTemplate(modulesText.change_confirm_title ?? 'Bytt fra :from til :to?', {
+                        from: resolvePackageName(activeMainPackage.key),
+                        to: resolvePackageName(packageChangeTarget?.key),
+                    })
+                    : `${modulesText.order_confirm_title ?? 'Bestill pakke'}: ${resolvePackageName(packageChangeTarget?.key)}`}
+                message={packageChangeTarget ? consequenceLines(packageChangeTarget, modulesText, resolveModuleLabel) : ''}
+                onConfirm={handlePackageChange}
+                onCancel={() => setPackageChange(null)}
+                confirmLabel={fillTemplate(modulesText.change_confirm ?? 'Bytt til :package', { package: resolvePackageName(packageChangeTarget?.key) })}
+                cancelLabel={tb.cancel_button ?? 'Avbryt'}
+                warning={packageChangeTarget?.direction === 'downgrade'}
             />
         </CustomerAppLayout>
     );

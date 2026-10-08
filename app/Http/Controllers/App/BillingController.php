@@ -107,9 +107,16 @@ class BillingController extends Controller
     }
 
     /**
-     * Order a commercial package. Self-service ordering completes in this request: the entitlement
-     * is written active, so the left rail, the Abonnement page and EnsureModuleIsEnabled all agree
-     * on the next response. No payment is started here.
+     * Order a commercial package, or move to another step of the ladder. Self-service ordering
+     * completes in this request: the entitlement is written active, so the left rail, the
+     * Abonnement page and EnsureModuleIsEnabled all agree on the next response. No payment is
+     * started here.
+     *
+     * For a main package this is also the downgrade: the customer moves to the chosen step and the
+     * one they were on is revoked (ModuleEntitlementService::changeMainPackage()). No data goes.
+     *
+     * The customer is always the signed-in user's own; the package key is the only input, so there
+     * is no way to name another customer.
      */
     public function requestPackage(Request $request, string $package): RedirectResponse
     {
@@ -125,7 +132,11 @@ class BillingController extends Controller
 
         abort_unless($catalogEntry !== null && $catalogEntry['orderable'], 404);
 
-        if ($service->hasPackage($customer, $package)) {
+        $isMain = $service->isMainPackage($package);
+        $previousMain = $service->effectiveMainPackage($customer);
+        $alreadyActive = $isMain ? $previousMain === $package : $service->hasPackage($customer, $package);
+
+        if ($alreadyActive) {
             return redirect()
                 ->route('app.billing.index')
                 ->with('error', __('procynia.billing.modules.order_already_active'));
@@ -133,11 +144,48 @@ class BillingController extends Controller
 
         $service->activatePackage($customer, $package, $user);
 
+        $message = $isMain && $previousMain !== null
+            ? __('procynia.billing.modules.change_success', [
+                'package' => __("procynia.billing.modules.package_labels.{$package}"),
+            ])
+            : __('procynia.billing.modules.order_success');
+
         // The redirect is what refreshes the shared entitlement props: the rail reads
         // `entitlements.modules` from HandleInertiaRequests, which is recomputed on this GET.
         return redirect()
             ->route('app.billing.index')
-            ->with('success', __('procynia.billing.modules.order_success'));
+            ->with('success', $message);
+    }
+
+    /**
+     * Cancel an add-on (Anbud). A main package is never cancelled here — the customer moves to
+     * another step instead — so asking for one is a 404, as is an unknown key. Nothing the customer
+     * registered under the add-on is deleted.
+     */
+    public function cancelPackage(Request $request, string $package): RedirectResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user->canManageCustomerBilling(), 403);
+
+        $customer = $user->customer;
+        abort_unless($customer instanceof Customer, 404);
+
+        $service = app(ModuleEntitlementService::class);
+
+        abort_unless($service->isAddOn($package), 404);
+
+        if (! $service->cancelAddOn($customer, $package)) {
+            return redirect()
+                ->route('app.billing.index')
+                ->with('error', __('procynia.billing.modules.cancel_not_active'));
+        }
+
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', __('procynia.billing.modules.cancel_success', [
+                'package' => __("procynia.billing.modules.package_labels.{$package}"),
+            ]));
     }
 
     public function cancel(Request $request): RedirectResponse

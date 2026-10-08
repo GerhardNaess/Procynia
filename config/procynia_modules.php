@@ -16,6 +16,11 @@
  * Anbud (`tender`) is not on the ladder. It is an add-on that combines with any step, or stands
  * alone, and no governance package carries it.
  *
+ * `kind` says which of the two a package is. A customer holds at most one `main` package — the step
+ * of the ladder it is on; moving to another step replaces it — and any number of `addon` packages
+ * beside it. Which step is the customer's is answered by
+ * ModuleEntitlementService::effectiveMainPackage(), and nowhere else.
+ *
  * There is no mandatory package. Wiki is an ordinary module, carried by every package that needs
  * it: the whole ladder, and Anbud, whose requirement answers are drawn from the Enterprise Wiki. A
  * customer with no package holds no module at all — which is why a new customer is handed
@@ -60,6 +65,7 @@ return [
 
         // Basis.
         'basis' => [
+            'kind' => 'main',
             'orderable' => true,
             'sort_order' => 10,
             'modules' => ['wiki', 'quality', 'improvements'],
@@ -67,6 +73,7 @@ return [
 
         // Styring: Basis, plus Risiko and Mål og KPI.
         'governance' => [
+            'kind' => 'main',
             'orderable' => true,
             'sort_order' => 20,
             'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives'],
@@ -74,6 +81,7 @@ return [
 
         // ISO: Styring, plus Etterlevelse og revisjon.
         'iso' => [
+            'kind' => 'main',
             'orderable' => true,
             'sort_order' => 30,
             'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance'],
@@ -81,6 +89,7 @@ return [
 
         // GRC: ISO, plus Leverandøroppfølging — the module that makes GRC more than ISO.
         'grc' => [
+            'kind' => 'main',
             'orderable' => true,
             'sort_order' => 40,
             'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance', 'supplier'],
@@ -88,6 +97,7 @@ return [
 
         // Anbud: the add-on. It carries Wiki because the bid engine answers requirements from it.
         'tender' => [
+            'kind' => 'addon',
             'orderable' => true,
             'sort_order' => 50,
             'modules' => ['wiki', 'tender'],

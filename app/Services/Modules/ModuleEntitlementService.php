@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 /**
@@ -18,13 +19,24 @@ use InvalidArgumentException;
  *  - Which technical modules does that give them? (the package -> module mapping in config)
  *
  * Everything downstream asks the second question. Nothing should branch on a package key.
+ *
+ * Changing packages is an entitlement change and nothing more. Moving down the ladder or cancelling
+ * Anbud marks rows revoked; it never deletes a module's data, a role or a permission. The data is
+ * simply out of reach until a package carrying its module is active again — and then it is all
+ * still there.
  */
 class ModuleEntitlementService
 {
+    /** A step of the ladder Basis → Styring → ISO → GRC. A customer is on at most one. */
+    public const KIND_MAIN = 'main';
+
+    /** Held beside the main package, and cancelled on its own (Anbud). */
+    public const KIND_ADDON = 'addon';
+
     /**
      * The commercial catalog, sorted, with each package's technical modules resolved.
      *
-     * @return array<string, array{key: string, orderable: bool, sort_order: int, modules: list<string>}>
+     * @return array<string, array{key: string, kind: string, orderable: bool, sort_order: int, modules: list<string>}>
      */
     public function packages(): array
     {
@@ -33,6 +45,7 @@ class ModuleEntitlementService
         foreach (config('procynia_modules.packages', []) as $key => $package) {
             $packages[$key] = [
                 'key' => (string) $key,
+                'kind' => ($package['kind'] ?? null) === self::KIND_MAIN ? self::KIND_MAIN : self::KIND_ADDON,
                 'orderable' => (bool) ($package['orderable'] ?? false),
                 'sort_order' => (int) ($package['sort_order'] ?? 0),
                 'modules' => $this->knownModules(array_values($package['modules'] ?? [])),
@@ -45,7 +58,7 @@ class ModuleEntitlementService
     }
 
     /**
-     * @return array{key: string, orderable: bool, sort_order: int, modules: list<string>}|null
+     * @return array{key: string, kind: string, orderable: bool, sort_order: int, modules: list<string>}|null
      */
     public function package(string $packageKey): ?array
     {
@@ -116,6 +129,99 @@ class ModuleEntitlementService
         return in_array($packageKey, $this->activePackageKeys($customer), true);
     }
 
+    public function isMainPackage(string $packageKey): bool
+    {
+        return ($this->package($packageKey)['kind'] ?? null) === self::KIND_MAIN;
+    }
+
+    public function isAddOn(string $packageKey): bool
+    {
+        return ($this->package($packageKey)['kind'] ?? null) === self::KIND_ADDON;
+    }
+
+    /**
+     * The step of the ladder the customer is on: the highest active main package, so GRC over ISO
+     * over Styring over Basis. The one place that ranking is applied — the Abonnement page, the
+     * actions it offers and the package change below all read it from here.
+     *
+     * Rows below the effective step can still be active: before package changes replaced the main
+     * package, ordering a higher step left the lower row standing. They grant nothing the effective
+     * step does not already carry, and the next package change revokes them. Null when the customer
+     * holds no main package at all (an Anbud-only customer).
+     */
+    public function effectiveMainPackage(Customer $customer): ?string
+    {
+        $main = array_values(array_filter(
+            $this->activePackageKeys($customer),
+            fn (string $key): bool => $this->isMainPackage($key),
+        ));
+
+        // activePackageKeys() is in catalog order, which is ladder order.
+        return $main === [] ? null : $main[array_key_last($main)];
+    }
+
+    /**
+     * Put the customer on another step of the ladder, upwards or downwards.
+     *
+     * The target is activated and every other active main package revoked in one transaction,
+     * under a lock on the customer row, so no request ever sees the customer on two steps or on
+     * none. Nothing else is touched: no module data, no role, no permission. Whatever a lower step
+     * no longer carries is out of reach, not gone, and moving back up finds it intact.
+     */
+    public function changeMainPackage(Customer $customer, string $packageKey, ?User $changedBy = null): CustomerPackageEntitlement
+    {
+        $package = $this->package($packageKey);
+
+        if ($package === null || ! $package['orderable'] || $package['kind'] !== self::KIND_MAIN) {
+            throw new InvalidArgumentException("Package [{$packageKey}] is not a main package that can be ordered.");
+        }
+
+        return DB::transaction(function () use ($customer, $packageKey, $changedBy): CustomerPackageEntitlement {
+            $this->lockCustomer($customer);
+
+            $entitlement = $this->writeActive($customer, $packageKey, $changedBy);
+
+            $customer->packageEntitlements()
+                ->active()
+                ->where('package_key', '!=', $packageKey)
+                ->whereIn('package_key', $this->mainPackageKeys())
+                ->update([
+                    'status' => CustomerPackageEntitlement::STATUS_REVOKED,
+                    'deactivated_at' => Carbon::now(),
+                    'updated_at' => Carbon::now(),
+                ]);
+
+            return $entitlement;
+        });
+    }
+
+    /**
+     * Cancel an add-on (Anbud). The row is marked revoked — the order history stays on it — and the
+     * add-on's modules are out of reach unless the main package carries them too (Wiki). Nothing the
+     * customer registered under it is deleted, and ordering it again opens it all up as it was.
+     *
+     * Returns false when the add-on was not active, so there was nothing to cancel.
+     */
+    public function cancelAddOn(Customer $customer, string $packageKey): bool
+    {
+        if (! $this->isAddOn($packageKey)) {
+            throw new InvalidArgumentException("Package [{$packageKey}] is not an add-on.");
+        }
+
+        return DB::transaction(function () use ($customer, $packageKey): bool {
+            $this->lockCustomer($customer);
+
+            return $customer->packageEntitlements()
+                ->active()
+                ->where('package_key', $packageKey)
+                ->update([
+                    'status' => CustomerPackageEntitlement::STATUS_REVOKED,
+                    'deactivated_at' => Carbon::now(),
+                    'updated_at' => Carbon::now(),
+                ]) > 0;
+        });
+    }
+
     /**
      * Record a customer's interest in a package without granting it.
      *
@@ -171,6 +277,16 @@ class ModuleEntitlementService
             throw new InvalidArgumentException("Package [{$packageKey}] cannot be ordered.");
         }
 
+        // A step of the ladder replaces the one the customer is on rather than piling on top of it.
+        if ($package['kind'] === self::KIND_MAIN) {
+            return $this->changeMainPackage($customer, $packageKey, $activatedBy);
+        }
+
+        return $this->writeActive($customer, $packageKey, $activatedBy);
+    }
+
+    private function writeActive(Customer $customer, string $packageKey, ?User $activatedBy): CustomerPackageEntitlement
+    {
         $entitlement = $customer->packageEntitlements()->firstOrNew(['package_key' => $packageKey]);
 
         if ($entitlement->exists && $entitlement->isActive()) {
@@ -188,6 +304,21 @@ class ModuleEntitlementService
         ])->save();
 
         return $entitlement->refresh();
+    }
+
+    /** Serialises package changes per customer, so two concurrent changes cannot interleave. */
+    private function lockCustomer(Customer $customer): void
+    {
+        Customer::query()->whereKey($customer->getKey())->lockForUpdate()->first();
+    }
+
+    /** @return list<string> */
+    private function mainPackageKeys(): array
+    {
+        return array_keys(array_filter(
+            $this->packages(),
+            fn (array $package): bool => $package['kind'] === self::KIND_MAIN,
+        ));
     }
 
     /**
@@ -218,40 +349,108 @@ class ModuleEntitlementService
     }
 
     /**
-     * The catalog as the Abonnement page needs it: one entry per package, each already told
-     * whether it is active, ordered or orderable. The page renders this verdict; it does
-     * not compute one of its own.
+     * The catalog as the Abonnement page needs it: one entry per package, each already told its
+     * status and the one action it offers. The page renders this verdict; it does not compute one
+     * of its own.
      *
-     * @return list<array{key: string, orderable: bool, status: string, can_order: bool, modules: list<string>, requested_at: ?string, activated_at: ?string}>
+     *  - The effective main package is `active` and offers `change` (Endre pakke). It is never
+     *    cancelled: the customer moves to another step instead.
+     *  - Steps below it are `included` in it and offer nothing, and carry no date of their own.
+     *  - Steps above it offer `upgrade`; with no main package at all, every step offers `order`.
+     *  - An add-on is `active` with `cancel`, or offers `order`.
+     *
+     * `modules_lost` / `modules_gained` say what taking an entry's action would change for the
+     * customer — the consequence the confirmation spells out before a downgrade or a cancellation.
+     *
+     * @return list<array{key: string, kind: string, orderable: bool, status: string, included_in: ?string, action: ?string, direction: ?string, can_order: bool, modules: list<string>, modules_lost: list<string>, modules_gained: list<string>, requested_at: ?string, activated_at: ?string}>
      */
     public function overviewFor(Customer $customer): array
     {
+        $catalog = $this->packages();
         $entitlements = $customer->packageEntitlements()->get()->keyBy('package_key');
         $activeKeys = $this->activePackageKeys($customer);
+        $effective = $this->effectiveMainPackage($customer);
+        $effectiveOrder = $effective === null ? null : $catalog[$effective]['sort_order'];
+        $activeAddOns = array_values(array_filter($activeKeys, fn (string $key): bool => $this->isAddOn($key)));
+        $current = $this->modulesFor($customer);
         $overview = [];
 
-        foreach ($this->packages() as $key => $package) {
+        foreach ($catalog as $key => $package) {
             $entitlement = $entitlements->get($key);
+            $isMain = $package['kind'] === self::KIND_MAIN;
+            $isActive = $isMain ? $key === $effective : in_array($key, $activeKeys, true);
+            $isIncluded = $isMain && ! $isActive && $effectiveOrder !== null && $package['sort_order'] < $effectiveOrder;
 
             $status = match (true) {
-                in_array($key, $activeKeys, true) => 'active',
+                $isActive => 'active',
+                $isIncluded => 'included',
                 $entitlement?->status === CustomerPackageEntitlement::STATUS_REQUESTED => 'requested',
                 $entitlement?->status === CustomerPackageEntitlement::STATUS_DECLINED => 'declined',
                 default => 'available',
             };
 
+            $action = match (true) {
+                ! $package['orderable'] => null,
+                $isMain && $isActive => 'change',
+                $isMain && $isIncluded => null,
+                $isMain && $effective !== null => 'upgrade',
+                ! $isMain && $isActive => 'cancel',
+                $status === 'requested' => null,
+                default => 'order',
+            };
+
+            // What the customer would hold after this entry's action (or after moving to this step).
+            $after = null;
+
+            if ($isMain && ! $isActive) {
+                $after = $this->modulesForPackages([$key, ...$activeAddOns]);
+            } elseif (! $isMain) {
+                $after = $isActive
+                    ? $this->modulesForPackages(array_filter([$effective, ...array_diff($activeAddOns, [$key])]))
+                    : $this->modulesForPackages(array_filter([$effective, ...$activeAddOns, $key]));
+            }
+
+            $direction = null;
+
+            if ($isMain && ! $isActive && $effectiveOrder !== null) {
+                $direction = $package['sort_order'] > $effectiveOrder ? 'upgrade' : 'downgrade';
+            }
+
             $overview[] = [
                 'key' => $key,
+                'kind' => $package['kind'],
                 'orderable' => $package['orderable'],
                 'status' => $status,
-                'can_order' => $package['orderable'] && in_array($status, ['available', 'declined'], true),
+                'included_in' => $isIncluded ? $effective : null,
+                'action' => $action,
+                'direction' => $direction,
+                'can_order' => in_array($action, ['order', 'upgrade'], true),
                 'modules' => $package['modules'],
+                'modules_lost' => $after === null ? [] : array_values(array_diff($current, $after)),
+                'modules_gained' => $after === null ? [] : array_values(array_diff($after, $current)),
                 'requested_at' => $entitlement?->requested_at?->toDateString(),
-                'activated_at' => $entitlement?->activated_at?->toDateString(),
+                // Only the row that actually holds the access has a date worth showing; an included
+                // step's own row, if any, dates an order the customer has since moved past.
+                'activated_at' => $isActive ? $entitlement?->activated_at?->toDateString() : null,
             ];
         }
 
         return $overview;
+    }
+
+    /**
+     * @param  iterable<string>  $packageKeys
+     * @return list<string>
+     */
+    private function modulesForPackages(iterable $packageKeys): array
+    {
+        $modules = [];
+
+        foreach ($packageKeys as $packageKey) {
+            array_push($modules, ...$this->modulesForPackage($packageKey));
+        }
+
+        return $this->knownModules($modules);
     }
 
     /**

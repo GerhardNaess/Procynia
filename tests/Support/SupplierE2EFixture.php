@@ -96,6 +96,27 @@ class SupplierE2EFixture
     }
 
     /**
+     * For the package-change journey (tests/e2e/package-change.spec.js): the run's GRC customer
+     * with a System Owner who also holds supplier.view — the explicit grant System Owner needs like
+     * everyone else — and one active supplier already registered.
+     *
+     * @return array{email: string, supplier_name: string}
+     */
+    public static function seedPackageJourney(string $suffix, string $password): array
+    {
+        self::seedJourney($suffix, $password);
+
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $name = self::namer($suffix);
+        $owner = self::person($customer, $suffix, $password, $name('Systemeier'), 'eier');
+        $owner->forceFill(['role' => User::ROLE_CUSTOMER_ADMIN, 'bid_role' => User::BID_ROLE_SYSTEM_OWNER])->save();
+        self::role($customer, $name('Leverandørinnsyn'), [CustomerPermissionCatalog::SUPPLIER_VIEW], $owner);
+        $supplier = self::activeSupplier($suffix, $name('Driftspartner AS'));
+
+        return ['email' => $owner->email, 'supplier_name' => $supplier['name']];
+    }
+
+    /**
      * A supplier of the run's customer as one registered before criticality existed: active, owned
      * by the supplier manager, and not yet classified — the starting point for «Vurder kritikalitet».
      *
