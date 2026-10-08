@@ -311,7 +311,7 @@ Egne årsakskoder, aldri commercial quota-koden: `AI_CUSTOMER_DAILY_BUDGET_EXHAU
 
 ### Reservasjon
 
-Før kallet kjennes ikke tokenforbruket. Derfor reserveres et bevisst pessimistisk estimat: tokentak per operasjon fra ett register (`procynia.ai.operation_estimates`), ganget med pris og kurs, padd med `AI_OPERATIONAL_RESERVATION_SAFETY_MARGIN_PERCENT` (25 %). Målet er ikke presisjon, men at ett enkelt kall ikke kan lande langt over grensen fordi vi bare teller etterpå.
+Før kallet kjennes ikke tokenforbruket. Derfor reserveres et bevisst pessimistisk estimat: tokentak per operasjon fra operasjonsregisteret (`config/ai_operations.php`, feltet `estimate` ved siden av modellen; en variant arver fra forelderen), ganget med pris og kurs, padd med `AI_OPERATIONAL_RESERVATION_SAFETY_MARGIN_PERCENT` (25 %). Målet er ikke presisjon, men at ett enkelt kall ikke kan lande langt over grensen fordi vi bare teller etterpå.
 
 Livssyklus: **reserved** → **committed** (faktisk kostnad fra snapshotet), **released** (sikker feil før eller uten leverandørarbeid), eller **uncertain** (timeout/5xx → reservasjonen beholdes som påløpt). En usikker kostnad frigis aldri automatisk.
 
@@ -397,8 +397,8 @@ En tom priskatalog i produksjon med operasjonell håndheving aktivert er altså 
 Kostnadskontrollen trenger ingen egen shadow-modus: håndhevingen er allerede opt-in per scope, og det gir samme trygghet uten å risikere regnskapet. Et ekte shadow-lag måtte enten reservere uten å frigi, eller simulere i en parallell sti — begge deler kan gjøre budsjett-tallene usanne, og det er en dårligere bytte enn å skru på ett scope om gangen.
 
 1. Deploy kode og migrasjoner. `operational_budget_enabled = false` og ingen kundegrenser: alt av Fase 5 er da inaktivt.
-2. `php artisan ops:runtime-check` — skal være grønn.
-3. `php artisan ai:sync-model-prices` og `php artisan exchange-rates:sync`.
+2. `php artisan ai:sync-model-prices` og `php artisan exchange-rates:sync`.
+3. `php artisan ops:runtime-check` — skal være grønn. Sjekken «AI active model prices» feiler til steg 2 er kjørt.
 4. Verifiser kommersiell kvote per kunde i admin. Den er deterministisk og håndheves fra dag én.
 5. Observer faktisk forbruk read-only: `ai_usage_attempts.cost_nok` aggregert per kunde per døgn viser hva en grense *ville* blokkert, uten å blokkere noe.
 6. Sett kundegrense for én intern eller frivillig kunde. Observer et døgn.
@@ -413,7 +413,7 @@ Kostnadskontrollen trenger ingen egen shadow-modus: håndhevingen er allerede op
 | --- | --- | --- |
 | `customer_ai_case_usages` | kommersiell kvote — komplett siden den ble innført, unik per kunde/sak/periode | — |
 | `ai_token_events` | etterprising av *vellykkede* kall som gikk via `AiTokenLogger` | totalt forbruk: den er suksess-basert og dekker bare noen tjenester |
-| `ai_usage_attempts` | komplett operasjonelt forbruk **fra Fase 1 og framover** | tiden før Fase 1 |
+| `ai_usage_attempts` | komplett operasjonelt forbruk **fra Fase 1 og framover**; økonomisk grunnlag kun for rader med `ledger_version` (se «Usage-ledgeren») | tiden før Fase 1; rader uten `ledger_version` som kapasitetsgrunnlag |
 | `enterprise_wiki_ingest_runs` | tokenaggregat per run fra Fase 1 | historikk før Fase 1: kolonnene er tomme |
 | `ai_usage_events` | operasjonstelling | kostnad — raden har verken tokens eller modell |
 
@@ -428,3 +428,64 @@ Policyen er uendret og bevisst: et hold som kan ha kostet penger frigis aldri au
 ### Gratis providerkall
 
 `OpenAiClient::get()` brukes kun til `GET /models` i helsesjekk og preflight. Den er bevisst utenfor kostnadskontrollen: den koster ingenting, og en operatør må kunne verifisere leverandørforbindelsen under en hendelse — også mens en global stopp er aktiv.
+
+## Usage-ledgeren: økonomisk sannhetskilde
+
+`ai_usage_attempts` er den autoritative kilden for AI-forbruk og -kostnad. Én rad per leverandørkall, med eier, operasjon, tokens, faktisk kostnad og reservasjon på samme rad. All lesing går gjennom `App\Services\Ai\Usage\AiUsageLedger` (totals, breakdown, trend, recent, unattributed) med `AiUsageFilter` og `AiUsagePeriod` — aldri egen aggregat-SQL i en controller eller side.
+
+### Grensen: `ledger_version`
+
+Hver rad `AiUsageMeter` skriver får `ledger_version = AiUsageAttempt::LEDGER_VERSION` (1). Rader uten versjon er **legacy**: skrevet før attribusjon, operasjonsnavn, cached/reasoning-tokens, rettet gpt-5-pris og kostnadssemantikk for feilede kall. De beholdes for feilsøking, trend og operatørhistorikk, men er **aldri** grunnlag for kundekapasitet. Gamle rader skrives ikke om; ingen backfill. En per-rad-markør er valgt framfor en dato fordi deploytidspunktet er forskjellig per miljø, mens versjonen stemples av koden som skrev raden.
+
+| Scope | Regel | Brukes til |
+| --- | --- | --- |
+| `trusted()` | `ledger_version >= 1` og `attribution` er `customer` eller `system` | økonomisk grunnlag, AiForbruk, framtidig kapasitet |
+| `unattributed()` | `ledger_version >= 1` og `attribution = unattributed` | skal være 0; eget varsel |
+| `legacy()` | `ledger_version` mangler | feilsøking og trend, aldri fakturerbart |
+
+Kostnad på en trusted rad kan fortsatt være `unknown` eller `uncertain`. Aggregatene summerer bare `known` og `estimated` og teller resten separat — et kall med ukjent kostnad summeres aldri som null.
+
+**gpt-5-historikk:** rader priset med den gamle gpt-5-prisen (15/3.75/75) er legacy og blir stående. En reprosessering er mulig (tokens og modell finnes på raden; ny pris × samme FX-dato), men er ikke kjørt og krever en eksplisitt beslutning.
+
+### Attribusjon og strict
+
+- Alle kjente AI-inngangspunkter etablerer kunde: HTTP via innlogget kundebruker, kø-jobber via `RunsInAiCallContext`, operatørkommandoer via `RunsOperatorAiCommand`. Vedlikeholdssyklusen (`wiki:maintenance-cycle`), QA-regresjon og claim-resync (`EnterpriseWikiPageVersionClaimSyncService::syncRuns`, brukt av `wiki:repair-page-version-claims` og `wiki:repair-article-summary-links`) kjører nå hver run i sin kundes kontekst.
+- Det finnes i dag **ikke** noe legitimt systemarbeid som kaller AI. `AiCallContext::system()` / `system.*` er klassifiseringen når det kommer.
+- Måling: `php artisan ai:usage-integrity [--days=7]` svarer på «har vi unattributed AI-kall?» (antall, siste tidspunkt, per operasjon; exit 1 hvis noen). `ai:cost-control-health` varsler `ai_unattributed_attempts` hver time, og AiForbruk viser et rødt kontrollsignal.
+- `AI_CONTEXT_ENFORCEMENT=strict` avviser et kundedrevet kall uten kunde før kostnad oppstår. Manglende eller ukjent feature/operasjon avvises alltid, også i `warn`. Unntatt: kun eksplisitt `system.*`-arbeid. `ops:runtime-check` feiler på en ugyldig verdi (f.eks. `Strict`).
+- Før strict slås på i et miljø: `ai:usage-integrity --days=14` skal være grønn over normal trafikk, inkludert minst ett døgn med `wiki:maintenance-cycle` og en Anbud-ekstraksjon.
+
+### Reservasjon ≠ faktisk kostnad
+
+- **Reservert:** før kallet, `estimate` per operasjon i `config/ai_operations.php` × pris × FX + margin. Lagres som `reserved_cost_nok` og avgjør om kallet får starte.
+- **Faktisk:** fra leverandørens `usage` etterpå, med prissnapshot. Lagres som `cost_nok`. Reservasjonen overskriver aldri faktisk kostnad.
+
+### Feilede kall
+
+| Utfall | `cost_status` | Budsjett |
+| --- | --- | --- |
+| suksess med usage | `known`/`estimated` | gjøres opp til faktisk |
+| feil, men leverandøren rapporterte usage | `known`/`estimated` | gjøres opp til faktisk |
+| ingen usage rapportert (4xx, transportfeil, svar uten usage) | `unknown`, `price_state` tom | 4xx/transport: frigis; suksess uten usage: reservasjonen står |
+| timeout / 5xx | `uncertain` | reservasjonen står (som før) |
+| modell uten pris | `unknown`, `price_state = missing` | reservasjonen står, varsel `ai_unpriced_attempts` |
+
+Retry: hvert forsøk er sitt eget attempt med egen reservasjon og eget oppgjør. Anbud-saken forpliktes én gang per sak og periode. En kansellert jobb som ikke når leverandøren skriver ingen rad og holder ingenting.
+
+### Pris-readiness
+
+Et miljø er ikke AI-klart før hver modell operasjonsregisteret bruker (`AiOperationCatalog::activeModels()`) har en pris i kraft som er lik prisen i `config/ai_model_prices.php`. `ops:runtime-check` feiler kritisk på «AI active model prices» (`missing` / `unsynced`), og `ai:cost-control-health` varsler `ai_active_model_price_not_ready`. Rettingen er `ai:sync-model-prices`.
+
+### Gamle ledgers
+
+| Tabell | Beholdt | Hvorfor | Skrives fortsatt av |
+| --- | --- | --- | --- |
+| `ai_usage_attempts` | ja — autoritativ | økonomisk sannhetskilde | `AiUsageMeter` via `OpenAiClient` |
+| `customer_ai_case_usages`, `customer_ai_usage_reservations` | ja | Anbud-kvoten (AI-saker) håndheves fortsatt herfra | `AiCostControlService` (reservasjon/forpliktelse), `CustomerAiCaseUsageRecorder` fra `RequirementExtractionRunService` og `RequirementWikiAssessmentService` |
+| `ai_usage_events` | ja — kompatibilitet | Anbud-bruksgrensen (blokkerte forsøk), `AiUsageCapacity` | `AiUsageGuard::assertCanStartAiOperation` fra `AiController` (dokumentopplasting, Wiki-svar, vurdering) |
+| `ai_token_events` | ja — legacy | `AiCaseProfitabilityService` | `AiTokenLogger` fra `RequirementExtractionRunService` |
+
+### Perioder
+
+`AiUsagePeriod` er halvåpne vinduer over `started_at`. I dag finnes bare kalendermåned i applikasjonens tidssone — samme måned som AI-sak-kvoten og det månedlige NOK-budsjettet. Abonnementets faktureringsanker fra Stripe lagres ikke lokalt, så forbruk kan ennå ikke grupperes per faktisk faktureringsperiode. Det er en blocker for kapasitet koblet til abonnementsperiode.
+

@@ -4,15 +4,14 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiForbruk;
 use App\Models\AdminPageHelp;
+use App\Models\AiTokenEvent;
+use App\Models\AiUsageAttempt;
+use App\Models\AiUsageEvent;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
+use App\Models\Customer;
 use App\Models\CustomerAiCaseUsage;
 use App\Models\CustomerBillingLine;
-use App\Models\AiModelPrice;
-use App\Models\AiTokenEvent;
-use App\Models\AiUsageEvent;
-use App\Models\ExchangeRate;
-use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
@@ -21,6 +20,7 @@ use App\Services\Ai\AiUsageGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class AiForbrukPageTest extends TestCase
@@ -52,9 +52,9 @@ class AiForbrukPageTest extends TestCase
         Carbon::setTestNow('2026-06-02 12:00:00');
 
         AdminPageHelp::create([
-            'page_key'  => 'admin.billing.ai_usage',
-            'title'     => 'Hjelp — AI-forbruk',
-            'sections'  => [],
+            'page_key' => 'admin.billing.ai_usage',
+            'title' => 'Hjelp — AI-forbruk',
+            'sections' => [],
             'is_active' => true,
         ]);
 
@@ -70,9 +70,9 @@ class AiForbrukPageTest extends TestCase
         Carbon::setTestNow('2026-06-02 12:00:00');
 
         AdminPageHelp::create([
-            'page_key'  => 'admin.ai_forbruk',
-            'title'     => 'Hjelp — AI-forbruk',
-            'sections'  => [],
+            'page_key' => 'admin.ai_forbruk',
+            'title' => 'Hjelp — AI-forbruk',
+            'sections' => [],
             'is_active' => true,
         ]);
 
@@ -86,9 +86,9 @@ class AiForbrukPageTest extends TestCase
     public function test_page_help_partial_shows_edit_link_when_edit_url_provided(): void
     {
         $html = view('filament.components.page-help', [
-            'intro'     => 'Test intro',
-            'sections'  => [],
-            'editUrl'   => '/admin/admin-page-helps/1/edit',
+            'intro' => 'Test intro',
+            'sections' => [],
+            'editUrl' => '/admin/admin-page-helps/1/edit',
             'editLabel' => 'Rediger hjelpetekst',
         ])->render();
 
@@ -99,7 +99,7 @@ class AiForbrukPageTest extends TestCase
     public function test_page_help_partial_does_not_show_edit_link_without_edit_url(): void
     {
         $html = view('filament.components.page-help', [
-            'intro'    => 'Test intro',
+            'intro' => 'Test intro',
             'sections' => [],
         ])->render();
 
@@ -226,7 +226,7 @@ class AiForbrukPageTest extends TestCase
         $this->assertSame(400, (int) $totalTokens);
     }
 
-    public function test_page_shows_recent_token_events(): void
+    public function test_page_shows_recent_provider_attempts(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
 
@@ -234,26 +234,19 @@ class AiForbrukPageTest extends TestCase
         $customer = $this->createCustomer('Hendelses Kunde');
         $user = $this->createUser($customer);
 
-        $this->createTokenEvent(
-            $customer,
-            $user,
-            'saved_notice_requirement_answer_draft',
-            'gpt-4.1-mini',
-            100,
-            40,
-            140,
-        );
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 100, 40, costNok: 0.0012);
 
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
         $response->assertOk();
         $response->assertSee('Hendelseslogg');
-        $response->assertSee('Siste token-events (maks 30)');
+        $response->assertSee('Siste AI-kall (maks 30)');
         $response->assertSee('02.06.2026 12:00');
         $response->assertSee('Hendelses Kunde');
+        $response->assertSee('tender.requirement_answer');
     }
 
-    public function test_page_shows_token_usage_per_customer_and_model(): void
+    public function test_page_shows_usage_per_customer_and_model_from_attempts(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
 
@@ -263,9 +256,9 @@ class AiForbrukPageTest extends TestCase
         $userA = $this->createUser($customerA);
         $userB = $this->createUser($customerB);
 
-        $this->createTokenEvent($customerA, $userA, 'saved_notice_requirement_answer_draft', 'gpt-4.1-mini', 100, 40, 140);
-        $this->createTokenEvent($customerA, $userA, 'saved_notice_requirement_answer_draft', 'gpt-4.1-mini', 200, 80, 280);
-        $this->createTokenEvent($customerB, $userB, 'saved_notice_requirement_answer_draft', 'gpt-5', 500, 200, 700);
+        $this->createAttempt($customerA, $userA, 'tender.requirement_answer', 'gpt-4.1-mini', 100, 40);
+        $this->createAttempt($customerA, $userA, 'tender.requirement_answer', 'gpt-4.1-mini', 200, 80);
+        $this->createAttempt($customerB, $userB, 'wiki.generate_page', 'gpt-5', 500, 200);
 
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
@@ -322,36 +315,25 @@ class AiForbrukPageTest extends TestCase
         $this->assertSame(700, (int) $gpt5Sum);
     }
 
-    public function test_total_cost_uses_uppercase_fx_for_lowercase_usd_prices(): void
+    public function test_total_cost_is_the_sum_of_attempt_cost_snapshots(): void
     {
         Carbon::setTestNow('2026-06-03 12:00:00');
 
         $admin = $this->internalAdmin();
-        $customer = $this->createCustomer('Valuta Kunde');
+        $customer = $this->createCustomer('Kostnad Kunde');
         $user = $this->createUser($customer);
 
-        $this->createModelPrice('openai', 'gpt-4.1-mini', 'usd', 0.40, 1.60, '2026-06-01');
-        $this->createExchangeRate('USD', 'NOK', 9.2935, '2026-06-03');
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 100_000, 50_000, costNok: 1.12);
+        $this->createAttempt($customer, $user, 'wiki.generate_page', 'gpt-5', 100_000, 50_000, costNok: 5.80, costStatus: 'estimated');
 
-        $this->createTokenEvent(
-            $customer,
-            $user,
-            'saved_notice_documents_upload',
-            'gpt-4.1-mini',
-            100_000,
-            50_000,
-            150_000,
-            ['provider' => 'openai'],
-        );
+        $page = Livewire::actingAs($admin)->test(AiForbruk::class);
 
-        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
-
-        $response->assertOk();
-        $response->assertSee('≈ 1 kr');
-        $response->assertSee('Intern kostnad');
+        $this->assertEqualsWithDelta(6.92, $page->get('totalCostNok'), 0.0001);
+        $this->assertSame(AiForbruk::COST_OK, $page->get('totalCostStatus'));
+        $page->assertSee('Faktisk kostnad');
     }
 
-    public function test_total_cost_is_partial_when_some_events_have_no_provider(): void
+    public function test_calls_with_unknown_cost_make_the_total_partial_and_are_never_summed_as_zero(): void
     {
         Carbon::setTestNow('2026-06-03 12:00:00');
 
@@ -359,35 +341,64 @@ class AiForbrukPageTest extends TestCase
         $customer = $this->createCustomer('Delvis Kunde');
         $user = $this->createUser($customer);
 
-        $this->createModelPrice('openai', 'gpt-4.1-mini', 'usd', 0.40, 1.60, '2026-06-01');
-        $this->createExchangeRate('USD', 'NOK', 9.2935, '2026-06-03');
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 100_000, 50_000, costNok: 1.12);
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'unpriced-model', 29_161, 0, costNok: null, costStatus: 'unknown');
+        $this->createAttempt($customer, $user, 'wiki.verify_claim', 'gpt-4.1-mini', null, null, costNok: null, costStatus: 'uncertain', status: 'uncertain');
 
-        $this->createTokenEvent(
-            $customer,
-            $user,
-            'saved_notice_requirement_answer_draft',
-            'gpt-4.1',
-            29_161,
-            0,
-            29_161,
-        );
+        $page = Livewire::actingAs($admin)->test(AiForbruk::class);
 
-        $this->createTokenEvent(
-            $customer,
-            $user,
-            'saved_notice_documents_upload',
-            'gpt-4.1-mini',
-            100_000,
-            50_000,
-            150_000,
-            ['provider' => 'openai'],
-        );
+        $this->assertEqualsWithDelta(1.12, $page->get('totalCostNok'), 0.0001);
+        $this->assertSame(AiForbruk::COST_PARTIAL, $page->get('totalCostStatus'));
+        $this->assertSame(2, $page->get('unpricedCalls'));
+        $page->assertSee('2 kall uten kjent kostnad');
+    }
 
-        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+    public function test_only_trusted_attempts_are_counted(): void
+    {
+        Carbon::setTestNow('2026-06-03 12:00:00');
 
-        $response->assertOk();
-        $response->assertSee('≈ 1 kr');
-        $response->assertSee('Delvis dekning');
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Tillit Kunde');
+        $user = $this->createUser($customer);
+
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 1_000, 100, costNok: 1.0);
+        // Legacy: written before the usage-integrity boundary, with the overstated gpt-5 price.
+        $this->createAttempt($customer, $user, 'saved_notice.requirement_answer', 'gpt-5', 9_000, 900, costNok: 50.0, overrides: ['ledger_version' => null, 'attribution' => null]);
+        // Unattributed: no owner, so it belongs to no customer's usage.
+        $this->createAttempt(null, null, 'wiki.verify_claim', 'gpt-4.1-mini', 5_000, 500, costNok: 3.0, overrides: ['attribution' => 'unattributed']);
+
+        $page = Livewire::actingAs($admin)->test(AiForbruk::class);
+
+        $this->assertSame(1, $page->get('kpi')['operations']);
+        $this->assertSame(1_100, $page->get('kpi')['tokens']);
+        $this->assertEqualsWithDelta(1.0, $page->get('totalCostNok'), 0.0001);
+        $page->assertSee('AI-kall uten kunde');
+    }
+
+    public function test_function_rows_show_feature_operation_and_cost_and_filter_by_feature(): void
+    {
+        Carbon::setTestNow('2026-06-03 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Funksjon Kunde');
+        $user = $this->createUser($customer);
+
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 1_000, 100, costNok: 0.5);
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 1_000, 100, costNok: 0.5);
+        $this->createAttempt($customer, $user, 'quality.interpret_process', 'gpt-4.1-mini', 2_000, 300, costNok: 0.25);
+
+        $page = Livewire::actingAs($admin)->test(AiForbruk::class);
+        $rows = collect($page->get('functionRows'))->keyBy('operation_key');
+
+        $this->assertSame(2, $rows['tender.requirement_answer']['operations']);
+        $this->assertSame('tender', $rows['tender.requirement_answer']['feature']);
+        $this->assertEqualsWithDelta(1.0, $rows['tender.requirement_answer']['cost_nok'], 0.0001);
+        $this->assertSame(2_300, $rows['quality.interpret_process']['tokens']);
+
+        $page->set('functionFilter', 'quality');
+
+        $this->assertSame(['quality.interpret_process'], array_column($page->get('functionRows'), 'operation_key'));
+        $this->assertSame(1, $page->get('kpi')['operations']);
     }
 
     public function test_counts_activated_cases_from_customer_ai_case_usages(): void
@@ -421,16 +432,7 @@ class AiForbrukPageTest extends TestCase
         $user = $this->createUser($customer);
         $savedNotice = $this->createSavedNotice($customer, 'AI-TOKEN-ONLY-001', 'Token only target');
 
-        $this->createTokenEvent(
-            $customer,
-            $user,
-            'saved_notice_requirement_answer_draft',
-            'gpt-4.1',
-            12_000,
-            4_000,
-            16_000,
-            ['saved_notice_id' => $savedNotice->id],
-        );
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1', 12_000, 4_000, overrides: ['resource_type' => 'saved_notice', 'resource_id' => $savedNotice->id]);
 
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
@@ -799,6 +801,40 @@ class AiForbrukPageTest extends TestCase
         ]);
     }
 
+    /** A trusted attempt: post-boundary ledger version, attributed, with a cost snapshot. */
+    private function createAttempt(
+        ?Customer $customer,
+        ?User $user,
+        string $operationKey,
+        string $model,
+        ?int $inputTokens,
+        ?int $outputTokens,
+        ?float $costNok = 0.01,
+        string $costStatus = 'known',
+        string $status = 'success',
+        array $overrides = [],
+    ): AiUsageAttempt {
+        return AiUsageAttempt::query()->create(array_merge([
+            'customer_id' => $customer?->id,
+            'user_id' => $user?->id,
+            'attribution' => $customer !== null ? 'customer' : 'system',
+            'ledger_version' => AiUsageAttempt::LEDGER_VERSION,
+            'feature' => strstr($operationKey, '.', true) ?: $operationKey,
+            'operation_key' => $operationKey,
+            'provider' => 'openai',
+            'endpoint' => 'responses',
+            'model' => $model,
+            'status' => $status,
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'total_tokens' => $inputTokens === null ? null : $inputTokens + (int) $outputTokens,
+            'cost_status' => $costStatus,
+            'cost_nok' => $costNok,
+            'started_at' => now(),
+            'finished_at' => now(),
+        ], $overrides));
+    }
+
     private function createTokenEvent(
         Customer $customer,
         User $user,
@@ -818,41 +854,5 @@ class AiForbrukPageTest extends TestCase
             'output_tokens' => $output,
             'total_tokens' => $total,
         ], $overrides));
-    }
-
-    private function createModelPrice(
-        string $provider,
-        string $model,
-        string $currency,
-        float $inputPricePer1mTokens,
-        float $outputPricePer1mTokens,
-        string $validFrom,
-    ): AiModelPrice {
-        return AiModelPrice::query()->create([
-            'provider' => $provider,
-            'model' => $model,
-            'currency' => $currency,
-            'input_price_per_1m_tokens' => $inputPricePer1mTokens,
-            'output_price_per_1m_tokens' => $outputPricePer1mTokens,
-            'valid_from' => $validFrom,
-            'valid_to' => null,
-            'is_active' => true,
-        ]);
-    }
-
-    private function createExchangeRate(
-        string $baseCurrency,
-        string $quoteCurrency,
-        float $rate,
-        string $rateDate,
-    ): ExchangeRate {
-        return ExchangeRate::query()->create([
-            'base_currency' => $baseCurrency,
-            'quote_currency' => $quoteCurrency,
-            'rate' => $rate,
-            'rate_date' => $rateDate,
-            'source' => ExchangeRate::SOURCE_NORGES_BANK,
-            'fetched_at' => now(),
-        ]);
     }
 }
