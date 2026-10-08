@@ -171,10 +171,10 @@ describe('Documentation', () => {
         assert.doesNotMatch(section, /type="file"|download|upload/i);
     });
 
-    test('a renewal keeps the type and name, and asks for a new location and validity', () => {
-        const row = { id: 7, document_type: 'certificate', title: 'ISO 27001-sertifikat', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' };
-        assert.deepEqual(documentFormData('renew', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', location: '', valid_from: '', valid_until: '', comment: '' });
-        assert.deepEqual(documentFormData('edit', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' });
+    test('a renewal keeps the type, name and standard, and asks for a new location and validity', () => {
+        const row = { id: 7, document_type: 'certificate', title: 'ISO 27001-sertifikat', standard: 'ISO 27001', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' };
+        assert.deepEqual(documentFormData('renew', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', standard: 'ISO 27001', location: '', valid_from: '', valid_until: '', comment: '' });
+        assert.deepEqual(documentFormData('edit', row), { document_type: 'certificate', title: 'ISO 27001-sertifikat', standard: 'ISO 27001', location: 'Arkiv 1', valid_from: '2025-01-01', valid_until: '2026-01-01', comment: 'Gammel' });
         assert.equal(documentFormData('create').document_type, '');
     });
 });

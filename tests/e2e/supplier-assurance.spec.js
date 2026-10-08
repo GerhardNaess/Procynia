@@ -189,3 +189,97 @@ test('the profile decides which control requirements apply, and a reasoned overr
         .toHaveText('Gjelder når leverandøren behandler personopplysninger som databehandler');
     await expectReadable(page, '06-catalogue');
 });
+
+/**
+ * Kontroller krav (plan §8, §10.2.1): a requirement applies, its documentation is registered, the
+ * person controls the requirement with that document and reads the result, when and by whom; the
+ * history keeps the document as it was even after the row is corrected, and says — apart from it —
+ * what is different now. The used document can no longer be deleted. Access, applicability,
+ * immutability and the server refusals are PHP's (SupplierRequirementEvaluationTest).
+ */
+test('a requirement is controlled with a document, and the history keeps the document as it was', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const catalogue = await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Lønn ${suffix} AS', 'important', 12, ['processes_personal_data'])`);
+    const dpaTitle = `DBA ${suffix} 2026`;
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    // The requirement applies: a data processor.
+    const profile = page.getByTestId('supplier-profile');
+    await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
+    await answer(profile.getByTestId('profile-form'), 'data_role', 'Databehandler');
+    await profile.getByRole('button', { name: 'Lagre profil' }).click();
+    await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
+
+    const section = page.getByTestId('supplier-control-requirements');
+    const row = section.getByTestId('control-requirement-row').filter({ hasText: catalogue.dpa_title });
+    await expect(row.getByTestId('requirement-display-status')).toHaveText('Ikke vurdert');
+    await expect(row.getByTestId('requirement-last-control')).toHaveCount(0);
+
+    // Dokumentasjon: the agreement is registered there, not in the control.
+    const documents = page.getByTestId('supplier-documents');
+    await documents.getByRole('button', { name: 'Legg til dokumentasjon' }).click();
+    await documents.locator('#supplier-document-type').selectOption({ label: 'Databehandleravtale' });
+    await documents.locator('#supplier-document-title').fill(dpaTitle);
+    await documents.locator('#supplier-document-location').fill('P360 2026/12');
+    await documents.locator('#supplier-document-valid-until').fill('2028-12-31');
+    await documents.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
+    await expect(page.getByText('Dokumentasjonen er lagret.', { exact: true })).toBeVisible();
+
+    // Kontroller krav: choose the document, the result and the begrunnelse.
+    await row.getByRole('button', { name: 'Kontroller krav' }).click();
+    const form = row.getByTestId('evaluation-form');
+    await expect(form.getByTestId('evaluation-requirement')).toContainText('Personvernforordningen art. 28');
+    await form.getByRole('radio', { name: /^Dokumentert/ }).check();
+    await expect(form.getByTestId('evaluation-requires-document')).toBeVisible();
+    await expect(form.getByRole('button', { name: 'Registrer kontroll' })).toBeDisabled();
+    await form.getByTestId('evaluation-document-option').filter({ hasText: dpaTitle }).getByRole('checkbox').check();
+    await form.getByLabel('Begrunnelse').fill('Signert databehandleravtale dekker behandlingen av lønnsdata.');
+    await expectReadable(page, '07-evaluation-form');
+    await form.getByRole('button', { name: 'Registrer kontroll' }).click();
+    await expect(page.getByText('Kontrollen er registrert.', { exact: true })).toBeVisible();
+
+    // The latest result, when and by whom.
+    await expect(row.getByTestId('requirement-display-status')).toHaveText('Dokumentert');
+    await expect(row.getByTestId('requirement-last-control')).toContainText(`av ${person.name}`);
+
+    // The history: self-explanatory, with the document as it was.
+    const history = row.getByTestId('evaluation-history');
+    await history.locator('summary').click();
+    const entry = history.getByTestId('evaluation-entry');
+    await expect(entry).toHaveCount(1);
+    for (const text of ['Dokumentert', person.name, 'Signert databehandleravtale dekker behandlingen av lønnsdata.', 'Gjelder fordi leverandøren behandler personopplysninger som databehandler']) {
+        await expect(entry).toContainText(text);
+    }
+    await expect(entry.getByTestId('snapshot-title')).toHaveText(dpaTitle);
+    await expect(entry.getByTestId('snapshot-now')).toHaveCount(0);
+
+    // The used document is kept: no Slett, and it says why.
+    const document = documents.getByTestId('document-entry').filter({ hasText: dpaTitle });
+    await expect(document.getByTestId('document-used-in-control')).toBeVisible();
+    await expect(document.getByRole('button', { name: 'Slett' })).toHaveCount(0);
+
+    // Correct the row: the control still shows what was seen, and what is different now apart from it.
+    await document.getByRole('button', { name: 'Rediger' }).click();
+    await expect(documents.getByTestId('document-edit-used-hint')).toBeVisible();
+    await documents.locator('#supplier-document-title').fill(`${dpaTitle} revidert`);
+    await documents.locator('#supplier-document-location').fill('P360 2026/99');
+    await documents.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
+    await expect(page.getByText('Dokumentasjonen er oppdatert.', { exact: true })).toBeVisible();
+
+    // The history may still be open from before the save; open it if not.
+    if (! await history.evaluate((element) => element.open)) {
+        await history.locator('summary').click();
+    }
+    await expect(entry.getByTestId('snapshot-title')).toHaveText(dpaTitle);
+    await expect(entry).toContainText('P360 2026/12');
+    await expect(entry.getByTestId('snapshot-now')).toContainText('Dokumentet er endret etter kontrollen.');
+    await expect(entry.getByTestId('snapshot-now')).toContainText(`Nå: ${dpaTitle} revidert`);
+    await expect(row.getByTestId('requirement-display-status')).toHaveText('Dokumentert');
+    await expectReadable(page, '08-evaluation-history');
+});

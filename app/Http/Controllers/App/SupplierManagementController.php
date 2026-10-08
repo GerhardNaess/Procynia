@@ -10,6 +10,7 @@ use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
+use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
@@ -181,7 +182,11 @@ class SupplierManagementController extends Controller
         $criticalityChanges = $supplier->criticalityChanges()->with('changedBy:id,name')->get();
         $assessments = $supplier->assessments()->with('assessedBy:id,name')->get();
         $documents = $supplier->documents()->with('updatedBy:id,name')->get();
+        $undeletable = $this->documentsInControls($documents);
         $today = now();
+        // Dokumentasjon: supplier.edit, or supplier.assure so the person who controls can register the
+        // documentation they rely on (supplier-assurance-v2-plan §13.2).
+        $canDocument = $canEdit || $this->access->canAssure($user);
         $canAssess = $this->access->canAssess($user);
         $canDelete = $this->access->canDelete($user);
 
@@ -220,11 +225,14 @@ class SupplierManagementController extends Controller
                 'id' => (int) $document->id,
                 'document_type' => $document->document_type,
                 'title' => $document->title,
+                'standard' => $document->standard,
                 'location' => $document->location,
                 'valid_from' => $document->valid_from?->toDateString(),
                 'valid_until' => $document->valid_until?->toDateString(),
                 'comment' => $document->comment,
                 'status' => $document->validityStatus($today),
+                // Used as the basis of a control, or renewing such a row: kept (plan §10.4).
+                'deletable' => ! isset($undeletable[(int) $document->id]),
                 'updated_at' => $document->updated_at?->toIso8601String(),
                 'updated_by_name' => $document->updatedBy?->name,
             ])->all(),
@@ -261,10 +269,12 @@ class SupplierManagementController extends Controller
                 'can_change_criticality' => $canEdit && $open,
                 // The profile is supplier.edit only — never supplier.assure (supplier-assurance-v2-plan §13.2).
                 'can_edit_profile' => $canEdit && $open,
-                // Dokumentasjon: supplier.edit, and only while the supplier is not ended.
-                'can_manage_documents' => $canEdit && $open,
-                // Says why the documentation is read-only, for someone who could otherwise change it.
+                // Dokumentasjon: supplier.edit or supplier.assure, and only while the supplier is not ended.
+                'can_manage_documents' => $canDocument && $open,
+                // Says why the risk, case and requirement links are missing, for someone who could otherwise make them.
                 'has_edit_right' => $canEdit,
+                // Says why the documentation is read-only, for someone who could otherwise change it.
+                'has_document_right' => $canDocument,
                 // Only an active supplier is assessed (plan §4.3).
                 'can_assess' => $canAssess && $supplier->status === Supplier::STATUS_ACTIVE,
                 // Says why Vurder leverandør is missing, for someone who could otherwise assess.
@@ -280,6 +290,7 @@ class SupplierManagementController extends Controller
             'criteria' => SupplierAssessment::CRITERIA,
             'results' => SupplierAssessment::RESULTS,
             'document_types' => SupplierDocument::TYPES,
+            'document_standards' => SupplierDocument::STANDARD_SUGGESTIONS,
             'today' => $today->toDateString(),
             'owner_options' => $canEdit && $open ? $this->access->ownerCandidates($user) : [],
         ]);
@@ -557,6 +568,36 @@ class SupplierManagementController extends Controller
      * @param  Collection<int, SupplierCriticalityChange>  $changes
      * @return array<string, mixed>
      */
+    /**
+     * The documentation rows that may not be deleted: those named in a control, and every row renewing
+     * one of them (SupplierDocument::isDeletable(), for the whole list in one query).
+     *
+     * @param  Collection<int, SupplierDocument>  $documents
+     * @return array<int, true>
+     */
+    private function documentsInControls(Collection $documents): array
+    {
+        $kept = SupplierRequirementEvaluationDocument::query()
+            ->whereIn('supplier_document_id', $documents->pluck('id'))
+            ->distinct()
+            ->pluck('supplier_document_id')
+            ->mapWithKeys(fn ($id): array => [(int) $id => true])
+            ->all();
+        $replacedBy = $documents->pluck('replaced_by_document_id', 'id');
+
+        foreach (array_keys($kept) as $id) {
+            $seen = [];
+
+            while (($next = $replacedBy->get($id)) !== null && ! isset($seen[$id])) {
+                $seen[$id] = true;
+                $id = (int) $next;
+                $kept[$id] = true;
+            }
+        }
+
+        return $kept;
+    }
+
     private function criticalityPayload(Supplier $supplier, $changes): array
     {
         $latest = $changes->first();

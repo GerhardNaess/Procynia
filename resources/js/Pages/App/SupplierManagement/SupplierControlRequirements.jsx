@@ -6,6 +6,8 @@ import { formatLongDate } from '../Improvements/improvementStatus';
 import RequiredMark from '../Risk/RequiredMark';
 import ControlRequirementForm from './ControlRequirementForm';
 import { LEVEL_TONES, anchorLabel, groupByTheme, levelLabel, rowActions } from './controlRequirements';
+import { DISPLAY_STATUS_TONES, displayStatusLabel, lastControlText } from './requirementEvaluations';
+import { EvaluationForm, EvaluationHistory } from './SupplierRequirementEvaluation';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const HINT = 'text-base text-slate-600';
@@ -119,22 +121,24 @@ function Basis({ row, tr }) {
  * the control requirements that apply, grouped by theme, each with exactly one «Gjelder fordi …».
  * Computed by the server on every read — change the profile and this changes.
  *
- * Nothing here is a control result: every applying requirement is «Ikke vurdert» until controls
- * exist. Overrides are offered only when the server says the person may (supplier.assure, supplier
- * not ended); «Gjelder ikke denne leverandøren» is never offered for a mandatory requirement. The
+ * Each row shows its visningsstatus as the server computed it, when it was last controlled («Ikke
+ * vurdert» until then), «Kontroller krav» and its controls, newest first, with the documentation as
+ * it was at each control. Controls and overrides are offered only when the server says the person
+ * may (supplier.assure, supplier not ended); «Gjelder ikke denne leverandøren» is never offered for a mandatory requirement. The
  * requirements that do not apply are listed only for someone who can include them; the excluded ones
  * and the history are folded away.
  */
 export default function SupplierControlRequirements({ supplierId, data, locale = 'no', tr }) {
     const c = tr.control ?? {};
-    // One open form at a time: { kind: 'include' | 'exclude' | 'clear' | 'own', requirement }.
+    // One open form at a time: { kind: 'evaluate' | 'include' | 'exclude' | 'clear' | 'own', requirement }.
     const [panel, setPanel] = useState(null);
     const close = () => setPanel(null);
     const canOverride = data.permissions?.can_override ?? false;
     const groups = groupByTheme(data.applicable, tr);
 
-    const panelFor = (row) => panel?.requirement?.id === row.id && (
-        <OverrideForm key={`${panel.kind}-${row.id}`} supplierId={supplierId} action={panel.kind} requirement={row} onDone={close} tr={tr} />
+    const panelFor = (row) => panel?.requirement?.id === row.id && (panel.kind === 'evaluate'
+        ? <EvaluationForm key={`evaluate-${row.id}`} supplierId={supplierId} row={row} options={data.evaluation_form ?? {}} onDone={close} locale={locale} tr={tr} />
+        : <OverrideForm key={`${panel.kind}-${row.id}`} supplierId={supplierId} action={panel.kind} requirement={row} onDone={close} tr={tr} />
     );
 
     return (
@@ -153,26 +157,35 @@ export default function SupplierControlRequirements({ supplierId, data, locale =
                     <ul className="mt-2 space-y-3">
                         {group.rows.map((row) => {
                             const actions = rowActions(row);
+                            const lastControl = lastControlText(row.current, tr, locale);
 
                             return (
                                 <li key={row.id} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-requirement-row">
                                     <div className="flex flex-wrap items-center gap-2">
                                         <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
                                         <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
-                                        <StatusBadge tone="slate">{c.not_evaluated ?? 'Ikke vurdert'}</StatusBadge>
+                                        <span data-testid="requirement-display-status">
+                                            <StatusBadge tone={DISPLAY_STATUS_TONES[row.display_status] ?? 'slate'}>{displayStatusLabel(row.display_status, tr)}</StatusBadge>
+                                        </span>
                                     </div>
+                                    {lastControl && <p className="mt-1 text-base text-slate-600" data-testid="requirement-last-control">{lastControl}</p>}
+                                    {row.current?.accepted_until && (
+                                        <p className="text-base text-slate-600">{(c.accepted_until ?? 'Akseptert til :date').replace(':date', formatLongDate(row.current.accepted_until, locale))}</p>
+                                    )}
                                     <Reason reason={row.reason} tr={tr} />
                                     {row.exclusion_ignored && <p className="mt-1 text-base text-amber-800">{c.exclusion_ignored ?? 'Utelukkelse gjelder ikke obligatoriske krav.'}</p>}
                                     {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
                                     <Basis row={row} tr={tr} />
 
-                                    {panel === null && (actions.exclude || actions.clear) && (
+                                    {panel === null && (row.can_evaluate || actions.exclude || actions.clear) && (
                                         <div className="mt-3 flex flex-wrap gap-2">
+                                            {row.can_evaluate && <button type="button" onClick={() => setPanel({ kind: 'evaluate', requirement: row })} className={PRIMARY_ACTION}>{c.evaluate ?? 'Kontroller krav'}</button>}
                                             {actions.exclude && <button type="button" onClick={() => setPanel({ kind: 'exclude', requirement: row })} className={SECONDARY_ACTION}>{c.exclude ?? 'Gjelder ikke denne leverandøren'}</button>}
                                             {actions.clear && <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={SECONDARY_ACTION}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>}
                                         </div>
                                     )}
                                     {panelFor(row)}
+                                    <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} />
                                 </li>
                             );
                         })}
@@ -212,6 +225,23 @@ export default function SupplierControlRequirements({ supplierId, data, locale =
                                     <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={`mt-3 ${SECONDARY_ACTION}`}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>
                                 )}
                                 {panelFor(row)}
+                            </li>
+                        ))}
+                    </ul>
+                </details>
+            )}
+
+            {(data.earlier_evaluations ?? []).length > 0 && (
+                <details className="mt-6 border-t border-slate-100 pt-4" data-testid="control-earlier-evaluations">
+                    <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>
+                        {c.evaluations?.earlier_heading ?? 'Kontroller av krav som ikke gjelder nå'} ({data.earlier_evaluations.length})
+                    </summary>
+                    <p className={`mt-2 ${HINT}`}>{c.evaluations?.earlier_intro}</p>
+                    <ul className="mt-3 space-y-3">
+                        {data.earlier_evaluations.map((group) => (
+                            <li key={group.requirement_id} className="min-w-0 rounded-xl border border-slate-200 p-4">
+                                <p className="break-words text-base font-semibold text-slate-950">{group.title}</p>
+                                <EvaluationHistory evaluations={group.evaluations} locale={locale} tr={tr} testId="earlier-evaluation-history" />
                             </li>
                         ))}
                     </ul>

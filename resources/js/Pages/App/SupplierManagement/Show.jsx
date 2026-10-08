@@ -57,6 +57,7 @@ export default function SupplierManagementShow() {
         today = '',
         documents = [],
         document_types: documentTypes = [],
+        document_standards: documentStandards = [],
         improvement_cases: improvementCases = null,
         improvement_handoff: improvementHandoff = null,
         risks = null,
@@ -234,6 +235,8 @@ export default function SupplierManagementShow() {
                     supplierStatus={item.status}
                     documents={documents}
                     types={documentTypes}
+                    standards={documentStandards}
+                    reconfirmable={controlRequirements?.reconfirmable ?? {}}
                     permissions={permissions}
                     locale={locale}
                     tr={tr}

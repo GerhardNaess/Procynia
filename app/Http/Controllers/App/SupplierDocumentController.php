@@ -17,8 +17,10 @@ use Illuminate\Http\Request;
  * Dokumentasjon on the supplier page: registers, corrects, renews and deletes the description of a
  * supplier's documentation — never a file (plan §4.4).
  *
- * supplier.edit, and only that (plan §9.2): supplier.assess and supplier.delete grant nothing here,
- * and supplier.view only reads, which SupplierManagementController does. The supplier is reached
+ * supplier.edit or supplier.assure — the person who controls registers the documentation they rely
+ * on (supplier-assurance-v2-plan §13.2). supplier.assess and supplier.delete grant nothing here,
+ * and supplier.view only reads, which SupplierManagementController does. A row used in a control is
+ * never deleted (SupplierDocumentService). The supplier is reached
  * through SupplierAccessService, and the document only through that supplier, so another customer's
  * supplier or document is a 404. An ended supplier is read-only until it is reopened.
  */
@@ -93,7 +95,7 @@ class SupplierDocumentController extends Controller
         abort_unless($this->access->canOpenModule($user), 403);
 
         $supplier = $this->access->findVisibleSupplier($user, $supplierId) ?? abort(404);
-        abort_unless($user instanceof User && $this->access->canEdit($user), 403);
+        abort_unless($user instanceof User && ($this->access->canEdit($user) || $this->access->canAssure($user)), 403);
 
         return [$user, $supplier];
     }

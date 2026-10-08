@@ -19,6 +19,8 @@ use App\Models\SupplierDocument;
 use App\Models\SupplierImprovementCase;
 use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
+use App\Models\SupplierRequirementEvaluation;
+use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierRequirementOverride;
 use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
@@ -41,7 +43,8 @@ use Illuminate\Support\Facades\DB;
  * supplier role.
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
- * leverandørprofil and profile history, the kontrollkrav and overrides, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
+ * leverandørprofil and profile history, the kontrollkrav, overrides and controls with their
+ * documentation snapshots, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
  * forbedringer, the risks in Risiko and the kravkilde and requirements in Etterlevelse og revisjon,
  * with the rows linking them to suppliers, go with it. Risks
  * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
@@ -304,7 +307,7 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -318,6 +321,8 @@ class SupplierE2EFixture
             'profile_changes' => SupplierProfileChange::query()->whereIn('customer_id', $customerIds)->count(),
             'control_requirements' => SupplierControlRequirement::query()->whereIn('customer_id', $customerIds)->count(),
             'requirement_overrides' => SupplierRequirementOverride::query()->whereIn('customer_id', $customerIds)->count(),
+            'requirement_evaluations' => SupplierRequirementEvaluation::query()->whereIn('customer_id', $customerIds)->count(),
+            'evaluation_documents' => SupplierRequirementEvaluationDocument::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
             // Also by the run's suffix in the title, wherever it might have landed.

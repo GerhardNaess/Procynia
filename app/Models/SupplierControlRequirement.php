@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * Et kontrollkrav: one requirement the customer sets for suppliers, and how it is controlled
  * (docs/supplier-assurance-v2-plan.md §5.1). Mutable current state — the catalogue — with a
- * lifecycle of active and retired. A retired requirement applies to no one; it is deleted only
- * while unused (no overrides; later also no controls).
+ * lifecycle of active and retired. A retired requirement applies to no one and is never
+ * controlled again; it is deleted only while unused (no overrides, no controls).
  *
  * supplier_id null: a catalogue requirement, applied by applies_when (§5.3). supplier_id set: a
  * requirement for that one supplier, which always applies to it, has no rule and is never
@@ -111,7 +111,7 @@ class SupplierControlRequirement extends Model
     /** Unused: nothing refers to it, so it may be deleted rather than retired. */
     public function isDeletable(): bool
     {
-        return ! $this->overrides()->exists();
+        return ! $this->overrides()->exists() && ! $this->evaluations()->exists();
     }
 
     public function supplier(): BelongsTo
@@ -122,5 +122,10 @@ class SupplierControlRequirement extends Model
     public function overrides(): HasMany
     {
         return $this->hasMany(SupplierRequirementOverride::class, 'requirement_id');
+    }
+
+    public function evaluations(): HasMany
+    {
+        return $this->hasMany(SupplierRequirementEvaluation::class, 'requirement_id');
     }
 }

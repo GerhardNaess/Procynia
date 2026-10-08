@@ -189,6 +189,8 @@ class Supplier extends Model
             // Leverandørkontroll (phase 2): a requirement for this supplier, and any override.
             && ! $this->controlRequirements()->exists()
             && ! $this->requirementOverrides()->exists()
+            // Phase 3: any control.
+            && ! $this->requirementEvaluations()->exists()
             && ! $this->improvementCaseLinks()->exists()
             && ! $this->riskLinks()->exists()
             && ! $this->requirementLinks()->exists();
@@ -292,6 +294,14 @@ class Supplier extends Model
     {
         return $this->hasMany(SupplierRequirementOverride::class, 'supplier_id')
             ->orderByDesc('created_at')
+            ->orderByDesc('id');
+    }
+
+    /** Controls of the supplier's requirements, newest control date first. */
+    public function requirementEvaluations(): HasMany
+    {
+        return $this->hasMany(SupplierRequirementEvaluation::class, 'supplier_id')
+            ->orderByDesc('evaluated_on')
             ->orderByDesc('id');
     }
 }

@@ -41,6 +41,7 @@ use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\SupplierProfileController;
+use App\Http\Controllers\App\SupplierRequirementEvaluationController;
 use App\Http\Controllers\App\SupplierRequirementOverrideController;
 use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
@@ -488,7 +489,10 @@ Route::prefix('app')
             // Krav og kvalifikasjoner: a requirement for this supplier, and include/exclude/clear (supplier.assure).
             Route::post('/{supplierId}/control-requirements', [SupplierControlRequirementController::class, 'storeForSupplier'])->whereNumber('supplierId')->name('control-requirements.store-for-supplier');
             Route::post('/{supplierId}/requirement-overrides', [SupplierRequirementOverrideController::class, 'store'])->whereNumber('supplierId')->name('requirement-overrides.store');
-            // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit).
+            // Kontroller krav: a new, immutable control with its documentation snapshot (supplier.assure).
+            Route::post('/{supplierId}/requirement-evaluations', [SupplierRequirementEvaluationController::class, 'store'])->whereNumber('supplierId')->name('requirement-evaluations.store');
+            Route::post('/{supplierId}/documents/{documentId}/reconfirm', [SupplierRequirementEvaluationController::class, 'reconfirm'])->whereNumber(['supplierId', 'documentId'])->name('requirement-evaluations.reconfirm');
+            // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit or supplier.assure).
             Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
             Route::post('/{supplierId}/documents/{documentId}/renew', [SupplierDocumentController::class, 'renew'])->whereNumber(['supplierId', 'documentId'])->name('documents.renew');

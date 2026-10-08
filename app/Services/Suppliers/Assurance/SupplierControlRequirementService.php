@@ -23,8 +23,9 @@ use Illuminate\Validation\ValidationException;
  * against. supplier.edit, supplier.assess and supplier.delete grant nothing here.
  *
  * Mutable current state with no history of its own: an edit changes the requirement in place, and
- * the overrides (later controls) keep their own snapshot of title and level. Sett som utgått
- * retires it — it then applies to no one and its overrides stay — and Ta i bruk igjen reverses
+ * the overrides and controls keep their own snapshot of title and level. Sett som utgått
+ * retires it — it then applies to no one, is never controlled again, and its overrides and
+ * controls stay — and Ta i bruk igjen reverses
  * that. Slett is only for a requirement nothing refers to.
  *
  * A requirement for one supplier (supplier_id set) has no rule and always applies to that supplier.

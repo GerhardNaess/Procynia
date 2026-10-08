@@ -312,6 +312,7 @@ export function documentFormData(mode, document = null) {
         return {
             document_type: document.document_type,
             title: document.title ?? '',
+            standard: document.standard ?? '',
             location: document.location ?? '',
             valid_from: document.valid_from ?? '',
             valid_until: document.valid_until ?? '',
@@ -322,6 +323,7 @@ export function documentFormData(mode, document = null) {
     return {
         document_type: mode === 'renew' && document ? document.document_type : '',
         title: mode === 'renew' && document ? document.title : '',
+        standard: mode === 'renew' && document ? (document.standard ?? '') : '',
         location: '',
         valid_from: '',
         valid_until: '',
