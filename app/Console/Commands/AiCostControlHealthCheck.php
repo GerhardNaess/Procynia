@@ -6,6 +6,7 @@ use App\Models\AiUsageAttempt;
 use App\Models\CustomerAiUsageReservation;
 use App\Services\Admin\AdminNotificationService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
+use App\Services\Ai\Pricing\AiModelPriceReadiness;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
@@ -30,7 +31,7 @@ class AiCostControlHealthCheck extends Command
 
     protected $description = 'Report ageing uncertain AI reservations and unpriced provider attempts to internal admins.';
 
-    public function handle(AdminNotificationService $adminNotifications, AiOperationalPricingService $pricing): int
+    public function handle(AdminNotificationService $adminNotifications, AiOperationalPricingService $pricing, AiModelPriceReadiness $priceReadiness): int
     {
         if (! Schema::hasTable('customer_ai_usage_reservations') || ! Schema::hasTable('ai_usage_attempts')) {
             $this->warn('[AI_COST_HEALTH] Cost-control schema is not migrated; nothing to check.');
@@ -69,8 +70,12 @@ class AiCostControlHealthCheck extends Command
             );
         }
 
+        // A missing model price, not a failed call the provider reported no usage for: both are
+        // `unknown`, only the first is a catalogue problem.
         $unpriced = AiUsageAttempt::query()
             ->where('cost_status', 'unknown')
+            ->where(fn ($query) => $query->where('price_state', 'missing')
+                ->orWhere(fn ($inner) => $inner->whereNull('price_state')->whereNotNull('input_tokens')))
             ->where('started_at', '>=', $cutoff)
             ->count();
 
@@ -100,12 +105,30 @@ class AiCostControlHealthCheck extends Command
             );
         }
 
+        // A model the operation registry uses must be priced at its reviewed price before a
+        // customer reaches it — not discovered when the first call is refused or mispriced.
+        $priceProblems = $pricing->catalogueIsConfigured() ? $priceReadiness->problems() : [];
+
+        if ($priceProblems !== []) {
+            $summary = implode(', ', array_map(static fn (array $row): string => $row['model'].' ('.$row['state'].')', $priceProblems));
+
+            $adminNotifications->create(
+                type: 'ai_active_model_price_not_ready',
+                severity: 'critical',
+                title: 'Aktiv AI-modell mangler synket pris',
+                message: sprintf('Modeller i bruk uten gyldig, synket pris: %s. Kjør ai:sync-model-prices.', $summary),
+                data: ['models' => $priceProblems],
+                dedupeKey: 'ai_active_model_price_not_ready:'.$today,
+            );
+        }
+
         $this->line(sprintf(
-            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Unpriced attempts (%dh): %d. Price catalogue: %s.',
+            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Unpriced attempts (%dh): %d. Price catalogue: %s. Active models not price-ready: %d.',
             $ageingHolds,
             $hours,
             $unpriced,
             $pricing->catalogueIsConfigured() ? 'configured' : 'EMPTY',
+            count($priceProblems),
         ));
 
         return self::SUCCESS;

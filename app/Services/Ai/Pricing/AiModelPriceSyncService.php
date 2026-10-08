@@ -208,7 +208,7 @@ class AiModelPriceSyncService
     /**
      * @param  array<string, mixed>  $price
      */
-    private function priceChanged(AiModelPrice $active, array $price): bool
+    public function priceChanged(AiModelPrice $active, array $price): bool
     {
         $eps = 0.000001;
 

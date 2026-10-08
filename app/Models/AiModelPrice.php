@@ -76,6 +76,9 @@ class AiModelPrice extends Model
             ->where('valid_from', '<=', $at->format('Y-m-d'))
             ->where(fn ($q) => $q->whereNull('valid_to')->orWhere('valid_to', '>=', $at->format('Y-m-d')))
             ->orderByDesc('valid_from')
+            // A price changed twice on one day closes the old row and opens the new one on the same
+            // date; the newer row is the one in force.
+            ->orderByDesc('id')
             ->first();
     }
 }

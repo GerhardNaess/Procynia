@@ -22,13 +22,18 @@ final readonly class AiCostControlDecision
         public ?string $periodEnd,
         public string $status,
         public ?AiBudgetReservation $budgetReservation = null,
+        // The pre-call estimate for this operation (operation registry × price × FX, padded). Kept
+        // apart from the actual cost on purpose: it decides whether the call may start, and is
+        // written to the attempt as `reserved_cost_nok` — never into `cost_nok`.
+        public ?float $estimatedCostNok = null,
     ) {}
 
-    public function withBudgetReservation(AiBudgetReservation $reservation): self
+    public function withBudgetReservation(AiBudgetReservation $reservation, ?float $estimatedCostNok = null): self
     {
         return new self(
             $this->context, $this->policy, $this->reservationId, $this->used, $this->included,
             $this->remaining, $this->periodStart, $this->periodEnd, $this->status, $reservation,
+            $estimatedCostNok,
         );
     }
 }

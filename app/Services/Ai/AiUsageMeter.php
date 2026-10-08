@@ -155,6 +155,7 @@ class AiUsageMeter
                 'customer_id' => $context->customerId,
                 'user_id' => $context->userId,
                 'attribution' => $context->attribution(),
+                'ledger_version' => AiUsageAttempt::LEDGER_VERSION,
                 // OpenAiClient refuses a call without a well-formed operation before it gets here
                 // (AiCallContextPolicy). The fallback only keeps a NOT NULL column satisfiable for
                 // a caller that measures outside the client.
@@ -240,6 +241,11 @@ class AiUsageMeter
      * Written onto the attempt itself so a later price correction cannot rewrite the basis of an
      * operational decision. An attempt that cannot be priced is recorded as `unknown`, never as
      * zero — a call Procynia cannot cost is a risk to surface, not free work.
+     *
+     * Failed attempts are not assumed free either: when the provider still reported usage, that
+     * usage is priced like any other. When it reported none (failed or not), the cost is `unknown`
+     * with no price state — "the provider told us nothing", which is a different fact from "the model has no
+     * price" (`unknown` + price_state `missing`).
      */
     private function snapshotCost(AiUsageAttempt $attempt, string $status): void
     {
@@ -251,7 +257,11 @@ class AiUsageMeter
                 return;
             }
 
-            if ($status !== AiUsageAttempt::STATUS_SUCCESS) {
+            // No usage reported at all: a failure before the provider worked, or a response without
+            // a usage block. Pricing absent token counts would claim a cost of zero we do not know.
+            if ($attempt->input_tokens === null && $attempt->output_tokens === null) {
+                $attempt->update(['cost_status' => AiCostState::UNKNOWN]);
+
                 return;
             }
 

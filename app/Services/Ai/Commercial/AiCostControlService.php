@@ -61,7 +61,8 @@ class AiCostControlService
             ? Customer::query()->find($context->customerId)
             : null;
 
-        $budgetReservation = $this->reserveOperationalBudget($context, $customer);
+        $estimatedCostNok = $this->estimateCostNok($context);
+        $budgetReservation = $this->reserveOperationalBudget($context, $customer, $estimatedCostNok);
 
         if (! $customer instanceof Customer) {
             Log::notice('[AI_COST_CONTROL] Provider call has no customer context; treating it as explicit system work.', [
@@ -69,11 +70,11 @@ class AiCostControlService
             ]);
 
             return (new AiCostControlDecision($context, AiQuotaPolicy::UNLIMITED, null, 0, null, null, null, null, 'normal'))
-                ->withBudgetReservation($budgetReservation);
+                ->withBudgetReservation($budgetReservation, $estimatedCostNok);
         }
 
         try {
-            return $this->authorizeCustomer($context, $customer)->withBudgetReservation($budgetReservation);
+            return $this->authorizeCustomer($context, $customer)->withBudgetReservation($budgetReservation, $estimatedCostNok);
         } catch (Throwable $exception) {
             // A refusal after the NOK hold was taken must give the money back, or a blocked
             // customer would slowly consume the platform budget by being blocked.
@@ -211,31 +212,38 @@ class AiCostControlService
     }
 
     /**
-     * Hold a conservative NOK estimate against every safety budget this call touches.
-     *
-     * Platform budgets are never overridable: they are the ceiling that protects Procynia from its
-     * own automation, and an operator flag that could lift them would defeat the purpose. Customer
-     * budgets are equally non-overridable in v1 — raising the limit in admin is the deliberate act.
+     * The conservative pre-call price of this operation: its registry estimate (config/ai_operations.php)
+     * at the model's price and FX, padded. Null when the model cannot be priced, which is only
+     * reachable after an operator overrode the unknown-price stop.
      */
-    private function reserveOperationalBudget(AiCallContext $context, ?Customer $customer): AiBudgetReservation
+    private function estimateCostNok(AiCallContext $context): ?float
     {
         $model = trim((string) ($context->model ?? ''));
 
         if ($model === '') {
-            return AiBudgetReservation::none();
+            return null;
         }
 
-        $estimate = $this->pricing->estimateMaxCostNok(
+        return $this->pricing->estimateMaxCostNok(
             (string) ($context->provider ?? config('services.openai.provider_key', 'openai')),
             $model,
             config('services.openai.deployment_name'),
             config('services.openai.provider_region'),
             $context->operation,
         );
+    }
 
+    /**
+     * Hold a conservative NOK estimate against every safety budget this call touches.
+     *
+     * Platform budgets are never overridable: they are the ceiling that protects Procynia from its
+     * own automation, and an operator flag that could lift them would defeat the purpose. Customer
+     * budgets are equally non-overridable in v1 — raising the limit in admin is the deliberate act.
+     */
+    private function reserveOperationalBudget(AiCallContext $context, ?Customer $customer, ?float $estimate): AiBudgetReservation
+    {
         if ($estimate === null) {
-            // Only reachable when an operator overrode the unknown-price stop above. The call is
-            // allowed but cannot be reserved against a budget it cannot be priced for.
+            // The call is allowed but cannot be reserved against a budget it cannot be priced for.
             return AiBudgetReservation::none();
         }
 
@@ -338,6 +346,7 @@ class AiCostControlService
      */
     public function finalize(AiCostControlDecision $decision): void
     {
+        $this->recordReservedEstimate($decision);
         $this->settleBudget($decision);
 
         if ($decision->reservationId === null) {
@@ -377,6 +386,7 @@ class AiCostControlService
     {
         $uncertain = $this->isUncertain($exception);
 
+        $this->recordReservedEstimate($decision);
         $this->closeBudget($decision, $uncertain);
         $this->closeFailure($decision, $uncertain ? CustomerAiUsageReservation::STATUS_UNCERTAIN : CustomerAiUsageReservation::STATUS_RELEASED, $exception::class);
     }
@@ -385,6 +395,7 @@ class AiCostControlService
     {
         $uncertain = $status === 408 || $status >= 500;
 
+        $this->recordReservedEstimate($decision);
         $this->closeBudget($decision, $uncertain);
         $this->closeFailure($decision, $uncertain ? CustomerAiUsageReservation::STATUS_UNCERTAIN : CustomerAiUsageReservation::STATUS_RELEASED, 'http_'.$status);
     }
@@ -416,13 +427,24 @@ class AiCostControlService
 
     /**
      * A failure that certainly did no work gives the money back; a timeout or a 5xx does not.
-     * Releasing an uncertain call would let a provider that did charge us look free.
+     * Releasing an uncertain call would let a provider that did charge us look free. A failed call
+     * the provider still reported usage for is settled at that actual cost — a failure is never
+     * assumed to be free when the provider says otherwise.
      */
     private function closeBudget(AiCostControlDecision $decision, bool $uncertain): void
     {
         $reservation = $decision->budgetReservation;
 
         if ($reservation === null || $reservation->isEmpty()) {
+            return;
+        }
+
+        $attempt = $this->latestAttemptFor($decision);
+
+        if ($attempt?->cost_nok !== null && in_array($attempt->cost_status, [AiCostState::KNOWN, AiCostState::ESTIMATED], true)) {
+            $this->budgets->commit($reservation, (float) $attempt->cost_nok);
+            $this->evaluateBudgetThresholds($decision);
+
             return;
         }
 
@@ -434,6 +456,26 @@ class AiCostControlService
         }
 
         $this->budgets->release($reservation);
+    }
+
+    /**
+     * Write what the call reserved onto its own attempt, next to — never instead of — the actual
+     * cost the meter snapshots from provider usage.
+     */
+    private function recordReservedEstimate(AiCostControlDecision $decision): void
+    {
+        if ($decision->estimatedCostNok === null) {
+            return;
+        }
+
+        $attemptId = app(AiCallContextScope::class)->latestAttemptId();
+
+        if ($attemptId === null) {
+            return;
+        }
+
+        rescue(fn () => AiUsageAttempt::query()->whereKey($attemptId)->whereNull('reserved_cost_nok')
+            ->update(['reserved_cost_nok' => round($decision->estimatedCostNok, 4)]), null, false);
     }
 
     private function latestAttemptFor(AiCostControlDecision $decision): ?AiUsageAttempt

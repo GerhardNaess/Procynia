@@ -3,8 +3,10 @@
 namespace App\Services\Operations;
 
 use App\Models\IdentityProvider;
+use App\Services\Ai\Pricing\AiModelPriceReadiness;
 use App\Services\Auth\EntraConfig;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -105,6 +107,7 @@ class RuntimePreflightService
             $this->checkAiCostControlSchema(),
             $this->checkAiCostControlRuntimeSingleton(),
             $this->checkAiPricingReadiness(),
+            $this->checkAiActiveModelPrices(),
             $this->checkAiExchangeRateReadiness(),
             $this->checkAiCostControlConfiguration(),
         ];
@@ -211,6 +214,39 @@ class RuntimePreflightService
             return $this->pass('AI model pricing', sprintf('%d model price(s) registered', $priceCount));
         } catch (Throwable $e) {
             return $this->fail('AI model pricing', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * Every model the operation registry routes work to must have a price in force that matches the
+     * reviewed source price. A missing price makes the first customer call fail on the unknown-price
+     * stop; an unsynced one (a corrected price the database has not picked up) writes wrong costs
+     * into the usage ledger. Both are deploy blockers: run `ai:sync-model-prices` before serving AI.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiActiveModelPrices(): array
+    {
+        try {
+            if (! Schema::hasTable('ai_model_prices')) {
+                return $this->skip('AI active model prices', 'cost-control schema not migrated yet');
+            }
+
+            $problems = app(AiModelPriceReadiness::class)->problems();
+
+            if ($problems !== []) {
+                return $this->fail('AI active model prices', sprintf(
+                    'not AI-ready: %s. Run ai:sync-model-prices.',
+                    implode(', ', array_map(static fn (array $row): string => $row['model'].' '.$row['state'], $problems)),
+                ));
+            }
+
+            return $this->pass('AI active model prices', sprintf(
+                'every active model has a synced price (%s)',
+                implode(', ', AiOperationCatalog::activeModels()),
+            ));
+        } catch (Throwable $e) {
+            return $this->fail('AI active model prices', 'could not be determined: '.$this->redact($e->getMessage()));
         }
     }
 
