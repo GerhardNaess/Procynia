@@ -970,6 +970,19 @@ Intervall i måneder; «utløp» = ved dokumentets utløp. **Fet** = obligatoris
 | 8 | **Bemanning** | `sector:staffing` | Lønn, likebehandling, seriøsitet | ST1, ST2, L1, L4, E2 | **ST1** | 8 |
 | 9 | **Helse** | `sector:health_care`, `personal_data`, `special_category_data`, `on_site_work` | Personvern, sikkerhet, taushetsplikt | HE1, HE2, HE3, P1, P2, P4, P5, S2, S4 | **HE1, HE2, P1** | 8 |
 
+**Kravnivå og «Gates»-kolonnen — låst presisering (2026-10-08):**
+
+- Kravnivået tilhører bibliotekkravet (§16.3) og er likt uavhengig av hvilken kravmal som
+  materialiserer det. Etter import er nivået kontrollkravets eget, og bare kunden endrer det.
+- «Gates»-kolonnen over er veiledende og oppsummerende. Den overstyrer aldri nivået i
+  `RequirementLibrary`.
+- Anbefaler en mal et annet nivå enn bibliotekets, uttrykkes det som `recommended_level` i malen —
+  vist i forhåndsvisningen, aldri som automatisk nivåendring.
+
+Konsekvens: L1 er obligatorisk også i Bemanning; P2, P4, S2 og S4 er obligatoriske også i Helse; E2 i
+Bygg og anlegg forblir Viktig med `recommended_level = mandatory`. Dette er en presisering av
+eksisterende regel (§16.3, siste avsnitt), ikke ny produktlogikk.
+
 Rekkefølgen: 1–3 først (fase 5) fordi de dekker flest kunder og alle digitale leverandører. Mal 4
 følger aktsomhetsvurderingen (fase 7). 5–9 til slutt (fase 8).
 
