@@ -6,6 +6,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import SupplierAssessment from './SupplierAssessment';
+import SupplierAssuranceStatus from './SupplierAssuranceStatus';
 import SupplierControlRequirements from './SupplierControlRequirements';
 import { SupplierAttentionFindings } from './SupplierAttention';
 import SupplierCriticality from './SupplierCriticality';
@@ -48,6 +49,8 @@ export default function SupplierManagementShow() {
         criticality = null,
         profile = null,
         control_requirements: controlRequirements = null,
+        assurance = null,
+        activate_warning: activateWarning = false,
         attention = [],
         review_intervals: reviewIntervals = [],
         assessments = [],
@@ -74,7 +77,8 @@ export default function SupplierManagementShow() {
 
     const tr = translations?.supplier_management ?? {};
     const fields = tr.fields ?? {};
-    // Which panel is open: 'edit', 'end', 'reopen' or none. One at a time.
+    const a = tr.assurance ?? {};
+    // Which panel is open: 'edit', 'end', 'reopen', 'activate' or none. One at a time.
     const [panel, setPanel] = useState(null);
     // «Følg opp i Avvik og forbedringer», from the supplier ({ assessment: null }) or an assessment.
     const [followUp, setFollowUp] = useState(null);
@@ -134,6 +138,9 @@ export default function SupplierManagementShow() {
                         )}
                     </div>
                 </header>
+
+                {/* Kontrollstatus: Beslutning and Tilstand nå, side by side and never merged (plan §9.5). */}
+                {assurance && <SupplierAssuranceStatus supplierId={item.id} data={assurance} locale={locale} tr={tr} />}
 
                 {attention.length > 0 && (
                     <section className="rounded-[24px] border border-amber-200 bg-amber-50 p-6 shadow-sm" aria-labelledby="supplier-attention-heading" data-testid="supplier-attention">
@@ -280,7 +287,7 @@ export default function SupplierManagementShow() {
                     {panel === null && (permissions.can_activate || permissions.can_end || permissions.can_reopen) && (
                         <div className="mt-4 flex flex-wrap gap-2">
                             {permissions.can_activate && (
-                                <button type="button" onClick={activate} className={PRIMARY_ACTION}>{tr.activate ?? 'Ta i bruk'}</button>
+                                <button type="button" onClick={activateWarning ? () => setPanel('activate') : activate} className={PRIMARY_ACTION}>{tr.activate ?? 'Ta i bruk'}</button>
                             )}
                             {permissions.can_end && (
                                 <button type="button" onClick={() => setPanel('end')} className={WARNING_ACTION}>{tr.end ?? 'Avslutt leverandør'}</button>
@@ -288,6 +295,20 @@ export default function SupplierManagementShow() {
                             {permissions.can_reopen && (
                                 <button type="button" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne leverandør'}</button>
                             )}
+                        </div>
+                    )}
+
+                    {/* Ta i bruk warns, never blocks (plan §9.6): Procynia is not the purchasing system. */}
+                    {panel === 'activate' && (
+                        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4" role="alert" data-testid="activate-warning">
+                            <p className="text-lg font-semibold text-slate-950">{a.activate_warning_heading ?? 'Ta i bruk leverandøren?'}</p>
+                            {assurance?.state?.decision_required && <p className="mt-1 text-base text-slate-900">{a.activate_warning_decision_required}</p>}
+                            {assurance?.decision?.decision === 'not_approved' && <p className="mt-1 text-base text-slate-900">{a.activate_warning_not_approved}</p>}
+                            <p className="mt-1 text-base text-slate-800">{a.activate_warning_text}</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                <button type="button" onClick={() => { setPanel(null); activate(); }} className={WARNING_ACTION}>{a.activate_anyway ?? 'Ta i bruk likevel'}</button>
+                                <button type="button" onClick={() => setPanel(null)} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+                            </div>
                         </div>
                     )}
 

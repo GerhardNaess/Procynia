@@ -4,6 +4,7 @@ namespace App\Services\Suppliers\Assurance;
 
 use App\Models\ComplianceRequirement;
 use App\Models\Supplier;
+use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDocument;
 use App\Models\SupplierRequirementEvaluation;
@@ -40,6 +41,7 @@ class SupplierRequirementPayload
         private readonly ComplianceAccessService $compliance,
         private readonly SupplierRequirementApplicability $applicability,
         private readonly SupplierRequirementReasonText $text,
+        private readonly SupplierAssuranceResolver $resolver,
     ) {}
 
     /**
@@ -182,6 +184,69 @@ class SupplierRequirementPayload
                 'ended' => $supplier->isEnded() && $this->access->canAssure($user),
             ],
             'form' => $canOverride ? $this->formOptions($user) : null,
+        ];
+    }
+
+    /**
+     * Kontrollstatus (§9.5): the decision in force and the state now, side by side and never merged
+     * — the decision is a person's and history, the state is computed now. Every decision newest
+     * first, each with the state it was taken on as it was then. Null when nothing applies and no
+     * decision was ever registered: Kontrollstatus is then not shown.
+     *
+     * @param  list<array<string, mixed>>|null  $applicable  forSupplier()['applicable'], when already computed
+     * @return array<string, mixed>|null
+     */
+    public function assurance(User $user, Supplier $supplier, ?array $applicable = null): ?array
+    {
+        $decisions = $supplier->assuranceDecisions()->with('decidedBy:id,name')->get();
+        $inForce = SupplierAssuranceResolver::decisionInForce($decisions);
+        $rows = $applicable ?? ($this->resolver->rows(collect([$supplier]))[(int) $supplier->id] ?? []);
+        $state = SupplierAssuranceResolver::resolve($rows, $inForce?->decision);
+
+        if ($state === null && $decisions->isEmpty()) {
+            return null;
+        }
+
+        $canDecide = $this->access->canAssure($user) && ! $supplier->isEnded() && $state !== null;
+
+        return [
+            'state' => $state,
+            'decision' => $inForce === null ? null : $this->decision($inForce),
+            'history' => array_map(fn (SupplierAssuranceDecision $decision): array => $this->decision($decision), SupplierAssuranceDecision::newestFirst($decisions)),
+            'form' => $canDecide ? [
+                'decisions' => SupplierAssuranceDecision::DECISIONS,
+                'allowed' => $state['allowed_decisions'],
+                'today' => now()->toDateString(),
+            ] : null,
+            'permissions' => [
+                'can_decide' => $canDecide,
+                // Says why Registrer beslutning is missing, for someone who otherwise could.
+                'ended' => $supplier->isEnded() && $this->access->canAssure($user),
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function decision(SupplierAssuranceDecision $decision): array
+    {
+        $snapshot = (array) $decision->state_snapshot;
+
+        return [
+            'id' => (int) $decision->id,
+            'decision' => $decision->decision,
+            'rationale' => $decision->rationale,
+            'follow_up_note' => $decision->follow_up_note,
+            'decided_on' => $decision->decided_on?->toDateString(),
+            'decided_by_name' => $decision->decidedBy?->name,
+            'recorded_at' => $decision->recorded_at?->toIso8601String(),
+            'criticality' => $decision->criticality,
+            // What the person saw; shown as history only.
+            'snapshot' => [
+                'state' => $snapshot['state'] ?? null,
+                'applicable_count' => (int) ($snapshot['applicable_count'] ?? 0),
+                'counts' => (array) ($snapshot['counts'] ?? []),
+                'unmet' => array_values((array) ($snapshot['unmet'] ?? [])),
+            ],
         ];
     }
 

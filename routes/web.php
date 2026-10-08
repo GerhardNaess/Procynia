@@ -34,6 +34,7 @@ use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
+use App\Http\Controllers\App\SupplierAssuranceDecisionController;
 use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierControlRequirementController;
@@ -492,6 +493,8 @@ Route::prefix('app')
             // Kontroller krav: a new, immutable control with its documentation snapshot (supplier.assure).
             Route::post('/{supplierId}/requirement-evaluations', [SupplierRequirementEvaluationController::class, 'store'])->whereNumber('supplierId')->name('requirement-evaluations.store');
             Route::post('/{supplierId}/documents/{documentId}/reconfirm', [SupplierRequirementEvaluationController::class, 'reconfirm'])->whereNumber(['supplierId', 'documentId'])->name('requirement-evaluations.reconfirm');
+            // Registrer beslutning: a new, immutable assurance decision with a snapshot of the control state (supplier.assure).
+            Route::post('/{supplierId}/assurance-decisions', [SupplierAssuranceDecisionController::class, 'store'])->whereNumber('supplierId')->name('assurance-decisions.store');
             // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit or supplier.assure).
             Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');

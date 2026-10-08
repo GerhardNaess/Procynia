@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\ImprovementCase;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
+use App\Models\SupplierAssuranceDecision;
+use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierProfile;
@@ -13,6 +15,7 @@ use App\Models\SupplierProfileChange;
 use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
+use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
 use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierAttentionService;
@@ -65,6 +68,10 @@ use Inertia\Response;
  * is changed by SupplierRequirementOverrideController and SupplierControlRequirementController
  * (supplier.assure).
  *
+ * Kontrollstatus (supplier-assurance-v2-plan §9.5) — the decision in force and the state now, kept
+ * apart — is computed by SupplierAssuranceResolver on the register and the page; decisions are
+ * written by SupplierAssuranceDecisionController (supplier.assure).
+ *
  * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
  * reasons inline on the supplier page — read from the supplier's own data only.
  *
@@ -77,6 +84,9 @@ class SupplierManagementController extends Controller
 
     private const STATUS_FILTER_ALL = 'all';
 
+    /** The Beslutning filter's choice for suppliers with no decision registered. */
+    private const DECISION_FILTER_NONE = 'none';
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SupplierAccessService $access,
@@ -88,6 +98,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierComplianceRequirementService $requirements,
         private readonly SupplierAttentionService $attention,
         private readonly SupplierRequirementPayload $controlRequirements,
+        private readonly SupplierAssuranceResolver $assurance,
     ) {}
 
     public function index(Request $request): Response
@@ -100,6 +111,10 @@ class SupplierManagementController extends Controller
         $category = in_array($request->query('category'), Supplier::CATEGORIES, true) ? (string) $request->query('category') : '';
         $criticality = in_array($request->query('criticality'), Supplier::CRITICALITIES, true) ? (string) $request->query('criticality') : '';
         $attentionOnly = $request->boolean('attention');
+        // Kontrollstatus (supplier-assurance-v2-plan §9.5): two separate filters — the decision in
+        // force, and the computed «Krever beslutning».
+        $decision = in_array($request->query('decision'), [...SupplierAssuranceDecision::DECISIONS, self::DECISION_FILTER_NONE], true) ? (string) $request->query('decision') : '';
+        $decisionRequiredOnly = $request->boolean('decision_required');
 
         $query = $this->access->visibleSuppliers($user);
 
@@ -142,10 +157,26 @@ class SupplierManagementController extends Controller
             $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $findings[(int) $supplier->id] !== [])->values();
         }
 
+        $decisions = $this->assurance->decisionsInForce($suppliers->map(fn (Supplier $supplier): int => (int) $supplier->id)->all());
+        $states = $this->assurance->forSuppliers($suppliers, $decisions);
+        $control = fn (Supplier $supplier): array => [
+            'decision' => ($decisions[(int) $supplier->id] ?? null)?->decision,
+            'decision_required' => (bool) ($states[(int) $supplier->id]['decision_required'] ?? false),
+            'has_state' => ($states[(int) $supplier->id] ?? null) !== null,
+        ];
+
+        if ($decision !== '') {
+            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => ($control($supplier)['decision'] ?? self::DECISION_FILTER_NONE) === $decision)->values();
+        }
+
+        if ($decisionRequiredOnly) {
+            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $control($supplier)['decision_required'])->values();
+        }
+
         $canEdit = $this->access->canEdit($user);
 
         return Inertia::render('App/SupplierManagement/Index', [
-            'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier))->all(),
+            'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier) + ['control_status' => $control($supplier)])->all(),
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleSuppliers($user)->count(),
             // The worklist of the whole register the user can see, whatever the filters above.
@@ -156,7 +187,14 @@ class SupplierManagementController extends Controller
                 'category' => $category,
                 'criticality' => $criticality,
                 'attention' => $attentionOnly,
+                'decision' => $decision,
+                'decision_required' => $decisionRequiredOnly,
             ],
+            'assurance_decisions' => SupplierAssuranceDecision::DECISIONS,
+            // The Kontrollstatus column and filters, only once the customer has started
+            // Leverandørkontroll — a customer without control requirements sees the register as in v1.
+            'control_status_enabled' => SupplierControlRequirement::query()->where('customer_id', (int) $user->customer_id)->exists()
+                || SupplierAssuranceDecision::query()->where('customer_id', (int) $user->customer_id)->exists(),
             'statuses' => Supplier::STATUSES,
             'initial_statuses' => Supplier::INITIAL_STATUSES,
             'categories' => Supplier::CATEGORIES,
@@ -189,6 +227,8 @@ class SupplierManagementController extends Controller
         $canDocument = $canEdit || $this->access->canAssure($user);
         $canAssess = $this->access->canAssess($user);
         $canDelete = $this->access->canDelete($user);
+        $controlRequirements = $this->controlRequirements->forSupplier($user, $supplier);
+        $assurance = $this->controlRequirements->assurance($user, $supplier, $controlRequirements['applicable'] ?? null);
 
         return Inertia::render('App/SupplierManagement/Show', [
             'supplier' => $this->row($supplier, $assessments->first()?->assessed_on?->toDateString()) + [
@@ -208,7 +248,14 @@ class SupplierManagementController extends Controller
             'profile' => $this->profilePayload($supplier),
             // Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2): computed on read, never stored.
             // null for a customer that has no control requirements.
-            'control_requirements' => $this->controlRequirements->forSupplier($user, $supplier),
+            'control_requirements' => $controlRequirements,
+            // Kontrollstatus (supplier-assurance-v2-plan §9.5): the decision in force and the state now,
+            // kept apart. null when nothing applies and nothing was decided.
+            'assurance' => $assurance,
+            // Ta i bruk warns — never blocks — when a decision is needed or the decision in force is
+            // «Ikke godkjent for nye kjøp» (supplier-assurance-v2-plan §9.6).
+            'activate_warning' => ($assurance['state']['decision_required'] ?? false)
+                || ($assurance['decision']['decision'] ?? null) === SupplierAssuranceDecision::DECISION_NOT_APPROVED,
             'attention' => $this->attention->findingsForSupplier($supplier),
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
                 'id' => (int) $assessment->id,

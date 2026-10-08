@@ -283,3 +283,125 @@ test('a requirement is controlled with a document, and the history keeps the doc
     await expect(row.getByTestId('requirement-display-status')).toHaveText('Dokumentert');
     await expectReadable(page, '08-evaluation-history');
 });
+
+/**
+ * Kontrollstatus (plan §7.1, §9.5): a mandatory requirement applies and is controlled as Mangler, so
+ * Tilstand nå says Krever beslutning; a person registers a decision, and Beslutning and Tilstand nå
+ * are read as two lines. The requirement is then documented: the state changes, the decision does
+ * not — it stands in the history with the state it was taken on — and a new decision is a new entry.
+ * The state rules, access and immutability are PHP's (SupplierAssuranceResolverTest,
+ * SupplierAssuranceDecisionTest).
+ */
+test('a decision is registered on the control state, and stays as it was when the state changes', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const catalogue = await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Regnskap ${suffix} AS', 'important', 12, ['processes_personal_data'])`);
+    const dpaTitle = `DBA ${suffix} regnskap`;
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    // Only the mandatory data processing agreement applies: a processor without subcontractors.
+    const profile = page.getByTestId('supplier-profile');
+    await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
+    const profileForm = profile.getByTestId('profile-form');
+    await answer(profileForm, 'data_role', 'Databehandler');
+    await answer(profileForm, 'uses_subcontractors', 'Nei');
+    await profile.getByRole('button', { name: 'Lagre profil' }).click();
+    await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
+
+    const status = page.getByTestId('supplier-assurance-status');
+    const decisionLine = status.getByTestId('assurance-decision');
+    const stateLine = status.getByTestId('assurance-state');
+    await expect(status.getByRole('heading', { name: 'Kontrollstatus', exact: true })).toBeVisible();
+    await expect(decisionLine).toContainText('Ingen beslutning registrert');
+    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('Krever beslutning');
+    await expect(stateLine.getByTestId('assurance-applicable')).toHaveText('1 krav gjelder');
+
+    // Kontroller krav: Mangler.
+    const row = page.getByTestId('control-requirement-row').filter({ hasText: catalogue.dpa_title });
+    await row.getByRole('button', { name: 'Kontroller krav' }).click();
+    const evaluation = row.getByTestId('evaluation-form');
+    await evaluation.getByRole('radio', { name: /^Mangler/ }).check();
+    await evaluation.getByLabel('Begrunnelse').fill('Databehandleravtalen er ikke mottatt.');
+    await evaluation.getByRole('button', { name: 'Registrer kontroll' }).click();
+    await expect(page.getByText('Kontrollen er registrert.', { exact: true })).toBeVisible();
+
+    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('Krever beslutning');
+    await expect(stateLine).toContainText('Det finnes et forhold som krever at noen tar stilling.');
+    await expect(stateLine.getByTestId('assurance-summary')).toHaveText('1 mangler');
+    await expect(stateLine.getByTestId('assurance-open-mandatory')).toContainText(`${catalogue.dpa_title} – Mangler`);
+    await expect(stateLine).not.toContainText('%');
+
+    // Registrer beslutning: with a mandatory requirement open only «Ikke godkjent for nye kjøp» can be chosen.
+    await status.getByRole('button', { name: 'Registrer beslutning' }).click();
+    const form = status.getByTestId('decision-form');
+    await expect(form.getByRole('radio', { name: /^Godkjent med oppfølging/ })).toBeDisabled();
+    await expect(form.getByRole('radio', { name: /^Godkjent(?! med)/ })).toBeDisabled();
+    await expect(form.getByTestId('decision-not-allowed')).toHaveCount(2);
+    await form.getByRole('radio', { name: /^Ikke godkjent for nye kjøp/ }).check();
+    await form.getByLabel('Begrunnelse').fill('Ingen nye kjøp før databehandleravtalen er signert.');
+    await expectReadable(page, '09-decision-form');
+    await form.getByRole('button', { name: 'Registrer beslutning' }).click();
+    await expect(page.getByText('Beslutningen er registrert.', { exact: true })).toBeVisible();
+
+    // Two lines, labelled apart: the person's decision, and the state now.
+    await expect(decisionLine).toContainText('Beslutning');
+    await expect(decisionLine).toContainText('Ikke godkjent for nye kjøp');
+    await expect(decisionLine.getByTestId('assurance-decision-byline')).toContainText(`av ${person.name}`);
+    await expect(stateLine).toContainText('Tilstand nå');
+    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('Obligatorisk krav åpent');
+    await expectReadable(page, '10-decision-and-state');
+
+    // Dokumentasjon, then Kontroller krav: Dokumentert. The state changes; the decision does not.
+    const documents = page.getByTestId('supplier-documents');
+    await documents.getByRole('button', { name: 'Legg til dokumentasjon' }).click();
+    await documents.locator('#supplier-document-type').selectOption({ label: 'Databehandleravtale' });
+    await documents.locator('#supplier-document-title').fill(dpaTitle);
+    await documents.getByRole('button', { name: 'Lagre dokumentasjon' }).click();
+    await expect(page.getByText('Dokumentasjonen er lagret.', { exact: true })).toBeVisible();
+    await row.getByRole('button', { name: 'Kontroller krav' }).click();
+    await evaluation.getByRole('radio', { name: /^Dokumentert/ }).check();
+    await evaluation.getByTestId('evaluation-document-option').filter({ hasText: dpaTitle }).getByRole('checkbox').check();
+    await evaluation.getByLabel('Begrunnelse').fill('Signert databehandleravtale mottatt.');
+    await evaluation.getByRole('button', { name: 'Registrer kontroll' }).click();
+    await expect(page.getByText('Kontrollen er registrert.', { exact: true })).toBeVisible();
+
+    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('I orden');
+    await expect(stateLine.getByTestId('assurance-summary')).toHaveText('1 dokumentert');
+    await expect(stateLine.getByTestId('assurance-open-mandatory')).toHaveCount(0);
+    await expect(decisionLine).toContainText('Ikke godkjent for nye kjøp');
+
+    // A new decision: a new entry, newest first; the first still shows the state it was taken on.
+    await status.getByRole('button', { name: 'Registrer beslutning' }).click();
+    await form.getByRole('radio', { name: /^Godkjent(?! med)/ }).check();
+    await form.getByLabel('Begrunnelse').fill('Databehandleravtalen er signert og kontrollert.');
+    await form.getByRole('button', { name: 'Registrer beslutning' }).click();
+    await expect(page.getByText('Beslutningen er registrert.', { exact: true })).toBeVisible();
+    await expect(decisionLine).toContainText('Godkjent');
+    await expect(decisionLine).not.toContainText('Ikke godkjent');
+
+    const history = status.getByTestId('decision-history');
+    await history.locator('summary').click();
+    const entries = history.getByTestId('decision-history-entry');
+    await expect(entries).toHaveCount(2);
+    await expect(entries.nth(0)).toContainText('Godkjent');
+    await expect(entries.nth(0).getByTestId('decision-snapshot')).toContainText('I orden');
+    await expect(entries.nth(0).getByTestId('decision-snapshot')).toContainText('Alle obligatoriske og viktige krav var dokumentert.');
+    await expect(entries.nth(1)).toContainText('Ikke godkjent for nye kjøp');
+    await expect(entries.nth(1)).toContainText('Ingen nye kjøp før databehandleravtalen er signert.');
+    await expect(entries.nth(1).getByTestId('decision-snapshot')).toContainText('Obligatorisk krav åpent');
+    await expect(entries.nth(1).getByTestId('decision-snapshot')).toContainText('1 krav gjelder · 1 mangler');
+    await expect(entries.nth(1).getByTestId('decision-snapshot')).toContainText(`${catalogue.dpa_title} – Obligatorisk – Mangler`);
+    await expectReadable(page, '11-decision-history');
+
+    // The register: the decision in its own column, and no «Krever beslutning» marker now.
+    await page.goto('/app/supplier-management');
+    const registerRow = page.getByTestId('supplier-table').getByRole('row').filter({ hasText: `Regnskap ${suffix} AS` });
+    await expect(registerRow.getByTestId('register-control-status')).toHaveText('Godkjent');
+    await expect(registerRow.getByTestId('register-decision-required')).toHaveCount(0);
+    await expectReadable(page, '12-register');
+});

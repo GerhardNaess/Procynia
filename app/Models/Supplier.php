@@ -191,6 +191,8 @@ class Supplier extends Model
             && ! $this->requirementOverrides()->exists()
             // Phase 3: any control.
             && ! $this->requirementEvaluations()->exists()
+            // Phase 4: any assurance decision.
+            && ! $this->assuranceDecisions()->exists()
             && ! $this->improvementCaseLinks()->exists()
             && ! $this->riskLinks()->exists()
             && ! $this->requirementLinks()->exists();
@@ -302,6 +304,14 @@ class Supplier extends Model
     {
         return $this->hasMany(SupplierRequirementEvaluation::class, 'supplier_id')
             ->orderByDesc('evaluated_on')
+            ->orderByDesc('id');
+    }
+
+    /** Kontrollbeslutninger, the decision in force first. */
+    public function assuranceDecisions(): HasMany
+    {
+        return $this->hasMany(SupplierAssuranceDecision::class, 'supplier_id')
+            ->orderByDesc('decided_on')
             ->orderByDesc('id');
     }
 }
