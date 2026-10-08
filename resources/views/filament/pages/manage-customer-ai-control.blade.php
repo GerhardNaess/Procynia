@@ -98,9 +98,27 @@
                 <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.included') }}</dt>
                 <dd class="font-medium text-gray-900 dark:text-gray-100">
                     {{ ($capacity['is_configured'] ?? false) ? number_format((int) $capacity['included'], 0, ',', ' ') : __('procynia.ai_admin.capacity.not_configured') }}
-                    <span class="text-gray-600 dark:text-gray-400">
-                        ({{ __('procynia.ai_admin.capacity.sources.' . ($capacity['source'] ?? 'none')) }}{{ ($capacity['is_provisional'] ?? false) ? ', ' . __('procynia.ai_admin.capacity.provisional') : '' }})
-                    </span>
+                    @if ($capacity['is_provisional'] ?? false)
+                        <span class="text-gray-600 dark:text-gray-400">({{ __('procynia.ai_admin.capacity.provisional') }})</span>
+                    @endif
+                </dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.source_label') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100" data-testid="admin-ai-capacity-source">
+                    {{ __('procynia.ai_admin.capacity.sources.' . ($capacity['source'] ?? 'unconfigured')) }}
+                </dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.tier_label') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100" data-testid="admin-ai-capacity-tier">
+                    {{ $capacity['tier_key'] ?? null ? ($capacity['tier_name'] . ' (' . $capacity['tier_key'] . ')') : __('procynia.ai_admin.capacity.tier_none') }}
+                </dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.override_label') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100" data-testid="admin-ai-capacity-override">
+                    {{ ($capacity['override'] ?? null) === null ? '–' : number_format((int) $capacity['override'], 0, ',', ' ') }}
                 </dd>
             </div>
             <div>

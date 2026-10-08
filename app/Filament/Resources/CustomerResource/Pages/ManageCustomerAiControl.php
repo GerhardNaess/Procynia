@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\CustomerAiOperationalLimit;
 use App\Models\CustomerAiUsageReservation;
 use App\Models\User;
+use App\Services\Ai\Commercial\AiCapacityTierCatalog;
 use App\Services\Ai\Commercial\AiCreditAdjustmentService;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
 use App\Services\Ai\Commercial\AiRuntimeControlService;
@@ -17,6 +18,7 @@ use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Services\Ai\Operational\AiPaymentPolicyService;
 use App\Support\CustomerContext;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -142,6 +144,25 @@ class ManageCustomerAiControl extends Page
                         ->maxLength(500),
                 ])
                 ->action(fn (array $data) => $this->adjustCredits((int) $data['amount'], (string) $data['reason'])),
+
+            Action::make('set_ai_capacity_tier')
+                ->label(__('procynia.ai_admin.capacity.tier_action'))
+                ->icon('heroicon-o-adjustments-horizontal')
+                ->requiresConfirmation()
+                ->modalDescription(__('procynia.ai_admin.capacity.tier_action_confirm'))
+                ->fillForm(fn (): array => ['ai_capacity_tier' => $this->record->ai_capacity_tier])
+                ->form([
+                    Select::make('ai_capacity_tier')
+                        ->label(__('procynia.ai_admin.capacity.tier_field'))
+                        ->helperText(__('procynia.ai_admin.capacity.tier_help'))
+                        ->options(fn (): array => app(AiCapacityTierCatalog::class)->selectable($this->record->ai_capacity_tier))
+                        ->placeholder(__('procynia.ai_admin.capacity.tier_none'))
+                        ->nullable(),
+                    Textarea::make('reason')
+                        ->label(__('procynia.ai_admin.fields.reason'))
+                        ->required()->minLength(3)->maxLength(500),
+                ])
+                ->action(fn (array $data) => $this->saveAiCapacityTier($data)),
 
             Action::make('set_ai_units')
                 ->label(__('procynia.ai_admin.capacity.action'))
@@ -345,8 +366,53 @@ class ManageCustomerAiControl extends Page
     }
 
     /**
-     * The per-customer override of the shared AI capacity (AI units per billing period). Empty
-     * means "follow the plan". Audited like every other commercial change on this page.
+     * The customer's AI capacity tier — its own commercial dimension, never derived from Basis or an
+     * option. Empty means no tier (unconfigured unless an override applies). Only a tier this
+     * customer may be given is accepted: an active one, or the inactive one it already holds.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function saveAiCapacityTier(array $data): void
+    {
+        $actor = $this->internalActor();
+
+        if (! $actor instanceof User) {
+            return;
+        }
+
+        $tier = ($data['ai_capacity_tier'] ?? null) ?: null;
+        $before = $this->record->ai_capacity_tier;
+
+        if ($tier !== null && ! array_key_exists($tier, app(AiCapacityTierCatalog::class)->selectable($before))) {
+            $this->failure(__('procynia.ai_admin.capacity.tier_unknown'));
+
+            return;
+        }
+
+        DB::transaction(function () use ($tier, $before, $data, $actor): void {
+            $this->record->forceFill(['ai_capacity_tier' => $tier])->save();
+
+            BillingEvent::query()->create([
+                'customer_id' => $this->record->id,
+                'user_id' => $actor->id,
+                'event_type' => 'ai_capacity_tier_changed',
+                'source' => 'ai_cost_control',
+                'description' => trim((string) ($data['reason'] ?? '')),
+                'before' => ['ai_capacity_tier' => $before],
+                'after' => ['ai_capacity_tier' => $tier],
+            ]);
+        });
+
+        $this->record = $this->record->fresh();
+        $this->loadState();
+
+        Notification::make()->title(__('procynia.ai_admin.capacity.tier_saved'))->success()->send();
+    }
+
+    /**
+     * The per-customer override of the shared AI capacity (AI units per billing period). It wins
+     * over the tier; empty means "follow the tier". Audited like every other commercial change on
+     * this page.
      *
      * @param  array<string, mixed>  $data
      */
@@ -397,7 +463,11 @@ class ManageCustomerAiControl extends Page
         $this->quota = $status->toArray();
         $capacity = app(CustomerAiCapacityService::class)->forCustomer($this->record);
         $this->capacity = $capacity->toArray()
-            + ['override' => $this->record->included_ai_units, 'source' => $capacity->includedSource];
+            + [
+                'override' => $this->record->included_ai_units,
+                'tier_key' => $capacity->tierKey,
+                'tier_name' => $capacity->tierName,
+            ];
         $this->loadOperationalState();
         $this->globalStopActive = app(AiRuntimeControlService::class)->globalStopEnabled();
 
