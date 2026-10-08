@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\CustomerBillingPeriod;
 use App\Models\User;
 use App\Services\Ai\Commercial\CustomerAiCapacityService;
+use App\Services\Modules\ModuleEntitlementService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -15,9 +16,10 @@ use Illuminate\Support\Facades\DB;
  * Data for tests/e2e/ai-capacity.spec.js — the shared AI capacity on Abonnement.
  *
  * NO PROVIDER CALL. Usage is written straight into the ledger as settled attempts, tagged with the
- * spec's correlation id; a billing period is added only when none covers today. The E2E customer's
- * own capacity override is remembered outside the spec (so an interrupted run is restored by the
- * next sweep) and put back by cleanup().
+ * spec's correlation id; a billing period is added only when none covers today. The E2E customer
+ * holds Basis and several options; its capacity override is cleared for the spec so the capacity
+ * comes from Basis alone, remembered outside the spec (so an interrupted run is restored by the next
+ * sweep) and put back by cleanup().
  */
 final class AiCapacityE2EFixture
 {
@@ -27,7 +29,7 @@ final class AiCapacityE2EFixture
 
     private const OVERRIDE_CACHE_KEY = 'e2e:ai-capacity:previous-included-ai-units';
 
-    /** @return array<string, mixed> The capacity the page must show, as the service computes it. */
+    /** @return array<string, mixed> The capacity the page must show, as the service computes it, plus the customer's packages. */
     public static function seed(string $suffix): array
     {
         $customer = self::customer();
@@ -37,7 +39,7 @@ final class AiCapacityE2EFixture
         }
 
         DB::transaction(function () use ($customer, $suffix): void {
-            $customer->forceFill(['included_ai_units' => 5000])->save();
+            $customer->forceFill(['included_ai_units' => null])->save();
             $now = CarbonImmutable::now('UTC');
 
             $covered = CustomerBillingPeriod::query()->where('customer_id', $customer->id)
@@ -52,8 +54,8 @@ final class AiCapacityE2EFixture
                 ]);
             }
 
-            // 320 NOK settled = 3 200 units at the v1 rate, spread over three modules.
-            foreach ([['wiki', 'wiki.generate_page', 200.0], ['tender', 'tender.requirement_answer', 80.0], ['quality', 'quality.interpret_process', 40.0]] as [$feature, $operation, $nok]) {
+            // Settled usage spread over Basis and option modules — all from the same pool.
+            foreach ([['wiki', 'wiki.generate_page', 60.0], ['tender', 'tender.requirement_answer', 40.0], ['quality', 'quality.interpret_process', 20.0]] as [$feature, $operation, $nok]) {
                 AiUsageAttempt::query()->create([
                     'customer_id' => $customer->id, 'attribution' => 'customer',
                     'ledger_version' => AiUsageAttempt::LEDGER_VERSION,
@@ -69,7 +71,8 @@ final class AiCapacityE2EFixture
             }
         });
 
-        return app(CustomerAiCapacityService::class)->forCustomer($customer->fresh())->toArray();
+        return app(CustomerAiCapacityService::class)->forCustomer($customer->fresh())->toArray()
+            + ['packages' => app(ModuleEntitlementService::class)->activePackageKeys($customer)];
     }
 
     /** Removes this run's data, or every run's leftovers when no suffix is given. */

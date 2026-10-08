@@ -87,6 +87,12 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
                 </p>
             )}
 
+            {capacity.is_provisional && (
+                <p className="mt-4 text-base leading-6 text-slate-600" data-testid="ai-capacity-provisional">
+                    {texts.provisional_note ?? 'AI-kapasiteten er under innfasing, og nivået kan bli justert.'}
+                </p>
+            )}
+
             <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 text-base sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                     <dt className="text-slate-600">{texts.used_label ?? 'Brukt'}</dt>

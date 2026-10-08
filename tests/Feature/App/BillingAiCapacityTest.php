@@ -8,6 +8,7 @@ use App\Models\CustomerBillingPeriod;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -71,6 +72,7 @@ class BillingAiCapacityTest extends TestCase
 
     public function test_a_customer_without_a_defined_capacity_is_told_so_rather_than_shown_zero(): void
     {
+        // Not holding Basis and no customer-specific amount.
         $customer = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
 
         $this->actingAs($this->owner($customer))->get('/app/billing')
@@ -79,6 +81,29 @@ class BillingAiCapacityTest extends TestCase
                 ->where('ai_capacity.is_configured', false)
                 ->where('ai_capacity.status', 'not_configured')
                 ->where('ai_capacity.included', null));
+    }
+
+    public function test_a_basis_capacity_is_marked_provisional_and_a_customer_amount_is_not(): void
+    {
+        $customer = $this->customer();
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
+        foreach (['risk', 'compliance', 'supplier', 'tender'] as $option) {
+            app(ModuleEntitlementService::class)->activatePackage($customer, $option);
+        }
+
+        $this->actingAs($this->owner($customer))->get('/app/billing')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('ai_capacity.included', 2000)
+                ->where('ai_capacity.is_provisional', true));
+
+        $customer->update(['included_ai_units' => 5000]);
+
+        $this->actingAs($this->owner($customer))->get('/app/billing')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('ai_capacity.included', 5000)
+                ->where('ai_capacity.is_provisional', false));
     }
 
     public function test_the_page_carries_no_internal_cost_or_token_figures(): void
@@ -98,8 +123,9 @@ class BillingAiCapacityTest extends TestCase
                 $this->assertStringNotContainsString('12.34', json_encode($props['ai_capacity']));
                 $this->assertArrayNotHasKey('included_ai_credits', (array) ($props['subscription'] ?? []));
 
+                // The old plans carry no AI capacity: Basis is its only source.
                 foreach ($props['available_plans'] as $plan) {
-                    $this->assertArrayHasKey('included_ai_units', $plan);
+                    $this->assertArrayNotHasKey('included_ai_units', $plan);
                     $this->assertArrayNotHasKey('included_ai_credits', $plan);
                 }
             });

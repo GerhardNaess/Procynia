@@ -115,4 +115,14 @@ describe('the card stays simple and customer-safe', () => {
         assert.ok(billing.includes('<AiCapacityCard'));
         assert.ok(!/AiQuotaCard|ai_quota|included_ai_credits|KI-tilbud/.test(billing));
     });
+
+    test('plans carry no AI capacity — Basis is its only source', () => {
+        assert.ok(!/included_ai_units|includedAiUnits|AI-enheter per måned/.test(billing));
+    });
+
+    test('a provisional level is said to be phasing in, and never explains the conversion', () => {
+        assert.match(card, /capacity\.is_provisional && \(/);
+        assert.match(card, /under innfasing/);
+        assert.ok(!/nok_per_unit|0[.,]10|øre/i.test(card));
+    });
 });

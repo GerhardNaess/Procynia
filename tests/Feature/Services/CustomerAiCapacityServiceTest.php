@@ -23,6 +23,7 @@ use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\Ai\Commercial\AiUnitConverter;
 use App\Services\Ai\Commercial\CustomerAiCapacityService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\OpenAi\OpenAiClient;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\Ai\AiCostControlPresenter;
@@ -62,15 +63,22 @@ class CustomerAiCapacityServiceTest extends TestCase
         parent::tearDown();
     }
 
-    // ── included capacity ──────────────────────────────────────────────────
+    // ── included capacity: Basis is the one source ─────────────────────────
 
-    public function test_included_units_come_from_the_plan_per_month_and_a_customer_override_wins(): void
+    public function test_basis_includes_the_capacity_and_a_customer_override_wins(): void
     {
         $customer = $this->customer();
-        $this->assertSame(2000, $this->capacity($customer)->includedUnits, 'Pro includes 2 000 units a month.');
+        $capacity = $this->capacity($customer);
+        $this->assertSame(2000, $capacity->includedUnits, 'Basis includes the technical default of 2 000 units a month.');
+        $this->assertSame(CustomerAiCapacity::SOURCE_BASIS, $capacity->includedSource);
+        $this->assertTrue($capacity->isProvisional, 'The Basis level is a placeholder, not a decided price.');
+        $this->assertTrue($capacity->toArray()['is_provisional']);
 
         $customer->update(['included_ai_units' => 50_000]);
-        $this->assertSame(50_000, $this->capacity($customer)->includedUnits);
+        $capacity = $this->capacity($customer);
+        $this->assertSame(50_000, $capacity->includedUnits);
+        $this->assertSame(CustomerAiCapacity::SOURCE_CUSTOMER, $capacity->includedSource);
+        $this->assertFalse($capacity->isProvisional, 'A customer-specific amount is an explicit agreement.');
 
         // An explicit zero is a real value, not "not set".
         $customer->update(['included_ai_units' => 0]);
@@ -79,7 +87,36 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertSame(CustomerAiCapacity::STATUS_EXHAUSTED, $capacity->status);
     }
 
-    public function test_a_yearly_period_includes_twelve_months_of_the_plan(): void
+    public function test_options_never_add_capacity_and_every_module_shares_one_pool(): void
+    {
+        $customer = $this->customer();
+        $this->attempt($customer, ['feature' => 'wiki', 'operation_key' => 'wiki.generate_page', 'cost_nok' => 10.0]);
+        $before = $this->capacity($customer)->includedUnits;
+
+        foreach (['risk', 'objectives', 'compliance', 'supplier', 'tender'] as $option) {
+            app(ModuleEntitlementService::class)->activatePackage($customer, $option);
+        }
+        foreach ([['tender', 'tender.requirement_answer'], ['quality', 'quality.interpret_process'], ['compliance', 'compliance.wiki_handoff']] as [$feature, $operation]) {
+            $this->attempt($customer, ['feature' => $feature, 'operation_key' => $operation, 'cost_nok' => 10.0]);
+        }
+
+        $capacity = $this->capacity($customer);
+        $this->assertSame($before, $capacity->includedUnits, 'Five options, still the Basis capacity.');
+        $this->assertSame(400, $capacity->usedUnits, 'Every module draws on the same pool.');
+    }
+
+    public function test_the_old_subscription_plans_play_no_part_in_the_capacity(): void
+    {
+        $pro = $this->customer(['subscription_plan' => Customer::PLAN_PRO]);
+        $ultra = $this->customer(['subscription_plan' => Customer::PLAN_ULTRA]);
+        $this->assertSame($this->capacity($pro)->includedUnits, $this->capacity($ultra)->includedUnits);
+
+        // A Pro plan without Basis includes nothing: the plan is not a capacity source.
+        $withoutBasis = $this->customer(['subscription_plan' => Customer::PLAN_ULTRA], basis: false);
+        $this->assertSame(CustomerAiCapacity::SOURCE_NONE, $this->capacity($withoutBasis)->includedSource);
+    }
+
+    public function test_a_yearly_period_includes_twelve_months_of_basis(): void
     {
         $customer = $this->customer(['billing_interval' => Customer::BILLING_YEARLY]);
         $this->period($customer, '2026-03-01 00:00:00', '2027-03-01 00:00:00', 'year');
@@ -91,9 +128,9 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertSame('2027-02-28', $capacity->toArray()['period_end']);
     }
 
-    public function test_without_a_plan_or_customer_capacity_nothing_is_metered_or_refused(): void
+    public function test_without_basis_or_an_override_nothing_is_metered_or_refused(): void
     {
-        $customer = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
+        $customer = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE], basis: false);
         $this->attempt($customer, ['cost_nok' => 999.0]);
 
         $capacity = $this->capacity($customer);
@@ -106,6 +143,10 @@ class CustomerAiCapacityServiceTest extends TestCase
         // Enterprise gets its capacity per customer.
         $customer->update(['included_ai_units' => 100_000]);
         $this->assertSame(100_000, $this->capacity($customer)->includedUnits);
+
+        // And a Basis capacity can be switched off centrally.
+        config()->set('ai_customer_capacity.basis.included_units_per_month', null);
+        $this->assertFalse($this->capacity($this->customer())->isConfigured());
     }
 
     // ── used, reserved, remaining ──────────────────────────────────────────
@@ -513,7 +554,7 @@ class CustomerAiCapacityServiceTest extends TestCase
         Http::assertSentCount(3);
 
         // A customer without a defined capacity is recorded as unmetered, never as blocked.
-        $unmetered = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
+        $unmetered = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE], basis: false);
         $this->callAi($unmetered);
         $this->assertSame(CustomerAiCapacityService::VERDICT_UNMETERED, AiUsageAttempt::query()->where('customer_id', $unmetered->id)->sole()->capacity_verdict);
     }
@@ -646,12 +687,12 @@ class CustomerAiCapacityServiceTest extends TestCase
     }
 
     /** @param array<string, mixed> $attributes */
-    private function customer(array $attributes = []): Customer
+    private function customer(array $attributes = [], bool $basis = true): Customer
     {
         $language = Language::query()->firstOrCreate(['code' => 'no'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk']);
         $nationality = Nationality::query()->firstOrCreate(['code' => 'NO'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO']);
 
-        return Customer::query()->create(array_merge([
+        $customer = Customer::query()->create(array_merge([
             'name' => 'Capacity '.Str::random(8),
             'slug' => 'capacity-'.Str::lower(Str::random(10)),
             'language_id' => $language->id,
@@ -661,5 +702,11 @@ class CustomerAiCapacityServiceTest extends TestCase
             'billing_interval' => Customer::BILLING_MONTHLY,
             'included_ai_credits' => 5,
         ], $attributes));
+
+        if ($basis) {
+            app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
+        }
+
+        return $customer->fresh();
     }
 }

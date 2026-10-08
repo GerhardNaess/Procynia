@@ -395,8 +395,9 @@ class ManageCustomerAiControl extends Page
     {
         $status = app(AiQuotaStatusService::class)->forCustomer($this->record);
         $this->quota = $status->toArray();
-        $this->capacity = app(CustomerAiCapacityService::class)->forCustomer($this->record)->toArray()
-            + ['override' => $this->record->included_ai_units];
+        $capacity = app(CustomerAiCapacityService::class)->forCustomer($this->record);
+        $this->capacity = $capacity->toArray()
+            + ['override' => $this->record->included_ai_units, 'source' => $capacity->includedSource];
         $this->loadOperationalState();
         $this->globalStopActive = app(AiRuntimeControlService::class)->globalStopEnabled();
 

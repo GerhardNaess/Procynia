@@ -10,13 +10,36 @@
  * converts that cost into units. Changing the conversion re-reads all history at the new rate and
  * never touches the ledger, the customer UI or the subscription concept.
  *
- * Included capacity lives with the plans (config/procynia_plans.php `included_ai_units`) and can be
- * overridden per customer (customers.included_ai_units).
+ * Product rule: Basis (Wiki, Kvalitet, Avvik og forbedringer) is the one commercial source of
+ * included AI capacity. Options (Risiko, Mål og KPI, Etterlevelse, Leverandøroppfølging, Anbud)
+ * give access to features, never a pool of their own: every module draws on the same pool.
+ * The old subscription plans (free/pro/max/ultra/enterprise) play no part here.
+ *
+ * Included units, in order: customers.included_ai_units (per billing period — the mechanism for
+ * enterprise/special capacity) → Basis below (per month, ×12 for a yearly period) → none
+ * (unmetered: observed and recorded, never refused).
+ *
+ * NONE of the numbers in this file are commercial decisions. They are technical defaults for
+ * collecting data (docs/operations/ai-capacity.md) and are expected to change.
  */
 return [
 
-    // Internal settled AI cost, in NOK, that one AI unit represents. v1: 1 unit = 0.10 NOK.
+    // Internal settled AI cost, in NOK, that one AI unit represents. A technical calibration value,
+    // not a price: never shown to customers, never marketed. Default 0.10.
     'nok_per_unit' => (float) env('AI_CUSTOMER_CAPACITY_NOK_PER_UNIT', 0.10),
+
+    'basis' => [
+        // TECHNICAL PLACEHOLDER — units a customer holding Basis gets per month of billing period
+        // until a commercial level is decided. Null = no Basis capacity (every Basis customer
+        // unmetered). Options never add to it.
+        'included_units_per_month' => env('AI_CUSTOMER_CAPACITY_BASIS_UNITS_PER_MONTH', 2000) === null
+            ? null
+            : (int) env('AI_CUSTOMER_CAPACITY_BASIS_UNITS_PER_MONTH', 2000),
+
+        // While true, a Basis-derived capacity is marked provisional and the customer is told the
+        // level is being phased in. A customer-specific amount is never provisional.
+        'provisional' => (bool) env('AI_CUSTOMER_CAPACITY_BASIS_PROVISIONAL', true),
+    ],
 
     // Percent of the included capacity *settled* (actually used) at which the status changes.
     'thresholds' => [

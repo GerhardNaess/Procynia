@@ -9,6 +9,7 @@ use App\Exceptions\Ai\AiCostControlException;
 use App\Models\Customer;
 use App\Services\Ai\Usage\AiUsageLedger;
 use App\Services\Billing\CustomerBillingPeriodResolver;
+use App\Services\Modules\ModuleEntitlementService;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 
@@ -28,9 +29,10 @@ use DateTimeInterface;
  * no second reservation table that could drift from the ledger. When an attempt settles, its
  * reservation turns into usage at the actual cost by itself.
  *
- * Included capacity: customers.included_ai_units (per billing period) wins; otherwise the plan's
- * monthly `included_ai_units` × the period length (12 for a yearly period). Neither set → not
- * configured, and nothing is metered against it.
+ * Included capacity (resolveIncluded()): customers.included_ai_units (per billing period) wins;
+ * otherwise Basis — the one commercial source — at config ai_customer_capacity.basis, per month ×
+ * the period length; otherwise none (unmetered). Options and the old Pro/Max/Ultra plans never
+ * add capacity: one customer, one pool, however many modules it holds.
  */
 class CustomerAiCapacityService
 {
@@ -52,13 +54,14 @@ class CustomerAiCapacityService
         private readonly AiUsageLedger $ledger,
         private readonly CustomerBillingPeriodResolver $billingPeriods,
         private readonly AiUnitConverter $units,
+        private readonly ModuleEntitlementService $modules,
     ) {}
 
     public function forCustomer(Customer|int $customer, ?DateTimeInterface $at = null): CustomerAiCapacity
     {
         $customer = $customer instanceof Customer ? $customer : Customer::query()->findOrFail($customer);
         $period = $this->billingPeriods->at($customer, $at ?? CarbonImmutable::now('UTC'));
-        $included = $this->includedUnits($customer, $period);
+        ['units' => $included, 'source' => $source] = $this->resolveIncluded($customer, $period);
 
         $totals = $this->ledger->totals(new AiUsageFilter($period->toUsagePeriod(), customerId: (int) $customer->id));
         $usedExact = $this->units->unitsForCost((float) $totals['settled_cost_nok']);
@@ -71,6 +74,8 @@ class CustomerAiCapacityService
             customerId: (int) $customer->id,
             period: $period,
             includedUnits: $included,
+            includedSource: $source,
+            isProvisional: $source === CustomerAiCapacity::SOURCE_BASIS && (bool) config('ai_customer_capacity.basis.provisional', true),
             usedUnitsExact: $usedExact,
             reservedUnitsExact: $reservedExact,
             usedUnits: $this->units->displayUnits($usedExact),
@@ -136,23 +141,45 @@ class CustomerAiCapacityService
         return self::refusalReason($this->evaluate($customer, $estimatedCostNok, $at));
     }
 
-    /** Units included in this billing period, or null when neither customer nor plan defines any. */
+    /** Units included in this billing period, or null when nothing defines any. */
     public function includedUnits(Customer $customer, BillingPeriod $period): ?int
     {
+        return $this->resolveIncluded($customer, $period)['units'];
+    }
+
+    /**
+     * The included capacity and where it came from.
+     *
+     * @return array{units: ?int, source: string}
+     */
+    public function resolveIncluded(Customer $customer, BillingPeriod $period): array
+    {
         if ($customer->included_ai_units !== null) {
-            return max(0, (int) $customer->included_ai_units);
+            return ['units' => max(0, (int) $customer->included_ai_units), 'source' => CustomerAiCapacity::SOURCE_CUSTOMER];
         }
 
-        $monthly = $customer->planConfig()['included_ai_units'] ?? null;
+        $monthly = config('ai_customer_capacity.basis.included_units_per_month');
 
-        if ($monthly === null) {
-            return null;
+        if ($monthly === null || ! $this->holdsBasis($customer)) {
+            return ['units' => null, 'source' => CustomerAiCapacity::SOURCE_NONE];
         }
 
-        // Procynia bills monthly or yearly; the plan figure is per month.
+        // Procynia bills monthly or yearly; the Basis figure is per month.
         $months = in_array($period->interval, [BillingPeriod::INTERVAL_YEAR, Customer::BILLING_YEARLY], true) ? 12 : 1;
 
-        return max(0, (int) $monthly) * $months;
+        return ['units' => max(0, (int) $monthly) * $months, 'source' => CustomerAiCapacity::SOURCE_BASIS];
+    }
+
+    /** Holding the base package — never an option — is what includes capacity. */
+    private function holdsBasis(Customer $customer): bool
+    {
+        foreach ($this->modules->activePackageKeys($customer) as $packageKey) {
+            if (($this->modules->package($packageKey)['kind'] ?? null) === ModuleEntitlementService::KIND_BASE) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function status(?int $included, float $usedExact): string

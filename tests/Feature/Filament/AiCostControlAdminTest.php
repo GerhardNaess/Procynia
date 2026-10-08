@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Notifications\AiQuotaNotification;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
+use App\Services\Modules\ModuleEntitlementService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -185,13 +186,17 @@ class AiCostControlAdminTest extends TestCase
     {
         $admin = $this->internalAdmin();
         $customer = $this->customer(3);
+        // Basis is the source of the default capacity.
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
 
         $this->actingAs($admin);
         Livewire::test(ManageCustomerAiControl::class, ['record' => $customer])
             ->assertSet('capacity.included', 2000)
+            ->assertSet('capacity.source', 'basis')
             ->callAction('set_ai_units', ['included_ai_units' => 250000, 'reason' => 'Enterprise-avtale'])
             ->assertSet('capacity.included', 250000)
-            ->assertSet('capacity.override', 250000);
+            ->assertSet('capacity.override', 250000)
+            ->assertSet('capacity.source', 'customer');
 
         $this->assertSame(250000, $customer->fresh()->included_ai_units);
         $this->assertDatabaseHas('billing_events', [

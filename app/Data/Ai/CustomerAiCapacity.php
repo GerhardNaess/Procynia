@@ -25,10 +25,20 @@ final readonly class CustomerAiCapacity
     /** Neither the plan nor the customer defines a shared capacity. Nothing is metered against it. */
     public const STATUS_NOT_CONFIGURED = 'not_configured';
 
+    /** Where the included units came from (CustomerAiCapacityService::resolveIncluded()). */
+    public const SOURCE_CUSTOMER = 'customer';
+
+    public const SOURCE_BASIS = 'basis';
+
+    public const SOURCE_NONE = 'none';
+
     public function __construct(
         public int $customerId,
         public BillingPeriod $period,
         public ?int $includedUnits,
+        public string $includedSource,
+        // A technical default, not a decided commercial level — the customer is told it may change.
+        public bool $isProvisional,
         // Exact figures, for comparisons. Displayed figures are derived from them below.
         public float $usedUnitsExact,
         public float $reservedUnitsExact,
@@ -98,6 +108,7 @@ final readonly class CustomerAiCapacity
             'is_warning' => $this->isWarning(),
             'is_exhausted' => $this->isExhausted(),
             'shows_reservation' => $this->showsReservation,
+            'is_provisional' => $this->isProvisional,
             'period_start' => $this->period->start->toDateString(),
             // The period is half-open and renews on its end date (at the provider's time of day),
             // so the last whole day is the day before: periods read 15.10–14.11, 15.11–14.12.

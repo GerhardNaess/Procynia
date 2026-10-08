@@ -7,7 +7,6 @@ import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
-import { formatUnits } from '../../../Support/aiCapacity';
 import { packageActionLabel, packageConfirmation, packageStatus, splitPackages } from '../../../Support/packagePresentation';
 
 function classNames(...values) {
@@ -269,7 +268,6 @@ export default function BillingIndex() {
             ? formatPlanIntervalPrice(currentPlanIntervalOption.price_nok, currentPlanIntervalOption.interval)
             : null,
         includedUsers: currentPlanOption.included_users ?? null,
-        includedAiUnits: currentPlanOption.included_ai_units ?? null,
     } : null;
     const selectedPlanSummary = selectedPlan ? {
         label: planChangeText.selected_plan ?? 'Valgt abonnement',
@@ -282,7 +280,6 @@ export default function BillingIndex() {
             ? formatPlanIntervalPrice(selectedIntervalOption.price_nok, selectedIntervalOption.interval)
             : null,
         includedUsers: selectedPlan.included_users ?? null,
-        includedAiUnits: selectedPlan.included_ai_units ?? null,
     } : null;
     const isSamePlanSelection = normalizeKey(selectedPlanKey) === currentPlanKey
         && normalizeKey(selectedInterval) === currentIntervalKey;
@@ -801,16 +798,6 @@ export default function BillingIndex() {
                                                     </dd>
                                                 </div>
                                             )}
-                                            {planPreviewSummary.includedAiUnits !== null && planPreviewSummary.includedAiUnits !== undefined && (
-                                                <div>
-                                                    <dt className="text-slate-600">
-                                                        {planChangeText.included_ai_units ?? 'AI-enheter per måned'}
-                                                    </dt>
-                                                    <dd className="mt-1 font-medium text-slate-900">
-                                                        {formatUnits(planPreviewSummary.includedAiUnits, locale)}
-                                                    </dd>
-                                                </div>
-                                            )}
                                         </dl>
                                     )}
                                 </div>
@@ -934,16 +921,6 @@ export default function BillingIndex() {
                                                     </div>
                                                     <div className="font-semibold text-slate-900">
                                                         {selectedPlanSummary.includedUsers}
-                                                    </div>
-                                                </>
-                                            )}
-                                            {selectedPlanSummary.includedAiUnits !== null && selectedPlanSummary.includedAiUnits !== undefined && (
-                                                <>
-                                                    <div className="text-slate-600">
-                                                        {planChangeText.included_ai_units ?? 'AI-enheter per måned'}
-                                                    </div>
-                                                    <div className="font-semibold text-slate-900">
-                                                        {formatUnits(selectedPlanSummary.includedAiUnits, locale)}
                                                     </div>
                                                 </>
                                             )}

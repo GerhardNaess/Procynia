@@ -303,8 +303,6 @@ class BillingController extends Controller
                 'key' => $planKey,
                 'name' => $plan['name'] ?? ucfirst($planKey),
                 'included_users' => $plan['included_users'] ?? null,
-                // Per month; a yearly period includes twelve times this.
-                'included_ai_units' => $plan['included_ai_units'] ?? null,
                 'is_current' => $currentPlan === $planKey,
                 'intervals' => $intervals,
             ];

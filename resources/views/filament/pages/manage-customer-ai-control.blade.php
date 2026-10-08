@@ -99,7 +99,7 @@
                 <dd class="font-medium text-gray-900 dark:text-gray-100">
                     {{ ($capacity['is_configured'] ?? false) ? number_format((int) $capacity['included'], 0, ',', ' ') : __('procynia.ai_admin.capacity.not_configured') }}
                     <span class="text-gray-600 dark:text-gray-400">
-                        ({{ ($capacity['override'] ?? null) !== null ? __('procynia.ai_admin.capacity.source_customer') : __('procynia.ai_admin.capacity.source_plan') }})
+                        ({{ __('procynia.ai_admin.capacity.sources.' . ($capacity['source'] ?? 'none')) }}{{ ($capacity['is_provisional'] ?? false) ? ', ' . __('procynia.ai_admin.capacity.provisional') : '' }})
                     </span>
                 </dd>
             </div>

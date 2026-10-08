@@ -24,7 +24,7 @@ const plain = (text) => text.replace(/\s/g, ' ');
  * and reads the shared AI capacity: headline, one progress bar, used / remaining / period — at
  * desktop and at 390 px without sideways scrolling. No provider call is made; usage is seeded.
  */
-test('Abonnement shows the shared AI capacity in AI units', async ({ page }) => {
+test('Basis with several options shows one shared AI capacity in AI units', async ({ page }) => {
     const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\AiCapacityE2EFixture::seed('${suffix}'));`);
     const capacity = JSON.parse(stdout.match(/\{.*\}/)[0]);
 
@@ -37,8 +37,13 @@ test('Abonnement shows the shared AI capacity in AI units', async ({ page }) => 
     await expect(card.getByTestId('ai-capacity-headline')).toHaveText(
         new RegExp(`${grouped(capacity.used)} av ${grouped(capacity.included)} AI-enheter brukt`.replace(/ /g, '\\s')),
     );
-    expect(capacity.included).toBe(5000);
-    expect(capacity.used).toBeGreaterThanOrEqual(3200);
+    // Basis plus several options is still one pool, sized by Basis alone.
+    expect(capacity.packages).toContain('basis');
+    expect(capacity.packages.filter((key) => key !== 'basis').length).toBeGreaterThanOrEqual(2);
+    expect(capacity.is_provisional).toBe(true);
+    await expect(page.getByTestId('ai-capacity-card')).toHaveCount(1);
+    await expect(card.getByTestId('ai-capacity-provisional')).toContainText('under innfasing');
+    expect(capacity.used).toBeGreaterThanOrEqual(1200);
 
     const bar = card.getByRole('progressbar');
     await expect(bar).toHaveAttribute('aria-valuenow', String(capacity.percentage_used));
