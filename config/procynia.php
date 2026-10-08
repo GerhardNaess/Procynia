@@ -68,25 +68,8 @@ return [
             'reservation_safety_margin_percent' => env('AI_OPERATIONAL_RESERVATION_SAFETY_MARGIN_PERCENT', 25),
         ],
 
-        /*
-         * Conservative token ceilings per operation, used only to price a reservation before the
-         * call. They are not limits on the call itself. Kept in one registry so an estimate is
-         * never invented ad hoc inside a service.
-         */
-        'operation_estimates' => [
-            'default' => ['input_tokens' => 40000, 'output_tokens' => 8000],
-            'wiki.ask.retrieval_plan' => ['input_tokens' => 12000, 'output_tokens' => 2000],
-            'wiki.ask.answer' => ['input_tokens' => 40000, 'output_tokens' => 4000],
-            // Keyed by the operation names in config/ai_operations.php.
-            'tender.requirement_extraction.segment' => ['input_tokens' => 40000, 'output_tokens' => 16000],
-            'tender.requirement_extraction.document' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-            'tender.requirement_extraction.block' => ['input_tokens' => 40000, 'output_tokens' => 16000],
-            'tender.requirement_answer' => ['input_tokens' => 60000, 'output_tokens' => 8000],
-            'tender.requirement_assessment' => ['input_tokens' => 40000, 'output_tokens' => 6000],
-            'wiki.maintainer_decision' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-            'wiki.generate_page' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-            'wiki.maintenance' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-        ],
+        // Per-operation reservation estimates live in config/ai_operations.php, next to each
+        // operation's model.
 
         'payment' => [
             // A failed card should not take a customer's AI away the same afternoon; a week is

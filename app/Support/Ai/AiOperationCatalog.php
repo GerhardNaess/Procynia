@@ -15,8 +15,62 @@ final class AiOperationCatalog
 {
     public const FEATURE_SYSTEM = 'system';
 
+    public const ESTIMATE_OPERATION = 'operation';
+
+    public const ESTIMATE_FALLBACK = 'fallback';
+
     /** The model that performs an operation, falling back one segment at a time. */
     public static function model(string $operation): string
+    {
+        $model = trim((string) self::lookup($operation, 'model'));
+
+        if ($model !== '') {
+            return $model;
+        }
+
+        throw new InvalidArgumentException(sprintf('AI operation [%s] has no model in config/ai_operations.php.', $operation));
+    }
+
+    /**
+     * The pre-call reservation estimate for an operation, falling back one segment at a time like
+     * the model. `source` says whether it came from the operation registry or from the explicit
+     * emergency fallback — a caller that reaches the fallback is reserving against a guess.
+     *
+     * @return array{input_tokens: int, output_tokens: int, source: string}
+     */
+    public static function estimate(?string $operation): array
+    {
+        $entry = $operation === null ? null : self::lookup($operation, 'estimate');
+        $source = self::ESTIMATE_OPERATION;
+
+        if (! is_array($entry)) {
+            $entry = (array) config('ai_operations.reservation.fallback_estimate', []);
+            $source = self::ESTIMATE_FALLBACK;
+        }
+
+        return [
+            'input_tokens' => max(0, (int) ($entry['input_tokens'] ?? 0)),
+            'output_tokens' => max(0, (int) ($entry['output_tokens'] ?? 0)),
+            'source' => $source,
+        ];
+    }
+
+    /** Every operation key the registry lists, variants included. */
+    public static function registeredOperations(): array
+    {
+        return array_keys((array) config('ai_operations.operations', []));
+    }
+
+    /** Every model some registered operation resolves to — the models that must be priced. */
+    public static function activeModels(): array
+    {
+        $models = array_map(static fn (string $operation): string => self::model($operation), self::registeredOperations());
+
+        return array_values(array_unique($models));
+    }
+
+    /** Read one attribute of an operation, falling back one dot-segment at a time. */
+    private static function lookup(string $operation, string $attribute): mixed
     {
         // Operation keys contain dots, so they are looked up in the array — never through config()'s
         // dot notation, which would split them.
@@ -24,17 +78,17 @@ final class AiOperationCatalog
         $key = $operation;
 
         while ($key !== '') {
-            $model = trim((string) ($operations[$key]['model'] ?? ''));
+            $value = $operations[$key][$attribute] ?? null;
 
-            if ($model !== '') {
-                return $model;
+            if ($value !== null && $value !== '') {
+                return $value;
             }
 
             $cut = strrpos($key, '.');
             $key = $cut === false ? '' : substr($key, 0, $cut);
         }
 
-        throw new InvalidArgumentException(sprintf('AI operation [%s] has no model in config/ai_operations.php.', $operation));
+        return null;
     }
 
     /** The feature is the operation's first segment — never stored separately from it. */

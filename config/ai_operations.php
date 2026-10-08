@@ -69,44 +69,65 @@ return [
      */
     'context_enforcement' => env('AI_CONTEXT_ENFORCEMENT', 'warn'),
 
+    /*
+     * Pre-call reservation: what an operation is expected to cost at most, priced before the call
+     * so a customer's NOK budget is checked before money is spent (AiOperationalPricingService).
+     *
+     * Each operation states its own `estimate` next to its model. `output_tokens` is the output
+     * ceiling the client sends as max_output_tokens (or the model's capacity ceiling where the
+     * planner chooses it), so the reservation can never be outrun by the call's own output.
+     * `input_tokens` is a conservative ceiling above the largest prompts observed for that
+     * operation. An estimate is never the actual cost: the attempt ledger records what the
+     * provider reported, and the reservation is settled against that.
+     *
+     * A variant inherits its parent's estimate unless it is listed itself, the same way it
+     * inherits the model. `fallback_estimate` is an emergency rule only: an operation that reaches
+     * it is logged, because it means a new operation was added without its own estimate.
+     */
+    'reservation' => [
+        'fallback_estimate' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+    ],
+
     'operations' => [
         // Anbud
-        'tender.requirement_extraction' => ['model' => $requirementExtractionModel],
+        'tender.requirement_extraction' => ['model' => $requirementExtractionModel, 'estimate' => ['input_tokens' => 60000, 'output_tokens' => 16000]],
+        'tender.requirement_extraction.segment' => ['estimate' => ['input_tokens' => 20000, 'output_tokens' => 1200]],
+        'tender.requirement_extraction.block' => ['estimate' => ['input_tokens' => 30000, 'output_tokens' => 3000]],
         // The full-document prompt has always pinned its model independently of the env override.
-        'tender.requirement_extraction.document' => ['model' => 'gpt-4.1-mini'],
-        'tender.requirement_relevance' => ['model' => env('OPENAI_REQUIREMENT_RELEVANCE_MODEL', $requirementExtractionModel)],
-        'tender.excel_structure_discovery' => ['model' => 'gpt-4.1-mini'],
-        'tender.requirement_assessment' => ['model' => 'gpt-4.1-mini'],
-        'tender.requirement_research' => ['model' => 'gpt-4.1-mini'],
-        'tender.requirement_answer' => ['model' => 'gpt-4.1-mini'],
-        'tender.requirement_answer_revision' => ['model' => 'gpt-4.1-mini'],
-        'tender.requirement_alignment' => ['model' => 'gpt-4.1-mini'],
+        'tender.requirement_extraction.document' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 60000, 'output_tokens' => 8000]],
+        'tender.requirement_relevance' => ['model' => env('OPENAI_REQUIREMENT_RELEVANCE_MODEL', $requirementExtractionModel), 'estimate' => ['input_tokens' => 8000, 'output_tokens' => 256]],
+        'tender.excel_structure_discovery' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 30000, 'output_tokens' => 3000]],
+        'tender.requirement_assessment' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 800]],
+        'tender.requirement_research' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 500]],
+        'tender.requirement_answer' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 40000, 'output_tokens' => 2000]],
+        'tender.requirement_answer_revision' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 1200]],
+        'tender.requirement_alignment' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 2000]],
 
-        // Enterprise Wiki — ingest and maintenance
-        'wiki.maintainer_decision' => ['model' => 'gpt-5'],
-        'wiki.generate_page' => ['model' => 'gpt-5'],
-        'wiki.repair_page_sections' => ['model' => 'gpt-5'],
-        'wiki.repair_page_figures' => ['model' => 'gpt-5'],
-        'wiki.extract_page_claims' => ['model' => 'gpt-4.1-mini'],
-        'wiki.verify_claim' => ['model' => 'gpt-4.1-mini'],
-        'wiki.revise_semantics' => ['model' => 'gpt-5'],
-        'wiki.revise_links' => ['model' => 'gpt-5'],
-        'wiki.review_links' => ['model' => 'gpt-4.1-mini'],
-        'wiki.review_semantics' => ['model' => 'gpt-4.1-mini'],
-        'wiki.classify_cross_page_consistency' => ['model' => 'gpt-4.1-mini'],
+        // Enterprise Wiki — ingest and maintenance. gpt-5 output ceilings include reasoning tokens.
+        'wiki.maintainer_decision' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 60000, 'output_tokens' => 16000]],
+        'wiki.generate_page' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 60000, 'output_tokens' => 16000]],
+        'wiki.repair_page_sections' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 40000, 'output_tokens' => 16000]],
+        'wiki.repair_page_figures' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 40000, 'output_tokens' => 16000]],
+        'wiki.extract_page_claims' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 4000]],
+        'wiki.verify_claim' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 8000, 'output_tokens' => 900]],
+        'wiki.revise_semantics' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 30000, 'output_tokens' => 4000]],
+        'wiki.revise_links' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 30000, 'output_tokens' => 3000]],
+        'wiki.review_links' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 1000]],
+        'wiki.review_semantics' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 1500]],
+        'wiki.classify_cross_page_consistency' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 10000, 'output_tokens' => 700]],
         // Legacy section-by-section ingest (app/Jobs/Ai/Wiki).
-        'wiki.extract_section_claims' => ['model' => 'gpt-4.1-mini'],
-        'wiki.generate_article' => ['model' => 'gpt-5'],
+        'wiki.extract_section_claims' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 20000, 'output_tokens' => 2000]],
+        'wiki.generate_article' => ['model' => 'gpt-5', 'estimate' => ['input_tokens' => 30000, 'output_tokens' => 4000]],
 
         // Enterprise Wiki — navigation and Q&A, shared with requirement research
-        'wiki.navigation_plan' => ['model' => 'gpt-4.1-mini'],
-        'wiki.ask.retrieval_plan' => ['model' => 'gpt-4.1-mini'],
-        'wiki.ask.answer' => ['model' => 'gpt-4.1-mini'],
+        'wiki.navigation_plan' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 12000, 'output_tokens' => 1200]],
+        'wiki.ask.retrieval_plan' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 12000, 'output_tokens' => 1200]],
+        'wiki.ask.answer' => ['model' => 'gpt-4.1-mini', 'estimate' => ['input_tokens' => 40000, 'output_tokens' => 1200]],
 
         // Kvalitet
-        'quality.interpret_process' => ['model' => $qualityFlowModel],
-        'quality.clarify_process' => ['model' => $qualityFlowModel],
-        'quality.propose_process_change' => ['model' => $qualityFlowModel],
-        'quality.draft_activity_article' => ['model' => $qualityFlowModel],
+        'quality.interpret_process' => ['model' => $qualityFlowModel, 'estimate' => ['input_tokens' => 10000, 'output_tokens' => 4000]],
+        'quality.clarify_process' => ['model' => $qualityFlowModel, 'estimate' => ['input_tokens' => 6000, 'output_tokens' => 4000]],
+        'quality.propose_process_change' => ['model' => $qualityFlowModel, 'estimate' => ['input_tokens' => 10000, 'output_tokens' => 3000]],
+        'quality.draft_activity_article' => ['model' => $qualityFlowModel, 'estimate' => ['input_tokens' => 10000, 'output_tokens' => 4000]],
     ],
 ];
