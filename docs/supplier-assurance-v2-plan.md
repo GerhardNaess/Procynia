@@ -2,7 +2,8 @@
 
 Status: **implementeringskontrakt for v2. Fase 1–9 er implementert på `feat/supplier-assurance`
 (2026-10-08), ikke merget.** Beslutningene i §19.1 er låst; endringer i dem krever en ny beslutning,
-ikke en tolkning under implementering. §19.2 er fortsatt åpent — se der.
+ikke en tolkning under implementering. Faglig/juridisk review av kravmalene er fortsatt en åpen
+release-gate — se §19.2.
 Utgangspunkt: `main` @ `b7e45e98` (2026-10-08). Bygger på [Leverandøroppfølging v1](supplier-management-v1-plan.md),
 som er ferdig og merget.
 
@@ -953,7 +954,8 @@ på og røpe at det finnes. Uendret fra v1 §8.
 - Malene er knyttet til leverandører gjennom **profilen**, ikke ved å tildele en mal til en
   leverandør. Malen fyller katalogen; regelen avgjør hvem kravet gjelder.
 - **Faglig kvalitetssikring:** malinnhold (tekst, nivå, hjemmel) gjennomgås faglig før det leveres
-  til kunder (§19.2). Malene sier «typisk grunnlag», ikke juridisk fasit.
+  til kunder (§19.2, [reviewgrunnlag](supplier-assurance-template-review.md)). Malene beskriver
+  typiske leverandørkrav, ikke juridisk fasit.
 
 ### 16.2 Malene
 
@@ -1125,24 +1127,50 @@ krav og overstyringer (fase 2), kontroller (fase 3), beslutninger (fase 4) og ak
 | Ny rettighet `supplier.assure`; profilen er bare `supplier.edit`; rettighetene endres ikke mellom fasene | §13.2 |
 | Ingen nytt oppgavesystem; beregnet oppfølgingsplan + lokale signaler | §14, §15 |
 | Kravmaler i kode; felles bibliotek; aldri auto-oppdatering | §16.1 |
+| Kravmalene følger Leverandøroppfølging (`supplier`) i v2; ingen egen entitlement, pris eller tilvalg (låst 2026-10-08) | §19.2 |
 | Ingen backfill; v1-krav-koblinger beholdes som de er | §17 |
 
-### 19.2 Åpne spørsmål
+### 19.2 Kommersiell pakking og faglig review
 
-**Ingen av disse blokkerer fase 1–4.** Fase 1–4 bruker bare manuelt opprettede kontrollkrav og
-berøres verken av malinnhold eller av kommersiell pakking. Spørsmålene må være avklart før fase 5
-merges. Til da gjelder standarden i tabellen.
+**Status 2026-10-08:** Supplier Assurance v2 er teknisk ferdig. Merge-porten er grønn (fase 9). Av
+de to spørsmålene som sto åpne, er den kommersielle pakkingen låst. Faglig/juridisk review er
+fortsatt åpen, og er en release-gate.
 
-**Status etter fase 9 (2026-10-08): begge er fortsatt åpne.** Implementert etter standarden: malene
-har `basis_text` tomt, veiledningen sier «typisk grunnlag», og malene er tilgjengelige for alle kunder
-med `supplier` uten ny entitlement. Ingen av de ni malene eller bibliotekets 39 krav (tekst, nivå,
-intervall, anvendelsesregel, NO/EN-oversettelse) er faglig eller juridisk gjennomgått. Dette er
-produktbeslutninger, ikke tekniske blokkere for merge.
+Historikk: spørsmålene blokkerte ikke fase 1–4. Fase 5–9 ble implementert etter standarden som
+sto her: malene er tilgjengelige for alle kunder med `supplier`, og `basis_text` er tomt.
 
-| # | Spørsmål | Blokkerer | Anbefalt standard hvis ikke avklart |
-|---|---|---|---|
-| 1 | Hvem kvalitetssikrer innholdet i kravmalene (tekst, nivå, `basis_text`) faglig/juridisk før de leveres til kunder? | Fase 5 (kunde-lansering av maler) | Malene merges med `basis_text` tomt og «typisk grunnlag» i veiledningen; hjemmelstekst legges inn etter faglig gjennomgang |
-| 2 | Skal kravmalene være tilgjengelige for alle kunder med `supplier`, eller være en del av et eget tilvalg? | Fase 5 | Alle kunder med `supplier`; ingen entitlement-endring |
+**1. Kommersiell pakking — låst (2026-10-08)**
+
+**Kravmalene følger Leverandøroppfølging i v2.**
+
+- Ingen egen entitlement for kravmalene, ingen separat pris og intet eget tilvalg.
+- Ingen avhengighet til GRC eller andre moduler.
+- Alle kunder med aktiv Leverandøroppfølging (`supplier`) har tilgang til kravmalene. «Ta i bruk
+  kravmal» krever `supplier.assure` (§13.2).
+- Dagens implementasjon fungerer allerede slik. Det kreves ingen kodeendring.
+- Arkitekturen hindrer ikke separat kommersiell pakking senere, hvis det blir aktuelt. Det krever i
+  så fall en ny beslutning.
+
+**2. Faglig/juridisk review — åpen release-gate**
+
+Den tekniske implementasjonen er ferdig. Innholdet er ikke kvalitetssikret: ingen av de ni malene
+eller de 39 kravene i biblioteket (tekst, nivå, intervall, anvendelsesregel, dokumenttyper,
+NO/EN-oversettelse) er faglig eller juridisk gjennomgått. `basis_text` og `guidance` er tomme for
+alle kravene.
+
+Reviewgrunnlaget er [`supplier-assurance-template-review.md`](supplier-assurance-template-review.md).
+Det viser alle 39 kravene og alle ni malene, med review-status per krav. Alle krav står som
+`Ikke vurdert`.
+
+**Release-gate:** Kravmalene kan ikke regnes som produksjonsgodkjent innhold før en navngitt faglig
+og juridisk eier har gjennomgått og godkjent review-dokumentet. Hvem det er, er ikke bestemt.
+Gaten er oppfylt når:
+
+1. faglig og juridisk reviewer er navngitt i review-dokumentet,
+2. alle 39 kravene har status `Godkjent`, og endringene for krav med `Må endres` er gjort i koden,
+3. dato og godkjent versjon (commit) er fylt ut.
+
+Produksjonsmerge av `feat/supplier-assurance` bør vente til gaten er oppfylt.
 
 ---
 
