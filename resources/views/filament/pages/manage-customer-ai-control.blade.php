@@ -85,6 +85,49 @@
         @endif
     </section>
 
+    <section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900" data-testid="admin-ai-capacity">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
+            {{ __('procynia.ai_admin.capacity.section') }}
+        </h2>
+        <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">
+            {{ __('procynia.ai_admin.capacity.section_help') }}
+        </p>
+
+        <dl class="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 text-base sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.included') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">
+                    {{ ($capacity['is_configured'] ?? false) ? number_format((int) $capacity['included'], 0, ',', ' ') : __('procynia.ai_admin.capacity.not_configured') }}
+                    <span class="text-gray-600 dark:text-gray-400">
+                        ({{ ($capacity['override'] ?? null) !== null ? __('procynia.ai_admin.capacity.source_customer') : __('procynia.ai_admin.capacity.source_plan') }})
+                    </span>
+                </dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.fields.used') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">{{ number_format((int) ($capacity['used'] ?? 0), 0, ',', ' ') }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.fields.reserved') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">{{ number_format((int) ($capacity['reserved'] ?? 0), 0, ',', ' ') }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.fields.remaining') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">
+                    {{ ($capacity['remaining'] ?? null) === null ? '–' : number_format((int) $capacity['remaining'], 0, ',', ' ') }}
+                </dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.fields.status') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">{{ __('procynia.ai_admin.capacity.statuses.' . ($capacity['status'] ?? 'not_configured')) }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.fields.period') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">{{ ($capacity['period_start'] ?? '') }} – {{ ($capacity['period_end'] ?? '') }}</dd>
+            </div>
+        </dl>
+    </section>
+
     <section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
             {{ __('procynia.ai_admin.sections.operational') }}

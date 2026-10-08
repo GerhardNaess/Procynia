@@ -38,6 +38,7 @@ class AiCostControlService
         private readonly AiOperationalBudgetService $budgets,
         private readonly AiPaymentPolicyService $paymentPolicy,
         private readonly AiOperationalAlertService $operationalAlerts,
+        private readonly CustomerAiCapacityService $capacity,
     ) {}
 
     /**
@@ -74,7 +75,7 @@ class AiCostControlService
         }
 
         try {
-            return $this->authorizeCustomer($context, $customer)->withBudgetReservation($budgetReservation, $estimatedCostNok);
+            return $this->authorizeCustomer($context, $customer, $estimatedCostNok)->withBudgetReservation($budgetReservation, $estimatedCostNok);
         } catch (Throwable $exception) {
             // A refusal after the NOK hold was taken must give the money back, or a blocked
             // customer would slowly consume the platform budget by being blocked.
@@ -84,11 +85,11 @@ class AiCostControlService
         }
     }
 
-    private function authorizeCustomer(AiCallContext $context, Customer $customer): AiCostControlDecision
+    private function authorizeCustomer(AiCallContext $context, Customer $customer, ?float $estimatedCostNok): AiCostControlDecision
     {
         $this->assertPaymentStateAllows($context, $customer);
 
-        return DB::transaction(function () use ($context): AiCostControlDecision {
+        return DB::transaction(function () use ($context, $estimatedCostNok): AiCostControlDecision {
             $customer = Customer::query()->lockForUpdate()->findOrFail($context->customerId);
             if (($customer->ai_access_status ?? Customer::AI_ACCESS_ENABLED) === Customer::AI_ACCESS_SUSPENDED) {
                 $this->assertOverrideMayBypass($context, AiCostControlException::CUSTOMER_SUSPENDED, $customer);
@@ -101,6 +102,10 @@ class AiCostControlService
                 // Nothing commercial left to meter once entitlement itself was overridden.
                 return new AiCostControlDecision($context, AiQuotaPolicy::NONE, null, 0, 0, 0, null, null, 'exhausted');
             }
+
+            // The shared capacity applies to every module, so it is checked before the Anbud
+            // AI-case quota, under the same customer row lock.
+            $this->assertCapacityAllows($context, $customer, $estimatedCostNok);
 
             if (! $context->commercialCredit || ($context->savedNoticeId ?? 0) <= 0) {
                 return new AiCostControlDecision($context, $policy->type, null, 0, $policy->type === AiQuotaPolicy::FINITE ? $policy->includedCredits : null, null, null, null, 'normal');
@@ -163,6 +168,40 @@ class AiCostControlService
 
             return new AiCostControlDecision($context, $policy->type, $reservation->id, $committed, $included, max(0, $included - $occupied - 1), $periodStart, $periodEnd, $this->status($occupied + 1, $included));
         });
+    }
+
+    /**
+     * The shared AI capacity gate: does this operation's estimate fit in what the customer has
+     * left this billing period, after settled usage and open reservations?
+     *
+     * The reservation that makes the next caller see this one is the attempt row the usage meter
+     * opens as pending with this same estimate — not a second reservation store. In `observe` mode
+     * (the default while the Anbud AI-case quota is still the commercial gate) a refusal is only
+     * logged.
+     */
+    private function assertCapacityAllows(AiCallContext $context, Customer $customer, ?float $estimatedCostNok): void
+    {
+        $mode = (string) config('ai_customer_capacity.enforcement', 'observe');
+
+        if ($mode === 'off') {
+            return;
+        }
+
+        $refusal = $this->capacity->refusalFor($customer, $estimatedCostNok);
+
+        if ($refusal === null) {
+            return;
+        }
+
+        if ($mode !== 'enforce') {
+            Log::notice('[AI_CAPACITY] Call would be refused by the shared AI capacity; observe mode lets it through.', [
+                'customer_id' => $customer->id, 'reason' => $refusal, 'operation' => $context->operation,
+            ]);
+
+            return;
+        }
+
+        $this->assertOverrideMayBypass($context, $refusal, $customer);
     }
 
     /**

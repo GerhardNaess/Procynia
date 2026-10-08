@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\Ai\Commercial\AiCreditAdjustmentService;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
 use App\Services\Ai\Commercial\AiRuntimeControlService;
+use App\Services\Ai\Commercial\CustomerAiCapacityService;
 use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Services\Ai\Operational\AiPaymentPolicyService;
 use App\Support\CustomerContext;
@@ -59,6 +60,9 @@ class ManageCustomerAiControl extends Page
     public array $paymentState = [];
 
     public bool $globalStopActive = false;
+
+    /** @var array<string, mixed> The shared AI capacity, in AI units, as the customer sees it. */
+    public array $capacity = [];
 
     public static function canAccess(array $parameters = []): bool
     {
@@ -138,6 +142,23 @@ class ManageCustomerAiControl extends Page
                         ->maxLength(500),
                 ])
                 ->action(fn (array $data) => $this->adjustCredits((int) $data['amount'], (string) $data['reason'])),
+
+            Action::make('set_ai_units')
+                ->label(__('procynia.ai_admin.capacity.action'))
+                ->icon('heroicon-o-bolt')
+                ->requiresConfirmation()
+                ->modalDescription(__('procynia.ai_admin.capacity.action_confirm'))
+                ->fillForm(fn (): array => ['included_ai_units' => $this->record->included_ai_units])
+                ->form([
+                    TextInput::make('included_ai_units')
+                        ->label(__('procynia.ai_admin.capacity.override_field'))
+                        ->helperText(__('procynia.ai_admin.capacity.override_help'))
+                        ->numeric()->integer()->minValue(0)->nullable(),
+                    Textarea::make('reason')
+                        ->label(__('procynia.ai_admin.fields.reason'))
+                        ->required()->minLength(3)->maxLength(500),
+                ])
+                ->action(fn (array $data) => $this->saveIncludedAiUnits($data)),
 
             Action::make('set_operational_limits')
                 ->label(__('procynia.ai_admin.actions.set_operational_limits'))
@@ -323,6 +344,44 @@ class ManageCustomerAiControl extends Page
         Notification::make()->title(__('procynia.ai_admin.notifications.operational_limits_updated'))->success()->send();
     }
 
+    /**
+     * The per-customer override of the shared AI capacity (AI units per billing period). Empty
+     * means "follow the plan". Audited like every other commercial change on this page.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function saveIncludedAiUnits(array $data): void
+    {
+        $actor = $this->internalActor();
+
+        if (! $actor instanceof User) {
+            return;
+        }
+
+        $raw = $data['included_ai_units'] ?? null;
+        $units = $raw === null || $raw === '' ? null : max(0, (int) $raw);
+        $before = $this->record->included_ai_units;
+
+        DB::transaction(function () use ($units, $before, $data, $actor): void {
+            $this->record->forceFill(['included_ai_units' => $units])->save();
+
+            BillingEvent::query()->create([
+                'customer_id' => $this->record->id,
+                'user_id' => $actor->id,
+                'event_type' => 'ai_capacity_units_changed',
+                'source' => 'ai_cost_control',
+                'description' => trim((string) ($data['reason'] ?? '')),
+                'before' => ['included_ai_units' => $before],
+                'after' => ['included_ai_units' => $units],
+            ]);
+        });
+
+        $this->record = $this->record->fresh();
+        $this->loadState();
+
+        Notification::make()->title(__('procynia.ai_admin.capacity.saved'))->success()->send();
+    }
+
     private function positiveOrNull(mixed $value): ?float
     {
         if ($value === null || $value === '') {
@@ -336,6 +395,8 @@ class ManageCustomerAiControl extends Page
     {
         $status = app(AiQuotaStatusService::class)->forCustomer($this->record);
         $this->quota = $status->toArray();
+        $this->capacity = app(CustomerAiCapacityService::class)->forCustomer($this->record)->toArray()
+            + ['override' => $this->record->included_ai_units];
         $this->loadOperationalState();
         $this->globalStopActive = app(AiRuntimeControlService::class)->globalStopEnabled();
 

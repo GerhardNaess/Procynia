@@ -181,6 +181,33 @@ class AiCostControlAdminTest extends TestCase
         ]);
     }
 
+    public function test_an_admin_can_give_a_customer_its_own_ai_units_and_return_it_to_the_plan(): void
+    {
+        $admin = $this->internalAdmin();
+        $customer = $this->customer(3);
+
+        $this->actingAs($admin);
+        Livewire::test(ManageCustomerAiControl::class, ['record' => $customer])
+            ->assertSet('capacity.included', 2000)
+            ->callAction('set_ai_units', ['included_ai_units' => 250000, 'reason' => 'Enterprise-avtale'])
+            ->assertSet('capacity.included', 250000)
+            ->assertSet('capacity.override', 250000);
+
+        $this->assertSame(250000, $customer->fresh()->included_ai_units);
+        $this->assertDatabaseHas('billing_events', [
+            'customer_id' => $customer->id,
+            'user_id' => $admin->id,
+            'event_type' => 'ai_capacity_units_changed',
+            'description' => 'Enterprise-avtale',
+        ]);
+
+        Livewire::test(ManageCustomerAiControl::class, ['record' => $customer->fresh()])
+            ->callAction('set_ai_units', ['included_ai_units' => null, 'reason' => 'Tilbake til plan'])
+            ->assertSet('capacity.included', 2000);
+
+        $this->assertNull($customer->fresh()->included_ai_units);
+    }
+
     public function test_the_page_shows_the_canonical_quota_and_the_audit_history(): void
     {
         $admin = $this->internalAdmin();

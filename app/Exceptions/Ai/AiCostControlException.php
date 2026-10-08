@@ -11,6 +11,13 @@ class AiCostControlException extends RuntimeException
 
     public const QUOTA_EXHAUSTED = 'AI_QUOTA_EXHAUSTED';
 
+    // The shared AI capacity (CustomerAiCapacityService). EXHAUSTED: settled usage has used the
+    // period's capacity. INSUFFICIENT: what is left after temporary reservations does not cover
+    // this operation — worded so it never claims everything is used.
+    public const CAPACITY_EXHAUSTED = 'AI_CAPACITY_EXHAUSTED';
+
+    public const CAPACITY_INSUFFICIENT = 'AI_CAPACITY_INSUFFICIENT';
+
     public const CUSTOMER_SUSPENDED = 'AI_CUSTOMER_SUSPENDED';
 
     public const GLOBAL_STOP = 'AI_GLOBAL_STOP';

@@ -89,6 +89,7 @@ class Customer extends Model
         'billing_anchor_at',
         'included_users',
         'included_ai_credits',
+        'included_ai_units',
         'billing_discount_percent',
         'ai_access_status',
     ];
@@ -102,6 +103,7 @@ class Customer extends Model
             'billing_anchor_at' => 'immutable_datetime',
             'included_users' => 'integer',
             'included_ai_credits' => 'integer',
+            'included_ai_units' => 'integer',
             'billing_discount_percent' => 'decimal:2',
         ];
     }
