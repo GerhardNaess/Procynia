@@ -5,9 +5,11 @@ namespace App\Services\Operations;
 use App\Models\CustomerBillingPeriod;
 use App\Models\IdentityProvider;
 use App\Services\Ai\Pricing\AiModelPriceReadiness;
+use App\Services\Ai\Usage\AiUsageLedger;
 use App\Services\Auth\EntraConfig;
 use App\Services\OpenAi\OpenAiClient;
 use App\Support\Ai\AiOperationCatalog;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -150,6 +152,7 @@ class RuntimePreflightService
             $this->checkAiPricingReadiness(),
             $this->checkAiActiveModelPrices(),
             $this->checkAiContextEnforcement(),
+            $this->checkAiOpenSettlements(),
             $this->checkAiExchangeRateReadiness(),
             $this->checkAiCostControlConfiguration(),
         ];
@@ -310,6 +313,39 @@ class RuntimePreflightService
         return $this->pass('AI context enforcement', $mode === 'strict'
             ? 'strict: a customer-driven AI call without a customer is refused'
             : 'warn: a customer-driven AI call without a customer is recorded as unattributed and alerted (check with ai:usage-integrity)');
+    }
+
+    /**
+     * AI calls whose cost is still open (pending/unresolved) after the configured age. Never fatal
+     * — the reservation already holds the money; it only means an operator has something to look
+     * at (ai:cost-control-health lists them).
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiOpenSettlements(): array
+    {
+        try {
+            if (! Schema::hasColumn('ai_usage_attempts', 'settlement_status')) {
+                return $this->skip('AI open settlements', 'settlement column not migrated yet');
+            }
+
+            $hours = max(1, (int) config('ai_operations.settlement.open_alert_after_hours', 24));
+            $open = app(AiUsageLedger::class)->openSettlements(CarbonImmutable::now('UTC')->subHours($hours));
+
+            if ($open['count'] > 0) {
+                return $this->warn('AI open settlements', sprintf(
+                    '%d AI call(s) older than %dh still have no final cost (oldest %s), holding %.2f NOK reserved. See ai:cost-control-health.',
+                    $open['count'],
+                    $hours,
+                    $open['oldest_started_at'],
+                    $open['reserved_cost_nok'],
+                ));
+            }
+
+            return $this->pass('AI open settlements', sprintf('no AI call older than %dh is waiting for a final cost', $hours));
+        } catch (Throwable $e) {
+            return $this->warn('AI open settlements', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
     }
 
     /**

@@ -340,7 +340,7 @@ class AiUsageLedgerTest extends TestCase
         $this->attempt($beta, 'quality.interpret_process', 8.00);
         $this->attempt(null, 'system.price_probe', 16.00, ['attribution' => 'system']);
         $this->attempt(null, 'wiki.verify_claim', 32.00, ['attribution' => 'unattributed']);
-        $this->attempt($alpha, 'saved_notice.requirement_answer', 64.00, ['ledger_version' => null, 'attribution' => null]);
+        $this->attempt($alpha, 'saved_notice.requirement_answer', 64.00, ['ledger_version' => null, 'attribution' => null, 'settlement_status' => null]);
         $this->attempt($alpha, 'tender.requirement_answer', 128.00, ['started_at' => '2026-09-30 23:59:59']);
 
         $ledger = app(AiUsageLedger::class);
@@ -449,7 +449,7 @@ class AiUsageLedgerTest extends TestCase
             'provider' => 'openai', 'endpoint' => 'responses', 'model' => 'gpt-4.1-mini',
             'status' => AiUsageAttempt::STATUS_SUCCESS,
             'input_tokens' => 100, 'output_tokens' => 10, 'total_tokens' => 110,
-            'cost_status' => 'known', 'cost_nok' => $costNok,
+            'cost_status' => 'known', 'settlement_status' => AiUsageAttempt::SETTLEMENT_SETTLED, 'cost_nok' => $costNok,
             'started_at' => now(), 'finished_at' => now(),
         ], $overrides));
     }

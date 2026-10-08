@@ -100,8 +100,20 @@ class AiForbruk extends Page
 
     public string $totalCostStatus = self::COST_NO_CALLS;
 
-    /** Calls in the period whose cost is unknown or uncertain — never summed as zero. */
+    /** Calls in the period whose cost is not final (pending + unresolved) — never summed as zero. */
     public int $unpricedCalls = 0;
+
+    /** Settlement split of the trusted calls in the period; never added into one figure. */
+    public int $pendingCalls = 0;
+
+    public float $pendingReservedNok = 0.0;
+
+    public int $unresolvedCalls = 0;
+
+    public float $unresolvedReservedNok = 0.0;
+
+    /** Pre-boundary attempts in the period: shown as a count only, their cost is never used. */
+    public int $legacyCalls = 0;
 
     public const COST_OK = 'ok';
 
@@ -593,7 +605,7 @@ class AiForbruk extends Page
             'input_tokens' => $attempt->input_tokens,
             'output_tokens' => $attempt->output_tokens,
             'total_tokens' => $attempt->total_tokens,
-            'cost_nok' => in_array($attempt->cost_status, ['known', 'estimated'], true) ? (float) $attempt->cost_nok : null,
+            'cost_nok' => $attempt->settlement_status === AiUsageAttempt::SETTLEMENT_SETTLED ? (float) $attempt->cost_nok : null,
         ])->values()->all();
     }
 
@@ -830,12 +842,21 @@ class AiForbruk extends Page
     // Cost helpers
     // -------------------------------------------------------------------------
 
-    /** Total actual cost in NOK of the trusted calls in the period, from the attempt snapshots. */
+    /**
+     * Settled cost in NOK of the trusted calls in the period, from the attempt snapshots, with the
+     * open settlements (pending, unresolved) and legacy calls beside it — never inside it.
+     */
     private function buildTotalCost(Carbon $from, Carbon $to): void
     {
-        $totals = $this->ledger()->totals($this->usageFilter($from, $to));
+        $filter = $this->usageFilter($from, $to);
+        $totals = $this->ledger()->totals($filter);
 
-        $this->unpricedCalls = $totals['unknown_cost_calls'] + $totals['uncertain_cost_calls'];
+        $this->unpricedCalls = $totals['pending_calls'] + $totals['unresolved_calls'];
+        $this->pendingCalls = $totals['pending_calls'];
+        $this->pendingReservedNok = round($totals['pending_reserved_cost_nok'], 2);
+        $this->unresolvedCalls = $totals['unresolved_calls'];
+        $this->unresolvedReservedNok = round($totals['unresolved_reserved_cost_nok'], 2);
+        $this->legacyCalls = $this->ledger()->legacyCalls($filter);
         $this->totalCostStatus = $this->costStatus($totals);
         $this->totalCostNok = in_array($this->totalCostStatus, [self::COST_OK, self::COST_PARTIAL], true)
             ? round($totals['cost_nok'], 2)
@@ -843,15 +864,15 @@ class AiForbruk extends Page
     }
 
     /**
-     * ok: every call is priced. partial: some calls have unknown or uncertain cost, the sum covers
-     * the rest. price_missing: none could be priced. no_tokens: no calls.
+     * ok: no call has an open settlement. partial: some calls are pending or unresolved, the sum
+     * covers the settled rest. price_missing: none is settled. no_tokens: no calls.
      *
      * @param  array<string, int|float>  $row
      */
     private function costStatus(array $row): string
     {
         $calls = (int) ($row['calls'] ?? 0);
-        $unpriced = (int) ($row['unknown_cost_calls'] ?? 0) + (int) ($row['uncertain_cost_calls'] ?? 0);
+        $unpriced = (int) ($row['pending_calls'] ?? 0) + (int) ($row['unresolved_calls'] ?? 0);
 
         return match (true) {
             $calls === 0 => self::COST_NO_CALLS,

@@ -5,8 +5,11 @@ namespace App\Services\Ai\Usage;
 use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Operational\AiCostState;
 use App\Data\Ai\Usage\AiUsageFilter;
+use App\Data\Billing\BillingPeriod;
 use App\Models\AiUsageAttempt;
+use App\Services\Billing\CustomerBillingPeriodResolver;
 use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -19,15 +22,43 @@ use InvalidArgumentException;
  * finance needs comes from here, so "how much AI did customer X use in period P" has exactly one
  * answer. It reads; it never decides whether a call may run (that is AiCostControlService).
  *
- * Cost is the actual cost snapshotted from provider usage. `cost_nok` sums known and estimated
- * (stale price or rate, padded) costs; calls whose cost is unknown or uncertain are counted
- * separately and never summed as zero. `reserved_nok` is what those calls reserved before they
- * ran — shown next to actual cost, never instead of it.
+ * Cost is read by settlement, and the three are never added into one figure:
+ *  - settled_cost_nok:            actual cost of settled calls (known, or estimated from a stale
+ *                                 price/rate). `cost_nok` is the same figure, kept for readers.
+ *  - pending_reserved_cost_nok:   what pending calls (timeout, 5xx, in flight) still hold.
+ *  - unresolved_reserved_cost_nok: what unresolved calls (work done, cost not establishable) hold.
+ * A call with an open settlement is never summed as zero and never charged as settled; whatever
+ * commercial rule a capacity engine applies to it, it can apply from these figures.
+ *
+ * Billing periods come from CustomerBillingPeriodResolver: `forBillingPeriod()` answers usage for
+ * a customer's actual subscription period.
  */
 class AiUsageLedger
 {
     /** Columns a breakdown may group by. */
-    public const DIMENSIONS = ['customer_id', 'user_id', 'feature', 'operation_key', 'model', 'provider', 'resource_type', 'status', 'attribution'];
+    public const DIMENSIONS = ['customer_id', 'user_id', 'feature', 'operation_key', 'model', 'provider', 'resource_type', 'status', 'attribution', 'settlement_status'];
+
+    public function __construct(
+        private readonly CustomerBillingPeriodResolver $billingPeriods,
+    ) {}
+
+    /**
+     * A customer's trusted usage in the billing period that contains $at (default: now), totals
+     * and per feature/operation — the shape a capacity engine reads.
+     *
+     * @return array{period: BillingPeriod, totals: array<string, int|float>, operations: list<array<string, mixed>>}
+     */
+    public function forBillingPeriod(int $customerId, ?DateTimeInterface $at = null): array
+    {
+        $period = $this->billingPeriods->at($customerId, $at ?? CarbonImmutable::now('UTC'));
+        $filter = new AiUsageFilter($period->toUsagePeriod(), customerId: $customerId);
+
+        return [
+            'period' => $period,
+            'totals' => $this->totals($filter),
+            'operations' => $this->breakdown($filter, ['feature', 'operation_key']),
+        ];
+    }
 
     /** @return array<string, int|float> */
     public function totals(AiUsageFilter $filter): array
@@ -55,7 +86,7 @@ class AiUsageLedger
             ->select($dimensions)
             ->selectRaw($this->aggregates())
             ->groupBy($dimensions)
-            ->orderByDesc(DB::raw('COALESCE(SUM(CASE WHEN cost_status IN (\''.AiCostState::KNOWN.'\', \''.AiCostState::ESTIMATED.'\') THEN cost_nok END), 0)'))
+            ->orderByDesc(DB::raw("COALESCE(SUM(CASE WHEN settlement_status = '".AiUsageAttempt::SETTLEMENT_SETTLED."' THEN cost_nok END), 0)"))
             ->orderByDesc(DB::raw('COUNT(*)'));
 
         if ($limit !== null) {
@@ -135,6 +166,61 @@ class AiUsageLedger
         ];
     }
 
+    /**
+     * Post-boundary attempts whose cost is still open (pending or unresolved), for operations:
+     * how many, what they hold, and since when. `$olderThan` narrows it to the ones that have
+     * outlived normal retry and are an operational deviation.
+     *
+     * @return array{count: int, reserved_cost_nok: float, oldest_started_at: ?string, operations: list<array{settlement_status: string, feature: string, operation_key: string, count: int, reserved_cost_nok: float, oldest_started_at: string}>}
+     */
+    public function openSettlements(?CarbonImmutable $olderThan = null): array
+    {
+        $operations = AiUsageAttempt::query()
+            ->where('ledger_version', '>=', AiUsageAttempt::TRUSTED_SINCE_LEDGER_VERSION)
+            ->openSettlement()
+            ->when($olderThan !== null, fn (Builder $query) => $query->where('started_at', '<', $olderThan))
+            ->select(['settlement_status', 'feature', 'operation_key'])
+            ->selectRaw('COUNT(*) as count, COALESCE(SUM(reserved_cost_nok), 0) as reserved_cost_nok, MIN(started_at) as oldest_started_at')
+            ->groupBy(['settlement_status', 'feature', 'operation_key'])
+            ->orderBy(DB::raw('MIN(started_at)'))
+            ->toBase()
+            ->get()
+            ->map(fn (object $row): array => [
+                'settlement_status' => (string) $row->settlement_status,
+                'feature' => (string) $row->feature,
+                'operation_key' => (string) $row->operation_key,
+                'count' => (int) $row->count,
+                'reserved_cost_nok' => round((float) $row->reserved_cost_nok, 4),
+                'oldest_started_at' => (string) $row->oldest_started_at,
+            ])->all();
+
+        $oldest = array_column($operations, 'oldest_started_at');
+        sort($oldest);
+
+        return [
+            'count' => array_sum(array_column($operations, 'count')),
+            'reserved_cost_nok' => round(array_sum(array_column($operations, 'reserved_cost_nok')), 4),
+            'oldest_started_at' => $oldest[0] ?? null,
+            'operations' => $operations,
+        ];
+    }
+
+    /**
+     * Legacy (pre-boundary) attempts matching the filter's period and scope. A count for display
+     * only — their cost is never part of any economic figure.
+     */
+    public function legacyCalls(AiUsageFilter $filter): int
+    {
+        return AiUsageAttempt::query()
+            ->legacy()
+            ->where('started_at', '>=', $filter->period->start)
+            ->where('started_at', '<', $filter->period->end)
+            ->when($filter->customerId !== null, fn (Builder $query) => $query->where('customer_id', $filter->customerId))
+            ->when($filter->feature !== null, fn (Builder $query) => $query->where('feature', $filter->feature))
+            ->when($filter->operation !== null, fn (Builder $query) => $query->where('operation_key', $filter->operation))
+            ->count();
+    }
+
     /** @return array{trusted: int, unattributed: int, legacy: int} */
     public function integrity(): array
     {
@@ -158,7 +244,9 @@ class AiUsageLedger
 
     private function aggregates(): string
     {
-        $priced = "cost_status IN ('".AiCostState::KNOWN."', '".AiCostState::ESTIMATED."')";
+        $settled = "settlement_status = '".AiUsageAttempt::SETTLEMENT_SETTLED."'";
+        $pending = "settlement_status = '".AiUsageAttempt::SETTLEMENT_PENDING."'";
+        $unresolved = "settlement_status = '".AiUsageAttempt::SETTLEMENT_UNRESOLVED."'";
 
         return implode(', ', [
             'COUNT(*) as calls',
@@ -169,7 +257,13 @@ class AiUsageLedger
             'COALESCE(SUM(output_tokens), 0) as output_tokens',
             'COALESCE(SUM(reasoning_tokens), 0) as reasoning_tokens',
             'COALESCE(SUM(total_tokens), 0) as total_tokens',
-            "COALESCE(SUM(CASE WHEN {$priced} THEN cost_nok END), 0) as cost_nok",
+            "COALESCE(SUM(CASE WHEN {$settled} THEN cost_nok END), 0) as cost_nok",
+            "SUM(CASE WHEN {$settled} THEN 1 ELSE 0 END) as settled_calls",
+            "SUM(CASE WHEN {$pending} THEN 1 ELSE 0 END) as pending_calls",
+            "COALESCE(SUM(CASE WHEN {$pending} THEN reserved_cost_nok END), 0) as pending_reserved_cost_nok",
+            "SUM(CASE WHEN {$unresolved} THEN 1 ELSE 0 END) as unresolved_calls",
+            "COALESCE(SUM(CASE WHEN {$unresolved} THEN reserved_cost_nok END), 0) as unresolved_reserved_cost_nok",
+            "SUM(CASE WHEN settlement_status = '".AiUsageAttempt::SETTLEMENT_RELEASED."' THEN 1 ELSE 0 END) as released_calls",
             "SUM(CASE WHEN cost_status = '".AiCostState::ESTIMATED."' THEN 1 ELSE 0 END) as estimated_cost_calls",
             "SUM(CASE WHEN cost_status = '".AiCostState::UNKNOWN."' OR cost_status IS NULL THEN 1 ELSE 0 END) as unknown_cost_calls",
             "SUM(CASE WHEN cost_status = '".AiCostState::UNCERTAIN."' THEN 1 ELSE 0 END) as uncertain_cost_calls",
@@ -186,11 +280,14 @@ class AiUsageLedger
     {
         $out = [];
 
-        foreach (['calls', 'successful_calls', 'failed_calls', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_tokens', 'total_tokens', 'estimated_cost_calls', 'unknown_cost_calls', 'uncertain_cost_calls', 'system_calls'] as $key) {
+        foreach (['calls', 'successful_calls', 'failed_calls', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_tokens', 'total_tokens', 'estimated_cost_calls', 'unknown_cost_calls', 'uncertain_cost_calls', 'system_calls', 'settled_calls', 'pending_calls', 'unresolved_calls', 'released_calls'] as $key) {
             $out[$key] = (int) ($row[$key] ?? 0);
         }
 
         $out['cost_nok'] = round((float) ($row['cost_nok'] ?? 0), 4);
+        $out['settled_cost_nok'] = $out['cost_nok'];
+        $out['pending_reserved_cost_nok'] = round((float) ($row['pending_reserved_cost_nok'] ?? 0), 4);
+        $out['unresolved_reserved_cost_nok'] = round((float) ($row['unresolved_reserved_cost_nok'] ?? 0), 4);
         $out['reserved_nok'] = round((float) ($row['reserved_nok'] ?? 0), 4);
 
         return $out;

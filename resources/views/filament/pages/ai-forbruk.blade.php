@@ -204,7 +204,7 @@
                             ≈ {{ number_format($totalCostNok ?? 0, 0, ',', ' ') }} kr
                         </div>
                         <div class="mt-auto text-base font-medium text-gray-600">
-                            {{ $totalCostStatus === 'partial' ? $unpricedCalls.' kall uten kjent kostnad' : 'Faktisk kostnad' }}
+                            {{ $totalCostStatus === 'partial' ? $unpricedCalls.' kall uten kjent kostnad' : 'Faktisk kostnad, oppgjort' }}
                         </div>
                     @else
                         <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-600">–</div>
@@ -218,6 +218,27 @@
                 </article>
 
             </div>
+
+            {{-- Kostnadsoppgjør: oppgjort, åpent og legacy holdes adskilt --}}
+            <section aria-label="Kostnadsoppgjør" class="grid gap-3 sm:grid-cols-3">
+                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                    <div class="text-base font-bold text-gray-900">Oppgjort</div>
+                    <div class="text-base text-gray-700">{{ number_format($totalCostNok ?? 0, 2, ',', ' ') }} kr faktisk kostnad</div>
+                </div>
+                <div class="rounded-2xl border p-4 shadow-sm {{ ($pendingCalls + $unresolvedCalls) > 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white' }}">
+                    <div class="text-base font-bold text-gray-900">Venter / uavklart</div>
+                    <div class="text-base text-gray-700">
+                        {{ $pendingCalls }} venter ({{ number_format($pendingReservedNok, 2, ',', ' ') }} kr reservert),
+                        {{ $unresolvedCalls }} uavklart ({{ number_format($unresolvedReservedNok, 2, ',', ' ') }} kr reservert)
+                    </div>
+                    <div class="text-base text-gray-600">Reservert, ikke belastet. Inngår ikke i oppgjort kostnad.</div>
+                </div>
+                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                    <div class="text-base font-bold text-gray-900">Legacy</div>
+                    <div class="text-base text-gray-700">{{ $legacyCalls }} kall før usage-grensen</div>
+                    <div class="text-base text-gray-600">Gamle estimater vises ikke som kostnad.</div>
+                </div>
+            </section>
 
             {{-- Merknad under KPI-raden --}}
             <p class="text-base leading-6 text-gray-600">

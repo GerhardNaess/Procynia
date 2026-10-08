@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Schema;
 class AiCostControlHealthCheck extends Command
 {
     protected $signature = 'ai:cost-control-health
-                            {--hours=24 : How old an uncertain hold must be before it is reported}';
+                            {--hours= : How old an uncertain hold or open settlement must be before it is reported (default: ai_operations.settlement.open_alert_after_hours)}';
 
     protected $description = 'Report ageing uncertain AI reservations and unpriced provider attempts to internal admins.';
 
@@ -40,7 +40,7 @@ class AiCostControlHealthCheck extends Command
             return self::SUCCESS;
         }
 
-        $hours = max(1, (int) $this->option('hours'));
+        $hours = max(1, (int) ($this->option('hours') ?? config('ai_operations.settlement.open_alert_after_hours', 24)));
         $cutoff = CarbonImmutable::now(config('app.timezone') ?: 'UTC')->subHours($hours);
         $today = $cutoff->toDateString();
 
@@ -144,9 +144,35 @@ class AiCostControlHealthCheck extends Command
             );
         }
 
+        // Attempts whose cost is still open after any normal retry would have finished: pending
+        // (the provider may have worked) or unresolved (it did, cost unknown). Their reservation is
+        // held, not charged; deciding what they cost is an operator's call (runbook).
+        $openSettlements = $ledger->openSettlements($cutoff);
+
+        if ($openSettlements['count'] > 0) {
+            $adminNotifications->create(
+                type: 'ai_open_settlements_ageing',
+                severity: 'warning',
+                title: 'AI-kostnader uten endelig oppgjør',
+                message: sprintf(
+                    '%d AI-kall har stått uten endelig kostnad i mer enn %d timer (eldste %s). De holder %s kr reservert og er ikke belastet som oppgjort: %s.',
+                    $openSettlements['count'],
+                    $hours,
+                    $openSettlements['oldest_started_at'],
+                    number_format($openSettlements['reserved_cost_nok'], 2, ',', ' '),
+                    implode(', ', array_map(static fn (array $row): string => sprintf('%s %s ×%d', $row['operation_key'], $row['settlement_status'], $row['count']), $openSettlements['operations'])),
+                ),
+                data: $openSettlements,
+                dedupeKey: 'ai_open_settlements_ageing:'.$today,
+            );
+        }
+
         $this->line(sprintf(
-            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Unpriced attempts (%dh): %d. Unattributed attempts (%dh): %d. Price catalogue: %s. Active models not price-ready: %d.',
+            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Open settlements (>%dh): %d holding %.2f NOK. Unpriced attempts (%dh): %d. Unattributed attempts (%dh): %d. Price catalogue: %s. Active models not price-ready: %d.',
             $ageingHolds,
+            $hours,
+            $openSettlements['count'],
+            $openSettlements['reserved_cost_nok'],
             $hours,
             $unpriced,
             $hours,

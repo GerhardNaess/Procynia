@@ -11,10 +11,11 @@ use DateTimeInterface;
  * One definition of "a period" for every reader of AI usage, so the admin report, a future
  * capacity engine and the subscription page cannot disagree about which day a call belongs to.
  *
- * Today the only period AI is measured in is the calendar month in the application timezone —
- * the same month the commercial AI-case quota (AiQuotaStatusService) and the monthly NOK budget
- * use. Procynia does not store a subscription's billing anchor locally, so a billing-period
- * constructor cannot be written yet; when it can, it belongs here and nowhere else.
+ * Two kinds of period exist. The calendar month in the application timezone (UTC) is what the
+ * commercial AI-case quota (AiQuotaStatusService) and the monthly NOK budget still use. A
+ * customer's actual billing period comes from CustomerBillingPeriodResolver
+ * (`BillingPeriod::toUsagePeriod()`, or `AiUsageLedger::forBillingPeriod()`) — never derive one
+ * here from a calendar.
  */
 final readonly class AiUsagePeriod
 {

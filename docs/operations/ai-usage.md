@@ -443,7 +443,7 @@ Hver rad `AiUsageMeter` skriver får `ledger_version = AiUsageAttempt::LEDGER_VE
 | `unattributed()` | `ledger_version >= 1` og `attribution = unattributed` | skal være 0; eget varsel |
 | `legacy()` | `ledger_version` mangler | feilsøking og trend, aldri fakturerbart |
 
-Kostnad på en trusted rad kan fortsatt være `unknown` eller `uncertain`. Aggregatene summerer bare `known` og `estimated` og teller resten separat — et kall med ukjent kostnad summeres aldri som null.
+Kostnad på en trusted rad kan fortsatt være åpen. Det leses av `settlement_status` (se «Oppgjør»), aldri av om `cost_nok` er null — et kall med ukjent kostnad summeres aldri som null.
 
 **gpt-5-historikk:** rader priset med den gamle gpt-5-prisen (15/3.75/75) er legacy og blir stående. En reprosessering er mulig (tokens og modell finnes på raden; ny pris × samme FX-dato), men er ikke kjørt og krever en eksplisitt beslutning.
 
@@ -460,17 +460,25 @@ Kostnad på en trusted rad kan fortsatt være `unknown` eller `uncertain`. Aggre
 - **Reservert:** før kallet, `estimate` per operasjon i `config/ai_operations.php` × pris × FX + margin. Lagres som `reserved_cost_nok` og avgjør om kallet får starte.
 - **Faktisk:** fra leverandørens `usage` etterpå, med prissnapshot. Lagres som `cost_nok`. Reservasjonen overskriver aldri faktisk kostnad.
 
-### Feilede kall
+### Oppgjør (`settlement_status`)
 
-| Utfall | `cost_status` | Budsjett |
-| --- | --- | --- |
-| suksess med usage | `known`/`estimated` | gjøres opp til faktisk |
-| feil, men leverandøren rapporterte usage | `known`/`estimated` | gjøres opp til faktisk |
-| ingen usage rapportert (4xx, transportfeil, svar uten usage) | `unknown`, `price_state` tom | 4xx/transport: frigis; suksess uten usage: reservasjonen står |
-| timeout / 5xx | `uncertain` | reservasjonen står (som før) |
-| modell uten pris | `unknown`, `price_state = missing` | reservasjonen står, varsel `ai_unpriced_attempts` |
+Hvert trusted attempt klassifiseres av `AiUsageMeter`, og `AiCostControlService` følger samme klassifisering for NOK-holdet og Anbud-credit, så de tre aldri er uenige om samme kall. Regelen for «kan leverandøren ha utført arbeidet?» ligger ett sted: `AiProviderFailure` (timeout, brutt forbindelse, HTTP 408 og 5xx = usikkert; øvrige 4xx inkl. 429 = sikkert avvist).
 
-Retry: hvert forsøk er sitt eget attempt med egen reservasjon og eget oppgjør. Anbud-saken forpliktes én gang per sak og periode. En kansellert jobb som ikke når leverandøren skriver ingen rad og holder ingenting.
+| `settlement_status` | Betyr | Kostnad | Reservasjon |
+| --- | --- | --- | --- |
+| `settled` (A) | faktisk kostnad er kjent (`known`, eller `estimated` fra gammel pris/kurs) | `cost_nok` teller | gjort opp til faktisk |
+| `released` | leverandøren avviste sikkert (4xx uten usage) | ingen | frigitt |
+| `pending` (B) | leverandøren kan ha jobbet (timeout/5xx uten usage, eller kallet er fortsatt i gang / ble drept) | ingen oppgjort kostnad | beholdes |
+| `unresolved` (C) | leverandøren jobbet, men kostnaden kan ikke fastsettes automatisk (suksess uten usage, modell uten pris) | ingen oppgjort kostnad | beholdes |
+
+- Usage som leverandøren rapporterer, prises alltid — også sammen med en feilstatus (også 5xx). `AiProviderHttpException` bærer usage fra feilresponsen slik at den ikke går tapt.
+- Et attempt starter som `pending` med `reserved_cost_nok` skrevet ved start: et kall som aldri blir ferdig, holder fortsatt reservasjonen sin.
+- `pending`/`unresolved` behandles **aldri** som 0 og belastes **aldri** som oppgjort med et estimat. Reservasjonen står som `pending_reserved_cost_nok` / `unresolved_reserved_cost_nok`, adskilt fra `settled_cost_nok`. Hva et åpent oppgjør til slutt skal koste kunden, er en kommersiell regel for neste fase — dataene for å anvende den finnes uten ny migrering.
+- Retry: hvert forsøk er sitt eget attempt med egen reservasjon og eget oppgjør. Et retry som lykkes, gjøres opp én gang; det første forsøket står som `pending` med sin reservasjon. Ingen dobbeltbelastning i `settled_cost_nok`. Anbud-saken forpliktes fortsatt én gang per sak og kalendermåned.
+- Et kall som avvises før leverandøren (global stopp, budsjett, kvote, ukjent pris) skriver ingen rad og holder ingenting.
+- Endring fra før: et 5xx-svar via `createResponse()` ble tidligere frigitt (feilen kom som en generell `RuntimeException`). Nå klassifiseres det som usikkert, slik `failHttp()` og denne dokumentasjonen allerede beskrev.
+
+**Drift:** åpne oppgjør eldre enn `ai_operations.settlement.open_alert_after_hours` (`AI_SETTLEMENT_OPEN_ALERT_AFTER_HOURS`, default 24 — samme 24 t som den eksisterende sweepen av usikre reservasjoner) er et operasjonelt avvik: `ai:cost-control-health` varsler `ai_open_settlements_ageing` (antall, reservert NOK, eldste, per feature/operasjon) og `ops:runtime-check` gir en advarsel «AI open settlements» (aldri kritisk). Ingenting belastes automatisk. `AiUsageLedger::openSettlements()` er kilden.
 
 ### Pris-readiness
 
@@ -487,5 +495,15 @@ Et miljø er ikke AI-klart før hver modell operasjonsregisteret bruker (`AiOper
 
 ### Perioder
 
-`AiUsagePeriod` er halvåpne vinduer over `started_at`. I dag finnes bare kalendermåned i applikasjonens tidssone — samme måned som AI-sak-kvoten og det månedlige NOK-budsjettet. Abonnementets faktureringsanker fra Stripe lagres ikke lokalt, så forbruk kan ennå ikke grupperes per faktisk faktureringsperiode. Det er en blocker for kapasitet koblet til abonnementsperiode.
+`AiUsagePeriod` er halvåpne vinduer `[start, end)` over `started_at`, i UTC.
 
+- **Faktureringsperiode** (økonomisk ledger): `CustomerBillingPeriodResolver` svarer på «hvilken faktureringsperiode tilhører tidspunkt X for kunde Y?» fra lokal database. `AiUsageLedger::forBillingPeriod($customerId, $at)` gir totals og per feature/operasjon for perioden — det en kapasitetsmotor leser. Ingen Stripe-kall ved oppslag.
+- **Kalendermåned**: AI-sak-kvoten (Anbud) og det månedlige NOK-budsjettet bruker fortsatt kalendermåned, uendret.
+
+Kilder for faktureringsperioden, i prioritet:
+
+1. `customer_billing_periods` — faktisk Stripe-periode. Skrives av webhooks (`customer.subscription.created/updated/deleted`, allerede registrert av Cashier; fornyelse kommer som `updated`), av `BillingService::syncSubscriptionFromStripe` og av `php artisan billing:sync-subscriptions` (initial-/reparasjonssynk). Historikk bevares: ny periode er ny rad; et reset midt i perioden (plan- eller intervallbytte) avkorter forrige rad ved ny start, så perioder aldri overlapper. Idempotent, tenant-sikker (abonnementet må tilhøre kundens Stripe-id) og robust mot webhooks som kommer i feil rekkefølge (`provider_event_at`). Umiddelbar kansellering avslutter perioden ved `ended_at`; kansellering ved periodeslutt beholder perioden hel.
+2. `customers.billing_anchor_at` — eksplisitt kontrakt for manuell/enterprise-fakturering: perioder trinnvis fra ankeret med `billing_interval` (månedlig/årlig).
+3. Kundens opprettelsesdato som anker når intet anker er satt.
+
+Avledede perioder (2–3) klippes mot Stripe-perioder, så et tidspunkt aldri tilhører to perioder. Hver periode er merket med `source` (`provider`, `anchor`, `account_created`). `ops:runtime-check` advarer («Billing periods») når en kunde med fakturerende Stripe-abonnement mangler lokal gjeldende periode.

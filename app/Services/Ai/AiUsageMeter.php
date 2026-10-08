@@ -4,13 +4,14 @@ namespace App\Services\Ai;
 
 use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Operational\AiCostState;
+use App\Exceptions\Ai\AiProviderHttpException;
 use App\Models\AiUsageAttempt;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\Ai\Operational\AiOperationalAlertService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
 use App\Support\Ai\AiCallContextScope;
+use App\Support\Ai\AiProviderFailure;
 use Closure;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -64,16 +65,21 @@ class AiUsageMeter
         }
     }
 
-    public function measureResponse(string $model, Closure $providerCall): array
+    /**
+     * @param  ?float  $reservedCostNok  The pre-call estimate cost control reserved for this call.
+     *                                   Written when the attempt starts, so a call that never
+     *                                   finishes (worker killed mid-call) still shows what it holds.
+     */
+    public function measureResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null): array
     {
-        return $this->measure($model, 'responses', $providerCall);
+        return $this->measure($model, 'responses', $providerCall, reservedCostNok: $reservedCostNok);
     }
 
     /** Measure a raw Responses API transport call used by legacy clients that need the HTTP object. */
-    public function measureHttpResponse(string $model, Closure $providerCall): Response
+    public function measureHttpResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null): Response
     {
         $context = $this->contextScope->current();
-        $attempt = $this->start($context, $model, 'responses');
+        $attempt = $this->start($context, $model, 'responses', $reservedCostNok);
         $startedAt = microtime(true);
 
         try {
@@ -86,7 +92,11 @@ class AiUsageMeter
             ];
             $this->finish(
                 $attempt,
-                $response->successful() ? AiUsageAttempt::STATUS_SUCCESS : AiUsageAttempt::STATUS_FAILED,
+                match (true) {
+                    $response->successful() => AiUsageAttempt::STATUS_SUCCESS,
+                    AiProviderFailure::isUncertainStatus($response->status()) => AiUsageAttempt::STATUS_UNCERTAIN,
+                    default => AiUsageAttempt::STATUS_FAILED,
+                },
                 (int) round((microtime(true) - $startedAt) * 1000),
                 $decoded,
                 $response->successful() ? null : 'http_'.$response->status(),
@@ -96,9 +106,7 @@ class AiUsageMeter
         } catch (Throwable $exception) {
             $this->finish(
                 $attempt,
-                $exception instanceof ConnectionException && str_contains(mb_strtolower($exception->getMessage()), 'timeout')
-                    ? AiUsageAttempt::STATUS_UNCERTAIN
-                    : AiUsageAttempt::STATUS_FAILED,
+                AiProviderFailure::isUncertain($exception) ? AiUsageAttempt::STATUS_UNCERTAIN : AiUsageAttempt::STATUS_FAILED,
                 (int) round((microtime(true) - $startedAt) * 1000),
                 [],
                 $this->failureType($exception),
@@ -115,10 +123,10 @@ class AiUsageMeter
     }
 
     /** @return array<string, mixed> */
-    private function measure(string $model, string $endpoint, Closure $providerCall, bool $embedding = false): array
+    private function measure(string $model, string $endpoint, Closure $providerCall, bool $embedding = false, ?float $reservedCostNok = null): array
     {
         $context = $this->contextScope->current();
-        $attempt = $this->start($context, $model, $endpoint);
+        $attempt = $this->start($context, $model, $endpoint, $reservedCostNok);
         $startedAt = microtime(true);
 
         try {
@@ -136,11 +144,10 @@ class AiUsageMeter
             $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
             $this->finish(
                 $attempt,
-                $exception instanceof ConnectionException && str_contains(mb_strtolower($exception->getMessage()), 'timeout')
-                    ? AiUsageAttempt::STATUS_UNCERTAIN
-                    : AiUsageAttempt::STATUS_FAILED,
+                AiProviderFailure::isUncertain($exception) ? AiUsageAttempt::STATUS_UNCERTAIN : AiUsageAttempt::STATUS_FAILED,
                 $elapsedMs,
-                [],
+                // Usage the provider reported alongside its error: priced, never dropped.
+                $exception instanceof AiProviderHttpException && $exception->usage !== null ? ['usage' => $exception->usage] : [],
                 $this->failureType($exception),
             );
 
@@ -148,7 +155,7 @@ class AiUsageMeter
         }
     }
 
-    private function start(AiCallContext $context, string $model, string $endpoint): ?AiUsageAttempt
+    private function start(AiCallContext $context, string $model, string $endpoint, ?float $reservedCostNok = null): ?AiUsageAttempt
     {
         try {
             $attempt = AiUsageAttempt::query()->create([
@@ -172,6 +179,9 @@ class AiUsageMeter
                 'endpoint' => $endpoint,
                 'model' => $model,
                 'status' => AiUsageAttempt::STATUS_STARTED,
+                // Open until the call finishes: a call killed mid-flight may still have been billed.
+                'settlement_status' => AiUsageAttempt::SETTLEMENT_PENDING,
+                'reserved_cost_nok' => $reservedCostNok === null ? null : round($reservedCostNok, 4),
                 'started_at' => now(),
             ]);
 
@@ -236,37 +246,39 @@ class AiUsageMeter
     }
 
     /**
-     * Freeze what this attempt cost, using the price and rate in force at the time.
+     * Freeze what this attempt cost, using the price and rate in force at the time, and decide
+     * whether that cost is final (its settlement).
      *
      * Written onto the attempt itself so a later price correction cannot rewrite the basis of an
-     * operational decision. An attempt that cannot be priced is recorded as `unknown`, never as
-     * zero — a call Procynia cannot cost is a risk to surface, not free work.
+     * operational decision. An attempt that cannot be priced is never recorded as zero — a call
+     * Procynia cannot cost is a risk to surface, not free work.
      *
-     * Failed attempts are not assumed free either: when the provider still reported usage, that
-     * usage is priced like any other. When it reported none (failed or not), the cost is `unknown`
-     * with no price state — "the provider told us nothing", which is a different fact from "the model has no
-     * price" (`unknown` + price_state `missing`).
+     * Whenever the provider reported usage, that usage is priced and settled — success or failure.
+     * Without usage:
+     *  - uncertain outcome (timeout, 5xx): `uncertain`, settlement pending — the reservation holds;
+     *  - certain failure (a refused request): `unknown`, released — the provider did no work;
+     *  - success without a usage block: `unknown`, unresolved — work done, cost not established.
+     * A model without a price is `unknown` + price_state `missing`, unresolved.
      */
     private function snapshotCost(AiUsageAttempt $attempt, string $status): void
     {
         try {
-            if ($status === AiUsageAttempt::STATUS_UNCERTAIN) {
-                // The provider may or may not have done the work. Cost is unresolved by nature.
-                $attempt->update(['cost_status' => AiCostState::UNCERTAIN]);
-
-                return;
-            }
-
-            // No usage reported at all: a failure before the provider worked, or a response without
-            // a usage block. Pricing absent token counts would claim a cost of zero we do not know.
             if ($attempt->input_tokens === null && $attempt->output_tokens === null) {
-                $attempt->update(['cost_status' => AiCostState::UNKNOWN]);
+                $attempt->update(match ($status) {
+                    AiUsageAttempt::STATUS_UNCERTAIN => ['cost_status' => AiCostState::UNCERTAIN, 'settlement_status' => AiUsageAttempt::SETTLEMENT_PENDING],
+                    AiUsageAttempt::STATUS_SUCCESS => ['cost_status' => AiCostState::UNKNOWN, 'settlement_status' => AiUsageAttempt::SETTLEMENT_UNRESOLVED],
+                    default => ['cost_status' => AiCostState::UNKNOWN, 'settlement_status' => AiUsageAttempt::SETTLEMENT_RELEASED],
+                });
 
                 return;
             }
 
             $cost = $this->pricing->costForAttempt($attempt);
-            $attempt->update($cost->toAttemptColumns());
+            $attempt->update($cost->toAttemptColumns() + [
+                'settlement_status' => $cost->status === AiCostState::UNKNOWN
+                    ? AiUsageAttempt::SETTLEMENT_UNRESOLVED
+                    : AiUsageAttempt::SETTLEMENT_SETTLED,
+            ]);
 
             if ($cost->status === AiCostState::UNKNOWN) {
                 $this->operationalAlerts->reportMissingModelPrice(
@@ -283,6 +295,8 @@ class AiUsageMeter
                 (string) $cost->priceCurrency,
             );
         } catch (Throwable $exception) {
+            // The settlement stays pending: an attempt whose cost could not be snapshotted keeps
+            // its reservation rather than looking free.
             Log::warning('[PROCYNIA][AI_USAGE_METER] Could not snapshot AI cost.', [
                 'attempt_id' => $attempt->id,
                 'error' => $exception->getMessage(),

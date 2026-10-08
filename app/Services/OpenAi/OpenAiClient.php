@@ -3,6 +3,7 @@
 namespace App\Services\OpenAi;
 
 use App\Data\Ai\AiCallContext;
+use App\Exceptions\Ai\AiProviderHttpException;
 use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Commercial\AiCostControlService;
 use App\Support\Ai\AiCallContextPolicy;
@@ -70,6 +71,7 @@ class OpenAiClient
             $result = $this->usageMeter->measureResponse(
                 $model,
                 fn (): array => $this->send('responses', $payload, $timeoutSeconds, $onStats),
+                $decision->estimatedCostNok,
             );
             $this->costControl->finalize($decision);
 
@@ -122,6 +124,7 @@ class OpenAiClient
                 ? $this->usageMeter->measureHttpResponse(
                     trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown',
                     fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
+                    $decision->estimatedCostNok,
                 )
                 : $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats);
 
@@ -169,7 +172,9 @@ class OpenAiClient
         if ($response->failed()) {
             $this->logFailure($endpoint, $response->status(), $requestId, $response->body());
 
-            throw new RuntimeException($this->failureMessageFromResponse($endpoint, $response));
+            $usage = $response->json('usage');
+
+            throw new AiProviderHttpException($this->failureMessageFromResponse($endpoint, $response), $response->status(), is_array($usage) ? $usage : null);
         }
 
         $decoded = $response->json();

@@ -20,8 +20,8 @@ use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
 use App\Services\Ai\Operational\AiPaymentPolicyService;
 use App\Support\Ai\AiCallContextScope;
+use App\Support\Ai\AiProviderFailure;
 use Carbon\CarbonImmutable;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -393,7 +393,7 @@ class AiCostControlService
 
     public function failHttp(AiCostControlDecision $decision, int $status): void
     {
-        $uncertain = $status === 408 || $status >= 500;
+        $uncertain = AiProviderFailure::isUncertainStatus($status);
 
         $this->recordReservedEstimate($decision);
         $this->closeBudget($decision, $uncertain);
@@ -430,6 +430,9 @@ class AiCostControlService
      * Releasing an uncertain call would let a provider that did charge us look free. A failed call
      * the provider still reported usage for is settled at that actual cost — a failure is never
      * assumed to be free when the provider says otherwise.
+     *
+     * The attempt's own settlement decides when the meter wrote one, so the NOK hold and the
+     * usage ledger always agree about the same call; the failure classification is the fallback.
      */
     private function closeBudget(AiCostControlDecision $decision, bool $uncertain): void
     {
@@ -441,11 +444,15 @@ class AiCostControlService
 
         $attempt = $this->latestAttemptFor($decision);
 
-        if ($attempt?->cost_nok !== null && in_array($attempt->cost_status, [AiCostState::KNOWN, AiCostState::ESTIMATED], true)) {
+        if ($attempt?->settlement_status === AiUsageAttempt::SETTLEMENT_SETTLED && $attempt->cost_nok !== null) {
             $this->budgets->commit($reservation, (float) $attempt->cost_nok);
             $this->evaluateBudgetThresholds($decision);
 
             return;
+        }
+
+        if ($attempt !== null && $attempt->settlement_status !== null) {
+            $uncertain = in_array($attempt->settlement_status, AiUsageAttempt::OPEN_SETTLEMENTS, true);
         }
 
         if ($uncertain) {
@@ -535,7 +542,7 @@ class AiCostControlService
 
     private function isUncertain(Throwable $exception): bool
     {
-        return $exception instanceof ConnectionException || str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out');
+        return AiProviderFailure::isUncertain($exception);
     }
 
     private function status(int $used, ?int $included): string

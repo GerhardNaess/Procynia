@@ -88,6 +88,17 @@ return [
         'fallback_estimate' => ['input_tokens' => 60000, 'output_tokens' => 16000],
     ],
 
+    /*
+     * Settlement of attempts whose cost is not final (`pending`: timeout/5xx/in flight;
+     * `unresolved`: work done, cost not establishable). Their reservation is held and they are
+     * never charged as settled. After this many hours an open settlement has outlived any normal
+     * retry and is reported to operations (`ai:cost-control-health`, `ops:runtime-check`) — the
+     * same 24 h the existing uncertain-hold sweep uses. Nothing is ever charged automatically.
+     */
+    'settlement' => [
+        'open_alert_after_hours' => (int) env('AI_SETTLEMENT_OPEN_ALERT_AFTER_HOURS', 24),
+    ],
+
     'operations' => [
         // Anbud
         'tender.requirement_extraction' => ['model' => $requirementExtractionModel, 'estimate' => ['input_tokens' => 60000, 'output_tokens' => 16000]],

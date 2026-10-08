@@ -353,6 +353,32 @@ class AiForbrukPageTest extends TestCase
         $page->assertSee('2 kall uten kjent kostnad');
     }
 
+    public function test_settled_open_and_legacy_cost_are_shown_apart(): void
+    {
+        Carbon::setTestNow('2026-06-03 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Oppgjør Kunde');
+        $user = $this->createUser($customer);
+
+        $this->createAttempt($customer, $user, 'tender.requirement_answer', 'gpt-4.1-mini', 1_000, 100, costNok: 2.0);
+        $this->createAttempt($customer, $user, 'wiki.verify_claim', 'gpt-4.1-mini', null, null, costNok: null, costStatus: 'uncertain', status: 'uncertain', overrides: ['reserved_cost_nok' => 0.75]);
+        $this->createAttempt($customer, $user, 'wiki.verify_claim', 'gpt-4.1-mini', null, null, costNok: null, costStatus: 'unknown', overrides: ['reserved_cost_nok' => 0.5]);
+        $this->createAttempt($customer, $user, 'saved_notice.requirement_answer', 'gpt-5', 9_000, 900, costNok: 50.0, overrides: ['ledger_version' => null, 'attribution' => null, 'settlement_status' => null]);
+
+        $page = Livewire::actingAs($admin)->test(AiForbruk::class);
+
+        $this->assertEqualsWithDelta(2.0, $page->get('totalCostNok'), 0.0001);
+        $this->assertSame(1, $page->get('pendingCalls'));
+        $this->assertEqualsWithDelta(0.75, $page->get('pendingReservedNok'), 0.0001);
+        $this->assertSame(1, $page->get('unresolvedCalls'));
+        $this->assertEqualsWithDelta(0.5, $page->get('unresolvedReservedNok'), 0.0001);
+        $this->assertSame(1, $page->get('legacyCalls'));
+        $page->assertSee('Venter / uavklart');
+        $page->assertSee('1 kall før usage-grensen');
+        $page->assertDontSee('50,00 kr');
+    }
+
     public function test_only_trusted_attempts_are_counted(): void
     {
         Carbon::setTestNow('2026-06-03 12:00:00');
@@ -829,6 +855,11 @@ class AiForbrukPageTest extends TestCase
             'output_tokens' => $outputTokens,
             'total_tokens' => $inputTokens === null ? null : $inputTokens + (int) $outputTokens,
             'cost_status' => $costStatus,
+            'settlement_status' => match ($costStatus) {
+                'known', 'estimated' => AiUsageAttempt::SETTLEMENT_SETTLED,
+                'uncertain' => AiUsageAttempt::SETTLEMENT_PENDING,
+                default => AiUsageAttempt::SETTLEMENT_UNRESOLVED,
+            },
             'cost_nok' => $costNok,
             'started_at' => now(),
             'finished_at' => now(),

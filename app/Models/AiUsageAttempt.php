@@ -35,13 +35,28 @@ class AiUsageAttempt extends Model
 
     public const STATUS_UNCERTAIN = 'uncertain';
 
+    /** A. The actual cost is final and counts as settled usage. */
+    public const SETTLEMENT_SETTLED = 'settled';
+
+    /** The provider certainly did no work; the reservation was given back and nothing is owed. */
+    public const SETTLEMENT_RELEASED = 'released';
+
+    /** B. The provider may have worked (timeout, 5xx, in flight); the reservation is still held. */
+    public const SETTLEMENT_PENDING = 'pending';
+
+    /** C. The provider worked but the cost cannot be established automatically; reservation held. */
+    public const SETTLEMENT_UNRESOLVED = 'unresolved';
+
+    /** Settlements whose reservation still stands in for an unknown actual cost. */
+    public const OPEN_SETTLEMENTS = [self::SETTLEMENT_PENDING, self::SETTLEMENT_UNRESOLVED];
+
     protected $fillable = [
         'customer_id', 'user_id', 'attribution', 'ledger_version', 'feature', 'operation_key', 'resource_type', 'resource_id',
         'enterprise_wiki_ingest_run_id', 'job_id', 'request_correlation_id', 'provider',
         'deployment_name', 'provider_region', 'endpoint', 'model', 'status', 'failure_type',
         'provider_request_id', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_tokens', 'total_tokens', 'elapsed_ms',
         'started_at', 'finished_at',
-        'cost_status', 'cost_usd', 'cost_nok', 'reserved_cost_nok', 'ai_model_price_id',
+        'cost_status', 'settlement_status', 'cost_usd', 'cost_nok', 'reserved_cost_nok', 'ai_model_price_id',
         'price_currency', 'price_input_per_1m', 'price_cached_input_per_1m', 'price_output_per_1m', 'fx_rate', 'fx_rate_date',
         'price_state', 'fx_state',
     ];
@@ -64,7 +79,7 @@ class AiUsageAttempt extends Model
     /**
      * Rows that may be used as an economic basis: written under a trusted ledger version, and
      * owned — by a customer or by explicit system work. Legacy and unattributed rows are excluded.
-     * Cost on a trusted row can still be unknown or uncertain; that is read off cost_status.
+     * Cost on a trusted row can still be open; that is read off settlement_status.
      */
     public function scopeTrusted(Builder $query): Builder
     {
@@ -87,5 +102,11 @@ class AiUsageAttempt extends Model
         return $query
             ->where('ledger_version', '>=', self::TRUSTED_SINCE_LEDGER_VERSION)
             ->where('attribution', AiCallContext::ATTRIBUTION_UNATTRIBUTED);
+    }
+
+    /** Rows whose cost is not final: the reservation stands in for it (pending or unresolved). */
+    public function scopeOpenSettlement(Builder $query): Builder
+    {
+        return $query->whereIn('settlement_status', self::OPEN_SETTLEMENTS);
     }
 }
