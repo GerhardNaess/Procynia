@@ -36,7 +36,7 @@ class EnterpriseWikiVerifyPageClaims extends Command
 
         $context = $this->operatorAiCallContext([
             'customerId' => (int) $run->customer_id,
-            'operation' => 'operator.wiki.verify_page_claims',
+            'operation' => 'wiki.operator.verify_page_claims',
             'resourceType' => 'enterprise_wiki_document',
             'resourceId' => (int) $run->source_id,
         ]);

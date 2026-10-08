@@ -1301,7 +1301,7 @@ class EnterpriseWikiClaimContentRepairService
         $newVersion = $this->versionWriter->writeNewCurrentVersion($pageId, [
             'content_markdown' => $markdown,
             'content_blocks_json' => $blocks,
-            'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/claim-content-repair',
+            'generated_by_model' => WikiSemanticReviserAiClient::model().'/claim-content-repair',
         ]);
 
         $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);

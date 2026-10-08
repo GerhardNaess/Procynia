@@ -36,7 +36,7 @@ class FinalizeEnterpriseWikiClaimVerification implements ShouldQueue
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_claim_verification'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.finalize_claim_verification'),
             function () use ($flowService): void {
                 $this->handleInAiCallContext($flowService);
             },

@@ -154,6 +154,10 @@ class AiUsageMeter
             $attempt = AiUsageAttempt::query()->create([
                 'customer_id' => $context->customerId,
                 'user_id' => $context->userId,
+                'attribution' => $context->attribution(),
+                // OpenAiClient refuses a call without a well-formed operation before it gets here
+                // (AiCallContextPolicy). The fallback only keeps a NOT NULL column satisfiable for
+                // a caller that measures outside the client.
                 'feature' => $context->feature ?? 'unclassified',
                 'operation_key' => $context->operation ?? 'unclassified',
                 'resource_type' => $context->resourceType,
@@ -201,7 +205,11 @@ class AiUsageMeter
                 'failure_type' => $failureType,
                 'provider_request_id' => $meta['request_id'] ?? $result['request_id'] ?? null,
                 'input_tokens' => $this->integer($usage['input_tokens'] ?? $usage['prompt_tokens'] ?? null),
-                'output_tokens' => $this->integer($usage['output_tokens'] ?? null),
+                // Responses API: *_tokens_details; Chat Completions: prompt/completion_tokens_details.
+                // Absent details stay null — never 0, which would claim "no cache hit" we do not know.
+                'cached_input_tokens' => $this->integer(data_get($usage, 'input_tokens_details.cached_tokens') ?? data_get($usage, 'prompt_tokens_details.cached_tokens')),
+                'output_tokens' => $this->integer($usage['output_tokens'] ?? $usage['completion_tokens'] ?? null),
+                'reasoning_tokens' => $this->integer(data_get($usage, 'output_tokens_details.reasoning_tokens') ?? data_get($usage, 'completion_tokens_details.reasoning_tokens')),
                 'total_tokens' => $this->integer($usage['total_tokens'] ?? null),
                 'elapsed_ms' => $elapsedMs,
                 'finished_at' => now(),

@@ -50,7 +50,7 @@ trait RunsInAiCallContext
             runId: $run?->id,
             documentId: $run?->source_id,
             customerId: $run?->customer_id,
-            feature: 'enterprise_wiki',
+            feature: 'wiki',
             operation: $operation,
             resourceType: 'enterprise_wiki_document',
             resourceId: $run?->source_id,
@@ -77,7 +77,7 @@ trait RunsInAiCallContext
         return new AiCallContext(
             documentId: $documentId,
             customerId: is_numeric($customerId) ? (int) $customerId : null,
-            feature: 'enterprise_wiki',
+            feature: 'wiki',
             operation: $operation,
             resourceType: 'enterprise_wiki_document',
             resourceId: $documentId,
@@ -120,7 +120,7 @@ trait RunsInAiCallContext
 
         return new AiCallContext(
             customerId: is_numeric($customerId) ? (int) $customerId : null,
-            feature: 'saved_notice',
+            feature: 'tender',
             operation: $operation,
             resourceType: 'requirement_extraction_run',
             resourceId: $runId,

@@ -148,7 +148,15 @@ class AiOperationalPricingService
         $currency = strtoupper((string) $price->currency);
         $fx = $this->fxState($currency, $at);
 
-        $inputCost = ((int) $attempt->input_tokens) / 1_000_000 * (float) $price->input_price_per_1m_tokens;
+        // Cached tokens are part of input_tokens. They are billed at the cached-input rate where the
+        // model has one; a model without a cached rate bills them as ordinary input.
+        $inputTokens = (int) $attempt->input_tokens;
+        $cachedTokens = min($inputTokens, (int) $attempt->cached_input_tokens);
+        $inputRate = (float) $price->input_price_per_1m_tokens;
+        $cachedRate = $price->cached_input_price_per_1m_tokens !== null ? (float) $price->cached_input_price_per_1m_tokens : $inputRate;
+
+        $inputCost = ($inputTokens - $cachedTokens) / 1_000_000 * $inputRate
+            + $cachedTokens / 1_000_000 * $cachedRate;
         $outputCost = ((int) $attempt->output_tokens) / 1_000_000 * (float) $price->output_price_per_1m_tokens;
         $native = $inputCost + $outputCost;
 
@@ -172,6 +180,7 @@ class AiOperationalPricingService
             fxRateDate: $fx->rateDate,
             priceState: $priceState->state,
             fxState: $fx->state,
+            cachedInputPricePer1m: $price->cached_input_price_per_1m_tokens !== null ? (float) $price->cached_input_price_per_1m_tokens : null,
         );
     }
 

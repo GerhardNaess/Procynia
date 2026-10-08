@@ -5,6 +5,7 @@ namespace App\Services\Ai\Operational;
 use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Operational\AiFxState;
 use App\Data\Ai\Operational\AiPriceState;
+use App\Exceptions\Ai\AiCostControlException;
 use App\Models\Customer;
 use App\Services\Admin\AdminNotificationService;
 use Carbon\CarbonImmutable;
@@ -36,6 +37,26 @@ class AiOperationalAlertService
             ),
             data: ['provider' => $provider, 'model' => $model, 'operation' => $context->operation],
             dedupeKey: sprintf('ai_model_price_missing:%s:%s:%s', $provider, $model, $this->today()),
+        );
+    }
+
+    /**
+     * A customer-driven call reached the provider with no customer and without being marked as
+     * system work. It ran (warn mode), but its cost could not be attributed — a gap to close in
+     * the code path named by the operation, not a customer problem.
+     */
+    public function reportUnattributedCall(AiCallContext $context): void
+    {
+        $this->notify(
+            type: 'ai_call_unattributed',
+            severity: 'warning',
+            title: 'AI-kall uten kundekontekst',
+            message: sprintf(
+                'Operasjonen «%s» ble sendt til AI-leverandøren uten kunde og uten å være merket som systemarbeid. Kostnaden kan ikke knyttes til en kunde.',
+                (string) $context->operation,
+            ),
+            data: ['operation' => $context->operation, 'feature' => $context->feature, 'model' => $context->model],
+            dedupeKey: sprintf('ai_call_unattributed:%s:%s', (string) $context->operation, $this->today()),
         );
     }
 
@@ -137,8 +158,8 @@ class AiOperationalAlertService
     public function reportBudgetBlocked(string $reason, ?Customer $customer): void
     {
         $isGlobal = in_array($reason, [
-            \App\Exceptions\Ai\AiCostControlException::GLOBAL_DAILY_BUDGET_EXHAUSTED,
-            \App\Exceptions\Ai\AiCostControlException::GLOBAL_MONTHLY_BUDGET_EXHAUSTED,
+            AiCostControlException::GLOBAL_DAILY_BUDGET_EXHAUSTED,
+            AiCostControlException::GLOBAL_MONTHLY_BUDGET_EXHAUSTED,
         ], true);
 
         $window = str_contains($reason, 'DAILY') ? 'daily' : 'monthly';

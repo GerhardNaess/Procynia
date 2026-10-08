@@ -4,11 +4,18 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 class WikiArticleAiClient
 {
-    private const MODEL = 'gpt-5';
+    public const OPERATION = 'wiki.generate_article';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const MAX_OUTPUT_TOKENS = 4000;
 
@@ -41,7 +48,7 @@ class WikiArticleAiClient
         }
 
         $payload = $this->buildPayload($pageTitle, $claims, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiArticleAiClient');
 
         $markdown = data_get($decoded, 'article.markdown', '');
@@ -81,7 +88,7 @@ class WikiArticleAiClient
     private function buildPayload(string $pageTitle, array $claims, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

@@ -4,6 +4,7 @@ namespace App\Services\Ai\Quality;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -89,9 +90,12 @@ class ProcessFlowInterpretationAiClient
             && trim((string) config('services.openai.api_key', '')) !== '';
     }
 
+    public const OPERATION = 'quality.interpret_process';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
     public static function model(): string
     {
-        return (string) config('services.quality.flow_model', 'gpt-4.1-mini');
+        return AiOperationCatalog::model(self::OPERATION);
     }
 
     /**
@@ -228,7 +232,7 @@ class ProcessFlowInterpretationAiClient
             'temperature' => self::TEMPERATURE,
             'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
-        ], timeoutSeconds: 120);
+        ], timeoutSeconds: 120, operation: self::OPERATION);
 
         return $this->normalize(
             $this->responsesDecoder->decode($response, 'ProcessFlowInterpretationAiClient'),

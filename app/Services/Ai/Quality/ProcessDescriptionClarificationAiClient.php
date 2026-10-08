@@ -4,6 +4,7 @@ namespace App\Services\Ai\Quality;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -70,9 +71,12 @@ class ProcessDescriptionClarificationAiClient
         return ProcessFlowInterpretationAiClient::isAvailable();
     }
 
+    public const OPERATION = 'quality.clarify_process';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
     public static function model(): string
     {
-        return ProcessFlowInterpretationAiClient::model();
+        return AiOperationCatalog::model(self::OPERATION);
     }
 
     /**
@@ -106,7 +110,7 @@ class ProcessDescriptionClarificationAiClient
             'temperature' => self::TEMPERATURE,
             'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
-        ], timeoutSeconds: 120);
+        ], timeoutSeconds: 120, operation: self::OPERATION);
 
         $decoded = $this->responsesDecoder->decode($response, 'ProcessDescriptionClarificationAiClient');
         $rewritten = trim((string) ($decoded['description'] ?? ''));

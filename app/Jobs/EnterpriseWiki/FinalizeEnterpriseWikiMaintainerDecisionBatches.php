@@ -36,7 +36,7 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
     public function handle(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionSplitCoordinator $coordinator, EnterpriseWikiMaintainerDecisionService $decisionService, EnterpriseWikiDocumentFlowService $flow): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_maintainer_batches'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.finalize_maintainer_batches'),
             function () use ($state, $coordinator, $decisionService, $flow): void {
                 $this->handleInAiCallContext($state, $coordinator, $decisionService, $flow);
             },

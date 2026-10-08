@@ -76,8 +76,8 @@ class WikiInspectRequirementAnswer extends Command
         // exactly like the flows it inspects.
         $aiCallContext = $this->operatorAiCallContext([
             'customerId' => $customerId,
-            'feature' => 'saved_notice',
-            'operation' => 'operator.wiki.inspect_requirement_answer',
+            'feature' => 'tender',
+            'operation' => 'tender.operator.inspect_requirement_answer',
             'resourceType' => 'saved_notice_ai_requirement',
             'resourceId' => (int) $requirement->id,
             'savedNoticeId' => (int) ($requirement->saved_notice_id ?? 0) ?: null,

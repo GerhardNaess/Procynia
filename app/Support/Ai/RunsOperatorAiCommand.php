@@ -75,8 +75,8 @@ trait RunsOperatorAiCommand
         return new AiCallContext(
             customerId: $attributes['customerId'] ?? null,
             userId: $actor instanceof User ? $actor->id : null,
-            feature: $attributes['feature'] ?? 'enterprise_wiki',
-            operation: $attributes['operation'] ?? 'operator.unknown',
+            feature: $attributes['feature'] ?? 'wiki',
+            operation: $attributes['operation'] ?? 'wiki.operator.unknown',
             resourceType: $attributes['resourceType'] ?? null,
             resourceId: $attributes['resourceId'] ?? null,
             requestCorrelationId: Str::limit('operator-'.$this->getName().'-'.Str::uuid(), 128, ''),

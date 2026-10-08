@@ -107,7 +107,7 @@ class OutboundIntegrationContractTest extends TestCase
 
         /** @var OpenAiClient $client */
         $client = app(OpenAiClient::class);
-        $client->post('responses', ['model' => 'gpt-4.1-mini'], 42);
+        $client->post('responses', ['model' => 'gpt-4.1-mini'], 42, operation: 'system.transport_test');
 
         Http::assertSent(function (Request $request): bool {
             $this->assertStringStartsWith(
@@ -153,7 +153,7 @@ class OutboundIntegrationContractTest extends TestCase
         $threw = false;
 
         try {
-            $client->createResponse(['model' => 'gpt-4.1-mini']);
+            $client->createResponse(['model' => 'gpt-4.1-mini'], operation: 'system.transport_test');
         } catch (\Throwable $e) {
             $threw = true;
             $this->assertNotSame('', $e->getMessage(), 'A failed OpenAI call must carry a diagnostic message.');

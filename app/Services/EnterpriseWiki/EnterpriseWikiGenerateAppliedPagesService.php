@@ -1905,7 +1905,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             'content_markdown' => $markdown,
             'content_blocks_json' => $contentBlocks,
             'best_practice_review_json' => $bestPracticeReview !== [] ? $bestPracticeReview : null,
-            'generated_by_model' => WikiPageContentAiClient::MODEL,
+            'generated_by_model' => WikiPageContentAiClient::model(),
         ]);
     }
 
@@ -1984,7 +1984,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 'content_markdown' => $markdown,
                 'content_blocks_json' => $contentBlocks,
                 'best_practice_review_json' => $bestPracticeReview !== [] ? $bestPracticeReview : null,
-                'generated_by_model' => WikiPageContentAiClient::MODEL,
+                'generated_by_model' => WikiPageContentAiClient::model(),
             ]);
         });
     }

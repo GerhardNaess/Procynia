@@ -51,7 +51,7 @@ class ContinueEnterpriseWikiDocumentFlowAfterPages implements ShouldQueue
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.continue_after_pages'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.continue_after_pages'),
             function () use ($flowService): void {
                 $this->handleInAiCallContext($flowService);
             },

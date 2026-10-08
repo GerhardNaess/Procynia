@@ -14,6 +14,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityRetryExecutor;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiUtf8Guard;
+use App\Support\Ai\AiOperationCatalog;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -33,7 +34,17 @@ use RuntimeException;
  */
 class WikiPageContentAiClient
 {
-    public const MODEL = 'gpt-5';
+    public const OPERATION = 'wiki.generate_page';
+
+    public const OPERATION_REPAIR_SECTIONS = 'wiki.repair_page_sections';
+
+    public const OPERATION_REPAIR_FIGURES = 'wiki.repair_page_figures';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const REASONING_EFFORT = 'low';
 
@@ -142,7 +153,8 @@ class WikiPageContentAiClient
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $context ??= AiCallContext::none();
+        // Names the operation and otherwise inherits the job's context (customer, run, budget).
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION);
         $this->utf8Guard->assertValid([
             'page_title' => $pageTitle,
             'source_text' => $sourceText,
@@ -185,7 +197,7 @@ class WikiPageContentAiClient
     {
         return $this->capacityPlanner->plan(new AiCapacityRequest(
             operationType: self::CAPACITY_OPERATION_TYPE,
-            model: self::MODEL,
+            model: self::model(),
             inputSizeChars: $inputSizeChars,
             expectedResultObjects: self::EXPECTED_BLOCK_COUNTS[$pageType] ?? self::DEFAULT_EXPECTED_BLOCK_COUNT,
             retryAttempt: $retryAttempt,
@@ -231,7 +243,8 @@ class WikiPageContentAiClient
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $context ??= AiCallContext::none();
+        // Names the operation and otherwise inherits the job's context (customer, run, budget).
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION_REPAIR_SECTIONS);
         $this->utf8Guard->assertValid([
             'page_title' => $pageTitle,
             'existing_markdown' => $existingMarkdown,
@@ -280,7 +293,7 @@ class WikiPageContentAiClient
     {
         return $this->capacityPlanner->planBatchCall(
             operationType: self::CAPACITY_OPERATION_TYPE,
-            model: self::MODEL,
+            model: self::model(),
             candidatesInBatch: $sectionsToRepair,
             inputSizeChars: $inputSizeChars,
             retryAttempt: $retryAttempt,
@@ -319,7 +332,8 @@ class WikiPageContentAiClient
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $context ??= AiCallContext::none();
+        // Names the operation and otherwise inherits the job's context (customer, run, budget).
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION_REPAIR_FIGURES);
         $this->utf8Guard->assertValid([
             'page_title' => $pageTitle,
             'existing_markdown' => $existingMarkdown,
@@ -657,7 +671,7 @@ class WikiPageContentAiClient
     private function buildRepairPayload(string $pageType, string $languageName, string $repairPromptText, array $plannedTopics, array $linkCatalog, int $maxOutputTokens): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => AiOperationCatalog::model(self::OPERATION_REPAIR_SECTIONS),
             'input' => [
                 [
                     'role' => 'developer',
@@ -1014,7 +1028,7 @@ class WikiPageContentAiClient
     private function buildFigureRepairPayload(string $pageType, string $languageName, string $figureRepairPromptText, array $linkCatalog, int $maxOutputTokens): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => AiOperationCatalog::model(self::OPERATION_REPAIR_FIGURES),
             'input' => [
                 [
                     'role' => 'developer',
@@ -1168,7 +1182,7 @@ class WikiPageContentAiClient
     private function buildPayload(string $pageType, string $languageName, string $generationPromptText, array $plannedSections, array $linkCatalog, int $maxOutputTokens): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

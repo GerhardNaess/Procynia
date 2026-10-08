@@ -6,7 +6,6 @@ use App\Models\AdminNotification;
 use App\Models\AiModelPrice;
 use App\Models\AiModelPriceSyncRun;
 use App\Services\Admin\AdminNotificationService;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -18,54 +17,53 @@ class AiModelPriceSyncService
 {
     public function __construct(
         private readonly AdminNotificationService $notifications,
-    ) {
-    }
+    ) {}
 
     public function sync(AiModelPriceProviderInterface $provider): AiModelPriceSyncRun
     {
         $run = AiModelPriceSyncRun::query()->create([
-            'provider'   => $provider->providerKey(),
+            'provider' => $provider->providerKey(),
             'started_at' => now(),
-            'status'     => AiModelPriceSyncRun::STATUS_RUNNING,
+            'status' => AiModelPriceSyncRun::STATUS_RUNNING,
         ]);
 
-        $created   = 0;
-        $changed   = 0;
+        $created = 0;
+        $changed = 0;
         $unchanged = 0;
-        $warnings  = 0;
+        $warnings = 0;
 
         try {
             $prices = $provider->fetchPrices();
-            $today  = now()->toDateString();
+            $today = now()->toDateString();
 
             foreach ($prices as $price) {
                 try {
                     $result = $this->upsertPrice($provider->providerKey(), $price, $today);
 
                     match ($result) {
-                        'created'   => $created++,
-                        'changed'   => $changed++,
+                        'created' => $created++,
+                        'changed' => $changed++,
                         'unchanged' => $unchanged++,
-                        default     => null,
+                        default => null,
                     };
                 } catch (Throwable $e) {
                     $warnings++;
                     Log::warning('[PROCYNIA][AI_PRICE_SYNC] Failed to upsert price entry.', [
                         'provider' => $provider->providerKey(),
-                        'model'    => $price['model'] ?? null,
-                        'error'    => $e->getMessage(),
+                        'model' => $price['model'] ?? null,
+                        'error' => $e->getMessage(),
                     ]);
                 }
             }
 
             $run->forceFill([
-                'status'           => AiModelPriceSyncRun::STATUS_COMPLETED,
-                'finished_at'      => now(),
-                'models_seen'      => count($prices),
-                'prices_created'   => $created,
-                'prices_changed'   => $changed,
+                'status' => AiModelPriceSyncRun::STATUS_COMPLETED,
+                'finished_at' => now(),
+                'models_seen' => count($prices),
+                'prices_created' => $created,
+                'prices_changed' => $changed,
                 'prices_unchanged' => $unchanged,
-                'warnings_count'   => $warnings,
+                'warnings_count' => $warnings,
             ])->save();
 
             if ($warnings > 0) {
@@ -80,8 +78,8 @@ class AiModelPriceSyncService
             }
         } catch (Throwable $e) {
             $run->forceFill([
-                'status'        => AiModelPriceSyncRun::STATUS_FAILED,
-                'finished_at'   => now(),
+                'status' => AiModelPriceSyncRun::STATUS_FAILED,
+                'finished_at' => now(),
                 'error_message' => $e->getMessage(),
                 'warnings_count' => $warnings,
             ])->save();
@@ -96,9 +94,9 @@ class AiModelPriceSyncService
             );
 
             Log::error('[PROCYNIA][AI_PRICE_SYNC] Sync run failed.', [
-                'provider'    => $provider->providerKey(),
+                'provider' => $provider->providerKey(),
                 'sync_run_id' => $run->id,
-                'error'       => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
         }
 
@@ -106,11 +104,11 @@ class AiModelPriceSyncService
     }
 
     /**
-     * @param array<string, mixed> $price
+     * @param  array<string, mixed>  $price
      */
     private function upsertPrice(string $providerKey, array $price, string $today): string
     {
-        $model          = (string) ($price['model'] ?? '');
+        $model = (string) ($price['model'] ?? '');
         $deploymentName = $price['deployment_name'] ?? null;
         $providerRegion = $price['provider_region'] ?? null;
 
@@ -149,7 +147,7 @@ class AiModelPriceSyncService
         if ($newHash !== null && $active->source_hash === $newHash) {
             $active->forceFill([
                 'last_seen_at' => now(),
-                'sync_status'  => AiModelPrice::SYNC_STATUS_OK,
+                'sync_status' => AiModelPrice::SYNC_STATUS_OK,
             ])->save();
 
             return 'unchanged';
@@ -157,16 +155,16 @@ class AiModelPriceSyncService
 
         if ($this->priceChanged($active, $price)) {
             $oldData = [
-                'input_price_per_1m_tokens'        => (float) $active->input_price_per_1m_tokens,
+                'input_price_per_1m_tokens' => (float) $active->input_price_per_1m_tokens,
                 'cached_input_price_per_1m_tokens' => $active->cached_input_price_per_1m_tokens !== null
                     ? (float) $active->cached_input_price_per_1m_tokens : null,
-                'output_price_per_1m_tokens'       => (float) $active->output_price_per_1m_tokens,
+                'output_price_per_1m_tokens' => (float) $active->output_price_per_1m_tokens,
             ];
 
             $active->forceFill([
-                'valid_to'     => $today,
-                'is_active'    => false,
-                'sync_status'  => AiModelPrice::SYNC_STATUS_CHANGED,
+                'valid_to' => $today,
+                'is_active' => false,
+                'sync_status' => AiModelPrice::SYNC_STATUS_CHANGED,
             ])->save();
 
             AiModelPrice::query()->create(array_merge(
@@ -185,7 +183,7 @@ class AiModelPriceSyncService
                 AdminNotification::SEVERITY_WARNING,
                 "AI-modellpris endret: {$providerKey}/{$model}",
                 sprintf(
-                    "Input: %s → %s USD/1M · Output: %s → %s USD/1M",
+                    'Input: %s → %s USD/1M · Output: %s → %s USD/1M',
                     $oldData['input_price_per_1m_tokens'],
                     $price['input_price_per_1m_tokens'],
                     $oldData['output_price_per_1m_tokens'],
@@ -200,43 +198,52 @@ class AiModelPriceSyncService
 
         $active->forceFill([
             'last_seen_at' => now(),
-            'source_hash'  => $newHash,
-            'sync_status'  => AiModelPrice::SYNC_STATUS_OK,
+            'source_hash' => $newHash,
+            'sync_status' => AiModelPrice::SYNC_STATUS_OK,
         ])->save();
 
         return 'unchanged';
     }
 
     /**
-     * @param array<string, mixed> $price
+     * @param  array<string, mixed>  $price
      */
     private function priceChanged(AiModelPrice $active, array $price): bool
     {
         $eps = 0.000001;
 
+        $activeCached = $active->cached_input_price_per_1m_tokens;
+        $newCached = $price['cached_input_price_per_1m_tokens'] ?? null;
+
+        // The cached-input rate prices real attempts (AiOperationalPricingService), so a change to it
+        // alone is a price change with its own validity period like any other.
+        $cachedChanged = ($activeCached === null) !== ($newCached === null)
+            || ($activeCached !== null && abs((float) $activeCached - (float) $newCached) > $eps);
+
         return abs((float) $active->input_price_per_1m_tokens - (float) $price['input_price_per_1m_tokens']) > $eps
-            || abs((float) $active->output_price_per_1m_tokens - (float) $price['output_price_per_1m_tokens']) > $eps;
+            || abs((float) $active->output_price_per_1m_tokens - (float) $price['output_price_per_1m_tokens']) > $eps
+            || $cachedChanged;
     }
 
     /**
-     * @param array<string, mixed> $price
+     * @param  array<string, mixed>  $price
      * @return array<string, mixed>
      */
     private function baseFields(string $providerKey, array $price): array
     {
         return [
-            'provider'                        => $providerKey,
-            'model'                           => (string) ($price['model'] ?? ''),
-            'deployment_name'                 => $price['deployment_name'] ?? null,
-            'provider_region'                 => $price['provider_region'] ?? null,
-            'currency'                        => (string) ($price['currency'] ?? 'usd'),
-            'input_price_per_1m_tokens'       => (float) ($price['input_price_per_1m_tokens'] ?? 0),
+            'provider' => $providerKey,
+            'model' => (string) ($price['model'] ?? ''),
+            'deployment_name' => $price['deployment_name'] ?? null,
+            'provider_region' => $price['provider_region'] ?? null,
+            'currency' => (string) ($price['currency'] ?? 'usd'),
+            'input_price_per_1m_tokens' => (float) ($price['input_price_per_1m_tokens'] ?? 0),
             'cached_input_price_per_1m_tokens' => isset($price['cached_input_price_per_1m_tokens'])
                 ? (float) $price['cached_input_price_per_1m_tokens'] : null,
-            'output_price_per_1m_tokens'      => (float) ($price['output_price_per_1m_tokens'] ?? 0),
-            'source_url'                      => $price['source_url'] ?? null,
-            'source_hash'                     => $price['raw_payload_hash'] ?? null,
-            'last_seen_at'                    => now(),
+            'output_price_per_1m_tokens' => (float) ($price['output_price_per_1m_tokens'] ?? 0),
+            'source_url' => $price['source_url'] ?? null,
+            'source_hash' => $price['raw_payload_hash'] ?? null,
+            'last_seen_at' => now(),
         ];
     }
 }

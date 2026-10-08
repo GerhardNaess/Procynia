@@ -235,8 +235,8 @@ class EnterpriseWikiMaintenanceCycleService
             runId: $run->id,
             documentId: $run->source_id,
             customerId: $run->customer_id,
-            feature: 'enterprise_wiki',
-            operation: 'enterprise_wiki.maintenance',
+            feature: 'wiki',
+            operation: 'wiki.maintenance',
             resourceType: 'enterprise_wiki_document',
             resourceId: $run->source_id,
         ), fn (): string => $this->processRunInAiContext($run));

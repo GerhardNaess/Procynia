@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 class WikiSectionAiClient
@@ -12,7 +13,13 @@ class WikiSectionAiClient
 
     public const MAX_CLAIMS = 15;
 
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'wiki.extract_section_claims';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -49,7 +56,7 @@ class WikiSectionAiClient
         $trimmedText = mb_substr(trim($sectionText), 0, self::MAX_INPUT_CHARS);
         $payload = $this->buildPayload($trimmedText, $heading, $this->languageName($languageCode));
 
-        $response = $this->openAiClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiSectionAiClient');
 
         if (! array_key_exists('claims', $decoded) || ! is_array($decoded['claims'])) {
@@ -79,7 +86,7 @@ class WikiSectionAiClient
         $headingLine = $heading !== null ? "Heading: {$heading}\n\n" : '';
 
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

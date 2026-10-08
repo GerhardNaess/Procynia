@@ -2,17 +2,18 @@
 
 namespace App\Services\Ai\Requirements;
 
+use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
 use App\Data\Ai\Requirements\DocxTableRowData;
 use App\Data\Ai\Requirements\RequirementExtractionBlockData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Data\Ai\Requirements\RequirementExtractionResultData;
 use App\Data\Ai\Requirements\RequirementSegmentExtractionResultData;
-use App\Data\Ai\AiCallContext;
 use App\Models\SavedNoticeAiDocument;
 use App\Services\OpenAi\OpenAiClient;
 use App\Services\RequirementExtractor;
 use App\Support\Ai\AiCallContextScope;
+use App\Support\Ai\AiOperationCatalog;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
@@ -98,7 +99,7 @@ class RequirementCandidateExtractor
         $model = (string) ($payload['model'] ?? '');
 
         try {
-            $response = $this->postResponses($document, $payload, 450, 'saved_notice.requirement_extraction.segment');
+            $response = $this->postResponses($document, $payload, 450, 'tender.requirement_extraction.segment');
         } catch (ConnectionException $exception) {
             return $this->failedSegmentResult(
                 document: $document,
@@ -701,7 +702,7 @@ class RequirementCandidateExtractor
         // splitOversizedSegment() below was found to allow up to ~3 sequential calls per chunk —
         // see ProcessRequirementExtractionChunk::$timeout for the corresponding job-level margin).
         try {
-            $response = $this->postResponses($document, $payload, 450, 'saved_notice.requirement_extraction.document');
+            $response = $this->postResponses($document, $payload, 450, 'tender.requirement_extraction.document');
         } catch (ConnectionException $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
@@ -1152,7 +1153,7 @@ class RequirementCandidateExtractor
         $promptVersion = $this->blockPromptBuilder->promptVersion();
 
         try {
-            $response = $this->postResponses($document, $payload, 450, 'saved_notice.requirement_extraction.block');
+            $response = $this->postResponses($document, $payload, 450, 'tender.requirement_extraction.block');
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
@@ -1244,7 +1245,7 @@ class RequirementCandidateExtractor
 
         return $this->contextScope->within(new AiCallContext(
             customerId: is_numeric($customerId) ? (int) $customerId : null,
-            feature: 'saved_notice',
+            feature: 'tender',
             operation: $operation,
             resourceType: 'saved_notice_ai_document',
             resourceId: $document->id,
@@ -1255,12 +1256,7 @@ class RequirementCandidateExtractor
 
     private function relevanceModel(): string
     {
-        $model = trim((string) config(
-            'services.openai.requirement_relevance_model',
-            config('services.openai.requirement_extraction_model', config('services.openai.model', 'gpt-4.1-mini')),
-        ));
-
-        return $model !== '' ? $model : 'gpt-4.1-mini';
+        return AiOperationCatalog::model('tender.requirement_relevance');
     }
 
     private function relevancePromptVersion(): string

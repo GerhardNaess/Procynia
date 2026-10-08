@@ -162,8 +162,8 @@ class AiPaymentPolicyTest extends TestCase
 
         $decision = app(AiCostControlService::class)->authorize(new AiCallContext(
             customerId: $customer->id,
-            feature: 'enterprise_wiki',
-            operation: 'operator.wiki.recover_document_flow',
+            feature: 'wiki',
+            operation: 'wiki.operator.recover_document_flow',
             model: 'gpt-5',
             operatorOverride: true,
             operatorActorUserId: $admin->id,

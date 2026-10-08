@@ -119,7 +119,7 @@ class EnterpriseWikiRunPostIngestQa extends Command
     private function qaInRunContext(EnterpriseWikiPostIngestQaService $qaService, EnterpriseWikiIngestRun $run, bool $retry): ?array
     {
         return $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($run->id, 'enterprise_wiki.post_ingest_qa'),
+            $this->enterpriseWikiRunAiCallContext($run->id, 'wiki.post_ingest_qa'),
             fn (): ?array => $qaService->runForRun($run, retry: $retry),
         );
     }

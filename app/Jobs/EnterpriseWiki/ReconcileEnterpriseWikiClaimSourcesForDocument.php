@@ -55,7 +55,7 @@ class ReconcileEnterpriseWikiClaimSourcesForDocument implements ShouldQueue
     public function handle(EnterpriseWikiClaimSourceReconciliationService $service): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiDocumentAiCallContext($this->documentId, 'enterprise_wiki.reconcile_claim_sources'),
+            $this->enterpriseWikiDocumentAiCallContext($this->documentId, 'wiki.reconcile_claim_sources'),
             function () use ($service): void {
                 $this->handleInAiCallContext($service);
             },

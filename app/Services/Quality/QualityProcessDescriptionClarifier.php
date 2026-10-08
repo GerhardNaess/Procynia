@@ -55,7 +55,7 @@ class QualityProcessDescriptionClarifier
             new AiCallContext(
                 customerId: (int) $item->customer_id,
                 feature: 'quality',
-                operation: 'process_flow_clarification',
+                operation: 'quality.clarify_process',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),

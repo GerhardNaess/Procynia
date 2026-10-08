@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -26,7 +27,13 @@ use RuntimeException;
  */
 class WikiCrossPageConsistencyAiClient
 {
-    public const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'wiki.classify_cross_page_consistency';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     public const PROMPT_VERSION = '1.0';
 
@@ -92,7 +99,7 @@ class WikiCrossPageConsistencyAiClient
         }
 
         $payload = $this->buildPayload($occurrence, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiCrossPageConsistencyAiClient');
 
         $this->validateResult($decoded);
@@ -102,7 +109,7 @@ class WikiCrossPageConsistencyAiClient
             'confidence' => (string) $decoded['confidence'],
             'evidence_excerpt' => (string) $decoded['evidence_excerpt'],
             'reason' => (string) $decoded['reason'],
-            'model' => self::MODEL.'/'.self::PROMPT_VERSION,
+            'model' => self::model().'/'.self::PROMPT_VERSION,
         ];
     }
 
@@ -130,7 +137,7 @@ class WikiCrossPageConsistencyAiClient
     private function buildPayload(array $occurrence, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

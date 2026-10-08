@@ -86,15 +86,15 @@ class AiUsageMeterTest extends TestCase
         $customer = $this->createCustomer();
         $meter = app(AiUsageMeter::class);
 
-        $meter->within(new AiCallContext(customerId: $customer->id, feature: 'enterprise_wiki', operation: 'enterprise_wiki.test'), fn (): array => app(OpenAiClient::class)->createResponse([
+        $meter->within(new AiCallContext(customerId: $customer->id, feature: 'wiki', operation: 'wiki.test'), fn (): array => app(OpenAiClient::class)->createResponse([
             'model' => 'gpt-5',
             'input' => [],
         ]));
 
         $this->assertDatabaseHas('ai_usage_attempts', [
             'customer_id' => $customer->id,
-            'feature' => 'enterprise_wiki',
-            'operation_key' => 'enterprise_wiki.test',
+            'feature' => 'wiki',
+            'operation_key' => 'wiki.test',
             'endpoint' => 'responses',
             'model' => 'gpt-5',
             'status' => 'success',
@@ -109,7 +109,7 @@ class AiUsageMeterTest extends TestCase
         $meter = app(AiUsageMeter::class);
 
         try {
-            $meter->within(new AiCallContext(customerId: $customer->id, feature: 'enterprise_wiki', operation: 'enterprise_wiki.verify'), function () use ($meter): void {
+            $meter->within(new AiCallContext(customerId: $customer->id, feature: 'wiki', operation: 'wiki.verify'), function () use ($meter): void {
                 $response = $meter->measureResponse('gpt-5', fn (): array => [
                     'status' => 'incomplete',
                     'usage' => ['input_tokens' => 90, 'output_tokens' => 40, 'total_tokens' => 130],
@@ -123,7 +123,7 @@ class AiUsageMeterTest extends TestCase
 
         $this->assertDatabaseHas('ai_usage_attempts', [
             'customer_id' => $customer->id,
-            'operation_key' => 'enterprise_wiki.verify',
+            'operation_key' => 'wiki.verify',
             'status' => 'failed',
             'failure_type' => 'invalid_response',
             'total_tokens' => 130,

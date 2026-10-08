@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -21,7 +22,13 @@ use RuntimeException;
  */
 class WikiLinkSemanticQaAiClient
 {
-    public const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'wiki.review_links';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     public const PROMPT_VERSION = '1.0';
 
@@ -68,7 +75,7 @@ class WikiLinkSemanticQaAiClient
         $truncatedContent = mb_substr(trim($content), 0, self::MAX_CONTENT_CHARS);
 
         $payload = $this->buildPayload($truncatedContent, $pageType, $linkCatalog, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiLinkSemanticQaAiClient');
 
         $this->validateResult($decoded, $linkCatalog);
@@ -78,7 +85,7 @@ class WikiLinkSemanticQaAiClient
             'missing_link_slugs' => array_values((array) $decoded['missing_link_slugs']),
             'remove_link_slugs' => array_values((array) $decoded['remove_link_slugs']),
             'critique' => (string) $decoded['critique'],
-            'model' => self::MODEL.'/'.self::PROMPT_VERSION,
+            'model' => self::model().'/'.self::PROMPT_VERSION,
         ];
     }
 
@@ -118,7 +125,7 @@ class WikiLinkSemanticQaAiClient
     private function buildPayload(string $content, string $pageType, array $linkCatalog, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

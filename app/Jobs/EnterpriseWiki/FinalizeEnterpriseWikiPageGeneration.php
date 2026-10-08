@@ -88,7 +88,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     public function handle(): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_page_generation'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.finalize_page_generation'),
             function (): void {
                 $this->failWithoutRetryOnCostControlBlock(fn (): mixed => $this->handleInAiCallContext());
             },

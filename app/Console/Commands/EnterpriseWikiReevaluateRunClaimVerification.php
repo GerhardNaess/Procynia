@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunClaimVerificationReevaluationService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -12,6 +13,8 @@ use Illuminate\Console\Command;
 #[Description('Re-evaluate one Enterprise Wiki run\'s unsupported_generated_content claims with the current semantic (cross-language/paraphrase) verification logic.')]
 class EnterpriseWikiReevaluateRunClaimVerification extends Command
 {
+    use RunsInAiCallContext;
+
     public function handle(EnterpriseWikiRunClaimVerificationReevaluationService $service): int
     {
         $runId = $this->option('run-id');
@@ -31,7 +34,11 @@ class EnterpriseWikiReevaluateRunClaimVerification extends Command
         }
 
         $apply = (bool) $this->option('apply');
-        $result = $service->reevaluate($run, $apply);
+        // Any AI call the run's services make belongs to the run's customer.
+        $result = $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext((int) $run->id, 'wiki.operator.reevaluate_claim_verification'),
+            fn (): array => $service->reevaluate($run, $apply),
+        );
 
         $this->info($apply
             ? "[WIKI_CLAIM_VERIFICATION_REEVAL] Applied re-evaluation for run [{$run->id}]."

@@ -112,7 +112,7 @@ class AiCostControlServiceTest extends TestCase
 
     private function caseContext(Customer $customer, SavedNotice $notice): AiCallContext
     {
-        return new AiCallContext(customerId: $customer->id, feature: 'saved_notice', operation: 'saved_notice.test', savedNoticeId: $notice->id, commercialCredit: true);
+        return new AiCallContext(customerId: $customer->id, feature: 'tender', operation: 'tender.test', savedNoticeId: $notice->id, commercialCredit: true);
     }
 
     private function customer(int $credits, string $plan = Customer::PLAN_PRO): Customer

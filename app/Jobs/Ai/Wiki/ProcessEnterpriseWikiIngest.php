@@ -44,7 +44,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
     public function handle(EnterpriseWikiIngestService $service, EnterpriseWikiSectionParser $parser): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.process_ingest'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.process_ingest'),
             function () use ($service, $parser): void {
                 $this->handleInAiCallContext($service, $parser);
             },

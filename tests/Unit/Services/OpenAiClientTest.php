@@ -40,7 +40,7 @@ class OpenAiClientTest extends TestCase
                     ],
                 ],
             ],
-        ]);
+        ], operation: 'system.transport_test');
 
         $this->assertSame('resp_123', $response['id']);
         $this->assertSame(200, $response['_meta']['http_status']);
@@ -66,7 +66,7 @@ class OpenAiClientTest extends TestCase
         app(OpenAiClient::class)->createResponse([
             'model' => 'gpt-4.1-mini',
             'input' => [],
-        ]);
+        ], operation: 'system.transport_test');
     }
 
     public function test_it_logs_only_safe_error_metadata_for_non_success_responses(): void
@@ -107,7 +107,7 @@ class OpenAiClientTest extends TestCase
                     ],
                 ],
             ],
-        ]);
+        ], operation: 'system.transport_test');
 
         $this->assertTrue($response->failed());
 
@@ -161,7 +161,7 @@ class OpenAiClientTest extends TestCase
                         ],
                     ],
                 ],
-            ]);
+            ], operation: 'system.transport_test');
 
             $this->fail('Expected the OpenAI client to throw a runtime exception.');
         } catch (RuntimeException $exception) {

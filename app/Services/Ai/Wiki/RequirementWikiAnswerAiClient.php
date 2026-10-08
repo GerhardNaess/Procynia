@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -31,7 +32,13 @@ use RuntimeException;
  */
 class RequirementWikiAnswerAiClient
 {
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'tender.requirement_answer';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -91,7 +98,7 @@ class RequirementWikiAnswerAiClient
         }
 
         $payload = $this->buildPayload($requirementIdentifier, $requirementText, $pages, $this->languageName($languageCode), $caseInstructions, $requirementUserPrompt);
-        $response = $this->openAiClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'RequirementWikiAnswerAiClient');
 
         return $this->normalize($decoded, array_column($pages, 'page_id'), $this->offeredFiguresByRef($pages));
@@ -269,7 +276,7 @@ class RequirementWikiAnswerAiClient
         ]));
 
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

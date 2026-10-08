@@ -8,6 +8,7 @@ use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Support\Ai\AiOperationCatalog;
 use Closure;
 use RuntimeException;
 
@@ -37,7 +38,13 @@ use RuntimeException;
  */
 class EnterpriseWikiMaintainerDecisionAiClient
 {
-    private const MODEL = 'gpt-5';
+    public const OPERATION = 'wiki.maintainer_decision';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const REASONING_EFFORT = 'low';
 
@@ -146,7 +153,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             );
         }
 
-        $context ??= AiCallContext::none();
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION);
         $languageName = $this->languageName($languageCode);
         $sourceText = $planning->sourceText;
 
@@ -296,7 +303,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             );
         }
 
-        $context ??= AiCallContext::none();
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION);
         $languageName = $this->languageName($languageCode);
         $repairPromptText = EnterpriseWikiMaintainerDecisionDeltaPrompt::userPrompt(
             $planning->sourceMeta,
@@ -331,7 +338,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planBatchCall(
                 self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE,
-                self::MODEL,
+                self::model(),
                 $repairedObjects,
                 $capacityInputSizeChars,
                 $retryAttempt,
@@ -364,7 +371,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
     {
         return $this->capacityPlanner->planBatchCall(
             self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE,
-            self::MODEL,
+            self::model(),
             max(1, count($group['object_ids'])),
             0,
         )->strategy !== AiCapacityPlan::STRATEGY_SPLIT_REQUIRED;
@@ -373,14 +380,14 @@ class EnterpriseWikiMaintainerDecisionAiClient
     /** How many objects one bounded repair call may take on. */
     public function maxObjectsPerRepairCall(): int
     {
-        return $this->capacityPlanner->maxItemsPerBatch(self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE, self::MODEL);
+        return $this->capacityPlanner->maxItemsPerBatch(self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE, self::model());
     }
 
     private function planCapacity(int $inputSizeChars, int $expectedResultObjects, int $retryAttempt): AiCapacityPlan
     {
         return $this->capacityPlanner->plan(new AiCapacityRequest(
             operationType: self::CAPACITY_OPERATION_TYPE,
-            model: self::MODEL,
+            model: self::model(),
             inputSizeChars: $inputSizeChars,
             expectedResultObjects: $expectedResultObjects,
             retryAttempt: $retryAttempt,
@@ -412,7 +419,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         $schemaBlock = EnterpriseWikiMaintainerDecisionDeltaPrompt::jsonSchema();
 
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',
@@ -565,7 +572,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
 
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

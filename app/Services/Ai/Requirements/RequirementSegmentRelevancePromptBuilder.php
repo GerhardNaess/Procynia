@@ -5,6 +5,7 @@ namespace App\Services\Ai\Requirements;
 use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
 use App\Models\SavedNoticeAiDocument;
 use App\Services\Ai\AiPromptSecurity;
+use App\Support\Ai\AiOperationCatalog;
 use JsonException;
 use RuntimeException;
 
@@ -134,16 +135,7 @@ class RequirementSegmentRelevancePromptBuilder
      */
     private function openAiModel(): string
     {
-        $model = trim((string) config(
-            'services.openai.requirement_relevance_model',
-            config('services.openai.requirement_extraction_model', config('services.openai.model', 'gpt-4.1-mini')),
-        ));
-
-        if ($model === '') {
-            throw new RuntimeException('OpenAI segment relevance model is not configured.');
-        }
-
-        return $model;
+        return AiOperationCatalog::model('tender.requirement_relevance');
     }
 
     /**

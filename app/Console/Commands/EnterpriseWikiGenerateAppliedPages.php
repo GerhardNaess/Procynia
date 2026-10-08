@@ -36,7 +36,7 @@ class EnterpriseWikiGenerateAppliedPages extends Command
 
         $context = $this->operatorAiCallContext([
             'customerId' => (int) $run->customer_id,
-            'operation' => 'operator.wiki.generate_applied_pages',
+            'operation' => 'wiki.operator.generate_applied_pages',
             'resourceType' => 'enterprise_wiki_document',
             'resourceId' => (int) $run->source_id,
         ]);

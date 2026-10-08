@@ -111,7 +111,7 @@ class QualityActivityArticleService
             new AiCallContext(
                 customerId: (int) $item->customer_id,
                 feature: 'quality',
-                operation: 'process_activity_article_draft',
+                operation: 'quality.draft_activity_article',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),

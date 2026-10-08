@@ -155,7 +155,7 @@ class AiCostControlService
             $reservation = CustomerAiUsageReservation::query()->create([
                 'customer_id' => $customer->id, 'saved_notice_id' => $context->savedNoticeId,
                 'period_start' => $periodStart, 'period_end' => $periodEnd,
-                'operation' => Str::limit($context->operation ?: 'saved_notice.ai', 100, ''),
+                'operation' => Str::limit($context->operation ?: 'tender.ai', 100, ''),
                 'correlation_key' => Str::limit($context->requestCorrelationId ?: (string) Str::uuid(), 128, ''),
                 'status' => CustomerAiUsageReservation::STATUS_RESERVED, 'reserved_at' => now(),
             ]);

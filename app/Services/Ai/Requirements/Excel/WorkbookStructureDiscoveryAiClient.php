@@ -6,6 +6,7 @@ use App\Data\Ai\Requirements\Excel\WorkbookFieldRoleData;
 use App\Data\Ai\Requirements\Excel\WorkbookSheetSchemaData;
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -27,7 +28,13 @@ use RuntimeException;
  */
 class WorkbookStructureDiscoveryAiClient
 {
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'tender.excel_structure_discovery';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -65,7 +72,7 @@ class WorkbookStructureDiscoveryAiClient
 
         $startedAt = microtime(true);
         $payload = $this->buildPayload($orientation, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: self::TIMEOUT_SECONDS);
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: self::TIMEOUT_SECONDS, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WorkbookStructureDiscoveryAiClient');
 
         return [
@@ -85,7 +92,7 @@ class WorkbookStructureDiscoveryAiClient
     private function buildPayload(array $orientation, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 ['role' => 'developer', 'content' => [['type' => 'input_text', 'text' => $this->developerPrompt($languageName)]]],
                 ['role' => 'user', 'content' => [['type' => 'input_text', 'text' => json_encode($orientation, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]]],

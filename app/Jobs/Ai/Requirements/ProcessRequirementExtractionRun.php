@@ -41,7 +41,7 @@ class ProcessRequirementExtractionRun implements ShouldQueue
     public function handle(RequirementExtractionRunService $service): void
     {
         $this->withinAiCallContext(
-            $this->requirementExtractionRunAiCallContext($this->runId, 'saved_notice.requirement_extraction.run'),
+            $this->requirementExtractionRunAiCallContext($this->runId, 'tender.requirement_extraction.run'),
             function () use ($service): void {
                 $this->handleInAiCallContext($service);
             },

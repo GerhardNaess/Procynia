@@ -75,18 +75,17 @@ return [
          */
         'operation_estimates' => [
             'default' => ['input_tokens' => 40000, 'output_tokens' => 8000],
-            'embeddings' => ['input_tokens' => 8000, 'output_tokens' => 0],
             'wiki.ask.retrieval_plan' => ['input_tokens' => 12000, 'output_tokens' => 2000],
             'wiki.ask.answer' => ['input_tokens' => 40000, 'output_tokens' => 4000],
-            'saved_notice.requirement_extraction.segment' => ['input_tokens' => 40000, 'output_tokens' => 16000],
-            'saved_notice.requirement_extraction.document' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-            'saved_notice.requirement_extraction.block' => ['input_tokens' => 40000, 'output_tokens' => 16000],
-            'saved_notice.requirement_answer_draft' => ['input_tokens' => 40000, 'output_tokens' => 8000],
-            'saved_notice.requirement_wiki_answer' => ['input_tokens' => 60000, 'output_tokens' => 8000],
-            'saved_notice.requirement_assessment' => ['input_tokens' => 40000, 'output_tokens' => 6000],
-            'enterprise_wiki.ingest' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-            'enterprise_wiki.maintenance' => ['input_tokens' => 60000, 'output_tokens' => 16000],
-            'knowledge.chunk_metadata_batch' => ['input_tokens' => 20000, 'output_tokens' => 4000],
+            // Keyed by the operation names in config/ai_operations.php.
+            'tender.requirement_extraction.segment' => ['input_tokens' => 40000, 'output_tokens' => 16000],
+            'tender.requirement_extraction.document' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+            'tender.requirement_extraction.block' => ['input_tokens' => 40000, 'output_tokens' => 16000],
+            'tender.requirement_answer' => ['input_tokens' => 60000, 'output_tokens' => 8000],
+            'tender.requirement_assessment' => ['input_tokens' => 40000, 'output_tokens' => 6000],
+            'wiki.maintainer_decision' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+            'wiki.generate_page' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+            'wiki.maintenance' => ['input_tokens' => 60000, 'output_tokens' => 16000],
         ],
 
         'payment' => [

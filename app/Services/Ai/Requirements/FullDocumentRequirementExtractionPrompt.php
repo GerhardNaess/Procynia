@@ -2,6 +2,8 @@
 
 namespace App\Services\Ai\Requirements;
 
+use App\Support\Ai\AiOperationCatalog;
+
 /**
  * Canonical source of truth for Procynia's Phase 1 requirement extraction prompt.
  *
@@ -13,8 +15,6 @@ final class FullDocumentRequirementExtractionPrompt
     public const PROMPT_VERSION = '2026-07-13.phase_1.v10';
 
     public const PROMPT_NAME = 'phase_1_requirement_extraction';
-
-    public const MODEL = 'gpt-4.1-mini';
 
     public const MAX_OUTPUT_TOKENS = 8000;
 
@@ -32,7 +32,7 @@ final class FullDocumentRequirementExtractionPrompt
 
     public static function model(): string
     {
-        return self::MODEL;
+        return AiOperationCatalog::model('tender.requirement_extraction.document');
     }
 
     public static function maxOutputTokens(): int

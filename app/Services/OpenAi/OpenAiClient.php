@@ -2,9 +2,12 @@
 
 namespace App\Services\OpenAi;
 
+use App\Data\Ai\AiCallContext;
 use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Commercial\AiCostControlService;
+use App\Support\Ai\AiCallContextPolicy;
 use App\Support\Ai\AiCallContextScope;
+use Closure;
 use GuzzleHttp\TransferStats;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -18,6 +21,7 @@ class OpenAiClient
         private readonly AiUsageMeter $usageMeter,
         private readonly AiCostControlService $costControl,
         private readonly AiCallContextScope $contextScope,
+        private readonly AiCallContextPolicy $contextPolicy,
     ) {}
 
     /**
@@ -49,11 +53,18 @@ class OpenAiClient
      *                                                   and a failed transfer, so a caller can capture connect/transfer timing even when this
      *                                                   method ends up throwing (e.g. EnterpriseWikiAiCapacityRetryExecutor's structured
      *                                                   per-attempt logging, built for the Wiki run-592 incident).
+     * @param  ?string  $operation  The registered AI operation this call performs (config/ai_operations.php).
+     *                              It narrows the ambient context; the customer still comes from the entry point.
      */
-    public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
+    public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null, ?string $operation = null): array
+    {
+        return $this->withinOperation($operation, fn (): array => $this->createResponseInContext($payload, $timeoutSeconds, $onStats));
+    }
+
+    private function createResponseInContext(array $payload, int $timeoutSeconds, ?callable $onStats): array
     {
         $model = trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown';
-        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($model, 'responses'));
+        $decision = $this->costControl->authorize($this->providerCallContext($model, 'responses'));
 
         try {
             $result = $this->usageMeter->measureResponse(
@@ -70,10 +81,15 @@ class OpenAiClient
         }
     }
 
-    public function createEmbedding(string $input): array
+    public function createEmbedding(string $input, ?string $operation = null): array
+    {
+        return $this->withinOperation($operation, fn (): array => $this->createEmbeddingInContext($input));
+    }
+
+    private function createEmbeddingInContext(string $input): array
     {
         $model = $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($model, 'embeddings'));
+        $decision = $this->costControl->authorize($this->providerCallContext($model, 'embeddings'));
 
         try {
             $result = $this->usageMeter->measureResponse(
@@ -90,11 +106,16 @@ class OpenAiClient
         }
     }
 
-    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null): Response
+    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null, ?string $operation = null): Response
+    {
+        return $this->withinOperation($operation, fn (): Response => $this->postInContext($endpoint, $payload, $timeoutSeconds, $onStats));
+    }
+
+    private function postInContext(string $endpoint, array $payload, int $timeoutSeconds, ?callable $onStats): Response
     {
         $endpoint = ltrim($endpoint, '/');
         $postModel = trim((string) ($payload['model'] ?? '')) ?: $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($postModel, $endpoint));
+        $decision = $this->costControl->authorize($this->providerCallContext($postModel, $endpoint));
 
         try {
             $response = $endpoint === 'responses'
@@ -120,6 +141,22 @@ class OpenAiClient
         }
 
         return $response;
+    }
+
+    /**
+     * The operation a client names is pushed as a nested scope, so the usage meter — which reads the
+     * scope, not this call's arguments — records exactly the context that was authorised.
+     */
+    private function withinOperation(?string $operation, Closure $call): mixed
+    {
+        return $operation === null
+            ? $call()
+            : $this->contextScope->within(AiCallContext::none()->withOperation($operation), $call);
+    }
+
+    private function providerCallContext(string $model, string $endpoint): AiCallContext
+    {
+        return $this->contextPolicy->enforce($this->contextScope->current()->forProviderCall($model, $endpoint));
     }
 
     private function send(string $endpoint, array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array

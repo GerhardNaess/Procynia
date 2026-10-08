@@ -495,7 +495,7 @@ class EnterpriseWikiLinkSemanticRepairService
                 $pageId,
                 [
                     'content_markdown' => $markdown,
-                    'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
+                    'generated_by_model' => WikiLinkRevisionAiClient::model().'/link-semantic-repair',
                 ],
                 fn (EnterpriseWikiPageVersion $written) => $this->restoreBlockProvenance($pageId, $written),
             );

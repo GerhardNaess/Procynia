@@ -433,7 +433,7 @@ class EnterpriseWikiIncrementalRelinkService
                 $pageId,
                 [
                     'content_markdown' => $markdown,
-                    'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
+                    'generated_by_model' => WikiLinkRevisionAiClient::model().'/incremental-relink',
                 ],
                 fn (EnterpriseWikiPageVersion $written) => $this->blockProvenanceRepairService->repairPageVersion($pageId, $written),
             );

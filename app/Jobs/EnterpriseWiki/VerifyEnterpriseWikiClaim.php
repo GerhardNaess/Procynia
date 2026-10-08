@@ -41,7 +41,7 @@ class VerifyEnterpriseWikiClaim implements ShouldQueue
         EnterpriseWikiDocumentFlowService $flowService,
     ): void {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.verify_claim'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.verify_claim'),
             function () use ($verificationService, $flowService): void {
                 $this->handleInAiCallContext($verificationService, $flowService);
             },
