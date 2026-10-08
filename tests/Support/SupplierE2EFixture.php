@@ -16,6 +16,8 @@ use App\Models\SupplierComplianceRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierImprovementCase;
+use App\Models\SupplierProfile;
+use App\Models\SupplierProfileChange;
 use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
@@ -37,7 +39,7 @@ use Illuminate\Support\Facades\DB;
  * supplier role.
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
- * assessments, their documentation, the run's fagområder, the cases created in Avvik og
+ * leverandørprofil and profile history, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
  * forbedringer, the risks in Risiko and the kravkilde and requirements in Etterlevelse og revisjon,
  * with the rows linking them to suppliers, go with it. Risks
  * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
@@ -133,11 +135,13 @@ class SupplierE2EFixture
 
     /**
      * An active supplier of the run's customer, owned by the supplier manager, classified with the
-     * given level and interval (Nei to all four questions) — or not classified without a level.
+     * given level and interval (Ja to the questions in $yes, Nei to the rest) — or not classified
+     * without a level.
      *
+     * @param  list<string>  $yes
      * @return array{id: int, name: string}
      */
-    public static function activeSupplier(string $suffix, string $name, ?string $criticality = null, ?int $intervalMonths = null): array
+    public static function activeSupplier(string $suffix, string $name, ?string $criticality = null, ?int $intervalMonths = null, array $yes = []): array
     {
         $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
         $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
@@ -155,6 +159,7 @@ class SupplierE2EFixture
 
         if ($criticality !== null) {
             $supplier->forceFill(['criticality' => $criticality, 'review_interval_months' => $intervalMonths]
+                + array_fill_keys($yes, true)
                 + array_fill_keys(Supplier::CRITICALITY_QUESTIONS, false));
         }
 
@@ -264,7 +269,7 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -274,6 +279,8 @@ class SupplierE2EFixture
             'suppliers' => Supplier::query()->whereIn('customer_id', $customerIds)->count(),
             'status_changes' => SupplierStatusChange::query()->whereIn('customer_id', $customerIds)->count(),
             'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'profiles' => SupplierProfile::query()->whereIn('customer_id', $customerIds)->count(),
+            'profile_changes' => SupplierProfileChange::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
             // Also by the run's suffix in the title, wherever it might have landed.

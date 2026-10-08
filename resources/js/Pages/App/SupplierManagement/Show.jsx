@@ -13,6 +13,7 @@ import SupplierDocuments from './SupplierDocuments';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
 import SupplierImprovementCases from './SupplierImprovementCases';
+import SupplierProfile from './SupplierProfile';
 import SupplierRequirements from './SupplierRequirements';
 import SupplierRisks from './SupplierRisks';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
@@ -44,6 +45,7 @@ export default function SupplierManagementShow() {
         supplier: item,
         registered = null,
         criticality = null,
+        profile = null,
         attention = [],
         review_intervals: reviewIntervals = [],
         assessments = [],
@@ -196,6 +198,14 @@ export default function SupplierManagementShow() {
                     criticality={criticality}
                     canChange={permissions.can_change_criticality ?? false}
                     reviewIntervals={reviewIntervals}
+                    locale={locale}
+                    tr={tr}
+                />
+
+                <SupplierProfile
+                    supplierId={item.id}
+                    profile={profile}
+                    canEdit={permissions.can_edit_profile ?? false}
                     locale={locale}
                     tr={tr}
                 />

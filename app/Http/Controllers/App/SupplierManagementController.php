@@ -8,6 +8,8 @@ use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
+use App\Models\SupplierProfile;
+use App\Models\SupplierProfileChange;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
@@ -54,6 +56,9 @@ use Inertia\Response;
  * change); supplier.delete deletes one registered by mistake and never used. supplier.assess — the
  * supplier assessment of how a supplier performs — is not used here: criticality is how important
  * the supplier is, a register decision (plan §9.2).
+ *
+ * The leverandørprofil (supplier-assurance-v2-plan §4) is shown here with its history and written by
+ * SupplierProfileController (supplier.edit; supplier.assure grants nothing there).
  *
  * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
  * reasons inline on the supplier page — read from the supplier's own data only.
@@ -190,6 +195,7 @@ class SupplierManagementController extends Controller
                 'status' => $changes->last()?->from_status ?? $supplier->status,
             ],
             'criticality' => $this->criticalityPayload($supplier, $criticalityChanges),
+            'profile' => $this->profilePayload($supplier),
             'attention' => $this->attention->findingsForSupplier($supplier),
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
                 'id' => (int) $assessment->id,
@@ -245,6 +251,8 @@ class SupplierManagementController extends Controller
                 'can_end' => $canEdit && $open,
                 'can_reopen' => $canEdit && ! $open,
                 'can_change_criticality' => $canEdit && $open,
+                // The profile is supplier.edit only — never supplier.assure (supplier-assurance-v2-plan §13.2).
+                'can_edit_profile' => $canEdit && $open,
                 // Dokumentasjon: supplier.edit, and only while the supplier is not ended.
                 'can_manage_documents' => $canEdit && $open,
                 // Says why the documentation is read-only, for someone who could otherwise change it.
@@ -568,6 +576,49 @@ class SupplierManagementController extends Controller
                 'at' => $supplier->created_at?->toIso8601String(),
                 'by_name' => $supplier->createdBy?->name,
             ] : null,
+        ];
+    }
+
+    /**
+     * Leverandørprofil: the current answers (null before anyone has filled it in), which questions are
+     * asked for this supplier, whether it is complete, the four criticality answers it is read with,
+     * and every save newest first with the whole profile before and after. The answers are codes; the
+     * page names them.
+     *
+     * @return array<string, mixed>
+     */
+    private function profilePayload(Supplier $supplier): array
+    {
+        $profile = $supplier->profile()->with('updatedBy:id,name')->first();
+        $answers = $profile?->answers();
+        $basis = $supplier->classification();
+
+        return [
+            'answers' => $answers,
+            'visible' => SupplierProfile::visibleFields($supplier, $answers ?? SupplierProfile::emptyAnswers()),
+            'complete' => $answers !== null && SupplierProfile::isComplete($supplier, $answers),
+            'completed_at' => $profile?->completed_at?->toIso8601String(),
+            'updated_at' => $profile?->updated_at?->toIso8601String(),
+            'updated_by_name' => $profile?->updatedBy?->name,
+            // Shown read-only on the profile: they change under Kritikalitet.
+            'basis' => $basis !== null ? array_intersect_key($basis, array_flip(Supplier::CRITICALITY_QUESTIONS)) : null,
+            'history' => $supplier->profileChanges()->with('changedBy:id,name')->get()
+                ->map(fn (SupplierProfileChange $change): array => [
+                    'id' => (int) $change->id,
+                    'from' => $change->from_profile,
+                    'to' => $change->to_profile,
+                    'reason' => $change->reason,
+                    'changed_at' => $change->changed_at?->toIso8601String(),
+                    'changed_by_name' => $change->changedBy?->name,
+                ])->all(),
+            'options' => [
+                'groups' => SupplierProfile::GROUPS,
+                'answers' => SupplierProfile::ANSWERS,
+                'data_roles' => SupplierProfile::DATA_ROLES,
+                'data_locations' => SupplierProfile::DATA_LOCATIONS,
+                'sectors' => SupplierProfile::SECTORS,
+                'high_risk_categories' => SupplierProfile::HIGH_RISK_CATEGORIES,
+            ],
         ];
     }
 

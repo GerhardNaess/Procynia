@@ -14,8 +14,10 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * Customer-wide in v1: a role that grants supplier.view will read every supplier of the user's own
  * customer; there is no fagområde. supplier.edit registers and changes suppliers and moves them
- * through their lifecycle; supplier.assess registers supplier assessments; supplier.delete removes
- * a supplier registered by mistake. Neither edit nor assess implies the other.
+ * through their lifecycle, and fills in the leverandørprofil; supplier.assess registers supplier
+ * assessments; supplier.assure is Leverandørkontroll (docs/supplier-assurance-v2-plan.md §13.2);
+ * supplier.delete removes a supplier registered by mistake. None of edit, assess and assure implies
+ * another.
  *
  * SYSTEM OWNER, EXPLICIT GRANT.
  *
@@ -61,7 +63,10 @@ class SupplierAccessService
             && $this->entitlements->hasModule($customer, 'supplier');
     }
 
-    /** Registering and changing suppliers, their criticality and documentation, and their lifecycle. */
+    /**
+     * Registering and changing suppliers, their criticality, leverandørprofil and documentation, and
+     * their lifecycle.
+     */
     public function canEdit(User $user): bool
     {
         return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::SUPPLIER_EDIT);
@@ -74,6 +79,16 @@ class SupplierAccessService
     public function canAssess(User $user): bool
     {
         return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::SUPPLIER_ASSESS);
+    }
+
+    /**
+     * Leverandørkontroll: control requirements, overrides, controls and decisions. The only check of
+     * supplier.assure. It never grants supplier.edit — the person who controls a supplier cannot
+     * change the profile that decides which requirements apply.
+     */
+    public function canAssure(User $user): bool
+    {
+        return $this->canOpenModule($user) && $this->permissions->has($user, CustomerPermissionCatalog::SUPPLIER_ASSURE);
     }
 
     /** Deleting a supplier registered by mistake. */

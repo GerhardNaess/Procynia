@@ -196,7 +196,7 @@ class CustomerRolePermissionTest extends TestCase
             CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_COMPLIANCE],
         );
         $this->assertSame(
-            ['supplier.view', 'supplier.edit', 'supplier.assess', 'supplier.delete'],
+            ['supplier.view', 'supplier.edit', 'supplier.assess', 'supplier.assure', 'supplier.delete'],
             CustomerPermissionCatalog::domains()[CustomerPermissionCatalog::DOMAIN_SUPPLIER],
         );
         $this->assertSame(

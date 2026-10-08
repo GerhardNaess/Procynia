@@ -37,7 +37,7 @@ export function cleanUpSupplierE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await supplierFixture(`remaining('${suffix}')`)).toEqual({
-            customers: 0, suppliers: 0, status_changes: 0, criticality_changes: 0, assessments: 0, documents: 0, improvement_cases: 0, case_links: 0, risks: 0, risk_links: 0, requirements: 0, requirement_links: 0, business_areas: 0, roles: 0, users: 0,
+            customers: 0, suppliers: 0, status_changes: 0, criticality_changes: 0, profiles: 0, profile_changes: 0, assessments: 0, documents: 0, improvement_cases: 0, case_links: 0, risks: 0, risk_links: 0, requirements: 0, requirement_links: 0, business_areas: 0, roles: 0, users: 0,
         });
     });
 }

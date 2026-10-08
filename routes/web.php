@@ -39,6 +39,7 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
+use App\Http\Controllers\App\SupplierProfileController;
 use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -473,6 +474,8 @@ Route::prefix('app')
             Route::post('/{supplierId}/assessments', [SupplierAssessmentController::class, 'store'])->whereNumber('supplierId')->name('assessments.store');
             // Vurder / Endre kritikalitet: the only way criticality changes after registration.
             Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
+            // Leverandørprofil: supplier.edit only, never supplier.assure (supplier-assurance-v2-plan §13.2).
+            Route::post('/{supplierId}/profile', [SupplierProfileController::class, 'update'])->whereNumber('supplierId')->name('profile');
             // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit).
             Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
