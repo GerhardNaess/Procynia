@@ -24,7 +24,6 @@ use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementExtractionPipeline;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementLoader;
-use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementExtractor;
 use Carbon\Carbon;
 use Illuminate\Http\Client\Request;
@@ -36,7 +35,6 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
-use Mockery;
 use RuntimeException;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
@@ -3096,32 +3094,6 @@ class AiControllerTest extends TestCase
             'customer' => $customer,
             'user' => $user,
         ];
-    }
-
-    /**
-     * Purpose: Bind a deterministic embedding service for controller integration tests.
-     * Inputs: A callback that returns the desired embedding outcome.
-     * Returns: None.
-     * Side effects: Replaces the container binding with a predictable fake service.
-     */
-    private function bindEmbeddingService(callable $handler): void
-    {
-        $service = Mockery::mock(EmbeddingService::class);
-        $service->shouldReceive('tryEmbedText')
-            ->andReturnUsing($handler);
-
-        $this->app->instance(EmbeddingService::class, $service);
-    }
-
-    /**
-     * Purpose: Provide a deterministic embedding vector that matches the pgvector dimension.
-     * Inputs: None.
-     * Returns: A 1536-dimensional embedding vector with stable values.
-     * Side effects: None.
-     */
-    private function deterministicEmbeddingVector(): array
-    {
-        return array_fill(0, 1536, 0.001);
     }
 
     private function createCustomer(string $name): Customer

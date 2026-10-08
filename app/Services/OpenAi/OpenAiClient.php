@@ -34,8 +34,8 @@ class OpenAiClient
      * Deliberately outside cost control. This is only used for `GET /models` by the health check
      * and the runtime preflight: it consumes no tokens and costs nothing, and an operator has to be
      * able to verify provider connectivity during an incident — including while a global stop is
-     * active. Every call that can actually spend money goes through createResponse(), post() or
-     * createEmbedding(), all of which authorise first.
+     * active. Every call that can actually spend money goes through createResponse() or post(),
+     * both of which authorise first.
      */
     public function get(string $endpoint, int $timeoutSeconds = 180): Response
     {
@@ -83,31 +83,6 @@ class OpenAiClient
         }
     }
 
-    public function createEmbedding(string $input, ?string $operation = null): array
-    {
-        return $this->withinOperation($operation, fn (): array => $this->createEmbeddingInContext($input));
-    }
-
-    private function createEmbeddingInContext(string $input): array
-    {
-        $model = $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->providerCallContext($model, 'embeddings'));
-
-        try {
-            $result = $this->usageMeter->measureResponse(
-                $model,
-                fn (): array => $this->send('embeddings', ['model' => $model, 'input' => $input]),
-            );
-            $this->costControl->finalize($decision);
-
-            return $result;
-        } catch (\Throwable $exception) {
-            $this->costControl->fail($decision, $exception);
-
-            throw $exception;
-        }
-    }
-
     public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null, ?string $operation = null): Response
     {
         return $this->withinOperation($operation, fn (): Response => $this->postInContext($endpoint, $payload, $timeoutSeconds, $onStats));
@@ -116,17 +91,18 @@ class OpenAiClient
     private function postInContext(string $endpoint, array $payload, int $timeoutSeconds, ?callable $onStats): Response
     {
         $endpoint = ltrim($endpoint, '/');
-        $postModel = trim((string) ($payload['model'] ?? '')) ?: $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->providerCallContext($postModel, $endpoint));
+        $model = trim((string) ($payload['model'] ?? '')) ?: 'unknown';
+        $decision = $this->costControl->authorize($this->providerCallContext($model, $endpoint));
 
         try {
-            $response = $endpoint === 'responses'
-                ? $this->usageMeter->measureHttpResponse(
-                    trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown',
-                    fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
-                    $decision->estimatedCostNok,
-                )
-                : $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats);
+            // Every endpoint is measured: a provider call that reaches no ledger row would spend
+            // money invisibly.
+            $response = $this->usageMeter->measureHttpResponse(
+                $model,
+                fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
+                $decision->estimatedCostNok,
+                $endpoint,
+            );
 
             if ($response->successful()) {
                 $this->costControl->finalize($decision);
@@ -293,17 +269,6 @@ class OpenAiClient
             ->asJson()
             ->timeout($timeoutSeconds)
             ->withOptions($options);
-    }
-
-    private function embeddingModel(): string
-    {
-        $model = trim((string) config('services.openai.embedding_model', 'text-embedding-3-small'));
-
-        if ($model === '') {
-            throw new RuntimeException('OpenAI embedding model is not configured.');
-        }
-
-        return $model;
     }
 
     private function requestIdFrom(Response $response): ?string

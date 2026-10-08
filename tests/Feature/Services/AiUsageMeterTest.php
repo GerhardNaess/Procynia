@@ -11,6 +11,7 @@ use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseIncompleteException;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -52,23 +53,22 @@ class AiUsageMeterTest extends TestCase
         ]);
     }
 
-    public function test_it_marks_an_embedding_timeout_as_uncertain_instead_of_zero_cost_success(): void
+    public function test_no_runtime_code_has_an_unmetered_embedding_path(): void
     {
-        $customer = $this->createCustomer();
-        $meter = app(AiUsageMeter::class);
+        // The dead EmbeddingService path was removed (2026-10-09). An embedding call, if one is
+        // ever added, must go through OpenAiClient::post() with a registered operation like any
+        // other AI call — not through a side door that bypasses the operation/context contract.
+        $this->assertFalse(class_exists('App\\Services\\OpenAi\\EmbeddingService'));
+        $this->assertFalse(method_exists(AiUsageMeter::class, 'measureEmbedding'));
+        $this->assertFalse(method_exists(OpenAiClient::class, 'createEmbedding'));
 
-        $meter->within(new AiCallContext(customerId: $customer->id, feature: 'knowledge', operation: 'knowledge.embedding'), fn (): array => $meter->measureEmbedding(
-            'text-embedding-3-small',
-            fn (): array => ['ok' => false, 'model' => 'text-embedding-3-small', 'usage' => [], 'error_type' => 'timeout'],
-        ));
+        $offenders = collect(File::allFiles(app_path()))
+            ->filter(fn (\SplFileInfo $file): bool => preg_match("/['\"]embeddings['\"]/", (string) file_get_contents($file->getPathname())) === 1)
+            ->map(fn (\SplFileInfo $file): string => $file->getPathname())
+            ->values()
+            ->all();
 
-        $this->assertDatabaseHas('ai_usage_attempts', [
-            'customer_id' => $customer->id,
-            'operation_key' => 'knowledge.embedding',
-            'model' => 'text-embedding-3-small',
-            'status' => 'uncertain',
-            'failure_type' => 'timeout',
-        ]);
+        $this->assertSame([], $offenders);
     }
 
     public function test_the_openai_responses_client_creates_one_measured_gpt_five_attempt(): void

@@ -48,22 +48,6 @@ return [
                 'output_price_per_1m_tokens' => 10.00,
                 'source_url' => 'https://developers.openai.com/api/docs/pricing',
             ],
-            [
-                'model' => 'text-embedding-3-small',
-                'currency' => 'usd',
-                'input_price_per_1m_tokens' => 0.02,
-                'cached_input_price_per_1m_tokens' => null,
-                'output_price_per_1m_tokens' => 0.00,
-                'source_url' => 'https://developers.openai.com/api/docs/pricing',
-            ],
-            [
-                'model' => 'text-embedding-3-large',
-                'currency' => 'usd',
-                'input_price_per_1m_tokens' => 0.13,
-                'cached_input_price_per_1m_tokens' => null,
-                'output_price_per_1m_tokens' => 0.00,
-                'source_url' => 'https://developers.openai.com/api/docs/pricing',
-            ],
         ],
     ],
 ];

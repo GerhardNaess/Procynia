@@ -84,7 +84,7 @@ no-op.
 
 ### Optional — bevisst ikke satt
 
-`APP_LOCALE` (default `no`), `OPENAI_BASE_URL`/`OPENAI_MODEL`/`OPENAI_EMBEDDING_MODEL`,
+`APP_LOCALE` (default `no`), `OPENAI_BASE_URL`/`OPENAI_MODEL`,
 `BCRYPT_ROUNDS`, øvrige `DOFFIN_*`-endepunkter. Laravel-configen har allerede riktig verdi.
 
 `PROCYNIA_OPTIMIZE_ON_BOOT` (default `true`) styrer om entrypoint varmer config/route/view-cache.

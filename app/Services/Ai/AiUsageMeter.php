@@ -76,10 +76,10 @@ class AiUsageMeter
     }
 
     /** Measure a raw Responses API transport call used by legacy clients that need the HTTP object. */
-    public function measureHttpResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null): Response
+    public function measureHttpResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null, string $endpoint = 'responses'): Response
     {
         $context = $this->contextScope->current();
-        $attempt = $this->start($context, $model, 'responses', $reservedCostNok);
+        $attempt = $this->start($context, $model, $endpoint, $reservedCostNok);
         $startedAt = microtime(true);
 
         try {
@@ -117,13 +117,7 @@ class AiUsageMeter
     }
 
     /** @return array<string, mixed> */
-    public function measureEmbedding(string $model, Closure $providerCall): array
-    {
-        return $this->measure($model, 'embeddings', $providerCall, true);
-    }
-
-    /** @return array<string, mixed> */
-    private function measure(string $model, string $endpoint, Closure $providerCall, bool $embedding = false, ?float $reservedCostNok = null): array
+    private function measure(string $model, string $endpoint, Closure $providerCall, ?float $reservedCostNok = null): array
     {
         $context = $this->contextScope->current();
         $attempt = $this->start($context, $model, $endpoint, $reservedCostNok);
@@ -133,11 +127,7 @@ class AiUsageMeter
             $result = $providerCall();
             $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
-            if ($embedding && is_array($result) && ! ($result['ok'] ?? false)) {
-                $this->finish($attempt, $result['error_type'] === 'timeout' ? AiUsageAttempt::STATUS_UNCERTAIN : AiUsageAttempt::STATUS_FAILED, $elapsedMs, $result, (string) ($result['error_type'] ?? 'embedding_failed'));
-            } else {
-                $this->finish($attempt, AiUsageAttempt::STATUS_SUCCESS, $elapsedMs, is_array($result) ? $result : []);
-            }
+            $this->finish($attempt, AiUsageAttempt::STATUS_SUCCESS, $elapsedMs, is_array($result) ? $result : []);
 
             return $result;
         } catch (Throwable $exception) {

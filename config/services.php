@@ -46,7 +46,6 @@ return [
         // OPENAI_MODEL and OPENAI_REQUIREMENT_*_MODEL). `requirement_grounding_judge_model` and
         // `requirement_answer_model` were removed: nothing read them — the answer path has always
         // run on gpt-4.1-mini, whatever OPENAI_REQUIREMENT_ANSWER_MODEL said.
-        'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'provider_key' => env('OPENAI_PROVIDER_KEY', 'openai'),
         'deployment_name' => env('OPENAI_DEPLOYMENT_NAME'),
         'provider_region' => env('OPENAI_PROVIDER_REGION'),
