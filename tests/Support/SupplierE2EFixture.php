@@ -29,6 +29,7 @@ use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -356,7 +357,7 @@ class SupplierE2EFixture
             return [
                 'requirement_title' => $requirement->title,
                 'document_title' => $document->title,
-                'due_on' => \Illuminate\Support\Carbon::parse($evaluatedOn)->addMonthsNoOverflow(6)->toDateString(),
+                'due_on' => Carbon::parse($evaluatedOn)->addMonthsNoOverflow(6)->toDateString(),
             ];
         });
     }

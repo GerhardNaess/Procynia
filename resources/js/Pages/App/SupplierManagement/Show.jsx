@@ -82,7 +82,7 @@ export default function SupplierManagementShow() {
     const a = tr.assurance ?? {};
     // Which panel is open: 'edit', 'end', 'reopen', 'activate' or none. One at a time.
     const [panel, setPanel] = useState(null);
-    // «Følg opp i Avvik og forbedringer», from the supplier ({ assessment: null }) or an assessment.
+    // «Følg opp i Avvik og forbedringer», from the supplier ({ assessment: null }), an assessment or a control ({ evaluation }).
     const [followUp, setFollowUp] = useState(null);
     const canFollowUp = (improvementHandoff?.area_options ?? []).length > 0;
 
@@ -223,7 +223,13 @@ export default function SupplierManagementShow() {
                 />
 
                 {controlRequirements && (
-                    <SupplierControlRequirements supplierId={item.id} data={controlRequirements} locale={locale} tr={tr} />
+                    <SupplierControlRequirements
+                        supplierId={item.id}
+                        data={controlRequirements}
+                        onFollowUp={canFollowUp && followUp === null ? (evaluation) => setFollowUp({ evaluation }) : null}
+                        locale={locale}
+                        tr={tr}
+                    />
                 )}
 
                 <SupplierFollowUpPlan plan={followUpPlan} formatDate={(date) => formatLongDate(date, locale)} tr={tr} />

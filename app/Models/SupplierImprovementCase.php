@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * That a case in Avvik og forbedringer concerns a supplier — created from it («handoff», possibly
- * from one of its assessments) or connected afterwards («linked»). Nothing about the case is kept
+ * from one of its assessments or one of its controls) or connected afterwards («linked»). Nothing about the case is kept
  * here: its type, status, owner, frist and tiltak are read from Avvik og forbedringer, through that
  * module's access rules, when they are shown.
  *
@@ -28,6 +28,7 @@ class SupplierImprovementCase extends Model
         'supplier_id',
         'improvement_case_id',
         'supplier_assessment_id',
+        'supplier_requirement_evaluation_id',
         'origin',
         'handoff_key',
         'created_by',
@@ -46,5 +47,10 @@ class SupplierImprovementCase extends Model
     public function assessment(): BelongsTo
     {
         return $this->belongsTo(SupplierAssessment::class, 'supplier_assessment_id');
+    }
+
+    public function evaluation(): BelongsTo
+    {
+        return $this->belongsTo(SupplierRequirementEvaluation::class, 'supplier_requirement_evaluation_id');
     }
 }

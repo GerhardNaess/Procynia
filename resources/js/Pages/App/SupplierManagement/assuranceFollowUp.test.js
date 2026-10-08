@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { attentionFindingItems, followUpEntryDate, followUpEntryText, followUpView, nextControlText } from './assuranceFollowUp.js';
-import { ATTENTION_TARGETS, attentionFindingText } from './supplierManagement.js';
+import { ATTENTION_TARGETS, attentionFindingText, caseHandoffPrefill, caseOriginText } from './supplierManagement.js';
 
 const tr = {
     control: { levels: { mandatory: 'Obligatorisk', important: 'Viktig' }, display_statuses: { not_evaluated: 'Ikke vurdert' } },
@@ -83,5 +83,17 @@ describe('Neste kontroller', () => {
         assert.equal(nextControlText(row('documented', { next_control_on: null }), tr), 'Ingen fast kontrollfrist');
         assert.equal(nextControlText(row('documented', { next_control_on: '2027-04-08', control_overdue: false }), tr, date), 'Neste kontroll «2027-04-08»');
         assert.equal(nextControlText(row('partially_documented', { next_control_on: '2026-10-07', control_overdue: true }), tr, date), 'Kontrollfristen var «2026-10-07»');
+    });
+});
+
+describe('Følg opp i Avvik og forbedringer from a control', () => {
+    test('the suggestion names the requirement, the result and the reason; the case list says where it came from', () => {
+        const evaluation = { id: 9, requirement_title: 'DBA', status: 'missing', evaluated_on: '2026-10-08', rationale: 'Ikke mottatt.' };
+        const prefill = caseHandoffPrefill({ name: 'Acme AS' }, null, { control: { display_statuses: { missing: 'Mangler' } } }, date, evaluation);
+
+        assert.equal(prefill.title, 'Leverandør: Acme AS – DBA');
+        assert.equal(prefill.description, 'Sak opprettet fra kontrollen av kravet «DBA» hos Acme AS «2026-10-08». Resultat: Mangler.\n\nBegrunnelse fra kontrollen: Ikke mottatt.');
+        assert.equal(caseOriginText({ origin: 'handoff', evaluation: { requirement_title: 'DBA', evaluated_on: '2026-10-08' } }, {}, date), 'Opprettet fra kontrollen av «DBA» «2026-10-08»');
+        assert.equal(caseOriginText({ origin: 'handoff', evaluation: null, assessed_on: null }, {}), 'Opprettet fra leverandøren');
     });
 });

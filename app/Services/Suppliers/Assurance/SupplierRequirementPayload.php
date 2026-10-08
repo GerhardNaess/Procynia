@@ -96,13 +96,18 @@ class SupplierRequirementPayload
                     // Neste kontroll, and why it may come sooner (plan §14, §22.1).
                     'follow_up' => SupplierRequirementStatus::followUp($inForce, $requirement->control_interval_months, $documentsNow, $today),
                     'current' => $inForce === null ? null : [
+                        'id' => (int) $inForce->id,
                         'status' => $inForce->status,
+                        'rationale' => $inForce->rationale,
                         'evaluated_on' => $inForce->evaluated_on?->toDateString(),
                         'accepted_until' => $inForce->accepted_until?->toDateString(),
                         'evaluated_by_name' => $inForce->evaluatedBy?->name,
                     ],
                     'evaluations' => $entries((int) $requirement->id),
                     'can_evaluate' => $canEvaluate,
+                    // «Følg opp i Avvik og forbedringer» from the control in force — supplier.assure, a
+                    // result short of Dokumentert. The page also needs a fagområde to register in.
+                    'can_follow_up' => $canEvaluate && $inForce !== null && in_array($inForce->status, SupplierRequirementEvaluation::FOLLOW_UP_STATUSES, true),
                     'can_exclude' => $canOverride && $decision['automatic'] && ! $requirement->isMandatory()
                         && $requirement->supplier_id === null && $decision['override']?->action !== SupplierRequirementOverride::ACTION_EXCLUDE,
                     'can_clear' => $canOverride && $decision['override'] !== null,

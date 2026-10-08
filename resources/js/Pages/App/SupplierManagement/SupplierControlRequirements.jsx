@@ -129,7 +129,7 @@ function Basis({ row, tr }) {
  * requirements that do not apply are listed only for someone who can include them; the excluded ones
  * and the history are folded away.
  */
-export default function SupplierControlRequirements({ supplierId, data, locale = 'no', tr }) {
+export default function SupplierControlRequirements({ supplierId, data, onFollowUp = null, locale = 'no', tr }) {
     const c = tr.control ?? {};
     // One open form at a time: { kind: 'evaluate' | 'include' | 'exclude' | 'clear' | 'own', requirement }.
     const [panel, setPanel] = useState(null);
@@ -185,6 +185,11 @@ export default function SupplierControlRequirements({ supplierId, data, locale =
                                     {panel === null && (row.can_evaluate || actions.exclude || actions.clear) && (
                                         <div className="mt-3 flex flex-wrap gap-2">
                                             {row.can_evaluate && <button type="button" onClick={() => setPanel({ kind: 'evaluate', requirement: row })} className={PRIMARY_ACTION}>{c.evaluate ?? 'Kontroller krav'}</button>}
+                                            {row.can_follow_up && onFollowUp && (
+                                                <button type="button" onClick={() => onFollowUp({ ...row.current, requirement_title: row.title })} className={SECONDARY_ACTION} data-testid="requirement-follow-up">
+                                                    {c.follow_up ?? 'Følg opp i Avvik og forbedringer'}
+                                                </button>
+                                            )}
                                             {actions.exclude && <button type="button" onClick={() => setPanel({ kind: 'exclude', requirement: row })} className={SECONDARY_ACTION}>{c.exclude ?? 'Gjelder ikke denne leverandøren'}</button>}
                                             {actions.clear && <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={SECONDARY_ACTION}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>}
                                         </div>

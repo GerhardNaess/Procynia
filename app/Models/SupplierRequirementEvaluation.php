@@ -47,6 +47,12 @@ class SupplierRequirementEvaluation extends Model
     /** How far ahead a temporary acceptance may run (§8.1). */
     public const MAX_ACCEPTANCE_MONTHS = 12;
 
+    /**
+     * Results that can be followed up in Avvik og forbedringer: everything short of Dokumentert
+     * (plan §7.1 — following up never removes a blocker; it is follow-up, not acceptance).
+     */
+    public const FOLLOW_UP_STATUSES = [self::STATUS_PARTIALLY_DOCUMENTED, self::STATUS_MISSING, self::STATUS_TEMPORARILY_ACCEPTED];
+
     public $timestamps = false;
 
     protected $fillable = [

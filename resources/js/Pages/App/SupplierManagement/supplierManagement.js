@@ -362,9 +362,20 @@ export function caseStatusLabel(status, ti = {}) {
  * @param {object|null} assessment  the assessment followed up, or null
  * @param {(date: string) => string} formatDate
  */
-export function caseHandoffPrefill(supplier, assessment, tr = {}, formatDate = (date) => date) {
+export function caseHandoffPrefill(supplier, assessment, tr = {}, formatDate = (date) => date, evaluation = null) {
     const c = tr.cases ?? {};
     const title = (c.prefill_title ?? 'Leverandør: :name').replace(':name', supplier.name);
+
+    if (evaluation) {
+        const intro = (c.prefill_description_evaluation ?? 'Sak opprettet fra kontrollen av kravet «:requirement» hos :name :date. Resultat: :result.')
+            .replace(':requirement', evaluation.requirement_title ?? '')
+            .replace(':name', supplier.name)
+            .replace(':date', formatDate(evaluation.evaluated_on))
+            .replace(':result', tr.control?.display_statuses?.[evaluation.status] ?? evaluation.status);
+        const rationale = (c.prefill_rationale_evaluation ?? 'Begrunnelse fra kontrollen: :rationale').replace(':rationale', evaluation.rationale ?? '');
+
+        return { title: `${title} – ${evaluation.requirement_title ?? ''}`, description: `${intro}\n\n${rationale}` };
+    }
 
     if (! assessment) {
         return { title, description: (c.prefill_description ?? 'Sak opprettet fra Leverandøroppfølging for :name.').replace(':name', supplier.name) };
@@ -384,12 +395,18 @@ export function assessmentNeedsFollowUp(assessment) {
     return Boolean(assessment) && assessment.overall_result !== 'satisfactory';
 }
 
-/** How a listed case came to concern the supplier: created here, from an assessment, or linked later. */
+/** How a listed case came to concern the supplier: created here, from an assessment or a control, or linked later. */
 export function caseOriginText(entry, tr = {}, formatDate = (date) => date) {
     const c = tr.cases ?? {};
 
     if (entry.origin === 'linked') {
         return c.linked ?? 'Koblet til senere';
+    }
+
+    if (entry.evaluation) {
+        return (c.from_evaluation ?? 'Opprettet fra kontrollen av «:requirement» :date')
+            .replace(':requirement', entry.evaluation.requirement_title)
+            .replace(':date', formatDate(entry.evaluation.evaluated_on));
     }
 
     return entry.assessed_on

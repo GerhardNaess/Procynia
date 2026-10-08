@@ -300,9 +300,12 @@ class SupplierManagementController extends Controller
             ])->all(),
             // null, not empty: the person cannot read Avvik og forbedringer, so nothing is said about it.
             'improvement_cases' => $this->improvements->casesFor($user, $supplier),
-            'improvement_handoff' => $canEdit && $open ? $this->improvements->formOptions($user) + [
-                'link_options' => $this->improvements->linkOptions($user, $supplier),
+            // supplier.edit hands off from the supplier and its assessments and links cases;
+            // supplier.assure hands off from a control (supplier-assurance-v2-plan §13.2).
+            'improvement_handoff' => ($canEdit || $this->access->canAssure($user)) && $open ? $this->improvements->formOptions($user) + [
+                'link_options' => $canEdit ? $this->improvements->linkOptions($user, $supplier) : [],
                 'types' => ImprovementCase::TYPES,
+                'can_from_supplier' => $canEdit,
             ] : null,
             // null, not empty: the person cannot read Risiko, so nothing is said about it.
             'risks' => $this->risks->risksFor($user, $supplier),

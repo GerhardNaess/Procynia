@@ -25,10 +25,10 @@ const TERM = 'text-base font-semibold text-slate-600';
  * assessments. Title and description start as a visible suggestion; the person chooses the type, the
  * fagområde, the ansvarlig and the frist. Nothing is created before they press «Opprett sak».
  */
-function HandoffForm({ supplier, assessment, handoff, onDone, locale, tr, ti }) {
+function HandoffForm({ supplier, assessment, evaluation, handoff, onDone, locale, tr, ti }) {
     const c = tr.cases ?? {};
     const ref = useRef(null);
-    const prefill = caseHandoffPrefill(supplier, assessment, tr, (iso) => formatLongDate(iso, locale));
+    const prefill = caseHandoffPrefill(supplier, assessment, tr, (iso) => formatLongDate(iso, locale), evaluation);
     const form = useForm({
         type: '',
         title: prefill.title,
@@ -37,6 +37,7 @@ function HandoffForm({ supplier, assessment, handoff, onDone, locale, tr, ti }) 
         owner_user_id: '',
         due_date: '',
         supplier_assessment_id: assessment?.id ?? null,
+        supplier_requirement_evaluation_id: evaluation?.id ?? null,
         handoff_key: newHandoffKey(),
     });
     const owners = ownersForArea(handoff.owner_options ?? [], form.data.business_area_id);
@@ -119,6 +120,7 @@ function HandoffForm({ supplier, assessment, handoff, onDone, locale, tr, ti }) 
             </div>
 
             {form.errors.supplier_assessment_id && <p className={ERROR}>{form.errors.supplier_assessment_id}</p>}
+            {form.errors.supplier_requirement_evaluation_id && <p className={ERROR}>{form.errors.supplier_requirement_evaluation_id}</p>}
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
@@ -177,7 +179,9 @@ function LinkForm({ supplierId, options, onDone, tr, ti }) {
  * server sent null: the person cannot read Avvik og forbedringer, so nothing is said about it.
  *
  * The case is worked in Avvik og forbedringer; this page only starts it (`followUp` — from the
- * supplier, or the assessment Vurderinger asked to follow up) and shows where it stands.
+ * supplier, the assessment Vurderinger asked to follow up, or the control Krav og kvalifikasjoner
+ * asked to follow up) and shows where it stands. Starting from the supplier and linking are
+ * supplier.edit (`handoff.can_from_supplier`); from a control it is supplier.assure.
  */
 export default function SupplierImprovementCases({ supplier, cases, handoff, followUp, setFollowUp, hasEditRight, locale, tr, ti }) {
     const c = tr.cases ?? {};
@@ -188,6 +192,7 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
     }
 
     const canHandOff = Boolean(handoff) && (handoff.area_options ?? []).length > 0;
+    const fromSupplier = Boolean(handoff?.can_from_supplier);
     const idle = followUp === null && ! linking;
     const date = (iso) => formatLongDate(iso, locale);
 
@@ -224,7 +229,7 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
                                 </div>
                             </dl>
                             <p className="mt-2 text-base text-slate-600">{caseOriginText(entry, tr, date)}</p>
-                            {handoff && idle && entry.origin === 'linked' && (
+                            {fromSupplier && idle && entry.origin === 'linked' && (
                                 <button type="button" onClick={() => unlink(entry)} className={`mt-3 ${DESTRUCTIVE_ACTION}`}>{c.unlink ?? 'Fjern koblingen'}</button>
                             )}
                         </li>
@@ -232,7 +237,7 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
                 </ul>
             )}
 
-            {handoff && idle && (
+            {fromSupplier && idle && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     {canHandOff && (
                         <button type="button" onClick={() => setFollowUp({ assessment: null })} className={PRIMARY_ACTION}>{c.follow_up ?? 'Følg opp i Avvik og forbedringer'}</button>
@@ -240,7 +245,7 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
                     <button type="button" onClick={() => setLinking(true)} className={SECONDARY_ACTION}>{c.link ?? 'Koble til eksisterende sak'}</button>
                 </div>
             )}
-            {handoff && ! canHandOff && idle && (
+            {fromSupplier && ! canHandOff && idle && (
                 <p className="mt-3 text-base text-slate-600" data-testid="cases-no-areas">{c.no_areas ?? 'Du har ikke tilgang til å opprette saker i Avvik og forbedringer.'}</p>
             )}
             {! handoff && hasEditRight && supplier.status === 'ended' && (
@@ -249,9 +254,10 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
 
             {canHandOff && followUp !== null && (
                 <HandoffForm
-                    key={followUp.assessment?.id ?? 'supplier'}
+                    key={followUp.evaluation ? `evaluation-${followUp.evaluation.id}` : (followUp.assessment?.id ?? 'supplier')}
                     supplier={supplier}
-                    assessment={followUp.assessment}
+                    assessment={followUp.assessment ?? null}
+                    evaluation={followUp.evaluation ?? null}
                     handoff={handoff}
                     onDone={() => setFollowUp(null)}
                     locale={locale}

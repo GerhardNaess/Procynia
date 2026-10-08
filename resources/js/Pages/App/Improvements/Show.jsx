@@ -144,7 +144,11 @@ export default function ImprovementShow() {
                             <Link href={origin.url} className="font-semibold text-violet-700 hover:text-violet-900">{origin.name}</Link>
                             {origin.from_supplier && (
                                 <span className="block text-slate-600">
-                                    {origin.assessed_on
+                                    {origin.evaluation
+                                        ? (tr.supplier_origin_evaluation ?? 'Saken ble opprettet fra kontrollen av «:requirement» :date.')
+                                            .replace(':requirement', origin.evaluation.requirement_title)
+                                            .replace(':date', formatLongDate(origin.evaluation.evaluated_on, locale))
+                                        : origin.assessed_on
                                         ? (tr.supplier_origin_assessment ?? 'Saken ble opprettet fra leverandørvurderingen :date.').replace(':date', formatLongDate(origin.assessed_on, locale))
                                         : (tr.supplier_origin_handoff ?? 'Saken ble opprettet fra leverandøren.')}
                                 </span>
