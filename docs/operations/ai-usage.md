@@ -453,7 +453,18 @@ Kostnad på en trusted rad kan fortsatt være åpen. Det leses av `settlement_st
 - Det finnes i dag **ikke** noe legitimt systemarbeid som kaller AI. `AiCallContext::system()` / `system.*` er klassifiseringen når det kommer.
 - Måling: `php artisan ai:usage-integrity [--days=7]` svarer på «har vi unattributed AI-kall?» (antall, siste tidspunkt, per operasjon; exit 1 hvis noen). `ai:cost-control-health` varsler `ai_unattributed_attempts` hver time, og AiForbruk viser et rødt kontrollsignal.
 - `AI_CONTEXT_ENFORCEMENT=strict` avviser et kundedrevet kall uten kunde før kostnad oppstår. Manglende eller ukjent feature/operasjon avvises alltid, også i `warn`. Unntatt: kun eksplisitt `system.*`-arbeid. `ops:runtime-check` feiler på en ugyldig verdi (f.eks. `Strict`).
-- Før strict slås på i et miljø: `ai:usage-integrity --days=14` skal være grønn over normal trafikk, inkludert minst ett døgn med `wiki:maintenance-cycle` og en Anbud-ekstraksjon.
+- `ai:usage-integrity` er en gate: exit 0 = klar, ellers ikke. Den sjekker alltid i vinduet: 0 unattributed, kundekall har kunde, alle rader har feature og registrert operasjon, systemarbeid er eksplisitt `system.*`, og alle rader har `settlement_status`.
+
+#### Kriterium før `AI_CONTEXT_ENFORCEMENT=strict` aktiveres
+
+Strict styres kun av env/config (`AI_CONTEXT_ENFORCEMENT`, default `warn`) og slås aldri på i kode. Før det settes til `strict` i et miljø, skal **alle** disse være oppfylt i **produksjon**:
+
+1. `php artisan ai:usage-integrity --days=14 --gate` gir exit 0. `--gate` krever i tillegg at vinduet er minst 14 dager (`AiUsageIntegrity::STRICT_GATE_DAYS`), at ledgeren har trafikk for hele vinduet, minst én Anbud-ekstraksjon (`tender.requirement_extraction*`) og Wiki-arbeid.
+2. Minst én fullført `wiki:maintenance-cycle` i vinduet — bekreftes manuelt i scheduler-loggen (`[WIKI_MAINTENANCE] Maintenance cycle complete`); ledgeren kan ikke bevise det.
+3. Wiki/Kvalitet/øvrige moduler er brukt i vinduet av de kundene som faktisk bruker dem — bekreftes manuelt.
+4. 0 unattributed kundekall (dekket av 1).
+
+Lokal kjøring eller testdata teller ikke som verifisering. Status per nå: **kode klar – produksjonsverifisering gjenstår.**
 
 ### Reservasjon ≠ faktisk kostnad
 

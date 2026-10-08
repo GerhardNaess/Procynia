@@ -8,6 +8,7 @@ use App\Data\Ai\Usage\AiUsageFilter;
 use App\Data\Billing\BillingPeriod;
 use App\Models\AiUsageAttempt;
 use App\Services\Billing\CustomerBillingPeriodResolver;
+use App\Support\Ai\AiOperationCatalog;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -219,6 +220,46 @@ class AiUsageLedger
             ->when($filter->feature !== null, fn (Builder $query) => $query->where('feature', $filter->feature))
             ->when($filter->operation !== null, fn (Builder $query) => $query->where('operation_key', $filter->operation))
             ->count();
+    }
+
+    /**
+     * Everything the strict gate (`ai:usage-integrity`) asks of post-boundary attempts in the
+     * window: ownership, classification and settlement, plus the traffic evidence it requires.
+     *
+     * @return array{unattributed: array{count: int, last_at: ?string, operations: list<array<string, mixed>>}, customer_without_customer_id: int, missing_feature: int, unregistered_operations: list<array{operation_key: string, count: int}>, system_not_classified: int, missing_settlement: int, first_attempt_at: ?string, tender_extraction_calls: int, wiki_calls: int}
+     */
+    public function attributionIntegrity(?CarbonImmutable $since = null): array
+    {
+        $query = fn (): Builder => AiUsageAttempt::query()
+            ->where('ledger_version', '>=', AiUsageAttempt::TRUSTED_SINCE_LEDGER_VERSION)
+            ->when($since !== null, fn (Builder $inner) => $inner->where('started_at', '>=', $since));
+
+        $unregistered = $query()
+            ->whereNotIn('operation_key', AiOperationCatalog::registeredOperations())
+            ->select('operation_key')
+            ->selectRaw('COUNT(*) as count')
+            ->groupBy('operation_key')
+            ->orderBy('operation_key')
+            ->toBase()
+            ->get()
+            ->map(fn (object $row): array => ['operation_key' => (string) $row->operation_key, 'count' => (int) $row->count])
+            ->all();
+
+        $first = AiUsageAttempt::query()
+            ->where('ledger_version', '>=', AiUsageAttempt::TRUSTED_SINCE_LEDGER_VERSION)
+            ->min('started_at');
+
+        return [
+            'unattributed' => $this->unattributed($since),
+            'customer_without_customer_id' => $query()->where('attribution', AiCallContext::ATTRIBUTION_CUSTOMER)->whereNull('customer_id')->count(),
+            'missing_feature' => $query()->where(fn (Builder $inner) => $inner->whereNull('feature')->orWhereIn('feature', ['', 'unclassified']))->count(),
+            'unregistered_operations' => $unregistered,
+            'system_not_classified' => $query()->where('attribution', AiCallContext::ATTRIBUTION_SYSTEM)->where('operation_key', 'not like', 'system.%')->count(),
+            'missing_settlement' => $query()->whereNull('settlement_status')->count(),
+            'first_attempt_at' => $first === null ? null : (string) $first,
+            'tender_extraction_calls' => $query()->where('operation_key', 'like', 'tender.requirement_extraction%')->count(),
+            'wiki_calls' => $query()->where('feature', 'wiki')->count(),
+        ];
     }
 
     /** @return array{trusted: int, unattributed: int, legacy: int} */
