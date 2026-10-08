@@ -55,8 +55,7 @@ test('the subscription card shows Basis, not the legacy plan', async ({ page }) 
         await page.goto('/app/billing');
 
         const card = page.getByTestId('subscription-card');
-        await expect(card.getByRole('heading', { name: 'Abonnement' })).toBeVisible();
-        await expect(card.getByText('Basis', { exact: true })).toBeVisible();
+        await expect(card.getByRole('heading', { name: 'Basis', exact: true })).toBeVisible();
         await expect(card.getByText('Aktiv', { exact: true })).toBeVisible();
         await expect(card.getByText('Fakturering')).toBeVisible();
         await expect(card.getByText(/^(Månedlig|Årlig)$/)).toBeVisible();
@@ -65,7 +64,7 @@ test('the subscription card shows Basis, not the legacy plan', async ({ page }) 
         await expect(page.getByRole('button', { name: 'Endre abonnement' })).toHaveCount(0);
         expect(await page.locator('main').innerText()).not.toMatch(/\b(Pro|Max|Ultra|Enterprise)\b/);
 
-        // Basis/Opsjoner and AI-kapasitet still have their own sections.
+        // Opsjoner and AI-kapasitet have their own sections.
         await expect(page.getByTestId('module-packages')).toBeVisible();
         await expect(page.getByTestId('ai-capacity-card')).toHaveCount(1);
 

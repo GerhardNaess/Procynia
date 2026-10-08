@@ -17,7 +17,7 @@ import {
  * The shared AI capacity on the subscription page: one pool for every Procynia module, in AI units.
  * A block of its own — AI capacity is separate from Basis and the options, and never sized by them.
  *
- * Meant to be understood in a few seconds — a headline, one bar, three facts. Every state is carried
+ * Meant to be understood in a few seconds — the tier, a headline, one bar, four facts. Every state is carried
  * by text first; the badge and the bar colour only repeat what the words already say.
  */
 export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' }) {
@@ -26,11 +26,6 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
     }
 
     const heading = <h2 className="text-base font-semibold text-slate-900">{texts.heading ?? 'AI-kapasitet'}</h2>;
-    const explainer = (
-        <p className="mt-5 text-base leading-6 text-slate-600">
-            {texts.explainer ?? 'AI-kapasiteten er separat fra Basis og opsjonene. Alle AI-funksjoner i Procynia bruker den samme kapasiteten, uansett hvilke opsjoner som er aktive.'}
-        </p>
-    );
 
     if (!isConfigured(capacity)) {
         return (
@@ -40,7 +35,7 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
                     {texts.not_configured ?? 'AI-kapasitet er ikke konfigurert ennå.'}
                 </p>
                 <p className="mt-2 text-base leading-6 text-slate-700">
-                    {texts.not_configured_detail ?? 'AI-bruk registreres, men det er ikke satt en kommersiell kapasitetsgrense. Ta kontakt med Procynia hvis dere har spørsmål om AI-kapasitet.'}
+                    {texts.not_configured_detail ?? 'AI-bruk registreres, men det er ikke satt en kommersiell kapasitetsgrense.'}
                 </p>
                 {/* Usage is still recorded without a limit, so it is shown — never as "0 av 0". */}
                 <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 text-base sm:grid-cols-2">
@@ -53,7 +48,6 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
                         <dd className="font-medium text-slate-900" data-testid="ai-capacity-period">{periodLabel(capacity, locale)}</dd>
                     </div>
                 </dl>
-                {explainer}
             </section>
         );
     }
@@ -72,12 +66,10 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
             </div>
 
             {capacity.tier_name && (
-                <p className="mt-2 text-base text-slate-700" data-testid="ai-capacity-tier">
-                    {texts.tier_label ?? 'Kapasitetsnivå'}: <span className="font-medium text-slate-900">{capacity.tier_name}</span>
-                </p>
+                <p className="mt-1 text-base font-medium text-slate-700" data-testid="ai-capacity-tier">{capacity.tier_name}</p>
             )}
 
-            <p className="mt-4 text-lg font-semibold text-slate-900" data-testid="ai-capacity-headline">
+            <p className="mt-3 text-lg font-semibold text-slate-900" data-testid="ai-capacity-headline">
                 {headline(capacity, texts, locale)}
             </p>
 
@@ -133,7 +125,6 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
                 </div>
             </dl>
 
-            {explainer}
         </section>
     );
 }

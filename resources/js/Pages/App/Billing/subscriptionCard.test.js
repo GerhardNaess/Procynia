@@ -42,7 +42,59 @@ describe('the subscription card shows the product model, not the legacy plans', 
         assert.match(billing, /router\.post\('\/app\/billing\/cancel'/);
     });
 
-    test('modules and AI cases are not repeated in the card', () => {
-        assert.doesNotMatch(card(), /modulePackages|basePackage|AI-saker|ai_quota/);
+    test('options, AI capacity and AI cases are not repeated in the card', () => {
+        assert.doesNotMatch(card(), /optionPackages|aiCapacity|AiCapacityCard|AI-enheter|AI-saker|ai_quota/);
+    });
+
+    test('the card is headed Basis and carries the only Basis status badge', () => {
+        assert.match(card(), /<h2[^>]*>\{productLabel\}<\/h2>/);
+        assert.doesNotMatch(card(), /cardText\.heading/);
+        // What Basis contains is said here, once — not again among the options.
+        assert.match(card(), /basisModules/);
+        assert.doesNotMatch(options(), /basePackage|basisModules|base_heading|base_help/);
     });
 });
+
+/** The Opsjoner section. */
+function options() {
+    const start = billing.indexOf('data-testid="module-packages"');
+    assert.notEqual(start, -1, 'the options section is no longer recognisable');
+
+    return billing.slice(start, billing.indexOf('</section>', start));
+}
+
+describe('the page reads Basis → Opsjoner → AI-kapasitet → Fakturaer, without duplicates', () => {
+    test('the sections come in the order of the product model', () => {
+        const order = [
+            billing.indexOf('data-testid="subscription-card"'),
+            billing.indexOf('data-testid="module-packages"'),
+            billing.indexOf('<AiCapacityCard'),
+            billing.indexOf('invoicesText.heading'),
+        ];
+
+        assert.ok(order.every((at) => at !== -1));
+        assert.deepEqual([...order].sort((a, b) => a - b), order);
+    });
+
+    test('the top summary cards that repeated Basis and the services count are gone', () => {
+        assert.doesNotMatch(billing, /SummaryCard|summaryHints|subscriptionSummaryValue|procyniaServicesValue/);
+    });
+
+    test('options are called Opsjoner, never Tilleggstjenester or Moduler og pakker', () => {
+        assert.match(options(), /modulesText\.options_heading \?\? 'Opsjoner'/);
+        assert.doesNotMatch(billing, /Tilleggstjenester|tilleggstjenester|Moduler og pakker/);
+    });
+
+    test('other invoiced services appear only when there are any', () => {
+        assert.match(billing, /\{hasProcyniaServices && \(\s*<section data-testid="other-services"/);
+    });
+
+    test('the intro names the new model', () => {
+        assert.match(billing, /'Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer\.'/);
+    });
+
+    test('buttons are real buttons with visible names', () => {
+        assert.equal((card().match(/<button\s/g) ?? []).length, (card().match(/type="button"/g) ?? []).length);
+    });
+});
+

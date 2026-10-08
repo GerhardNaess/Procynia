@@ -137,6 +137,51 @@ class BillingAiCapacityTest extends TestCase
                 ->where('ai_capacity.tier_name', 'Nivå 2'));
     }
 
+    public function test_the_page_serves_basis_options_and_ai_capacity_as_separate_data(): void
+    {
+        config()->set('ai_customer_capacity.tiers', [
+            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2500, 'active' => true, 'sort_order' => 10],
+        ]);
+        $customer = $this->customer(['ai_capacity_tier' => 'tier_a', 'subscription_plan' => Customer::PLAN_ULTRA]);
+        $modules = app(ModuleEntitlementService::class);
+        $modules->activatePackage($customer, 'basis');
+        foreach (['risk', 'objectives', 'tender'] as $option) {
+            $modules->activatePackage($customer, $option);
+        }
+
+        $this->actingAs($this->owner($customer))->get('/app/billing')
+            ->assertOk()
+            ->assertInertia(function ($page): void {
+                $props = $page->toArray()['props'];
+
+                // Basis: billing facts only — no plan tier, no AI figures.
+                $this->assertSame('active', $props['subscription']['status']);
+                $this->assertSame('monthly', $props['subscription']['billing_interval']);
+                $this->assertDoesNotMatchRegularExpression('/ultra|pro|max|enterprise|ai_|plan/i', json_encode(array_keys($props['subscription'])).json_encode(array_values($props['subscription'])));
+
+                // Opsjoner: Basis apart from the options, each with its own status.
+                $packages = collect($props['module_packages'])->keyBy('key');
+                $this->assertSame('base', $packages['basis']['kind']);
+                $this->assertSame(['risk' => 'active', 'objectives' => 'active', 'compliance' => 'available', 'supplier' => 'available', 'tender' => 'active'],
+                    $packages->where('kind', 'option')->map(fn (array $entry): string => $entry['status'] === 'active' ? 'active' : 'available')->all());
+
+                // AI-kapasitet: its own block, sized by the tier.
+                $this->assertSame('tier', $props['ai_capacity']['source']);
+                $this->assertSame(2500, $props['ai_capacity']['included']);
+
+                // The wording follows the model: Opsjoner, not Tilleggstjenester; no summary cards.
+                $billing = $props['translations']['billing'];
+                $this->assertSame('Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer.', $billing['subtitle']);
+                $this->assertSame('Opsjoner', $billing['modules']['options_heading']);
+                $this->assertArrayNotHasKey('summary_hints', $billing);
+                $shipped = json_encode($billing, JSON_UNESCAPED_UNICODE);
+                $this->assertStringNotContainsStringIgnoringCase('tilleggstjenester', $shipped);
+                $this->assertStringNotContainsString('Moduler og pakker', $shipped);
+                // No legacy tier name travels to the page, not even as an unused label.
+                $this->assertDoesNotMatchRegularExpression('/\\b(Pro|Max|Ultra|Enterprise)\\b/', $shipped);
+            });
+    }
+
     public function test_the_page_carries_no_internal_cost_or_token_figures(): void
     {
         $customer = $this->customer(['included_ai_units' => 5000]);

@@ -118,7 +118,7 @@ describe('the card stays simple and customer-safe', () => {
 
     test('no plan, Basis or option sizes the capacity on the page', () => {
         assert.ok(!/included_ai_units|includedAiUnits|AI-enheter per måned/.test(billing));
-        assert.ok(!/Basis (gir|inkluderer)[^'.]*AI|inkludert i Basis|felles AI-kapasitet/i.test(billing + card));
+        assert.ok(!/Basis (gir|inkluderer)[^'.]*AI|inkludert i Basis|inkluderer en felles AI-kapasitet/i.test(billing + card));
     });
 
     test('Basis, the options and the AI capacity are three separate blocks, in that order', () => {
@@ -140,6 +140,17 @@ describe('the card stays simple and customer-safe', () => {
         assert.match(unconfigured, /ikke satt en kommersiell kapasitetsgrense/);
         assert.match(unconfigured, /ai-capacity-used/);
         assert.ok(!/headline\(|role="progressbar"|ai-capacity-remaining|ai-capacity-included/.test(unconfigured));
+    });
+
+    test('the provisional note is said once, quietly, without warning colours', () => {
+        assert.equal((card.match(/provisional_note/g) ?? []).length, 1);
+        const note = card.slice(card.indexOf('capacity.is_provisional && ('), card.indexOf('</p>', card.indexOf('capacity.is_provisional && (')));
+        assert.ok(!/amber|rose|red|bg-/.test(note), 'the note is plain text, not a warning box');
+    });
+
+    test('an unconfigured capacity shows no status badge', () => {
+        const unconfigured = card.slice(card.indexOf('if (!isConfigured(capacity))'), card.indexOf('const reserved ='));
+        assert.ok(!/StatusBadge|statusLabel|God kapasitet|Brukt opp/.test(unconfigured));
     });
 
     test('the selected tier is named only when it sizes the capacity, and never with a price', () => {

@@ -93,12 +93,10 @@ describe('the header block matches the reference', () => {
 });
 
 describe('nothing but the framing moved', () => {
-    test('the cards and their grids are untouched', () => {
-        for (const card of ['SummaryCard', 'AiCapacityCard', 'ConfirmDialog']) {
+    test('the AI capacity card and the dialogs are still rendered', () => {
+        for (const card of ['AiCapacityCard', 'ConfirmDialog']) {
             assert.ok(billing.includes(`<${card}`), `${card} should still be rendered`);
         }
-
-        assert.match(billing, /<section className="grid gap-4 md:grid-cols-2">/);
     });
 
     test('the overlays keep their own widths, which the page container never set', () => {

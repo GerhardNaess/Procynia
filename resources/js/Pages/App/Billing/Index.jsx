@@ -4,7 +4,6 @@ import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AiCapacityCard from '../../../Components/App/AiCapacityCard';
 import AlertBox from '../../../Components/App/AlertBox';
-import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { packageActionLabel, packageConfirmation, packageStatus, splitPackages } from '../../../Support/packagePresentation';
@@ -41,26 +40,6 @@ function resolveLabel(value, labels, fallback) {
     return labels?.[key] ?? fallback;
 }
 
-
-function SummaryCard({ label, value, hint, hintLabel }) {
-    return (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
-                <span>{label}</span>
-                {hint && (
-                    <InfoHint
-                        size="sm"
-                        label={hintLabel ?? `Vis forklaring for ${label}`}
-                        text={hint}
-                    />
-                )}
-            </div>
-            <div className="mt-3 text-lg font-semibold text-slate-900">
-                {value}
-            </div>
-        </div>
-    );
-}
 
 function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLabel = 'Bekreft', cancelLabel = 'Avbryt', warning = false }) {
     if (!isOpen) {
@@ -129,7 +108,6 @@ export default function BillingIndex() {
     const statusLabels = tb.status_labels ?? {};
     const lineTypeLabels = tb.billing_line_type_labels ?? {};
     const billingLineStatusLabels = tb.billing_line_status_labels ?? {};
-    const summaryHints = tb.summary_hints ?? {};
 
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmResume, setConfirmResume] = useState(false);
@@ -189,15 +167,6 @@ export default function BillingIndex() {
         ?? summaryText.not_available
         ?? 'Ikke tilgjengelig';
 
-    const formatCount = (count) => {
-        if (count === 0) {
-            return summaryText.none ?? 'Ingen';
-        }
-
-        const template = count === 1 ? summaryText.active_one : summaryText.active_many;
-        return (template ?? ':count aktive').replace(':count', String(count));
-    };
-
     const isOutstandingInvoice = (status) => new Set(['open', 'unpaid', 'past_due', 'incomplete', 'incomplete_expired'])
         .has(normalizeKey(status));
 
@@ -212,12 +181,6 @@ export default function BillingIndex() {
         }).format(outstandingAmount)
         : null;
 
-    const subscriptionSummaryValue = hasRegisteredSubscription
-        ? `${productLabel} · ${currentIntervalLabel}`
-        : (summaryText.no_active_subscription ?? 'Ingen aktivt abonnement');
-
-    const procyniaServicesValue = formatCount(billingLines.length);
-
     const showAddonsWithoutSubscriptionWarning = !hasRegisteredSubscription && hasProcyniaServices;
     const handleCancel = () => {
         router.post('/app/billing/cancel', {}, {
@@ -229,6 +192,10 @@ export default function BillingIndex() {
     const resolvePackageName = (key) => packageLabels[key] ?? key;
     const resolveModuleLabel = (key) => moduleLabels[key] ?? key;
     const { base: basePackage, options: optionPackages } = splitPackages(modulePackages);
+    // "Wiki, Kvalitet og Avvik og forbedringer" — said once, in the Basis card.
+    const basisModules = basePackage?.modules?.length
+        ? new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(basePackage.modules.map((key) => resolveModuleLabel(key)))
+        : null;
     const confirmPackage = modulePackages.find((entry) => entry.key === confirmPackageKey) ?? null;
     const confirmation = confirmPackage ? packageConfirmation(confirmPackage, modulesText, resolvePackageName) : null;
 
@@ -309,27 +276,23 @@ export default function BillingIndex() {
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tb.title ?? 'Abonnement'}</h1>
                         <PageHelpButton
                             buttonLabel={tb.page_help_button ?? 'Hjelp'}
-                            title={tb.page_help_title ?? 'Om abonnement, tilleggstjenester og fakturaer'}
-                            intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og en separat AI-kapasitet. Alle AI-funksjoner i Procynia bruker den samme AI-kapasiteten.'}
+                            title={tb.page_help_title ?? 'Om abonnementet'}
+                            intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og separat AI-kapasitet. Basis er grunnproduktet. Opsjoner gir tilgang til flere moduler. AI-kapasiteten deles av alle funksjoner som bruker AI.'}
                             sections={[
                                 {
                                     title: tb.page_help_section_overview ?? 'Hva du finner her',
                                     items: [
                                         {
-                                            title: tb.page_help_item_subscription_title ?? 'Abonnement',
-                                            text: tb.page_help_item_subscription_text ?? 'Viser at Basis er aktiv, hvordan abonnementet faktureres og hvor mange brukere som er inkludert. Her kan abonnementet også sies opp.',
+                                            title: tb.page_help_item_subscription_title ?? 'Basis',
+                                            text: tb.page_help_item_subscription_text ?? 'Grunnproduktet: hvordan abonnementet faktureres og hvor mange brukere som er inkludert. Her kan abonnementet også sies opp.',
+                                        },
+                                        {
+                                            title: tb.page_help_item_modules_title ?? 'Opsjoner',
+                                            text: tb.page_help_item_modules_text ?? 'Moduler som kan bestilles og avbestilles hver for seg. Avbestilling sletter ikke data.',
                                         },
                                         {
                                             title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
-                                            text: tb.page_help_item_ai_capacity_text ?? 'AI-kapasiteten er en egen del av abonnementet, atskilt fra Basis og opsjonene. Den brukes når Procynia benytter AI til analyse, generering eller bearbeiding av innhold. Alle AI-funksjoner bruker den samme kapasiteten, og den endres ikke når opsjoner bestilles eller avbestilles.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_modules_title ?? 'Moduler og pakker',
-                                            text: tb.page_help_item_modules_text ?? 'Viser hvilke pakker kundemiljøet har, og hvilke moduler hver pakke aktiverer.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_services_title ?? 'Tilleggstjenester',
-                                            text: tb.page_help_item_services_text ?? 'Viser tilleggstjenester som er knyttet til kunden.',
+                                            text: tb.page_help_item_ai_capacity_text ?? 'Én felles AI-kapasitet for hele Procynia. Den endres ikke når opsjoner bestilles eller avbestilles.',
                                         },
                                         {
                                             title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
@@ -341,55 +304,44 @@ export default function BillingIndex() {
                         />
                     </div>
                     <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        {tb.subtitle ?? 'Oversikt over abonnement, tilleggstjenester og fakturaer.'}
+                        {tb.subtitle ?? 'Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer.'}
                     </p>
-                    <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        {tb.intro ?? 'Her ser du kundens abonnement, tilleggstjenester og fakturering. Fakturaer og PDF-er vises når de finnes.'}
-                    </p>
-                </section>
-
-                <section className="grid gap-4 md:grid-cols-2">
-                    <SummaryCard
-                        label={summaryText.subscription ?? 'Abonnement'}
-                        value={subscriptionSummaryValue}
-                        hint={summaryHints.subscription}
-                    />
-                    <SummaryCard
-                        label={summaryText.procynia_services ?? 'Tilleggstjenester'}
-                        value={procyniaServicesValue}
-                        hint={summaryHints.addons}
-                    />
                 </section>
 
                 {showAddonsWithoutSubscriptionWarning && (
                     <AlertBox>
-                        {alertText.addons_without_subscription ?? 'Kontoen har aktive tillegg, men ingen aktivt abonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
+                        {alertText.addons_without_subscription ?? 'Kontoen har aktive fakturerte tjenester, men ingen aktivt abonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
                     </AlertBox>
                 )}
 
+                {/* 1. Basis: the base product and how the subscription is billed. Never options or AI capacity. */}
                 <section data-testid="subscription-card" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2">
-                        <h2 className="text-base font-semibold text-slate-900">
-                            {cardText.heading ?? 'Abonnement'}
-                        </h2>
-                        <InfoHint
-                            size="sm"
-                            label="Vis forklaring for abonnement"
-                            text={cardText.hint ?? 'Abonnementet består av Basis, valgfrie opsjoner og en separat AI-kapasitet. Opsjonene bestilles under Moduler og pakker.'}
-                        />
+                    <div data-testid={basePackage ? `package-row-${basePackage.key}` : undefined}>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <h2 className="text-base font-semibold text-slate-900">{productLabel}</h2>
+                            <div data-testid={basePackage ? `package-status-${basePackage.key}` : undefined}>
+                                {hasRegisteredSubscription ? (
+                                    <StatusBadge tone={isEnding ? 'amber' : 'green'}>
+                                        {isEnding
+                                            ? (cardText.status_ending ?? 'Avsluttes ved periodeslutt')
+                                            : (cardText.status_active ?? 'Aktiv')}
+                                    </StatusBadge>
+                                ) : basePackage && (
+                                    <StatusBadge tone={packageStatus(basePackage, modulesText).tone}>
+                                        {packageStatus(basePackage, modulesText).label}
+                                    </StatusBadge>
+                                )}
+                            </div>
+                        </div>
+                        {basisModules && (
+                            <p className="mt-1 text-base leading-6 text-slate-600">
+                                {(cardText.contains ?? 'Inneholder :modules.').replace(':modules', basisModules)}
+                            </p>
+                        )}
                     </div>
 
                     {hasRegisteredSubscription ? (
                         <>
-                            <div className="mt-3 flex flex-wrap items-center gap-3">
-                                <span className="text-xl font-semibold text-slate-950">{productLabel}</span>
-                                <StatusBadge tone={isEnding ? 'amber' : 'green'}>
-                                    {isEnding
-                                        ? (cardText.status_ending ?? 'Avsluttes ved periodeslutt')
-                                        : (cardText.status_active ?? 'Aktiv')}
-                                </StatusBadge>
-                            </div>
-
                             <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-2 text-base">
                                 <dt className="text-slate-600">{cardText.billing_interval ?? 'Fakturering'}</dt>
                                 <dd className="font-medium text-slate-900">{currentIntervalLabel}</dd>
@@ -414,6 +366,7 @@ export default function BillingIndex() {
                             <div className="mt-5 flex flex-wrap gap-3">
                                 {subscription.status === 'active' && !isEnding && (
                                     <button
+                                        type="button"
                                         onClick={() => setConfirmCancel(true)}
                                         className={`rounded-lg px-4 py-2 text-base font-medium ${WARNING_COLOURS}`}
                                     >
@@ -422,6 +375,7 @@ export default function BillingIndex() {
                                 )}
                                 {isEnding && (
                                     <button
+                                        type="button"
                                         onClick={() => setConfirmResume(true)}
                                         className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
                                     >
@@ -431,55 +385,26 @@ export default function BillingIndex() {
                             </div>
                         </>
                     ) : (
-                        <p className="mt-3 text-base leading-6 text-slate-600">
-                            {cardText.empty ?? 'Ingen aktivt abonnement er registrert.'}
-                        </p>
+                        <>
+                            <p className="mt-3 text-base leading-6 text-slate-600">
+                                {cardText.empty ?? 'Ingen aktivt abonnement er registrert.'}
+                            </p>
+                            {basePackage && packageActionLabel(basePackage, modulesText) && (
+                                <div className="mt-4">{renderPackageAction(basePackage)}</div>
+                            )}
+                        </>
                     )}
                 </section>
 
+                {/* 2. Opsjoner: each option on its own. What Basis contains is not repeated here. */}
                 <section data-testid="module-packages" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2">
-                        <h2 className="text-base font-semibold text-slate-900">
-                            {modulesText.heading ?? 'Moduler og pakker'}
-                        </h2>
-                        <InfoHint size="sm" label="Vis forklaring for moduler og pakker" text={modulesText.hint} />
-                    </div>
-                    <p className="mt-2 text-base leading-6 text-slate-600">
-                        {modulesText.help ?? 'Basis er grunnpakken i Procynia. Du kan i tillegg bestille de modulene virksomheten trenger. Opsjoner kan aktiveres og avbestilles uavhengig av hverandre. Avbestilling sletter ikke data.'}
-                    </p>
-
-                    {basePackage && (
-                        <div data-testid={`package-row-${basePackage.key}`} className="mt-5 rounded-xl border border-slate-200 p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <h3 className="text-base font-semibold text-slate-900">{modulesText.base_heading ?? 'Basis'}</h3>
-                                    <p className="mt-1 text-base leading-6 text-slate-600">
-                                        {modulesText.base_help ?? 'Basis er grunnpakken i Procynia.'}
-                                    </p>
-                                </div>
-                                <div className="flex flex-wrap items-start gap-3">
-                                    {renderPackageStatus(basePackage)}
-                                    {renderPackageAction(basePackage)}
-                                </div>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-1.5">
-                                {basePackage.modules.map((moduleKey) => (
-                                    <span
-                                        key={moduleKey}
-                                        className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-base font-medium leading-6 text-slate-700"
-                                    >
-                                        {resolveModuleLabel(moduleKey)}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <h3 className="mt-6 text-base font-semibold text-slate-900">{modulesText.options_heading ?? 'Opsjoner'}</h3>
+                    <h2 className="text-base font-semibold text-slate-900">
+                        {modulesText.options_heading ?? 'Opsjoner'}
+                    </h2>
                     <p className="mt-1 text-base leading-6 text-slate-600">
-                        {modulesText.options_help ?? 'Bestill og avbestill hver modul for seg.'}
+                        {modulesText.options_help ?? 'Bestill og avbestill hver opsjon for seg. Brukere får tilgang gjennom rollene sine. Avbestilling sletter ikke data.'}
                     </p>
-                    <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
                         {optionPackages.map((entry) => (
                             <li
                                 key={entry.key}
@@ -487,7 +412,7 @@ export default function BillingIndex() {
                                 className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_10rem_9rem] sm:items-start"
                             >
                                 <div className="min-w-0">
-                                    <div className="font-medium text-slate-900">{resolvePackageName(entry.key)}</div>
+                                    <h3 className="font-medium text-slate-900">{resolvePackageName(entry.key)}</h3>
                                     {packageDescriptions[entry.key] && (
                                         <p className="mt-1 text-base leading-6 text-slate-600">{packageDescriptions[entry.key]}</p>
                                     )}
@@ -499,18 +424,18 @@ export default function BillingIndex() {
                     </ul>
                 </section>
 
-                {/* The third, separate part of the subscription: one AI pool, not sized by Basis or the options. */}
+                {/* 3. AI-kapasitet: one pool for every module, not sized by Basis or the options. */}
                 <AiCapacityCard capacity={aiCapacity} texts={aiCapacityText} locale={locale} />
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2">
+                {/* Invoiced services outside Basis and the options (seats, one-off services). Only when there are any. */}
+                {hasProcyniaServices && (
+                    <section data-testid="other-services" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {servicesText.heading ?? 'Tilleggstjenester'}
+                            {servicesText.heading ?? 'Andre fakturerte tjenester'}
                         </h2>
-                        <InfoHint size="sm" label="Vis forklaring for tilleggstjenester" text={tb.hint_procynia_services} />
-                    </div>
-
-                    {billingLines.length > 0 ? (
+                        <p className="mt-1 text-base leading-6 text-slate-600">
+                            {servicesText.help ?? 'Tjenester som faktureres i tillegg til Basis og opsjonene.'}
+                        </p>
                         <div className="mt-4 overflow-x-auto">
                             <table className="w-full text-base">
                                 <thead>
@@ -541,12 +466,8 @@ export default function BillingIndex() {
                                 </tbody>
                             </table>
                         </div>
-                    ) : (
-                        <p className="mt-4 text-base leading-6 text-slate-600">
-                            {servicesText.empty ?? 'Ingen tilleggstjenester registrert. Tilleggstjenester beskriver ekstra tjenester som er knyttet til abonnementet, men er ikke økonomisk fasit.'}
-                        </p>
-                    )}
-                </section>
+                    </section>
+                )}
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="text-base font-semibold text-slate-900">

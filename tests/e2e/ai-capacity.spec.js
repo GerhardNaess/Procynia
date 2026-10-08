@@ -37,13 +37,26 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
     const basis = page.getByTestId('subscription-card');
     const options = page.getByTestId('module-packages');
     const card = page.getByTestId('ai-capacity-card');
-    await expect(basis).toContainText('Basis');
-    await expect(options.getByRole('heading', { name: 'Opsjoner' })).toBeVisible();
+    await expect(basis.getByRole('heading', { name: 'Basis', exact: true })).toBeVisible();
+    await expect(basis).toContainText('Inneholder Wiki, Kvalitet og Avvik og forbedringer.');
+    await expect(options.getByRole('heading', { name: 'Opsjoner', level: 2 })).toBeVisible();
+    // Basis is said once: not again as a row among the options, and only one status badge for it.
+    await expect(options.getByText('Basis', { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('package-status-basis')).toHaveText('Aktiv');
     await expect(card.getByRole('heading', { name: 'AI-kapasitet' })).toBeVisible();
     await expect(page.getByTestId('ai-capacity-card')).toHaveCount(1);
     const [basisBox, optionsBox, cardBox0] = [await basis.boundingBox(), await options.boundingBox(), await card.boundingBox()];
     expect(basisBox.y).toBeLessThan(optionsBox.y);
     expect(optionsBox.y + optionsBox.height).toBeLessThanOrEqual(cardBox0.y);
+    const invoicesBox = await page.getByRole('heading', { name: 'Fakturaer og betalinger' }).boundingBox();
+    expect(cardBox0.y + cardBox0.height).toBeLessThanOrEqual(invoicesBox.y);
+
+    // No old plan names, no summary cards repeating Basis, no «Tilleggstjenester».
+    const main = await page.locator('main').innerText();
+    expect(main).not.toMatch(/\b(Pro|Max|Ultra|Enterprise)\b/);
+    expect(main).not.toMatch(/Tilleggstjenester|Moduler og pakker|Basis · (Månedlig|Årlig)/i);
+    expect(main.match(/Fakturering/g) ?? []).toHaveLength(1);
+    await expect(page.getByText('Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer.')).toBeVisible();
     await expect(basis).not.toContainText(/AI-enheter/);
     await expect(options).not.toContainText(/AI-enheter/);
 
@@ -53,7 +66,7 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
     expect(capacity.packages.filter((key) => key !== 'basis').length).toBeGreaterThanOrEqual(2);
     // Tinker resolves the name in the app locale; the page shows the user's Norwegian label.
     expect(capacity.tier_name).toBeTruthy();
-    await expect(card.getByTestId('ai-capacity-tier')).toHaveText('Kapasitetsnivå: Nivå 2');
+    await expect(card.getByTestId('ai-capacity-tier')).toHaveText('Nivå 2');
     await expect(card.getByTestId('ai-capacity-headline')).toHaveText(
         new RegExp(`${grouped(capacity.used)} av ${grouped(capacity.included)} AI-enheter brukt`.replace(/ /g, '\\s')),
     );
@@ -77,22 +90,29 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
 
     await page.setViewportSize(PHONE);
     expect(await sidewaysOverflow(page), 'the page scrolls sideways at 390 px').toEqual([]);
-    // The rest of Abonnement (InfoHint icons) predates this card; the card itself is held to 16 px.
-    const smallText = await card.evaluate((root) => {
+    // The whole page content — Basis, Opsjoner, AI-kapasitet, fakturaer — is held to 16 px.
+    const smallText = await page.locator('main').evaluate((root) => {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         const found = [];
 
         while (walker.nextNode()) {
             const element = walker.currentNode.parentElement;
 
-            if (walker.currentNode.textContent.trim() && parseFloat(getComputedStyle(element).fontSize) < 16) {
+            if (walker.currentNode.textContent.trim() && !element.closest('[aria-hidden="true"], .sr-only')
+                && parseFloat(getComputedStyle(element).fontSize) < 16) {
                 found.push(walker.currentNode.textContent.trim());
             }
         }
 
         return found;
     });
-    expect(smallText, 'card text below 16 px at 390 px').toEqual([]);
+    expect(smallText, 'page text below 16 px at 390 px').toEqual([]);
+
+    // Option buttons wrap inside their rows rather than pushing the page wider.
+    for (const button of await page.getByTestId('module-packages').getByRole('button').all()) {
+        const box = await button.boundingBox();
+        expect(box.x + box.width).toBeLessThanOrEqual(390);
+    }
 
     // The bar uses the card's full width beside its percentage; the facts stack vertically.
     const cardBox = await card.boundingBox();
@@ -118,7 +138,7 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
     await page.setViewportSize(DESKTOP);
     await page.getByRole('button', { name: 'Hjelp', exact: true }).click();
     const help = page.getByRole('dialog');
-    await expect(help).toContainText('Basis, valgfrie opsjoner og en separat AI-kapasitet');
-    await expect(help).toContainText('Alle AI-funksjoner i Procynia bruker den samme AI-kapasiteten.');
+    await expect(help).toContainText('Abonnementet består av Basis, valgfrie opsjoner og separat AI-kapasitet.');
+    await expect(help).toContainText('AI-kapasiteten deles av alle funksjoner som bruker AI.');
     await expect(help).not.toContainText(/token/i);
 });

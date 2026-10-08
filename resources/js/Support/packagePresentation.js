@@ -1,5 +1,5 @@
 /**
- * How the Abonnement page presents «Moduler og pakker»: Basis, then the options.
+ * How the Abonnement page presents Basis and the options (Opsjoner).
  *
  * The verdict — which packages are active and which action each one offers — is
  * ModuleEntitlementService::overviewFor()'s. This only turns that verdict into words.
