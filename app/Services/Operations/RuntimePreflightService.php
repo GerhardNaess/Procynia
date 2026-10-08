@@ -108,6 +108,7 @@ class RuntimePreflightService
             $this->checkAiCostControlRuntimeSingleton(),
             $this->checkAiPricingReadiness(),
             $this->checkAiActiveModelPrices(),
+            $this->checkAiContextEnforcement(),
             $this->checkAiExchangeRateReadiness(),
             $this->checkAiCostControlConfiguration(),
         ];
@@ -248,6 +249,26 @@ class RuntimePreflightService
         } catch (Throwable $e) {
             return $this->fail('AI active model prices', 'could not be determined: '.$this->redact($e->getMessage()));
         }
+    }
+
+    /**
+     * AI_CONTEXT_ENFORCEMENT is `warn` or `strict`. Anything else would silently behave as warn — a
+     * typo meant to switch strict on must not pass as if it had. The mode itself is reported, not
+     * judged: moving to strict is a rollout decision (see docs/operations/ai-usage.md).
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiContextEnforcement(): array
+    {
+        $mode = (string) config('ai_operations.context_enforcement', 'warn');
+
+        if (! in_array($mode, ['warn', 'strict'], true)) {
+            return $this->fail('AI context enforcement', sprintf('AI_CONTEXT_ENFORCEMENT must be "warn" or "strict", got "%s"', $mode));
+        }
+
+        return $this->pass('AI context enforcement', $mode === 'strict'
+            ? 'strict: a customer-driven AI call without a customer is refused'
+            : 'warn: a customer-driven AI call without a customer is recorded as unattributed and alerted (check with ai:usage-integrity)');
     }
 
     /**

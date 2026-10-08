@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -37,6 +38,8 @@ use Throwable;
  */
 class EnterpriseWikiPageVersionClaimSyncService
 {
+    use RunsInAiCallContext;
+
     public function __construct(
         private readonly EnterpriseWikiExtractPageClaimsService $extractService,
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyService,
@@ -90,7 +93,12 @@ class EnterpriseWikiPageVersionClaimSyncService
             }
 
             try {
-                $this->syncRun($run);
+                // Each run's re-extraction and verification is that run's customer's AI work, also
+                // when the sync is started from an operator repair command with no owner of its own.
+                $this->withinAiCallContext(
+                    $this->enterpriseWikiRunAiCallContext($run->id, 'wiki.claim_resync'),
+                    fn () => $this->syncRun($run),
+                );
             } catch (Throwable $e) {
                 Log::error('[WIKI_PAGE_VERSION_CLAIM_SYNC] Sync failed for run.', [
                     'run_id' => $run->id,

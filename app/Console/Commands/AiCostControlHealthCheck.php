@@ -7,6 +7,7 @@ use App\Models\CustomerAiUsageReservation;
 use App\Services\Admin\AdminNotificationService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
 use App\Services\Ai\Pricing\AiModelPriceReadiness;
+use App\Services\Ai\Usage\AiUsageLedger;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
@@ -31,7 +32,7 @@ class AiCostControlHealthCheck extends Command
 
     protected $description = 'Report ageing uncertain AI reservations and unpriced provider attempts to internal admins.';
 
-    public function handle(AdminNotificationService $adminNotifications, AiOperationalPricingService $pricing, AiModelPriceReadiness $priceReadiness): int
+    public function handle(AdminNotificationService $adminNotifications, AiOperationalPricingService $pricing, AiModelPriceReadiness $priceReadiness, AiUsageLedger $ledger): int
     {
         if (! Schema::hasTable('customer_ai_usage_reservations') || ! Schema::hasTable('ai_usage_attempts')) {
             $this->warn('[AI_COST_HEALTH] Cost-control schema is not migrated; nothing to check.');
@@ -122,11 +123,34 @@ class AiCostControlHealthCheck extends Command
             );
         }
 
+        // Customer work that reached the provider without an owner. Zero is the precondition for
+        // AI_CONTEXT_ENFORCEMENT=strict; anything else names the operation that still leaks.
+        $unattributed = $ledger->unattributed($cutoff);
+
+        if ($unattributed['count'] > 0) {
+            $adminNotifications->create(
+                type: 'ai_unattributed_attempts',
+                severity: 'warning',
+                title: 'AI-kall uten kunde',
+                message: sprintf(
+                    '%d AI-kall de siste %d timene nådde leverandøren uten kunde og uten å være merket som systemarbeid (sist %s): %s.',
+                    $unattributed['count'],
+                    $hours,
+                    $unattributed['last_at'],
+                    implode(', ', array_map(static fn (array $row): string => $row['operation_key'].' ×'.$row['count'], $unattributed['operations'])),
+                ),
+                data: $unattributed,
+                dedupeKey: 'ai_unattributed_attempts:'.$today,
+            );
+        }
+
         $this->line(sprintf(
-            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Unpriced attempts (%dh): %d. Price catalogue: %s. Active models not price-ready: %d.',
+            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Unpriced attempts (%dh): %d. Unattributed attempts (%dh): %d. Price catalogue: %s. Active models not price-ready: %d.',
             $ageingHolds,
             $hours,
             $unpriced,
+            $hours,
+            $unattributed['count'],
             $pricing->catalogueIsConfigured() ? 'configured' : 'EMPTY',
             count($priceProblems),
         ));

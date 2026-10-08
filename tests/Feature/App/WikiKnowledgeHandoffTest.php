@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\App;
 
+use App\Data\Ai\Usage\AiUsageFilter;
+use App\Data\Ai\Usage\AiUsagePeriod;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\AiModelPrice;
 use App\Models\AiUsageAttempt;
@@ -20,6 +22,7 @@ use App\Models\Nationality;
 use App\Models\Objective;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\Ai\Usage\AiUsageLedger;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\OpenAi\OpenAiClient;
 use App\Support\Ai\AiCallContextScope;
@@ -175,7 +178,8 @@ class WikiKnowledgeHandoffTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
     }
 
-    public function test_the_wiki_run_ai_usage_is_attributed_to_the_module_record_that_caused_it(): void
+    #[DataProvider('sources')]
+    public function test_the_wiki_run_ai_usage_is_attributed_to_the_module_record_that_caused_it(string $sourceType): void
     {
         config(['services.openai.api_key' => 'test-key', 'services.openai.base_url' => 'https://openai.test/v1']);
         Http::fake(['https://openai.test/v1/responses' => Http::response(['status' => 'completed', 'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'total_tokens' => 15]], 200)]);
@@ -188,7 +192,7 @@ class WikiKnowledgeHandoffTest extends TestCase
         $customer = $this->customer();
         // A plan that includes AI, so the call reaches the provider and is recorded.
         $customer->forceFill(['subscription_plan' => Customer::PLAN_PRO, 'included_ai_credits' => 10])->save();
-        $scenario = $this->scenario('supplier', $customer);
+        $scenario = $this->scenario($sourceType, $customer);
         $user = $this->member($customer, [...$scenario['edit'], CustomerPermissionCatalog::WIKI_SOURCE_MANAGE], $scenario['areas']);
         $this->actingAs($user)->post($scenario['url'], $this->payload())->assertSessionHasNoErrors();
         $run = EnterpriseWikiIngestRun::query()->where('customer_id', $customer->id)->sole();
@@ -216,9 +220,20 @@ class WikiKnowledgeHandoffTest extends TestCase
         $this->assertSame('customer', $attempt->attribution);
         $this->assertSame('wiki', $attempt->feature);
         $this->assertSame('wiki.generate_page', $attempt->operation_key);
-        $this->assertSame('supplier', $attempt->resource_type);
+        $this->assertSame($sourceType, $attempt->resource_type);
         $this->assertSame((int) $scenario['record']->getKey(), $attempt->resource_id);
         $this->assertSame(0, app(AiCallContextScope::class)->current()->customerId ?? 0);
+
+        // Usage reporting can say which module the Wiki spend came from — feature stays `wiki`, the
+        // call is counted once, never again under the module.
+        $byOrigin = app(AiUsageLedger::class)->breakdown(
+            new AiUsageFilter(AiUsagePeriod::calendarMonth(), customerId: (int) $customer->id),
+            ['feature', 'resource_type'],
+        );
+        $this->assertSame([['feature' => 'wiki', 'resource_type' => $sourceType, 'calls' => 1]], array_map(
+            static fn (array $row): array => ['feature' => $row['feature'], 'resource_type' => $row['resource_type'], 'calls' => $row['calls']],
+            $byOrigin,
+        ));
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────
