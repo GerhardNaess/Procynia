@@ -7,6 +7,7 @@ use App\Models\BusinessArea;
 use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
 use App\Services\Risk\RiskAttentionService;
@@ -16,7 +17,6 @@ use App\Services\Risk\RiskQualityContextService;
 use App\Services\Risk\RiskReviewSchedule;
 use App\Services\Risk\RiskScoringPolicy;
 use App\Services\Risk\RiskTreatmentService;
-use App\Services\Risk\RiskWikiKnowledgeService;
 use App\Services\Suppliers\SupplierRiskService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -51,7 +51,7 @@ class RiskController extends Controller
         private readonly RiskAcceptanceService $acceptances,
         private readonly RiskReviewSchedule $reviewSchedule,
         private readonly RiskAttentionService $attention,
-        private readonly RiskWikiKnowledgeService $wikiKnowledge,
+        private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
         private readonly RiskCreator $creator,
         private readonly SupplierRiskService $supplierRisks,
     ) {}
@@ -174,9 +174,9 @@ class RiskController extends Controller
             'treatment_owner_options' => $canEdit ? $this->treatments->ownerOptions($risk) : [],
             // The residual-risk decision and its history: whoever may see the risk may read them.
             'risk_acceptance' => $this->acceptances->decisionFor($risk),
-            // Wiki knowledge handed over from this risk, read live from the Wiki. Links only for
-            // someone who may read the Wiki; nothing of the risk was copied into it.
-            'wiki_knowledge' => $this->wikiKnowledge->describeForRisk($risk, $this->wikiKnowledge->canReadWiki($user)),
+            // «Lag kunnskapsartikkel»: what this risk has handed over to the Wiki (read live, links only
+            // for a Wiki reader) and, for someone who may hand it over, what it can contribute.
+            'knowledge_handoff' => $this->knowledgeHandoff->panel($user, 'risk', $risk),
             // «Gjelder leverandør»: null unless the risk concerns a supplier, the customer holds
             // Leverandøroppfølging *and* the person can read that supplier there. Nothing about the
             // supplier otherwise.
@@ -189,7 +189,6 @@ class RiskController extends Controller
                 'can_assess' => $this->access->can($user, CustomerPermissionCatalog::RISK_ASSESS, $risk),
                 'can_accept' => $this->access->can($user, CustomerPermissionCatalog::RISK_ACCEPT, $risk),
                 'can_delete' => $this->access->can($user, CustomerPermissionCatalog::RISK_DELETE, $risk),
-                'can_create_wiki_knowledge' => $this->wikiKnowledge->canHandOff($user, $risk),
             ],
             'area_options' => $this->areaOptions($editableAreas),
             'owner_options' => $canEdit ? $this->ownerOptions($user, $editableAreas) : [],

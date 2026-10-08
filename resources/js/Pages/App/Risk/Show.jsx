@@ -11,7 +11,7 @@ import RiskForm from './RiskForm';
 import RiskReviewSchedule from './RiskReviewSchedule';
 import RiskTreatmentPanel from './RiskTreatmentPanel';
 import RiskTreatmentStrategy from './RiskTreatmentStrategy';
-import RiskWikiKnowledgePanel from './RiskWikiKnowledgePanel';
+import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import RiskDescription from './RiskDescription';
 import { RISK_LEVEL_TONES } from './riskLevel';
 import { RISK_STATUS_TONES } from './riskStatus';
@@ -43,7 +43,7 @@ export default function RiskShow() {
         treatment_owner_options: treatmentOwnerOptions = [],
         risk_acceptance: riskAcceptance = null,
         review_schedule: reviewSchedule = null,
-        wiki_knowledge: wikiKnowledge = [],
+        knowledge_handoff: knowledgeHandoff = null,
         supplier_origin: supplierOrigin = null,
         permissions = {},
         area_options: areaOptions = [],
@@ -268,12 +268,7 @@ export default function RiskShow() {
                     />
                 )}
 
-                <RiskWikiKnowledgePanel
-                    riskId={risk.id}
-                    entries={wikiKnowledge}
-                    canCreate={Boolean(permissions.can_create_wiki_knowledge)}
-                    tr={tr}
-                />
+                <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`risk-${risk.id}`} />
             </div>
         </CustomerAppLayout>
     );

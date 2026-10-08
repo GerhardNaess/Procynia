@@ -32,7 +32,6 @@ use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
-use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
 use App\Http\Controllers\App\SupplierAssuranceDecisionController;
 use App\Http\Controllers\App\SupplierComplianceRequirementController;
@@ -56,6 +55,7 @@ use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
 use App\Http\Controllers\App\WikiGraphFocusController;
+use App\Http\Controllers\App\WikiKnowledgeHandoffController;
 use App\Http\Controllers\App\WikiSourceController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EntraAuthController;
@@ -355,8 +355,8 @@ Route::prefix('app')
             // Acceptance of residual risk. Never edited; a mistake is revoked and accepted anew. risk.accept in the area.
             Route::post('/risks/{riskId}/acceptances', [RiskAcceptanceController::class, 'store'])->whereNumber('riskId')->name('acceptances.store');
             Route::post('/risks/{riskId}/acceptances/{acceptanceId}/revoke', [RiskAcceptanceController::class, 'revoke'])->whereNumber(['riskId', 'acceptanceId'])->name('acceptances.revoke');
-            // Risiko → Enterprise Wiki: what the person wrote becomes an ordinary Wiki source. risk.edit + wiki.source.manage.
-            Route::post('/risks/{riskId}/wiki-knowledge', [RiskWikiKnowledgeController::class, 'store'])->whereNumber('riskId')->name('wiki-knowledge.store');
+            // «Lag kunnskapsartikkel» — the shared Wiki handoff (risk.edit + wiki.source.manage), gated by this module's route prefix.
+            Route::post('/risks/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'risk')->name('knowledge-handoff.store');
         });
         // Mål og KPI. Named under `app.objectives.`, mapped to the `objectives` module. Objectives are
         // addressed by a plain id and resolved through ObjectiveAccessService, never by implicit
