@@ -7,6 +7,7 @@ use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiRequirement;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -18,6 +19,10 @@ use Tests\TestCase;
  */
 class RequirementExtractionCandidateDataTest extends TestCase
 {
+    // The provider boundary records every call in ai_usage_attempts; without a transaction those
+    // rows outlive the test and leak into whichever DB-backed test runs next in the process.
+    use DatabaseTransactions;
+
     /**
      * Purpose: Ensure one valid segment row becomes one internal requirement candidate with preserved provenance.
      * Inputs: None.
@@ -26,7 +31,7 @@ class RequirementExtractionCandidateDataTest extends TestCase
      */
     public function test_it_maps_a_segment_row_into_the_internal_candidate_contract(): void
     {
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 99,
             'saved_notice_id' => 123,
@@ -122,7 +127,7 @@ class RequirementExtractionCandidateDataTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 101,
             'saved_notice_id' => 321,
@@ -242,5 +247,4 @@ class RequirementExtractionCandidateDataTest extends TestCase
                 && data_get($data, 'text.format.name') === 'requirement_segment_extraction';
         });
     }
-
 }

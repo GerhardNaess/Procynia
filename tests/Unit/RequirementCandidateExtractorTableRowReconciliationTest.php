@@ -6,6 +6,7 @@ use App\Data\Ai\Requirements\DocxTableCellData;
 use App\Data\Ai\Requirements\DocxTableRowData;
 use App\Models\SavedNoticeAiDocument;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -20,6 +21,10 @@ use Tests\TestCase;
  */
 class RequirementCandidateExtractorTableRowReconciliationTest extends TestCase
 {
+    // The provider boundary records every call in ai_usage_attempts; without a transaction those
+    // rows outlive the test and leak into whichever DB-backed test runs next in the process.
+    use DatabaseTransactions;
+
     private function buildRow(string $sourceRowKey, string $reqNo, string $requirementText, string $type = 'M'): DocxTableRowData
     {
         return new DocxTableRowData(

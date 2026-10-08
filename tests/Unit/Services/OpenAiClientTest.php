@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services;
 
 use App\Services\OpenAi\OpenAiClient;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -11,6 +12,10 @@ use Tests\TestCase;
 
 class OpenAiClientTest extends TestCase
 {
+    // The provider boundary records every call in ai_usage_attempts; without a transaction those
+    // rows outlive the test and leak into whichever DB-backed test runs next in the process.
+    use DatabaseTransactions;
+
     public function test_it_posts_to_the_responses_endpoint_with_the_configured_base_url(): void
     {
         config([

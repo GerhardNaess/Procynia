@@ -8,6 +8,7 @@ use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\OpenAi\OpenAiClient;
 use GuzzleHttp\Psr7\Response as Psr7Response;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Response as HttpClientResponse;
 use Illuminate\Support\Facades\Http;
 use Mockery\MockInterface;
@@ -21,6 +22,10 @@ use Tests\TestCase;
  */
 class RequirementCandidateExtractorFullDocumentTest extends TestCase
 {
+    // The provider boundary records every call in ai_usage_attempts; without a transaction those
+    // rows outlive the test and leak into whichever DB-backed test runs next in the process.
+    use DatabaseTransactions;
+
     /**
      * Purpose: Ensure the Phase 1 test path uses the extracted document text in one OpenAI call.
      * Inputs: None.
