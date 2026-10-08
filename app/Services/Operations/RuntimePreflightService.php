@@ -2,6 +2,7 @@
 
 namespace App\Services\Operations;
 
+use App\Models\CustomerBillingPeriod;
 use App\Models\IdentityProvider;
 use App\Services\Ai\Pricing\AiModelPriceReadiness;
 use App\Services\Auth\EntraConfig;
@@ -84,7 +85,47 @@ class RuntimePreflightService
                 $withOpenAi ? $this->checkOpenAi() : $this->skip('OpenAI connectivity', 'not requested (pass --with-openai)'),
             ],
             $this->checkAiCostControl(),
+            [$this->checkBillingPeriods()],
         );
+    }
+
+    /**
+     * Every customer Stripe still bills must have its current billing period recorded locally, or
+     * AI usage for that customer falls back to a derived period. A warning, not a deploy blocker:
+     * `billing:sync-subscriptions` fixes it without downtime.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkBillingPeriods(): array
+    {
+        try {
+            if (! Schema::hasTable('customer_billing_periods') || ! Schema::hasTable('subscriptions')) {
+                return $this->skip('Billing periods', 'billing period schema not migrated yet');
+            }
+
+            $now = now('UTC');
+            $missing = DB::table('subscriptions')
+                ->where('type', 'default')
+                ->whereIn('stripe_status', CustomerBillingPeriod::BILLING_SUBSCRIPTION_STATUSES)
+                ->whereNotExists(fn ($query) => $query->selectRaw('1')
+                    ->from('customer_billing_periods')
+                    ->whereColumn('customer_billing_periods.customer_id', 'subscriptions.customer_id')
+                    ->where('customer_billing_periods.period_start', '<=', $now)
+                    ->where('customer_billing_periods.period_end', '>', $now))
+                ->distinct()
+                ->count('customer_id');
+
+            if ($missing > 0) {
+                return $this->warn('Billing periods', sprintf(
+                    '%d customer(s) with a billing Stripe subscription have no current billing period recorded; AI usage falls back to a derived period. Run billing:sync-subscriptions.',
+                    $missing,
+                ));
+            }
+
+            return $this->pass('Billing periods', 'every billing Stripe subscription has its current period recorded locally');
+        } catch (Throwable $e) {
+            return $this->warn('Billing periods', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -532,6 +532,12 @@ class BillingService
         $syncedStripeItemIds = [];
 
         if ($stripeSubscription) {
+            rescue(
+                fn () => app(CustomerBillingPeriodRecorder::class)->recordStripeSubscription($customer, $stripeSubscription->toArray()),
+                null,
+                true,
+            );
+
             foreach ($stripeSubscription->items->data as $item) {
                 $priceId = $item->price->id ?? null;
                 $stripeItemId = $item->id ?? null;
