@@ -22,6 +22,26 @@ describe('Kravmaler (supplier-assurance-v2-plan §16, §22.2)', () => {
         assert.deepEqual(templatePreview(null), { toCreate: [], existing: [] });
     });
 
+    test('an overlapping template (Kritisk IKT after IT/SaaS) adds only its own items; a recommended level is shown, not applied', () => {
+        const itSaas = ['S1', 'S2', 'S4', 'S5', 'S6', 'S8', 'P1', 'P2', 'P3', 'P4', 'C1'];
+        const template = {
+            key: 'critical_ict',
+            items: [...itSaas, 'S3', 'S7', 'C2', 'C3', 'F2', 'Q2'].map((key) => ({
+                key, title: key, level: 'important', recommended_level: null, existing: itSaas.includes(key) ? { title: key, status: 'active' } : null,
+            })),
+        };
+
+        const preview = templatePreview(template);
+        assert.deepEqual(preview.toCreate.map((item) => item.key), ['S3', 'S7', 'C2', 'C3', 'F2', 'Q2']);
+        assert.equal(preview.existing.length, 11);
+
+        const page = source('./RequirementTemplates.jsx');
+        assert.match(page, /\{item\.recommended_level && \(/);
+        assert.match(page, /t\.recommended_level/);
+        // One list for all nine templates: stacked on a phone, three across from lg.
+        assert.match(page, /<ul className="mt-4 grid gap-3 lg:grid-cols-3">/);
+    });
+
     test('a template rule the form cannot write is kept on edit, and never offered for a new or own requirement', () => {
         const fromTemplate = { id: 7, title: 'Overføringsgrunnlag', rule: null, rule_text: 'Gjelder når …', supplier_specific: false };
 

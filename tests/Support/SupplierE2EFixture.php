@@ -28,7 +28,9 @@ use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -386,6 +388,53 @@ class SupplierE2EFixture
         ])->save();
 
         return ['high_risk_category' => 'textiles'];
+    }
+
+    /**
+     * Template overlap (phase 8): the customer already uses IT/SaaS-leverandør — applied through
+     * SupplierRequirementTemplateLibrary as «Ta i bruk kravmal» does — and has edited one of its
+     * requirements locally (S2, renamed and given a basis text).
+     *
+     * @return array{edited_title: string}
+     */
+    public static function seedItSaasInUse(string $suffix): array
+    {
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        app(SupplierRequirementTemplateLibrary::class)->apply($manager, RequirementTemplates::IT_SAAS);
+        $edited = self::namer($suffix)('MFA hos driftspartner');
+        SupplierControlRequirement::query()->where('customer_id', $manager->customer_id)->where('template_item_key', 'S2')->sole()
+            ->forceFill(['title' => $edited, 'basis_text' => 'Avtale pkt. 7', 'updated_by' => $manager->id])->save();
+
+        return ['edited_title' => $edited];
+    }
+
+    /**
+     * A critical ICT supplier's profile: processes personal data as a databehandler and stores our data
+     * in the EEA, without privileged access or subcontractors. Written as the profile itself, without a
+     * history row — the journey does not read it.
+     *
+     * @return array{sector: string}
+     */
+    public static function seedIctProfile(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        (new SupplierProfile)->forceFill([
+            'supplier_id' => $supplier->id,
+            'customer_id' => $supplier->customer_id,
+            'data_role' => 'processor',
+            'special_category_data' => 'no',
+            'stores_our_data' => 'yes',
+            'data_location' => 'eea',
+            'confidential_information' => 'no',
+            'privileged_access' => 'no',
+            'uses_subcontractors' => 'no',
+            'sectors' => ['ict'],
+            'updated_by' => $manager->id,
+        ])->save();
+
+        return ['sector' => 'ict'];
     }
 
     /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assurance_decisions: int, due_diligence_assessments: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */

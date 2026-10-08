@@ -3056,6 +3056,7 @@ return [
             'dialog_nothing' => 'All requirements in the template are already there. Nothing is added.',
             'confirm' => 'Add :count control requirements',
             'from_template' => 'From template: :name',
+            'recommended_level' => 'Recommended as :level in this template. The level can be changed in Control requirements.',
             'list' => [
                 'public_sector_general' => [
                     'name' => 'Public sector – general supplier',
@@ -3076,6 +3077,31 @@ return [
                     'name' => 'Product supplier with human rights risk',
                     'purpose' => 'Human rights, working conditions and environment.',
                     'suited_for' => 'Suppliers of products in high-risk categories or with production outside Norway/the EEA. Such suppliers should also have a due diligence assessment.',
+                ],
+                'critical_ict' => [
+                    'name' => 'Critical ICT supplier',
+                    'purpose' => 'Information security, continuity and finances. The requirements from IT/SaaS supplier and a few more.',
+                    'suited_for' => 'Critical suppliers of ICT and digital services.',
+                ],
+                'construction' => [
+                    'name' => 'Building and construction',
+                    'purpose' => 'Pay and working conditions, health and safety, fair business practice and environment.',
+                    'suited_for' => 'Suppliers in building and construction, especially for labour-intensive deliveries, subcontractors and work at our locations.',
+                ],
+                'cleaning' => [
+                    'name' => 'Cleaning',
+                    'purpose' => 'Pay and working conditions, health and safety, and fair business practice.',
+                    'suited_for' => 'Cleaning suppliers, especially for labour-intensive deliveries and work at our locations.',
+                ],
+                'staffing' => [
+                    'name' => 'Staffing',
+                    'purpose' => 'Pay and working conditions, equal treatment and fair business practice.',
+                    'suited_for' => 'Staffing agencies hiring out workers to us.',
+                ],
+                'health_care' => [
+                    'name' => 'Health',
+                    'purpose' => 'Privacy, information security and duty of confidentiality.',
+                    'suited_for' => 'Suppliers in the health sector that process personal data, including special categories, or work at our locations.',
                 ],
             ],
             'items' => [
@@ -3101,6 +3127,23 @@ return [
                 'H1' => ['title' => 'Self-declaration on human rights and working conditions in the supply chain'],
                 'H2' => ['title' => 'Overview of production sites in the supply chain'],
                 'H3' => ['title' => 'Third-party audit or inspection of production site'],
+                'Q2' => ['title' => 'Non-conformity handling and reporting to us'],
+                'L2' => ['title' => 'Pay and working conditions checked (employment contracts, timesheets, payslips)'],
+                'L3' => ['title' => 'HSE card for everyone at the workplace'],
+                'L4' => ['title' => 'Mandatory occupational pension'],
+                'L5' => ['title' => 'Subcontractors approved and limited number of tiers'],
+                'B1' => ['title' => 'Health, safety and working environment coordination (SHA) clarified'],
+                'R1' => ['title' => 'Approved cleaning company (public register)'],
+                'ST1' => ['title' => 'Registered staffing agency (public register)'],
+                'ST2' => ['title' => 'Equal treatment of hired workers'],
+                'M2' => ['title' => 'Contractual environmental requirements followed up'],
+                'S3' => ['title' => 'Logging and traceability of access'],
+                'S7' => ['title' => 'Independent security report'],
+                'C2' => ['title' => 'Restore testing documented'],
+                'C3' => ['title' => 'Critical dependencies and subcontractors mapped'],
+                'HE1' => ['title' => 'Compliance with the health sector\'s information security code of conduct'],
+                'HE2' => ['title' => 'Confidentiality declaration for personnel'],
+                'HE3' => ['title' => 'Police certificate where the regulations require it'],
             ],
         ],
         'assessment' => [
@@ -3771,9 +3814,9 @@ return [
                     [
                         'title' => 'Requirement templates',
                         'items' => [
-                            ['title' => 'A starting point', 'text' => 'A template adds the control requirements you do not already have. A requirement that is already there – also from another template – is not added again, and your own requirements are not changed.'],
+                            ['title' => 'A starting point', 'text' => 'The templates are starting points for different types of supplier, and you can use several of them. A template adds the control requirements you do not already have. A requirement that is already there – also from another template – is not added again, and your own requirements are not changed.'],
                             ['title' => 'The requirements are yours', 'text' => 'Requirements from a template can be edited, retired or deleted like any other control requirement. A newer version of the template does not change them.'],
-                            ['title' => 'Typical basis', 'text' => 'The templates describe typical supplier requirements, not a legal answer. Assess them against your own agreements and obligations.'],
+                            ['title' => 'Typical basis', 'text' => 'The templates describe typical supplier requirements, not a legal answer. Assess them against your own agreements and obligations. The requirements must still be controlled, and the decisions are made by people.'],
                         ],
                     ],
                 ],

@@ -973,6 +973,11 @@ Intervall i måneder; «utløp» = ved dokumentets utløp. **Fet** = obligatoris
 Rekkefølgen: 1–3 først (fase 5) fordi de dekker flest kunder og alle digitale leverandører. Mal 4
 følger aktsomhetsvurderingen (fase 7). 5–9 til slutt (fase 8).
 
+**Gates i mal 8 og 9 (avklart i fase 8):** Et biblioteksnøkkel har ett nivå uansett mal (§16.3).
+Derfor er L1 obligatorisk også i Bemanning, og P2, P4, S2 og S4 også i Helse, selv om «Gates»-kolonnen
+over bare nevner malens egne. Implementert gate-sett: Bemanning **ST1, L1**; Helse **HE1, HE2, P1, P2,
+P4, S2, S4**.
+
 ### 16.3 Kravbiblioteket (første versjon)
 
 Nivå: **O** = obligatorisk, V = viktig, F = oppfølging. Punkt: FK = før avtale, L = løpende, E = ved

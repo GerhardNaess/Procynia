@@ -23,6 +23,11 @@ function ItemList({ items, tr, existing = false }) {
                     {existing && item.existing && item.existing.title !== item.title && (
                         <span className="min-w-0 break-words text-slate-600">({fill(t.dialog_existing_renamed ?? 'heter nå «:title»', { title: item.existing.title })})</span>
                     )}
+                    {item.recommended_level && (
+                        <span className="w-full min-w-0 break-words text-slate-700" data-testid="template-item-recommended">
+                            {fill(t.recommended_level ?? 'Anbefalt som :level i denne malen. Nivået kan endres under Kontrollkrav.', { level: levelLabel(item.recommended_level, tr).toLowerCase() })}
+                        </span>
+                    )}
                 </li>
             ))}
         </ul>

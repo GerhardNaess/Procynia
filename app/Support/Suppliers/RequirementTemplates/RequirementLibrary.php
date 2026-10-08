@@ -11,9 +11,11 @@ namespace App\Support\Suppliers\RequirementTemplates;
  * requirement it becomes, and the same item is created at most once per customer, whichever template
  * brings it (partial unique index on (customer_id, template_item_key)). Never key on the title.
  *
- * Only the items the templates in RequirementTemplates use are here; later phases add the rest of
- * §16.3 with their templates. The values are the plan's table, unchanged:
- *  - level: one level per item (Obligatorisk · Viktig · Oppfølging, §7);
+ * Only the items the templates in RequirementTemplates use are here — all of §16.3 but M3, which no
+ * template brings. The values are the plan's table, unchanged:
+ *  - level: one level per item (Obligatorisk · Viktig · Oppfølging, §7), whichever template brings it
+ *    (§16.3); a template that wants it stricter says so as a recommendation (RequirementTemplates'
+ *    recommended_levels), never by a copy of the item;
  *  - applies_when: the rule over SupplierProfilePredicates, as groups (DNF, §5.3);
  *  - control_point: FK = before_contract, L = ongoing, E = on_change; «L/E» (P2) is ongoing;
  *  - control_interval_months: «utløp» and «—» are null — controlled at the document's expiry, or
@@ -48,13 +50,53 @@ final class RequirementLibrary
             'theme' => 'quality', 'level' => 'standard', 'applies_when' => [['criticality_important']],
             'control_point' => 'before_contract', 'control_interval_months' => null, 'accepted_document_types' => ['certificate', 'policy'],
         ],
+        'Q2' => [
+            'theme' => 'quality', 'level' => 'standard', 'applies_when' => [['criticality_critical']],
+            'control_point' => 'ongoing', 'control_interval_months' => 24, 'accepted_document_types' => ['policy', 'agreement'],
+        ],
         'L1' => [
             'theme' => 'labour_conditions', 'level' => 'mandatory', 'applies_when' => [['public_contract_terms']],
             'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['self_declaration'],
         ],
+        'L2' => [
+            'theme' => 'labour_conditions', 'level' => 'important', 'applies_when' => [['public_contract_terms', 'labour_intensive']],
+            'control_point' => 'ongoing', 'control_interval_months' => 6, 'accepted_document_types' => ['control_report'],
+        ],
+        'L3' => [
+            'theme' => 'labour_conditions', 'level' => 'mandatory', 'applies_when' => [['sector:construction'], ['sector:cleaning']],
+            'control_point' => 'ongoing', 'control_interval_months' => 6, 'accepted_document_types' => ['control_report'],
+        ],
+        'L4' => [
+            'theme' => 'labour_conditions', 'level' => 'important', 'applies_when' => [['labour_intensive']],
+            'control_point' => 'before_contract', 'control_interval_months' => 24, 'accepted_document_types' => ['self_declaration'],
+        ],
+        'L5' => [
+            'theme' => 'labour_conditions', 'level' => 'important', 'applies_when' => [['subcontractors', 'labour_intensive']],
+            'control_point' => 'on_change', 'control_interval_months' => null, 'accepted_document_types' => ['subcontractor_list'],
+        ],
+        'B1' => [
+            'theme' => 'labour_conditions', 'level' => 'important', 'applies_when' => [['sector:construction', 'on_site_work']],
+            'control_point' => 'before_contract', 'control_interval_months' => null, 'accepted_document_types' => ['policy', 'agreement'],
+        ],
+        'R1' => [
+            'theme' => 'labour_conditions', 'level' => 'mandatory', 'applies_when' => [['sector:cleaning']],
+            'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['public_certificate'],
+        ],
+        'ST1' => [
+            'theme' => 'labour_conditions', 'level' => 'mandatory', 'applies_when' => [['sector:staffing']],
+            'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['public_certificate'],
+        ],
+        'ST2' => [
+            'theme' => 'labour_conditions', 'level' => 'important', 'applies_when' => [['sector:staffing']],
+            'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['self_declaration', 'control_report'],
+        ],
         'M1' => [
             'theme' => 'environment', 'level' => 'important', 'applies_when' => [['environmental_impact']],
             'control_point' => 'before_contract', 'control_interval_months' => null, 'accepted_document_types' => ['certificate', 'environmental_documentation'],
+        ],
+        'M2' => [
+            'theme' => 'environment', 'level' => 'important', 'applies_when' => [['environmental_impact', 'public_contract_terms']],
+            'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['environmental_documentation', 'control_report'],
         ],
         'S1' => [
             'theme' => 'information_security', 'level' => 'important', 'applies_when' => [['stores_our_data', 'criticality_important']],
@@ -63,6 +105,10 @@ final class RequirementLibrary
         'S2' => [
             'theme' => 'information_security', 'level' => 'mandatory', 'applies_when' => [['system_access']],
             'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['security_documentation', 'policy'],
+        ],
+        'S3' => [
+            'theme' => 'information_security', 'level' => 'important', 'applies_when' => [['privileged_access']],
+            'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['security_documentation'],
         ],
         'S4' => [
             'theme' => 'information_security', 'level' => 'mandatory', 'applies_when' => [['system_access'], ['processor'], ['confidential_information']],
@@ -75,6 +121,10 @@ final class RequirementLibrary
         'S6' => [
             'theme' => 'information_security', 'level' => 'important', 'applies_when' => [['stores_our_data']],
             'control_point' => 'before_contract', 'control_interval_months' => 24, 'accepted_document_types' => ['security_documentation'],
+        ],
+        'S7' => [
+            'theme' => 'information_security', 'level' => 'mandatory', 'applies_when' => [['stores_our_data', 'criticality_critical'], ['privileged_access', 'criticality_critical']],
+            'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['audit_report', 'certificate'],
         ],
         'S8' => [
             'theme' => 'information_security', 'level' => 'important', 'applies_when' => [['stores_our_data']],
@@ -104,6 +154,14 @@ final class RequirementLibrary
             'theme' => 'continuity', 'level' => 'important', 'applies_when' => [['critical_delivery']],
             'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['policy'],
         ],
+        'C2' => [
+            'theme' => 'continuity', 'level' => 'important', 'applies_when' => [['critical_delivery', 'stores_our_data']],
+            'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['control_report', 'audit_report'],
+        ],
+        'C3' => [
+            'theme' => 'continuity', 'level' => 'standard', 'applies_when' => [['critical_delivery', 'subcontractors']],
+            'control_point' => 'ongoing', 'control_interval_months' => 24, 'accepted_document_types' => ['subcontractor_list'],
+        ],
         'H1' => [
             'theme' => 'human_rights', 'level' => 'mandatory', 'applies_when' => [['high_risk_products'], ['production_outside_eea']],
             'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['self_declaration'],
@@ -115,6 +173,18 @@ final class RequirementLibrary
         'H3' => [
             'theme' => 'human_rights', 'level' => 'important', 'applies_when' => [['high_risk_products', 'criticality_important']],
             'control_point' => 'ongoing', 'control_interval_months' => 24, 'accepted_document_types' => ['audit_report', 'control_report'],
+        ],
+        'HE1' => [
+            'theme' => 'information_security', 'level' => 'mandatory', 'applies_when' => [['sector:health_care', 'personal_data']],
+            'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['self_declaration', 'security_documentation'],
+        ],
+        'HE2' => [
+            'theme' => 'privacy', 'level' => 'mandatory', 'applies_when' => [['sector:health_care', 'on_site_work']],
+            'control_point' => 'before_contract', 'control_interval_months' => null, 'accepted_document_types' => ['confidentiality_agreement'],
+        ],
+        'HE3' => [
+            'theme' => 'ethics', 'level' => 'important', 'applies_when' => [['sector:health_care', 'on_site_work']],
+            'control_point' => 'before_contract', 'control_interval_months' => null, 'accepted_document_types' => ['control_report'],
         ],
     ];
 

@@ -426,8 +426,8 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
 
     const templates = page.getByTestId('requirement-templates');
     await expect(templates.getByRole('heading', { name: 'Kravmaler', exact: true })).toBeVisible();
-    await expect(templates.getByTestId('requirement-template')).toHaveCount(4);
-    const itSaas = templates.getByTestId('requirement-template').filter({ hasText: 'IT/SaaS-leverandør' });
+    await expect(templates.getByTestId('requirement-template')).toHaveCount(9);
+    const itSaas = templates.getByTestId('requirement-template').filter({ has: page.getByRole('heading', { name: 'IT/SaaS-leverandør', exact: true }) });
     await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
     await expectReadable(page, '13-templates');
 
@@ -619,4 +619,68 @@ test('a product supplier with human rights risk gets an aktsomhetsvurdering, and
     await card.getByTestId('due-diligence-history').locator('summary').click();
     await expect(card.getByTestId('due-diligence-history-entry')).toHaveCount(1);
     await expectReadable(page, '23-supplier-due-diligence-assessed');
+});
+
+/**
+ * Kravmaler 5–9 (plan §16.2, phase 8): the customer already uses IT/SaaS-leverandør and has edited one
+ * of its requirements. Kritisk IKT-leverandør is IT/SaaS and six more: the preview says which eleven
+ * are already there — the edited one under its own name — and only the six are added. The edited
+ * requirement is untouched; a critical ICT supplier gets the new ones through its profile. Content,
+ * levels, access and tenant rules are PHP's (SupplierRequirementTemplatesTest,
+ * SupplierRequirementTemplateTest).
+ */
+test('a template that overlaps one in use adds only what is missing, and never changes an edited requirement', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    await supplierFixture(`seedAssurance('${suffix}')`);
+    const inUse = await supplierFixture(`seedItSaasInUse('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Driftspartner ${suffix} AS', 'critical', 12, ['processes_personal_data', 'has_system_access', 'supports_critical_delivery'])`);
+    await supplierFixture(`seedIctProfile('${suffix}', ${supplier.id})`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/app/supplier-management/control-requirements');
+
+    const templates = page.getByTestId('requirement-templates');
+    await expect(templates.getByTestId('requirement-template')).toHaveCount(9);
+    for (const name of ['Kritisk IKT-leverandør', 'Bygg og anlegg', 'Renhold', 'Bemanning', 'Helse']) {
+        await expect(templates.getByRole('heading', { name, exact: true })).toBeVisible();
+    }
+    const criticalIct = templates.getByTestId('requirement-template').filter({ has: page.getByRole('heading', { name: 'Kritisk IKT-leverandør', exact: true }) });
+    await expect(criticalIct).toContainText('17 krav · 6 obligatoriske');
+    await expectReadable(page, '24-nine-templates');
+
+    // The preview: six to add, eleven already there — the edited one under the name the customer gave it.
+    await criticalIct.getByRole('button', { name: 'Ta i bruk kravmal' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Ta i bruk kravmal: Kritisk IKT-leverandør' });
+    await expect(dialog.getByRole('heading', { name: 'Legges til i Kontrollkrav (6)' })).toBeVisible();
+    await expect(dialog.getByTestId('template-item-new')).toHaveCount(6);
+    await expect(dialog.getByTestId('template-item-new').filter({ hasText: 'Uavhengig sikkerhetsrapport' })).toHaveCount(1);
+    await expect(dialog.getByRole('heading', { name: 'Finnes allerede og legges ikke til på nytt (11)' })).toBeVisible();
+    await expect(dialog.getByTestId('template-item-existing').filter({ hasText: 'Tilgangsstyring og MFA' })).toContainText(`heter nå «${inUse.edited_title}»`);
+    await expectReadable(page, '25-template-overlap-preview');
+    await dialog.getByRole('button', { name: 'Legg til 6 kontrollkrav' }).click();
+    await expect(page.getByText('6 kontrollkrav ble lagt til. 11 krav fantes allerede og ble ikke lagt til på nytt.', { exact: true })).toBeVisible();
+    await expect(criticalIct.getByTestId('requirement-template-complete')).toHaveText('Alle kravene er lagt til');
+
+    // The catalogue: two of the customer's own, eleven from IT/SaaS, six new — the edited one as it was.
+    const rows = page.getByTestId('control-catalogue-row');
+    await expect(rows).toHaveCount(19);
+    const edited = rows.filter({ hasText: inUse.edited_title });
+    await expect(edited).toHaveCount(1);
+    await expect(edited.getByTestId('control-template-origin')).toHaveText('Fra kravmal: IT/SaaS-leverandør');
+    await expect(rows.filter({ hasText: 'Tilgangsstyring og MFA' })).toHaveCount(0);
+    await expect(rows.filter({ hasText: 'Uavhengig sikkerhetsrapport' }).getByTestId('control-template-origin')).toHaveText('Fra kravmal: Kritisk IKT-leverandør');
+
+    // The critical ICT supplier: the new requirements apply through the profile, as any requirement does.
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+    const applicable = page.getByTestId('supplier-control-requirements').getByTestId('control-requirement-row');
+    await expect(applicable.filter({ hasText: 'Uavhengig sikkerhetsrapport' }).getByTestId('requirement-reason')).toContainText('Gjelder fordi');
+    await expect(applicable.filter({ hasText: 'Test av gjenoppretting dokumentert' })).toHaveCount(1);
+    await expect(applicable.filter({ hasText: inUse.edited_title })).toHaveCount(1);
+    // No privileged access, no subcontractors: those two do not apply.
+    await expect(applicable.filter({ hasText: 'Logging og sporbarhet av tilgang' })).toHaveCount(0);
+    await expect(applicable.filter({ hasText: 'Kritiske avhengigheter og underleverandører kartlagt' })).toHaveCount(0);
+    await expectReadable(page, '26-critical-ict-on-supplier');
 });

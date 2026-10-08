@@ -3060,6 +3060,7 @@ return [
             'dialog_nothing' => 'Alle kravene i malen finnes allerede. Ingenting legges til.',
             'confirm' => 'Legg til :count kontrollkrav',
             'from_template' => 'Fra kravmal: :name',
+            'recommended_level' => 'Anbefalt som :level i denne malen. Nivået kan endres under Kontrollkrav.',
             'list' => [
                 'public_sector_general' => [
                     'name' => 'Offentlig sektor – generell leverandør',
@@ -3080,6 +3081,31 @@ return [
                     'name' => 'Produktleverandør med menneskerettighetsrisiko',
                     'purpose' => 'Menneskerettigheter, arbeidsforhold og miljø.',
                     'suited_for' => 'Leverandører av produkter i høyrisikokategorier eller med produksjon utenfor Norge/EØS. Slike leverandører bør også ha en aktsomhetsvurdering.',
+                ],
+                'critical_ict' => [
+                    'name' => 'Kritisk IKT-leverandør',
+                    'purpose' => 'Informasjonssikkerhet, kontinuitet og økonomi. Kravene fra IT/SaaS-leverandør og noen flere.',
+                    'suited_for' => 'Kritiske leverandører av IKT og digitale tjenester.',
+                ],
+                'construction' => [
+                    'name' => 'Bygg og anlegg',
+                    'purpose' => 'Lønns- og arbeidsvilkår, HMS, seriøsitet og miljø.',
+                    'suited_for' => 'Leverandører i bygg og anlegg, særlig ved arbeidsintensive leveranser, underleverandører og arbeid på våre lokasjoner.',
+                ],
+                'cleaning' => [
+                    'name' => 'Renhold',
+                    'purpose' => 'Lønns- og arbeidsvilkår, HMS og seriøsitet.',
+                    'suited_for' => 'Renholdsleverandører, særlig ved arbeidsintensive leveranser og arbeid på våre lokasjoner.',
+                ],
+                'staffing' => [
+                    'name' => 'Bemanning',
+                    'purpose' => 'Lønns- og arbeidsvilkår, likebehandling og seriøsitet.',
+                    'suited_for' => 'Bemanningsforetak som leier ut arbeidskraft til oss.',
+                ],
+                'health_care' => [
+                    'name' => 'Helse',
+                    'purpose' => 'Personvern, informasjonssikkerhet og taushetsplikt.',
+                    'suited_for' => 'Leverandører i helsesektoren som behandler personopplysninger, også særlige kategorier, eller arbeider på våre lokasjoner.',
                 ],
             ],
             'items' => [
@@ -3105,6 +3131,23 @@ return [
                 'H1' => ['title' => 'Egenerklæring om menneskerettigheter og arbeidsforhold i leverandørkjeden'],
                 'H2' => ['title' => 'Oversikt over produksjonssteder i leverandørkjeden'],
                 'H3' => ['title' => 'Tredjepartsrevisjon eller kontroll av produksjonssted'],
+                'Q2' => ['title' => 'Avvikshåndtering og rapportering til oss'],
+                'L2' => ['title' => 'Lønns- og arbeidsvilkår kontrollert (arbeidsavtaler, timelister, lønnsslipper)'],
+                'L3' => ['title' => 'HMS-kort for alle på arbeidsplassen'],
+                'L4' => ['title' => 'Obligatorisk tjenestepensjon'],
+                'L5' => ['title' => 'Underleverandører godkjent og begrenset antall ledd'],
+                'B1' => ['title' => 'SHA-koordinering avklart'],
+                'R1' => ['title' => 'Godkjent renholdsvirksomhet (offentlig register)'],
+                'ST1' => ['title' => 'Registrert bemanningsforetak (offentlig register)'],
+                'ST2' => ['title' => 'Likebehandling av innleide'],
+                'M2' => ['title' => 'Kontraktsfestede miljøkrav fulgt opp'],
+                'S3' => ['title' => 'Logging og sporbarhet av tilgang'],
+                'S7' => ['title' => 'Uavhengig sikkerhetsrapport'],
+                'C2' => ['title' => 'Test av gjenoppretting dokumentert'],
+                'C3' => ['title' => 'Kritiske avhengigheter og underleverandører kartlagt'],
+                'HE1' => ['title' => 'Etterlevelse av bransjenorm for informasjonssikkerhet i helsesektoren'],
+                'HE2' => ['title' => 'Taushetserklæring for personell'],
+                'HE3' => ['title' => 'Politiattest der regelverket krever det'],
             ],
         ],
         'assessment' => [
@@ -3775,9 +3818,9 @@ return [
                     [
                         'title' => 'Kravmaler',
                         'items' => [
-                            ['title' => 'Et startpunkt', 'text' => 'En kravmal legger til de kontrollkravene dere ikke har fra før. Et krav som allerede finnes – også fra en annen mal – legges ikke til på nytt, og egne krav endres ikke.'],
+                            ['title' => 'Et startpunkt', 'text' => 'Kravmalene er startpunkter for ulike typer leverandører, og dere kan bruke flere av dem. En kravmal legger til de kontrollkravene dere ikke har fra før. Et krav som allerede finnes – også fra en annen mal – legges ikke til på nytt, og egne krav endres ikke.'],
                             ['title' => 'Kravene er deres', 'text' => 'Krav fra en mal kan endres, settes som utgått eller slettes som andre kontrollkrav. En nyere versjon av malen endrer dem ikke.'],
-                            ['title' => 'Typisk grunnlag', 'text' => 'Kravmalene beskriver typiske leverandørkrav, ikke juridisk fasit. Vurder dem mot egne avtaler og plikter.'],
+                            ['title' => 'Typisk grunnlag', 'text' => 'Kravmalene beskriver typiske leverandørkrav, ikke juridisk fasit. Vurder dem mot egne avtaler og plikter. Kravene må fortsatt kontrolleres, og beslutningene tas av mennesker.'],
                         ],
                     ],
                 ],

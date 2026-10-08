@@ -52,7 +52,7 @@ class SupplierRequirementTemplateLibrary
 
         return array_map(function (string $key) use ($existing): array {
             $template = RequirementTemplates::find($key);
-            $items = array_map(function (string $itemKey) use ($existing): array {
+            $items = array_map(function (string $itemKey) use ($existing, $template): array {
                 $item = RequirementLibrary::item($itemKey);
                 $have = $existing[$itemKey] ?? null;
 
@@ -61,6 +61,8 @@ class SupplierRequirementTemplateLibrary
                     'title' => RequirementLibrary::title($itemKey),
                     'theme' => $item['theme'],
                     'level' => $item['level'],
+                    // A stricter level the template suggests; shown, never applied (§16.3).
+                    'recommended_level' => $template['recommended_levels'][$itemKey] ?? null,
                     'existing' => $have === null ? null : [
                         'title' => $have->title,
                         'status' => $have->status,
