@@ -45,7 +45,7 @@ import {
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
-const PAGE_FILES = { index: './Index.jsx', supplier: './Show.jsx' };
+const PAGE_FILES = { index: './Index.jsx', control_requirements: './ControlRequirements.jsx', supplier: './Show.jsx' };
 
 describe('Every Leverandører page carries the shared PageHelp', () => {
     test('each help page is rendered by its page through PageHelpButton', () => {

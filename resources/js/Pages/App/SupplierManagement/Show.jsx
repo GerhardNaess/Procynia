@@ -6,6 +6,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import SupplierAssessment from './SupplierAssessment';
+import SupplierControlRequirements from './SupplierControlRequirements';
 import { SupplierAttentionFindings } from './SupplierAttention';
 import SupplierCriticality from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
@@ -46,6 +47,7 @@ export default function SupplierManagementShow() {
         registered = null,
         criticality = null,
         profile = null,
+        control_requirements: controlRequirements = null,
         attention = [],
         review_intervals: reviewIntervals = [],
         assessments = [],
@@ -209,6 +211,10 @@ export default function SupplierManagementShow() {
                     locale={locale}
                     tr={tr}
                 />
+
+                {controlRequirements && (
+                    <SupplierControlRequirements supplierId={item.id} data={controlRequirements} locale={locale} tr={tr} />
+                )}
 
                 <SupplierAssessment
                     supplier={item}

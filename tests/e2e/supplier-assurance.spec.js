@@ -90,3 +90,102 @@ test('a supplier profile is filled in, changed with a reason, and both saves rea
     // A supplier with a profile has a history: it is ended, never deleted.
     await expect(page.getByRole('button', { name: 'Slett leverandør' })).toHaveCount(0);
 });
+
+/**
+ * Krav og kvalifikasjoner (plan §5.2, §5.5): the profile makes requirements apply, each says why; an
+ * important one is excluded with a begrunnelse and read in the history; «Tilbake til automatisk
+ * vurdering» returns it to the rule, which then follows the profile again; and one is included by
+ * hand. A mandatory requirement is never offered exclusion. Access, immutability and the server
+ * refusals are PHP's (SupplierAssuranceRequirementTest).
+ */
+test('the profile decides which control requirements apply, and a reasoned override is undone back to the profile', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const catalogue = await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Drift ${suffix} AS', 'important', 12, ['processes_personal_data'])`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    const section = page.getByTestId('supplier-control-requirements');
+    const rows = section.getByTestId('control-requirement-row');
+    const row = (title) => rows.filter({ hasText: title });
+    await expect(section.getByRole('heading', { name: 'Krav og kvalifikasjoner', exact: true })).toBeVisible();
+    // No profile yet: unanswered profile questions do not trigger anything.
+    await expect(section.getByTestId('control-none')).toBeVisible();
+
+    // The profile makes both requirements apply.
+    const profile = page.getByTestId('supplier-profile');
+    await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
+    const form = profile.getByTestId('profile-form');
+    await answer(form, 'data_role', 'Databehandler');
+    await answer(form, 'uses_subcontractors', 'Ja');
+    await form.getByRole('button', { name: 'Lagre profil' }).click();
+    await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
+
+    await expect(rows).toHaveCount(2);
+    await expect(row(catalogue.dpa_title).getByTestId('requirement-reason')).toHaveText('Gjelder fordi leverandøren behandler personopplysninger som databehandler');
+    await expect(row(catalogue.subcontractors_title).getByTestId('requirement-reason')).toHaveText('Gjelder fordi leverandøren bruker underleverandører');
+    await expect(row(catalogue.dpa_title)).toContainText('Ikke vurdert');
+    // Mandatory: no exclusion offered.
+    await expect(row(catalogue.dpa_title).getByRole('button', { name: 'Gjelder ikke denne leverandøren' })).toHaveCount(0);
+    await expectReadable(page, '03-requirement-profile');
+
+    // Exclude the important one, with a begrunnelse.
+    await row(catalogue.subcontractors_title).getByRole('button', { name: 'Gjelder ikke denne leverandøren' }).click();
+    const exclude = section.getByTestId('override-form-exclude');
+    await exclude.getByLabel('Begrunnelse').fill('Underleverandøren dekkes av konsernavtalen.');
+    await expectReadable(page, '04-exclude-form');
+    await exclude.getByRole('button', { name: 'Utelukk kravet' }).click();
+    await expect(page.getByText('Kravet gjelder ikke lenger leverandøren.', { exact: true })).toBeVisible();
+    await expect(rows).toHaveCount(1);
+
+    const excluded = section.getByTestId('control-excluded');
+    await excluded.locator('summary').click();
+    await expect(excluded.getByTestId('control-excluded-row')).toContainText(`${person.name} utelukket kravet`);
+    await expect(excluded.getByTestId('control-excluded-row')).toContainText('Begrunnelse: Underleverandøren dekkes av konsernavtalen.');
+
+    const history = section.getByTestId('control-history');
+    await history.locator('summary').click();
+    await expect(history.getByTestId('control-history-entry')).toHaveCount(1);
+    await expect(history.getByTestId('control-history-entry').first()).toContainText(`Kravet ble utelukket manuelt: ${catalogue.subcontractors_title}`);
+    await expectReadable(page, '05-excluded-and-history');
+
+    // Back to the rule: it applies again, because the profile says so.
+    await excluded.getByRole('button', { name: 'Tilbake til automatisk vurdering' }).click();
+    const clear = section.getByTestId('override-form-clear');
+    await clear.getByLabel('Begrunnelse').fill('Konsernavtalen dekker ikke denne leveransen likevel.');
+    await clear.getByRole('button', { name: 'Tilbakestill' }).click();
+    await expect(page.getByText('Kravet følger leverandørprofilen igjen.', { exact: true })).toBeVisible();
+    await expect(row(catalogue.subcontractors_title).getByTestId('requirement-reason')).toHaveText('Gjelder fordi leverandøren bruker underleverandører');
+
+    // ... and follows the profile: no subcontractors, no requirement.
+    await profile.getByRole('button', { name: 'Rediger profil' }).click();
+    await answer(form, 'uses_subcontractors', 'Nei');
+    await page.locator('#supplier-profile-reason').fill('Leverandøren har sagt opp underleverandøren.');
+    await form.getByRole('button', { name: 'Lagre profil' }).click();
+    await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
+    await expect(rows).toHaveCount(1);
+    await expect(row(catalogue.subcontractors_title)).toHaveCount(0);
+
+    // Included by hand: the manual reason, with who and when.
+    await section.getByRole('button', { name: 'Legg til krav' }).click();
+    const include = section.getByTestId('override-form-include');
+    await expect(include).toContainText('Gjelder når leverandøren bruker underleverandører');
+    await include.getByLabel(new RegExp(catalogue.subcontractors_title)).check();
+    await include.getByLabel('Begrunnelse').fill('Vi vil ha oversikten uansett.');
+    await include.getByRole('button', { name: 'Legg til krav' }).click();
+    await expect(page.getByText('Kravet gjelder nå leverandøren.', { exact: true })).toBeVisible();
+    await expect(row(catalogue.subcontractors_title).getByTestId('requirement-reason')).toContainText(`Gjelder fordi ${person.name} inkluderte kravet manuelt`);
+    await expect(row(catalogue.subcontractors_title).getByTestId('requirement-reason')).toContainText('Begrunnelse: Vi vil ha oversikten uansett.');
+    await expect(history.getByTestId('control-history-entry')).toHaveCount(3);
+
+    // The catalogue says when each requirement applies, in words.
+    await page.goto('/app/supplier-management/control-requirements');
+    await expect(page.getByRole('heading', { name: 'Kontrollkrav', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('control-catalogue-row').filter({ hasText: catalogue.dpa_title }).getByTestId('control-rule-text'))
+        .toHaveText('Gjelder når leverandøren behandler personopplysninger som databehandler');
+    await expectReadable(page, '06-catalogue');
+});

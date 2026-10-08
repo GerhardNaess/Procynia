@@ -186,6 +186,9 @@ class Supplier extends Model
             // Every profile save writes a history row, so the profile and its history go together.
             && ! $this->profile()->exists()
             && ! $this->profileChanges()->exists()
+            // Leverandørkontroll (phase 2): a requirement for this supplier, and any override.
+            && ! $this->controlRequirements()->exists()
+            && ! $this->requirementOverrides()->exists()
             && ! $this->improvementCaseLinks()->exists()
             && ! $this->riskLinks()->exists()
             && ! $this->requirementLinks()->exists();
@@ -276,5 +279,19 @@ class Supplier extends Model
     public function requirementLinks(): HasMany
     {
         return $this->hasMany(SupplierComplianceRequirement::class, 'supplier_id');
+    }
+
+    /** Kontrollkrav for this one supplier — never the catalogue, which is applied by rule. */
+    public function controlRequirements(): HasMany
+    {
+        return $this->hasMany(SupplierControlRequirement::class, 'supplier_id');
+    }
+
+    /** Every manual override of the requirement profile, newest first. */
+    public function requirementOverrides(): HasMany
+    {
+        return $this->hasMany(SupplierRequirementOverride::class, 'supplier_id')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
     }
 }

@@ -13,11 +13,13 @@ use App\Models\Risk;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierComplianceRequirement;
+use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierImprovementCase;
 use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
+use App\Models\SupplierRequirementOverride;
 use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
@@ -39,7 +41,7 @@ use Illuminate\Support\Facades\DB;
  * supplier role.
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
- * leverandørprofil and profile history, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
+ * leverandørprofil and profile history, the kontrollkrav and overrides, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
  * forbedringer, the risks in Risiko and the kravkilde and requirements in Etterlevelse og revisjon,
  * with the rows linking them to suppliers, go with it. Risks
  * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
@@ -269,7 +271,40 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
+    /**
+     * Gives the supplier manager supplier.assure (Leverandørkontroll) and registers two catalogue
+     * requirements by hand — no templates: «Databehandleravtale», mandatory, for data processors, and
+     * «Oversikt over underleverandører», important, for suppliers that use subcontractors.
+     *
+     * @return array{dpa_title: string, subcontractors_title: string}
+     */
+    public static function seedAssurance(string $suffix): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $manager, $name): array {
+            self::role($customer, $name('Leverandørkontrollør'), [CustomerPermissionCatalog::SUPPLIER_ASSURE], $manager);
+            $requirement = fn (string $title, string $level, array $rule): SupplierControlRequirement => SupplierControlRequirement::query()->create([
+                'customer_id' => $customer->id,
+                'title' => $title,
+                'theme' => 'privacy',
+                'level' => $level,
+                'control_point' => 'before_contract',
+                'applies_when' => $rule,
+                'basis_text' => 'Personvernforordningen art. 28',
+                'created_by' => $manager->id,
+                'updated_by' => $manager->id,
+            ]);
+            $dpa = $requirement($name('Databehandleravtale'), 'mandatory', [['processor']]);
+            $subcontractors = $requirement($name('Oversikt over underleverandører'), 'important', [['subcontractors']]);
+
+            return ['dpa_title' => $dpa->title, 'subcontractors_title' => $subcontractors->title];
+        });
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -281,6 +316,8 @@ class SupplierE2EFixture
             'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
             'profiles' => SupplierProfile::query()->whereIn('customer_id', $customerIds)->count(),
             'profile_changes' => SupplierProfileChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'control_requirements' => SupplierControlRequirement::query()->whereIn('customer_id', $customerIds)->count(),
+            'requirement_overrides' => SupplierRequirementOverride::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
             // Also by the run's suffix in the title, wherever it might have landed.

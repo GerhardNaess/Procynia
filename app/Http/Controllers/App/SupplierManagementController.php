@@ -12,6 +12,7 @@ use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
+use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierAttentionService;
 use App\Services\Suppliers\SupplierComplianceRequirementService;
@@ -58,7 +59,10 @@ use Inertia\Response;
  * the supplier is, a register decision (plan §9.2).
  *
  * The leverandørprofil (supplier-assurance-v2-plan §4) is shown here with its history and written by
- * SupplierProfileController (supplier.edit; supplier.assure grants nothing there).
+ * SupplierProfileController (supplier.edit; supplier.assure grants nothing there). Krav og
+ * kvalifikasjoner — which control requirements apply and why — is SupplierRequirementPayload's, and
+ * is changed by SupplierRequirementOverrideController and SupplierControlRequirementController
+ * (supplier.assure).
  *
  * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
  * reasons inline on the supplier page — read from the supplier's own data only.
@@ -82,6 +86,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierRiskService $risks,
         private readonly SupplierComplianceRequirementService $requirements,
         private readonly SupplierAttentionService $attention,
+        private readonly SupplierRequirementPayload $controlRequirements,
     ) {}
 
     public function index(Request $request): Response
@@ -196,6 +201,9 @@ class SupplierManagementController extends Controller
             ],
             'criticality' => $this->criticalityPayload($supplier, $criticalityChanges),
             'profile' => $this->profilePayload($supplier),
+            // Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2): computed on read, never stored.
+            // null for a customer that has no control requirements.
+            'control_requirements' => $this->controlRequirements->forSupplier($user, $supplier),
             'attention' => $this->attention->findingsForSupplier($supplier),
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
                 'id' => (int) $assessment->id,

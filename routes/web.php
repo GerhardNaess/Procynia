@@ -36,10 +36,12 @@ use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
 use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\SupplierControlRequirementController;
 use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\SupplierProfileController;
+use App\Http\Controllers\App\SupplierRequirementOverrideController;
 use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -462,6 +464,13 @@ Route::prefix('app')
         Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
             Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
             Route::post('/', [SupplierManagementController::class, 'store'])->name('store');
+            // Kontrollkrav: supplier.view reads, supplier.assure writes (supplier-assurance-v2-plan §13.2).
+            Route::get('/control-requirements', [SupplierControlRequirementController::class, 'index'])->name('control-requirements.index');
+            Route::post('/control-requirements', [SupplierControlRequirementController::class, 'store'])->name('control-requirements.store');
+            Route::patch('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'update'])->whereNumber('requirementId')->name('control-requirements.update');
+            Route::post('/control-requirements/{requirementId}/retire', [SupplierControlRequirementController::class, 'retire'])->whereNumber('requirementId')->name('control-requirements.retire');
+            Route::post('/control-requirements/{requirementId}/reactivate', [SupplierControlRequirementController::class, 'reactivate'])->whereNumber('requirementId')->name('control-requirements.reactivate');
+            Route::delete('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'destroy'])->whereNumber('requirementId')->name('control-requirements.destroy');
             Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
             Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');
             Route::delete('/{supplierId}', [SupplierManagementController::class, 'destroy'])->whereNumber('supplierId')->name('destroy');
@@ -476,6 +485,9 @@ Route::prefix('app')
             Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
             // Leverandørprofil: supplier.edit only, never supplier.assure (supplier-assurance-v2-plan §13.2).
             Route::post('/{supplierId}/profile', [SupplierProfileController::class, 'update'])->whereNumber('supplierId')->name('profile');
+            // Krav og kvalifikasjoner: a requirement for this supplier, and include/exclude/clear (supplier.assure).
+            Route::post('/{supplierId}/control-requirements', [SupplierControlRequirementController::class, 'storeForSupplier'])->whereNumber('supplierId')->name('control-requirements.store-for-supplier');
+            Route::post('/{supplierId}/requirement-overrides', [SupplierRequirementOverrideController::class, 'store'])->whereNumber('supplierId')->name('requirement-overrides.store');
             // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit).
             Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');

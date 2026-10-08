@@ -82,6 +82,29 @@ final class SupplierProfilePredicates
      */
     public static function evaluate(Supplier $supplier, ?array $answers): array
     {
+        return self::compute($supplier, $answers, false);
+    }
+
+    /**
+     * The predicates that hold only because an answer is «Ikke avklart» or not answered — they would
+     * not hold had the answer been a clear yes or no. «Gjelder fordi …» says so rather than stating
+     * the fact as known (plan §2 pkt. 2–3).
+     *
+     * @param  array<string, mixed>|null  $answers
+     * @return list<string>
+     */
+    public static function uncertain(Supplier $supplier, ?array $answers): array
+    {
+        return array_values(array_diff(self::compute($supplier, $answers, false), self::compute($supplier, $answers, true)));
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $answers
+     * @param  bool  $certainOnly  only a clear answer counts, «Ikke avklart» and not answered do not
+     * @return list<string>
+     */
+    private static function compute(Supplier $supplier, ?array $answers, bool $certainOnly): array
+    {
         $personalData = $supplier->processes_personal_data === true;
         $systemAccess = $supplier->has_system_access === true;
 
@@ -98,20 +121,21 @@ final class SupplierProfilePredicates
             return self::holding($facts);
         }
 
-        $applies = fn (string $field): bool => in_array($answers[$field] ?? null, [SupplierProfile::ANSWER_YES, SupplierProfile::ANSWER_UNKNOWN, null], true);
+        $doubt = $certainOnly ? [] : [SupplierProfile::ANSWER_UNKNOWN, null];
+        $applies = fn (string $field): bool => in_array($answers[$field] ?? null, [SupplierProfile::ANSWER_YES, ...$doubt], true);
         $storesOurData = $applies('stores_our_data');
         $highRisk = $answers['high_risk_categories'] ?? null;
         $sectors = is_array($answers['sectors'] ?? null) ? $answers['sectors'] : [];
 
         $facts += [
-            'processor' => $personalData && in_array($answers['data_role'] ?? null, ['processor', SupplierProfile::ANSWER_UNKNOWN, null], true),
+            'processor' => $personalData && in_array($answers['data_role'] ?? null, ['processor', ...$doubt], true),
             // Only asked when the supplier processes personal data (§4.2); a question never asked is
             // not «unknown», or a supplier without personal data would get these requirements (§12).
             'special_category_data' => $personalData && $applies('special_category_data'),
             'privileged_access' => $systemAccess && $applies('privileged_access'),
             'stores_our_data' => $storesOurData,
             'confidential_information' => $applies('confidential_information'),
-            'data_outside_eea' => $storesOurData && in_array($answers['data_location'] ?? null, ['outside_eea', SupplierProfile::ANSWER_UNKNOWN, null], true),
+            'data_outside_eea' => $storesOurData && in_array($answers['data_location'] ?? null, ['outside_eea', ...$doubt], true),
             'subcontractors' => $applies('uses_subcontractors'),
             'production_outside_eea' => $applies('production_outside_eea'),
             'high_risk_products' => is_array($highRisk) && $highRisk !== [],
