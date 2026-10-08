@@ -7,6 +7,7 @@ import RequiredMark from '../Risk/RequiredMark';
 import ControlRequirementForm from './ControlRequirementForm';
 import { LEVEL_TONES, anchorLabel, groupByTheme, levelLabel, rowActions } from './controlRequirements';
 import { DISPLAY_STATUS_TONES, displayStatusLabel, lastControlText } from './requirementEvaluations';
+import { nextControlText } from './assuranceFollowUp';
 import { EvaluationForm, EvaluationHistory } from './SupplierRequirementEvaluation';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -158,9 +159,10 @@ export default function SupplierControlRequirements({ supplierId, data, locale =
                         {group.rows.map((row) => {
                             const actions = rowActions(row);
                             const lastControl = lastControlText(row.current, tr, locale);
+                            const nextControl = nextControlText(row, tr, (date) => formatLongDate(date, locale));
 
                             return (
-                                <li key={row.id} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-requirement-row">
+                                <li key={row.id} id={`control-requirement-${row.id}`} className="min-w-0 scroll-mt-4 rounded-xl border border-slate-200 p-4" data-testid="control-requirement-row">
                                     <div className="flex flex-wrap items-center gap-2">
                                         <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
                                         <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
@@ -169,6 +171,9 @@ export default function SupplierControlRequirements({ supplierId, data, locale =
                                         </span>
                                     </div>
                                     {lastControl && <p className="mt-1 text-base text-slate-600" data-testid="requirement-last-control">{lastControl}</p>}
+                                    {nextControl && (
+                                        <p className={`text-base ${row.follow_up?.control_overdue ? 'font-semibold text-amber-800' : 'text-slate-600'}`} data-testid="requirement-next-control">{nextControl}</p>
+                                    )}
                                     {row.current?.accepted_until && (
                                         <p className="text-base text-slate-600">{(c.accepted_until ?? 'Akseptert til :date').replace(':date', formatLongDate(row.current.accepted_until, locale))}</p>
                                     )}

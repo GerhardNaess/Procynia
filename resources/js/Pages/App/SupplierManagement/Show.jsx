@@ -12,6 +12,7 @@ import { SupplierAttentionFindings } from './SupplierAttention';
 import SupplierCriticality from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import SupplierDocuments from './SupplierDocuments';
+import SupplierFollowUpPlan from './SupplierFollowUpPlan';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
 import SupplierImprovementCases from './SupplierImprovementCases';
@@ -52,6 +53,7 @@ export default function SupplierManagementShow() {
         assurance = null,
         activate_warning: activateWarning = false,
         attention = [],
+        follow_up_plan: followUpPlan = null,
         review_intervals: reviewIntervals = [],
         assessments = [],
         criteria = [],
@@ -223,6 +225,8 @@ export default function SupplierManagementShow() {
                 {controlRequirements && (
                     <SupplierControlRequirements supplierId={item.id} data={controlRequirements} locale={locale} tr={tr} />
                 )}
+
+                <SupplierFollowUpPlan plan={followUpPlan} formatDate={(date) => formatLongDate(date, locale)} tr={tr} />
 
                 <SupplierAssessment
                     supplier={item}

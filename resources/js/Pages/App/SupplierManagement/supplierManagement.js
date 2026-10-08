@@ -477,9 +477,23 @@ const ATTENTION_FALLBACKS = {
     document_expiring: ':document «:title» utløper om :days dager (:date).',
     document_expiring_one: ':document «:title» utløper i morgen (:date).',
     document_expiring_today: ':document «:title» utløper i dag.',
+    decision_required_one: '1 obligatorisk krav krever beslutning:',
+    decision_required_many: ':count obligatoriske krav krever beslutning:',
+    control_overdue_one: '1 kontrollkrav er forfalt:',
+    control_overdue_many: ':count kontrollkrav er forfalt:',
+    requirement_not_evaluated_one: '1 obligatorisk eller viktig krav er ikke vurdert:',
+    requirement_not_evaluated_many: ':count obligatoriske eller viktige krav er ikke vurdert:',
+    profile_incomplete: 'Leverandøren er :level, og leverandørprofilen er ikke fylt ut.',
 };
 
+/** Findings that name requirements: the sentence counts them, attentionFindingItems() lists them. */
+export const ATTENTION_LIST_KEYS = ['decision_required', 'control_overdue', 'requirement_not_evaluated'];
+
 const ATTENTION_CATEGORY_FALLBACKS = {
+    decision_required: 'Krever beslutning',
+    control_overdue: 'Kontroll forfalt',
+    requirement_not_evaluated: 'Krav ikke vurdert',
+    profile_incomplete: 'Profil ikke fylt ut',
     not_assessed: 'Ikke vurdert',
     review_overdue: 'Vurdering forfalt',
     missing_owner: 'Mangler ansvarlig',
@@ -489,6 +503,10 @@ const ATTENTION_CATEGORY_FALLBACKS = {
 
 /** Where on the supplier page a finding is followed up. */
 export const ATTENTION_TARGETS = {
+    decision_required: { anchor: 'supplier-assurance-heading', label: 'go_to_assurance', fallback: 'Gå til Kontrollstatus' },
+    control_overdue: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
+    requirement_not_evaluated: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
+    profile_incomplete: { anchor: 'supplier-profile-heading', label: 'go_to_profile', fallback: 'Gå til leverandørprofil' },
     not_assessed: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
     review_overdue: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
     missing_owner: { anchor: 'supplier-details-heading', label: 'go_to_details', fallback: 'Gå til Om leverandøren' },
@@ -519,6 +537,13 @@ export function attentionFindingText(finding, tr = {}, formatDate = (date) => da
 
     if (key === 'document_expiring' && finding.days <= 1) {
         key = finding.days === 0 ? 'document_expiring_today' : 'document_expiring_one';
+    }
+
+    if (ATTENTION_LIST_KEYS.includes(key)) {
+        const count = (finding.requirements ?? []).length;
+        const plural = `${key}_${count === 1 ? 'one' : 'many'}`;
+
+        return (a[plural] ?? ATTENTION_FALLBACKS[plural]).replace(':count', String(count));
     }
 
     const template = a[key] ?? ATTENTION_FALLBACKS[key] ?? key;

@@ -308,6 +308,59 @@ class SupplierE2EFixture
         });
     }
 
+    /**
+     * Kontroll forfalt with explicit historical dates, instead of moving the clock: a Viktig
+     * requirement for every supplier, controlled every 6 months, and a Dokumentert control of it on
+     * the supplier dated 7 months ago, resting on a report without expiry. Its control date passed a
+     * month ago. Written as SupplierRequirementEvaluationService would store it.
+     *
+     * @return array{requirement_title: string, document_title: string, due_on: string}
+     */
+    public static function seedOverdueControl(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+        $evaluatedOn = now()->subMonthsNoOverflow(7)->toDateString();
+
+        return DB::transaction(function () use ($supplier, $manager, $name, $evaluatedOn): array {
+            $requirement = SupplierControlRequirement::query()->create([
+                'customer_id' => $supplier->customer_id,
+                'title' => $name('Uavhengig sikkerhetsrapport'),
+                'theme' => 'information_security',
+                'level' => 'important',
+                'control_point' => 'ongoing',
+                'control_interval_months' => 6,
+                'applies_when' => [],
+                'created_by' => $manager->id,
+                'updated_by' => $manager->id,
+            ]);
+            $document = SupplierDocument::query()->create([
+                'customer_id' => $supplier->customer_id,
+                'supplier_id' => $supplier->id,
+                'document_type' => 'audit_report',
+                'title' => $name('SOC 2-rapport'),
+            ]);
+            $evaluationId = DB::table('supplier_requirement_evaluations')->insertGetId([
+                'customer_id' => $supplier->customer_id, 'supplier_id' => $supplier->id, 'requirement_id' => $requirement->id,
+                'status' => SupplierRequirementEvaluation::STATUS_DOCUMENTED, 'rationale' => 'Rapporten dekker kravet.',
+                'evaluated_on' => $evaluatedOn, 'evaluated_by_user_id' => $manager->id, 'recorded_at' => now(),
+                'requirement_title' => $requirement->title, 'requirement_level' => $requirement->level, 'requirement_theme' => $requirement->theme,
+                'applicability_reason' => 'Gjelder alle leverandører', 'supplier_name' => $supplier->name, 'criticality' => $supplier->criticality,
+            ]);
+            DB::table('supplier_requirement_evaluation_documents')->insert([
+                'customer_id' => $supplier->customer_id, 'evaluation_id' => $evaluationId, 'supplier_document_id' => $document->id,
+                'document_type' => $document->document_type, 'document_title' => $document->title,
+            ]);
+
+            return [
+                'requirement_title' => $requirement->title,
+                'document_title' => $document->title,
+                'due_on' => \Illuminate\Support\Carbon::parse($evaluatedOn)->addMonthsNoOverflow(6)->toDateString(),
+            ];
+        });
+    }
+
     /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assurance_decisions: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {

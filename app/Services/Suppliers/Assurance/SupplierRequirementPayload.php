@@ -82,6 +82,7 @@ class SupplierRequirementPayload
             ->map(function (array $decision) use ($anchors, $canOverride, $canEvaluate, $evaluations, $documents, $today, $entries, &$current): array {
                 $requirement = $decision['requirement'];
                 $inForce = SupplierRequirementStatus::current($evaluations->get($requirement->id) ?? []);
+                $documentsNow = $inForce?->documents->map(fn (SupplierRequirementEvaluationDocument $used) => $documents->get($used->supplier_document_id))->filter() ?? collect();
 
                 if ($inForce !== null) {
                     $current[(int) $requirement->id] = $inForce;
@@ -90,12 +91,10 @@ class SupplierRequirementPayload
                 return $this->requirement($requirement, $anchors) + [
                     'reason' => $this->text->because($decision),
                     'exclusion_ignored' => $decision['exclusion_ignored'],
-                    'display_status' => SupplierRequirementStatus::display(
-                        $inForce,
-                        $requirement->control_interval_months,
-                        $inForce?->documents->map(fn (SupplierRequirementEvaluationDocument $used) => $documents->get($used->supplier_document_id))->filter() ?? [],
-                        $today,
-                    ),
+                    'evaluated' => $inForce !== null,
+                    'display_status' => SupplierRequirementStatus::display($inForce, $requirement->control_interval_months, $documentsNow, $today),
+                    // Neste kontroll, and why it may come sooner (plan §14, §22.1).
+                    'follow_up' => SupplierRequirementStatus::followUp($inForce, $requirement->control_interval_months, $documentsNow, $today),
                     'current' => $inForce === null ? null : [
                         'status' => $inForce->status,
                         'evaluated_on' => $inForce->evaluated_on?->toDateString(),

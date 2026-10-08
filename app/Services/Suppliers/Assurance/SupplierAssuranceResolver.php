@@ -169,9 +169,9 @@ class SupplierAssuranceResolver
      *
      * @return array<string, mixed>|null
      */
-    public function forSupplier(Supplier $supplier): ?array
+    public function forSupplier(Supplier $supplier, ?CarbonInterface $today = null): ?array
     {
-        return $this->forSuppliers(collect([$supplier]))[(int) $supplier->id] ?? null;
+        return $this->forSuppliers(collect([$supplier]), null, $today)[(int) $supplier->id] ?? null;
     }
 
     /**
@@ -181,9 +181,9 @@ class SupplierAssuranceResolver
      * @param  array<int, SupplierAssuranceDecision>|null  $decisionsInForce  decisionsInForce(), when already read
      * @return array<int, array<string, mixed>|null>
      */
-    public function forSuppliers(Collection $suppliers, ?array $decisionsInForce = null): array
+    public function forSuppliers(Collection $suppliers, ?array $decisionsInForce = null, ?CarbonInterface $today = null): array
     {
-        $rows = $this->rows($suppliers);
+        $rows = $this->rows($suppliers, $today);
         $decisionsInForce ??= $this->decisionsInForce(array_keys($rows));
         $result = [];
 
@@ -217,11 +217,17 @@ class SupplierAssuranceResolver
     }
 
     /**
-     * Each supplier's applying requirements with their visningsstatus now — the input of resolve().
-     * The documents are the rows as they are now, never a control's snapshot.
+     * Each supplier's applying requirements with their visningsstatus now — the input of resolve() —
+     * and, for the oppfølgingsplan and Trenger oppmerksomhet, the control point and the follow-up
+     * dates (SupplierRequirementStatus::followUp()). The documents are the rows as they are now, never
+     * a control's snapshot.
      *
-     * @param  Collection<int, Supplier>  $suppliers
-     * @return array<int, list<array{id: int, title: string, level: string, display_status: string}>>
+     * One batch for all the suppliers, whatever their number: the applicability (requirements,
+     * profiles, overrides), the controls with their documentation, and the documentation rows — each
+     * read once, by these supplier ids within their customer.
+     *
+     * @param  Collection<int, Supplier>  $suppliers  of one customer, already reached through SupplierAccessService
+     * @return array<int, list<array{id: int, title: string, level: string, control_point: string, control_interval_months: int|null, evaluated: bool, display_status: string, follow_up: array<string, mixed>}>>
      */
     public function rows(Collection $suppliers, ?CarbonInterface $today = null): array
     {
@@ -231,14 +237,16 @@ class SupplierAssuranceResolver
 
         $today ??= now();
         $ids = $suppliers->map(fn (Supplier $supplier): int => (int) $supplier->id)->all();
+        $customerIds = $suppliers->map(fn (Supplier $supplier): int => (int) $supplier->customer_id)->unique()->values()->all();
         $decided = $this->applicability->forSuppliers($suppliers);
         $evaluations = SupplierRequirementEvaluation::query()
             ->with('documents')
+            ->whereIn('customer_id', $customerIds)
             ->whereIn('supplier_id', $ids)
             ->get()
             ->toBase()
             ->groupBy(fn (SupplierRequirementEvaluation $evaluation): string => $evaluation->supplier_id.':'.$evaluation->requirement_id);
-        $documents = SupplierDocument::query()->whereIn('supplier_id', $ids)->get()->keyBy('id');
+        $documents = SupplierDocument::query()->whereIn('customer_id', $customerIds)->whereIn('supplier_id', $ids)->get()->keyBy('id');
 
         $result = [];
 
@@ -252,17 +260,17 @@ class SupplierAssuranceResolver
 
                 $requirement = $decision['requirement'];
                 $inForce = SupplierRequirementStatus::current($evaluations->get($supplierId.':'.$requirement->id) ?? []);
+                $documentsNow = $inForce?->documents->map(fn (SupplierRequirementEvaluationDocument $used) => $documents->get($used->supplier_document_id))->filter() ?? collect();
 
                 $result[$supplierId][] = [
                     'id' => (int) $requirement->id,
                     'title' => $requirement->title,
                     'level' => $requirement->level,
-                    'display_status' => SupplierRequirementStatus::display(
-                        $inForce,
-                        $requirement->control_interval_months,
-                        $inForce?->documents->map(fn (SupplierRequirementEvaluationDocument $used) => $documents->get($used->supplier_document_id))->filter() ?? [],
-                        $today,
-                    ),
+                    'control_point' => $requirement->control_point,
+                    'control_interval_months' => $requirement->control_interval_months,
+                    'evaluated' => $inForce !== null,
+                    'display_status' => SupplierRequirementStatus::display($inForce, $requirement->control_interval_months, $documentsNow, $today),
+                    'follow_up' => SupplierRequirementStatus::followUp($inForce, $requirement->control_interval_months, $documentsNow, $today),
                 ];
             }
         }

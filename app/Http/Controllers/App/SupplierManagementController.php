@@ -16,6 +16,7 @@ use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
+use App\Services\Suppliers\Assurance\SupplierFollowUpPlan;
 use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierAttentionService;
@@ -73,7 +74,9 @@ use Inertia\Response;
  * written by SupplierAssuranceDecisionController (supplier.assure).
  *
  * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
- * reasons inline on the supplier page — read from the supplier's own data only.
+ * reasons inline on the supplier page — read from the supplier's own data only, Leverandørkontroll's
+ * signals included. «Neste kontroller» is SupplierFollowUpPlan's. Both are computed on read; neither
+ * writes anything when a date passes.
  *
  * An ended supplier is read-only until it is reopened.
  */
@@ -229,9 +232,10 @@ class SupplierManagementController extends Controller
         $canDelete = $this->access->canDelete($user);
         $controlRequirements = $this->controlRequirements->forSupplier($user, $supplier);
         $assurance = $this->controlRequirements->assurance($user, $supplier, $controlRequirements['applicable'] ?? null);
+        $row = $this->row($supplier, $assessments->first()?->assessed_on?->toDateString());
 
         return Inertia::render('App/SupplierManagement/Show', [
-            'supplier' => $this->row($supplier, $assessments->first()?->assessed_on?->toDateString()) + [
+            'supplier' => $row + [
                 'contact_name' => $supplier->contact_name,
                 'contact_email' => $supplier->contact_email,
                 'contact_phone' => $supplier->contact_phone,
@@ -257,6 +261,17 @@ class SupplierManagementController extends Controller
             'activate_warning' => ($assurance['state']['decision_required'] ?? false)
                 || ($assurance['decision']['decision'] ?? null) === SupplierAssuranceDecision::DECISION_NOT_APPROVED,
             'attention' => $this->attention->findingsForSupplier($supplier),
+            // Neste kontroller (supplier-assurance-v2-plan §14): computed from the same rows as Krav og
+            // kvalifikasjoner, never stored. Only once the customer has started Leverandørkontroll, and
+            // never for an ended supplier — it is no longer followed up.
+            'follow_up_plan' => $open && $controlRequirements !== null && SupplierControlRequirement::query()->where('customer_id', (int) $supplier->customer_id)->exists()
+                ? SupplierFollowUpPlan::build(
+                    $controlRequirements['applicable'],
+                    $documents,
+                    $row['next_review_on'] !== null ? Carbon::parse($row['next_review_on']) : null,
+                    $today,
+                ) + ['preview' => SupplierFollowUpPlan::PREVIEW]
+                : null,
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
                 'id' => (int) $assessment->id,
                 'assessed_on' => $assessment->assessed_on?->toDateString(),

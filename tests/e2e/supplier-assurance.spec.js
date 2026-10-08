@@ -472,3 +472,70 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     await expect(applicable.filter({ hasText: catalogue.dpa_title })).toHaveCount(1);
     await expectReadable(page, '16-template-requirements-on-supplier');
 });
+
+/**
+ * Oppfølging (plan §14, §15.1): a requirement controlled every 6 months was last controlled 7 months
+ * ago — a fixture with explicit historical dates rather than a moved clock. The register's existing
+ * «trenger oppmerksomhet» filter finds the supplier and says which requirement is overdue and why;
+ * the supplier page names it, points to its row and lists it first in Neste kontroller. A new control
+ * clears that finding; the earlier control stays in the history. Every other signal, edge and
+ * tenant rule is PHP's (SupplierAssuranceAttentionTest, SupplierFollowUpPlanTest).
+ */
+test('an overdue control is found from the register, controlled again, and leaves Trenger oppmerksomhet', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Forfall ${suffix} AS')`);
+    const overdue = await supplierFixture(`seedOverdueControl('${suffix}', ${supplier.id})`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/app/supplier-management');
+
+    // The register: the existing filter, now also for Leverandørkontroll.
+    await page.getByTestId('supplier-attention-filter').check();
+    await page.getByRole('button', { name: 'Søk', exact: true }).click();
+    await expect(page).toHaveURL(/attention=1/);
+    const item = page.getByTestId('supplier-attention-item').filter({ hasText: supplier.name });
+    await expect(item).toContainText('1 kontrollkrav er forfalt:');
+    await expect(item.getByTestId('supplier-attention-requirements')).toContainText(`${overdue.requirement_title} – kontrollfristen var`);
+    await expect(page.getByTestId('supplier-attention-categories')).toContainText('Kontroll forfalt');
+    await expectReadable(page, '17-register-control-overdue');
+
+    // The supplier: which requirement, why, and where it is followed up.
+    await item.getByRole('link', { name: supplier.name }).click();
+    const attention = page.getByTestId('supplier-attention');
+    await expect(attention.locator('[data-finding="control_overdue"]')).toContainText('1 kontrollkrav er forfalt:');
+    await expect(attention.getByRole('link', { name: 'Gå til Krav og kvalifikasjoner' })).toHaveAttribute('href', '#supplier-control-heading');
+    const requirementLink = attention.getByRole('link', { name: new RegExp(`^${overdue.requirement_title} – kontrollfristen var`) });
+    const row = page.getByTestId('control-requirement-row').filter({ hasText: overdue.requirement_title });
+    await expect(requirementLink).toHaveAttribute('href', `#${await row.getAttribute('id')}`);
+    await expect(row.getByTestId('requirement-display-status')).toHaveText('Må fornyes');
+    await expect(row.getByTestId('requirement-next-control')).toContainText('Kontrollfristen var');
+
+    const plan = page.getByTestId('supplier-follow-up');
+    const first = plan.getByTestId('follow-up-entry').first();
+    await expect(first).toHaveAttribute('data-overdue', '1');
+    await expect(first).toContainText(`Ny kontroll: ${overdue.requirement_title}`);
+    await expect(first).toContainText('Forfalt');
+    await expectReadable(page, '18-supplier-control-overdue');
+
+    // A new control, on the same report.
+    await row.getByRole('button', { name: 'Kontroller krav' }).click();
+    const form = row.getByTestId('evaluation-form');
+    await form.getByRole('radio', { name: /^Dokumentert/ }).check();
+    await form.getByTestId('evaluation-document-option').filter({ hasText: overdue.document_title }).getByRole('checkbox').check();
+    await form.getByLabel('Begrunnelse').fill('Ny rapport for perioden gjennomgått.');
+    await form.getByRole('button', { name: 'Registrer kontroll' }).click();
+    await expect(page.getByText('Kontrollen er registrert.', { exact: true })).toBeVisible();
+
+    // The finding is gone; the next control is six months on; both controls are in the history.
+    await expect(page.locator('[data-finding="control_overdue"]')).toHaveCount(0);
+    await expect(row.getByTestId('requirement-display-status')).toHaveText('Dokumentert');
+    await expect(row.getByTestId('requirement-next-control')).toContainText('Neste kontroll');
+    await expect(plan.getByTestId('follow-up-entry').filter({ hasText: overdue.requirement_title })).toHaveAttribute('data-overdue', '0');
+    await row.getByTestId('evaluation-history').locator('summary').click();
+    await expect(row.getByTestId('evaluation-entry')).toHaveCount(2);
+    await expectReadable(page, '19-supplier-control-renewed');
+});
