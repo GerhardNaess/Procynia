@@ -70,3 +70,10 @@ export async function fillAssessment(scope, ratings, result, rationale) {
     await scope.getByTestId('assessment-result').getByRole('radio', { name: result, exact: true }).check();
     await scope.locator('#supplier-assessment-rationale').fill(rationale);
 }
+
+/** Opens one tab of the supplier page (Oversikt, Krav og kvalifikasjoner, Dokumentasjon …) by its name. */
+export async function openSupplierTab(page, name) {
+    const tab = page.getByTestId('supplier-page-tabs').getByRole('link', { name, exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-current', 'page');
+}

@@ -157,7 +157,7 @@ function DecisionEntry({ entry, locale, tr }) {
  * requirements not accepted. When the state worsens after a decision, both show it: the decision is
  * never rewritten. No percentage, no «14/18», no progress bar.
  */
-export default function SupplierAssuranceStatus({ supplierId, data, locale = 'no', tr }) {
+export default function SupplierAssuranceStatus({ supplierId, data, showRequirementsLink = false, locale = 'no', tr }) {
     const a = tr.assurance ?? {};
     const [deciding, setDeciding] = useState(false);
     const state = data.state;
@@ -215,9 +215,15 @@ export default function SupplierAssuranceStatus({ supplierId, data, locale = 'no
                 </div>
             </dl>
 
-            {data.permissions?.can_decide && data.form && ! deciding && (
-                <div className="mt-4">
-                    <button type="button" onClick={() => setDeciding(true)} className={PRIMARY_ACTION}>{a.register ?? 'Registrer beslutning'}</button>
+            {((data.permissions?.can_decide && data.form && ! deciding) || (showRequirementsLink && state)) && (
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    {data.permissions?.can_decide && data.form && ! deciding && (
+                        <button type="button" onClick={() => setDeciding(true)} className={PRIMARY_ACTION}>{a.register ?? 'Registrer beslutning'}</button>
+                    )}
+                    {/* The requirements behind the numbers — the summary here, the detail on its tab. */}
+                    {showRequirementsLink && state && (
+                        <a href="#supplier-control-heading" className="inline-flex min-h-11 items-center text-base font-semibold text-violet-700 hover:text-violet-900" data-testid="assurance-open-requirements">{a.open_requirements ?? 'Åpne Krav og kvalifikasjoner'}</a>
+                    )}
                 </div>
             )}
             {deciding && data.form && <DecisionForm supplierId={supplierId} form={data.form} onDone={() => setDeciding(false)} tr={tr} />}

@@ -2744,6 +2744,50 @@ return [
             'suppliers' => 'Leverandører',
             'control_requirements' => 'Kontrollkrav',
         ],
+        'page' => [
+            'tabs_label' => 'Leverandørsiden',
+            'tabs' => [
+                'overview' => 'Oversikt',
+                'requirements' => 'Krav og kvalifikasjoner',
+                'documents' => 'Dokumentasjon',
+                'assessments' => 'Vurderinger',
+                'due_diligence' => 'Aktsomhet',
+                'history' => 'Historikk',
+            ],
+            'history_intro' => 'Statusendringene står her. Historikken for kritikalitet, profil, kontroller, beslutninger og vurderinger står ved hver av dem.',
+            'open_documents' => 'Åpne Dokumentasjon',
+            'open_assessments' => 'Åpne Vurderinger',
+            'open_due_diligence' => 'Åpne Aktsomhet',
+            'no_assessment' => 'Ikke vurdert ennå',
+            'next_assessment' => 'Neste vurdering :date',
+            'due_diligence_missing' => 'Relevant ut fra profilen, men ikke vurdert ennå',
+            'due_diligence_not_relevant' => 'Ikke påkrevd ut fra profilen',
+            'documents_summary' => [
+                'none' => 'Ingen dokumentasjon registrert',
+                'valid' => ':count gyldige',
+                'expiring_soon' => ':count utløper snart',
+                'expired' => ':count utløpt',
+            ],
+            'security_privacy' => [
+                'heading' => 'Sikkerhet og personvern',
+                'intro' => 'Hva leveransen gjelder, og status for kravene til sikkerhet og personvern. Ingen samlet vurdering – hvert krav har sin egen status.',
+                'personal_data' => 'Personopplysninger',
+                'personal_data_role_unanswered' => 'Ja – rollen er ikke besvart',
+                'special_category_data' => 'Særlige kategorier personopplysninger',
+                'system_access' => 'Tilgang til våre systemer',
+                'privileged_access' => 'Privilegert tilgang',
+                'data_location' => 'Hvor dataene behandles',
+                'uses_subcontractors' => 'Underleverandører',
+                'yes' => 'Ja',
+                'no' => 'Nei',
+                'not_classified' => 'Kritikalitet ikke vurdert',
+                'requirements_heading' => 'Krav til sikkerhet og personvern',
+                'applicable_one' => '1 krav gjelder',
+                'applicable' => ':count krav gjelder',
+                'all_documented' => 'Alle kravene er dokumentert.',
+                'open_link' => 'Åpne Krav og kvalifikasjoner',
+            ],
+        ],
         'assurance' => [
             'heading' => 'Kontrollstatus',
             'intro' => 'Tilstanden beregnes fra kravene og kontrollene hver gang siden åpnes. Beslutningen tas av en person og endres ikke av seg selv.',
@@ -2752,6 +2796,7 @@ return [
             'no_decision' => 'Ingen beslutning registrert',
             'decided_by' => 'Besluttet :date av :name',
             'decided' => 'Besluttet :date',
+            'open_requirements' => 'Åpne Krav og kvalifikasjoner',
             'decisions' => [
                 'approved' => 'Godkjent',
                 'approved_with_follow_up' => 'Godkjent med oppfølging',
@@ -2819,6 +2864,8 @@ return [
             'heading' => 'Krav og kvalifikasjoner',
             'intro' => 'Kontrollkravene som gjelder denne leverandøren, og hvorfor. Hvilke krav som gjelder, følger av leverandørprofilen og kritikaliteten.',
             'none_applicable' => 'Ingen kontrollkrav gjelder denne leverandøren nå.',
+            'none_applicable_hint' => 'Ta i bruk en kravmal eller opprett kontrollkrav under Kontrollkrav – eller legg til et krav bare for denne leverandøren.',
+            'none_applicable_cta' => 'Bruk kravmal',
             'not_evaluated' => 'Ikke vurdert',
             'also_because' => 'Også fordi',
             'follow_up' => 'Følg opp i Avvik og forbedringer',
@@ -3830,6 +3877,22 @@ return [
                 'intro' => 'Leverandørsiden samler det dere vet om leverandøren, hvem som følger den opp, og hva som har skjedd med den.',
                 'sections' => [
                     [
+                        'title' => 'Slik er siden bygget opp',
+                        'items' => [
+                            ['title' => 'Oversikt', 'text' => 'Kontrollstatus står øverst på alle faner. Oversikt samler det som trenger oppmerksomhet, leverandøren, kritikalitet og profil, sikkerhet og personvern, korte sammendrag og neste kontroller. Herfra tar du leverandøren i bruk, avslutter eller gjenåpner den.'],
+                            ['title' => 'Fanene', 'text' => 'Krav og kvalifikasjoner, Dokumentasjon, Vurderinger og Aktsomhet har listene, historikken og handlingene. Lenkene i Trenger oppmerksomhet og Neste kontroller åpner riktig fane.'],
+                            ['title' => 'Beslutning og Tilstand nå', 'text' => 'Beslutningen er en persons, med dato og begrunnelse. Tilstand nå beregnes fra kravene og kontrollene. De vises hver for seg, og en gammel beslutning kan stå selv om tilstanden har endret seg.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Sikkerhet og personvern',
+                        'items' => [
+                            ['title' => 'Hva kortet viser', 'text' => 'Forholdene i profilen som gjør at krav til sikkerhet, personvern og kontinuitet gjelder – personopplysninger, tilgang, hvor dataene behandles og underleverandører – og status for hvert av disse kravene nå.'],
+                            ['title' => 'Ingen samlet vurdering', 'text' => 'Kortet er et utdrag av Krav og kvalifikasjoner. Det gir ingen poeng eller samlet status, og det godkjenner ikke leverandøren.'],
+                            ['title' => 'Kravmaler', 'text' => 'Kravene kommer fra kontrollkravene deres, ofte fra en kravmal. Kravmalene tas i bruk under Kontrollkrav; nivået på hvert krav endres der.'],
+                        ],
+                    ],
+                    [
                         'title' => 'Fra registrert til avsluttet',
                         'items' => [
                             ['title' => 'Ta i bruk', 'text' => 'En leverandør under vurdering blir aktiv når dere tar den i bruk.'],
@@ -3858,7 +3921,7 @@ return [
                         'items' => [
                             ['title' => 'Hvilke krav gjelder?', 'text' => 'Kontrollkravene som gjelder leverandøren, beregnes ut fra leverandørprofilen og kritikaliteten hver gang siden åpnes. Endres profilen, endres kravene med en gang.'],
                             ['title' => 'Gjelder fordi …', 'text' => 'Hvert krav viser hvorfor det gjelder. Et forhold som er «Ikke avklart» i profilen, regnes som om det gjelder, og det står da at det ikke er avklart.'],
-                            ['title' => 'Overstyre når det er begrunnet', 'text' => 'Med rettigheten for leverandørkontroll kan du legge til et krav som ikke gjelder automatisk, eller utelukke et krav som gjør det. Begge krever begrunnelse og lagres i historikken. Obligatoriske krav kan ikke utelukkes. «Tilbake til automatisk vurdering» opphever avgjørelsen.'],
+                            ['title' => 'Legge til eller utelukke et krav', 'text' => 'Med rettigheten for leverandørkontroll kan du legge til et krav som ikke gjelder automatisk, eller utelukke et krav som gjør det. Begge krever begrunnelse og lagres i historikken. Obligatoriske krav kan ikke utelukkes. «Tilbake til automatisk vurdering» opphever avgjørelsen.'],
                             ['title' => 'Dokumentasjon er grunnlaget', 'text' => 'Når du kontrollerer et krav, velger du dokumentasjonen du har lagt til grunn. Dokumentasjonen registreres under Dokumentasjon. At et dokument er valgt, betyr ikke at kravet er oppfylt.'],
                             ['title' => 'Kontrolløren vurderer', 'text' => 'Du avgjør om dokumentasjonen dekker kravet: Dokumentert, Delvis dokumentert, Mangler eller Midlertidig akseptert til en dato. Systemet setter aldri resultatet selv. «Dokumentert» krever minst ett dokument, og alle resultater krever begrunnelse.'],
                             ['title' => 'Historikken endres ikke', 'text' => 'En kontroll kan ikke endres eller slettes. Er den feil, registrerer du en ny. Kontrollen viser dokumentasjonen slik den var registrert da, også om dokumentet senere endres. «Må fornyes» vises når kontrollintervallet er passert eller dokumentet nå er utløpt eller erstattet.'],
@@ -3945,7 +4008,7 @@ return [
                         'title' => 'Avslutte eller slette?',
                         'items' => [
                             ['title' => 'Avslutt', 'text' => 'Den vanlige måten å ta en leverandør ut av bruk. Historikken beholdes.'],
-                            ['title' => 'Slett', 'text' => 'Bare for en leverandør som ble registrert ved en feil og aldri har endret status eller kritikalitet, blitt vurdert, fått registrert dokumentasjon eller blitt koblet til en sak i Avvik og forbedringer, en risiko i Risiko eller et krav i Etterlevelse og revisjon. Sletting kan ikke angres.'],
+                            ['title' => 'Slett', 'text' => 'Bare for en leverandør som ble registrert ved en feil og aldri har endret status eller kritikalitet, blitt vurdert, fått utfylt profil, egne kontrollkrav, kontroller, beslutninger eller aktsomhetsvurderinger, fått registrert dokumentasjon eller blitt koblet til en sak i Avvik og forbedringer, en risiko i Risiko eller et krav i Etterlevelse og revisjon. Sletting kan ikke angres.'],
                         ],
                     ],
                 ],

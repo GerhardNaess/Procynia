@@ -208,6 +208,12 @@ class SupplierRequirementPayload
         $rows = $applicable ?? ($this->resolver->rows(collect([$supplier]))[(int) $supplier->id] ?? []);
         $state = SupplierAssuranceResolver::resolve($rows, $inForce?->decision);
 
+        // An ended supplier is not followed up and no decision can be registered on it (§13.3): the
+        // state is shown as it is, but «Krever beslutning» does not ask for what cannot be done.
+        if ($state !== null && $supplier->isEnded()) {
+            $state['decision_required'] = false;
+        }
+
         if ($state === null && $decisions->isEmpty()) {
             return null;
         }

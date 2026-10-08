@@ -2740,6 +2740,50 @@ return [
             'suppliers' => 'Suppliers',
             'control_requirements' => 'Control requirements',
         ],
+        'page' => [
+            'tabs_label' => 'Supplier page',
+            'tabs' => [
+                'overview' => 'Overview',
+                'requirements' => 'Requirements and qualifications',
+                'documents' => 'Documentation',
+                'assessments' => 'Assessments',
+                'due_diligence' => 'Due diligence',
+                'history' => 'History',
+            ],
+            'history_intro' => 'Status changes are listed here. The history of criticality, profile, controls, decisions and assessments is kept with each of them.',
+            'open_documents' => 'Open Documentation',
+            'open_assessments' => 'Open Assessments',
+            'open_due_diligence' => 'Open Due diligence',
+            'no_assessment' => 'Not assessed yet',
+            'next_assessment' => 'Next assessment :date',
+            'due_diligence_missing' => 'Relevant from the profile, but not assessed yet',
+            'due_diligence_not_relevant' => 'Not required by the profile',
+            'documents_summary' => [
+                'none' => 'No documentation registered',
+                'valid' => ':count valid',
+                'expiring_soon' => ':count expiring soon',
+                'expired' => ':count expired',
+            ],
+            'security_privacy' => [
+                'heading' => 'Security and privacy',
+                'intro' => 'What the delivery involves, and the status of the security and privacy requirements. No overall rating – each requirement has its own status.',
+                'personal_data' => 'Personal data',
+                'personal_data_role_unanswered' => 'Yes – the role is not answered',
+                'special_category_data' => 'Special categories of personal data',
+                'system_access' => 'Access to our systems',
+                'privileged_access' => 'Privileged access',
+                'data_location' => 'Where the data is processed',
+                'uses_subcontractors' => 'Subcontractors',
+                'yes' => 'Yes',
+                'no' => 'No',
+                'not_classified' => 'Criticality not assessed',
+                'requirements_heading' => 'Security and privacy requirements',
+                'applicable_one' => '1 requirement applies',
+                'applicable' => ':count requirements apply',
+                'all_documented' => 'All the requirements are documented.',
+                'open_link' => 'Open Requirements and qualifications',
+            ],
+        ],
         'assurance' => [
             'heading' => 'Control status',
             'intro' => 'The state is computed from the requirements and controls each time the page opens. The decision is taken by a person and never changes by itself.',
@@ -2748,6 +2792,7 @@ return [
             'no_decision' => 'No decision registered',
             'decided_by' => 'Decided :date by :name',
             'decided' => 'Decided :date',
+            'open_requirements' => 'Open Requirements and qualifications',
             'decisions' => [
                 'approved' => 'Approved',
                 'approved_with_follow_up' => 'Approved with follow-up',
@@ -2815,6 +2860,8 @@ return [
             'heading' => 'Requirements and qualifications',
             'intro' => 'The control requirements that apply to this supplier, and why. Which requirements apply follows from the supplier profile and the criticality.',
             'none_applicable' => 'No control requirements apply to this supplier now.',
+            'none_applicable_hint' => 'Apply a requirement template or create control requirements under Control requirements – or add a requirement for this supplier only.',
+            'none_applicable_cta' => 'Use a requirement template',
             'not_evaluated' => 'Not assessed',
             'also_because' => 'Also because',
             'follow_up' => 'Follow up in Deviations and improvements',
@@ -3826,6 +3873,22 @@ return [
                 'intro' => 'The supplier page brings together what you know about the supplier, who follows it up, and what has happened to it.',
                 'sections' => [
                     [
+                        'title' => 'How the page is organised',
+                        'items' => [
+                            ['title' => 'Overview', 'text' => 'Control status is at the top of every tab. Overview gathers what needs attention, the supplier, criticality and profile, security and privacy, short summaries and the next controls. From here you take the supplier into use, end it or reopen it.'],
+                            ['title' => 'The tabs', 'text' => 'Requirements and qualifications, Documentation, Assessments and Due diligence hold the lists, the history and the actions. The links in Needs attention and Next controls open the right tab.'],
+                            ['title' => 'Decision and State now', 'text' => 'The decision is a person\'s, with a date and a reason. State now is computed from the requirements and controls. They are shown apart, and an earlier decision can stand while the state has changed.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Security and privacy',
+                        'items' => [
+                            ['title' => 'What the card shows', 'text' => 'The profile facts that make security, privacy and continuity requirements apply – personal data, access, where the data is processed and subcontractors – and the status of each of those requirements now.'],
+                            ['title' => 'No overall rating', 'text' => 'The card is an extract of Requirements and qualifications. It gives no points or overall status, and it does not approve the supplier.'],
+                            ['title' => 'Requirement templates', 'text' => 'The requirements come from your control requirements, often from a requirement template. Templates are applied under Control requirements; each requirement\'s level is changed there.'],
+                        ],
+                    ],
+                    [
                         'title' => 'From registered to ended',
                         'items' => [
                             ['title' => 'Take into use', 'text' => 'A supplier under review becomes active when you take it into use.'],
@@ -3854,7 +3917,7 @@ return [
                         'items' => [
                             ['title' => 'Which requirements apply?', 'text' => 'The control requirements that apply to the supplier are worked out from the supplier profile and the criticality every time the page opens. Change the profile, and the requirements change at once.'],
                             ['title' => 'Applies because …', 'text' => 'Each requirement shows why it applies. A condition that is «Not clarified» in the profile counts as applying, and the reason then says it is not clarified.'],
-                            ['title' => 'Overriding when there is a reason', 'text' => 'With the supplier assurance permission you can add a requirement that does not apply automatically, or exclude one that does. Both need a reason and are kept in the history. Mandatory requirements cannot be excluded. «Back to automatic assessment» lifts the decision.'],
+                            ['title' => 'Adding or excluding a requirement', 'text' => 'With the supplier assurance permission you can add a requirement that does not apply automatically, or exclude one that does. Both need a reason and are kept in the history. Mandatory requirements cannot be excluded. «Back to automatic assessment» lifts the decision.'],
                             ['title' => 'Documentation is the basis', 'text' => 'When you control a requirement, you choose the documentation you relied on. Documentation is registered under Documentation. Choosing a document does not mean the requirement is met.'],
                             ['title' => 'The controller judges', 'text' => 'You decide whether the documentation covers the requirement: Documented, Partially documented, Missing or Temporarily accepted until a date. The system never sets the result itself. «Documented» needs at least one document, and every result needs a reason.'],
                             ['title' => 'The history does not change', 'text' => 'A control cannot be changed or deleted. If it is wrong, register a new one. The control shows the documentation as it was registered then, even if the document changes later. «Renewal due» shows when the control interval has passed or the document has now expired or been replaced.'],
@@ -3941,7 +4004,7 @@ return [
                         'title' => 'End or delete?',
                         'items' => [
                             ['title' => 'End', 'text' => 'The usual way to take a supplier out of use. The history is kept.'],
-                            ['title' => 'Delete', 'text' => 'Only for a supplier registered by mistake that has never changed status or criticality, been assessed, had documentation registered or been linked to a case in Deviations and improvements, a risk in Risk or a requirement in Compliance and audit. Deleting cannot be undone.'],
+                            ['title' => 'Delete', 'text' => 'Only for a supplier registered by mistake that has never changed status or criticality, been assessed, had a profile, its own control requirements, controls, decisions or due diligence assessments, had documentation registered or been linked to a case in Deviations and improvements, a risk in Risk or a requirement in Compliance and audit. Deleting cannot be undone.'],
                         ],
                     ],
                 ],

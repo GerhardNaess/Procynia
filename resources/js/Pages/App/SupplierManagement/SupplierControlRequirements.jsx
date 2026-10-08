@@ -151,7 +151,15 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
             <p className={`mt-2 ${HINT}`}>{c.intro}</p>
 
             {groups.length === 0 ? (
-                <p className="mt-4 text-base text-slate-700" data-testid="control-none">{c.none_applicable ?? 'Ingen kontrollkrav gjelder denne leverandøren nå.'}</p>
+                <div className="mt-4" data-testid="control-none">
+                    <p className="text-base text-slate-700">{c.none_applicable ?? 'Ingen kontrollkrav gjelder denne leverandøren nå.'}</p>
+                    {canOverride && (
+                        <p className="mt-1 text-base text-slate-700">
+                            {c.none_applicable_hint ?? 'Ta i bruk en kravmal eller opprett kontrollkrav under Kontrollkrav – eller legg til et krav bare for denne leverandøren.'}{' '}
+                            <Link href="/app/supplier-management/control-requirements#requirement-templates-heading" className="font-semibold text-violet-700 hover:text-violet-900" data-testid="control-none-templates">{c.none_applicable_cta ?? 'Bruk kravmal'}</Link>
+                        </p>
+                    )}
+                </div>
             ) : groups.map((group) => (
                 <div key={group.theme} className="mt-5">
                     <h3 className="text-lg font-semibold text-slate-950">{group.label}</h3>

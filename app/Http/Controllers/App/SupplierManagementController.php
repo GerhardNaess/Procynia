@@ -166,7 +166,8 @@ class SupplierManagementController extends Controller
         $states = $this->assurance->forSuppliers($suppliers, $decisions);
         $control = fn (Supplier $supplier): array => [
             'decision' => ($decisions[(int) $supplier->id] ?? null)?->decision,
-            'decision_required' => (bool) ($states[(int) $supplier->id]['decision_required'] ?? false),
+            // Never on an ended supplier: it is not followed up, and no decision can be registered (§13.3).
+            'decision_required' => ! $supplier->isEnded() && (bool) ($states[(int) $supplier->id]['decision_required'] ?? false),
             'has_state' => ($states[(int) $supplier->id] ?? null) !== null,
         ];
 

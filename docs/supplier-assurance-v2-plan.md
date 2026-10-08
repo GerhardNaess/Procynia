@@ -1,7 +1,8 @@
 # Plan: Leverandørkontroll — Leverandøroppfølging v2
 
-Status: **implementeringskontrakt for v2.** Ikke implementert. Beslutningene i §19.1 er låst; endringer i
-dem krever en ny beslutning, ikke en tolkning under implementering. §19.2 blokkerer ikke fase 1–4.
+Status: **implementeringskontrakt for v2. Fase 1–9 er implementert på `feat/supplier-assurance`
+(2026-10-08), ikke merget.** Beslutningene i §19.1 er låst; endringer i dem krever en ny beslutning,
+ikke en tolkning under implementering. §19.2 er fortsatt åpent — se der.
 Utgangspunkt: `main` @ `b7e45e98` (2026-10-08). Bygger på [Leverandøroppfølging v1](supplier-management-v1-plan.md),
 som er ferdig og merget.
 
@@ -1132,6 +1133,12 @@ krav og overstyringer (fase 2), kontroller (fase 3), beslutninger (fase 4) og ak
 berøres verken av malinnhold eller av kommersiell pakking. Spørsmålene må være avklart før fase 5
 merges. Til da gjelder standarden i tabellen.
 
+**Status etter fase 9 (2026-10-08): begge er fortsatt åpne.** Implementert etter standarden: malene
+har `basis_text` tomt, veiledningen sier «typisk grunnlag», og malene er tilgjengelige for alle kunder
+med `supplier` uten ny entitlement. Ingen av de ni malene eller bibliotekets 39 krav (tekst, nivå,
+intervall, anvendelsesregel, NO/EN-oversettelse) er faglig eller juridisk gjennomgått. Dette er
+produktbeslutninger, ikke tekniske blokkere for merge.
+
 | # | Spørsmål | Blokkerer | Anbefalt standard hvis ikke avklart |
 |---|---|---|---|
 | 1 | Hvem kvalitetssikrer innholdet i kravmalene (tekst, nivå, `basis_text`) faglig/juridisk før de leveres til kunder? | Fase 5 (kunde-lansering av maler) | Malene merges med `basis_text` tomt og «typisk grunnlag» i veiledningen; hjemmelstekst legges inn etter faglig gjennomgang |
@@ -1335,6 +1342,32 @@ og «Krav for denne leverandøren».
 
 **Aldri:** generisk «Relasjoner», «koblinger», «predikat», «DNF», «applies_when» i UI.
 
+**Slik ble det implementert (fase 9):**
+
+- Fanene ligger i adressen (`?tab=requirements|documents|assessments|due_diligence|history`; Oversikt
+  uten). Byttet skjer i nettleseren uten ny forespørsel — alle data er allerede på siden — og
+  adressen oppdateres, så omlasting og tilbakeføringen etter et skjema lander på samme fane.
+  Krav og kvalifikasjoner vises bare når det finnes kontrollkrav (eller brukeren kan opprette ett) eller
+  krav fra Etterlevelse; Aktsomhet bare når siden har aktsomhetsdata.
+- Lenker inne på siden (Trenger oppmerksomhet, Neste kontroller, kortene) åpner fanen der seksjonen
+  ligger og ruller dit. «Følg opp i Avvik og forbedringer» og «Opprett risiko» fra en annen fane åpner
+  skjemaet på Oversikt.
+- **Kontrollstatus står over fanene** og er sammendraget av Krav og kvalifikasjoner, med lenken «Åpne
+  Krav og kvalifikasjoner». Et eget kort «Krav og kvalifikasjoner» på Oversikt ble derfor ikke laget —
+  det ville gjentatt de samme tallene en gang til (sammendrag + detalj, ikke tre like visninger).
+- Dokumentasjon-kortet viser antall gyldige / utløper snart / utløpt; *hvilke* dokumenter navngis i
+  Trenger oppmerksomhet og på fanen, ikke en tredje gang.
+- Kritikalitet og Leverandørprofil vises i sin helhet på Oversikt (det finnes ingen egen profilfane).
+  Historikk-fanen har statusendringene; historikken for kritikalitet, profil, kontroller,
+  beslutninger og vurderinger står ved hver av dem.
+- **Sikkerhet og personvern** beregnes i nettleseren fra sidens egne data (`profile` +
+  `control_requirements.applicable`, tema ∈ {information_security, privacy, continuity}): profilfakta
+  (personopplysninger og rolle, særlige kategorier, systemtilgang, privilegert tilgang, behandlingssted,
+  underleverandører), antall per visningsstatus og kravene som ikke er Dokumentert. Ingen ny spørring,
+  ingen lagring, ingen score; forankring i Etterlevelse vises ikke i kortet.
+- **Avsluttet leverandør:** én melding øverst; «Krever beslutning» slås av for avsluttede leverandører
+  på siden og i registeret (ingen kan beslutte, §13.3). Tilstanden vises fortsatt som den er.
+
 ### 22.2 Andre sider
 
 | Side | Innhold |
@@ -1368,7 +1401,7 @@ fixtures. Rettighetene i hver fase står i §13.2 og endres ikke senere.
 | **6. Oppfølgingsplan og Trenger oppmerksomhet** | `SupplierFollowUpPlan`; «Neste kontroller»-kort; signal 6–11; handoff fra kontroll til Avvik (proveniens-kolonne) | — (endring i `supplier_improvement_cases`) | Plan (enhet, månedskanter); hvert signal treffer/bommer én gang; ingen signal uten katalog; ingen lekkasje (usynlig leverandør teller ikke) |
 | **7. Aktsomhet og miljø** | `SupplierDueDiligenceService`; aktsomhetsfane; handoff til Avvik og Risiko med proveniens; mal 4; `isDeletable()` | #8 `supplier_due_diligence_assessments` (+ endringer i `supplier_improvement_cases`, `supplier_risks`) | Uforanderlighet; relevansregel; handoff-rettigheter (`assure` + målmodul); `supplier_assessments` uendret |
 | **8. Kravmaler 5–9** | Kritisk IKT, Bygg og anlegg, Renhold, Bemanning, Helse | — | Reglene i malene treffer forventede profiler (tabelltest per mal) |
-| **9. Sikkerhet/personvern-kort, UX og merge-port** | «Sikkerhet og personvern»-kort; oversikt med kort; PageHelp; 16 px/390 px; tre E2E-reiser; full PHP/JS/E2E som merge-port | — | §24 |
+| **9. Sikkerhet/personvern-kort, UX og merge-port** ✅ | «Sikkerhet og personvern»-kort; oversikt med kort; faner; PageHelp; 16 px/390 px; E2E-reisene oppdatert til fanene; full PHP/JS/E2E som merge-port | — | §24 |
 
 Fase 1–4 gir en brukbar kjerne med manuelle kontrollkrav. Fase 5 gjør den nyttig uten oppsettarbeid.
 

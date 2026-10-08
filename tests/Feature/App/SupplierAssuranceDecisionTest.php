@@ -205,6 +205,26 @@ class SupplierAssuranceDecisionTest extends TestCase
         $this->assertSame(['approved_with_follow_up', 'Signert avtale innen fristen.'], [$first->fresh()->decision, $first->fresh()->follow_up_note]);
     }
 
+    public function test_an_ended_supplier_shows_its_state_but_never_asks_for_a_decision(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE, CustomerPermissionCatalog::SUPPLIER_EDIT]);
+        $supplier = $this->supplier($customer, $assurer, 'Avsluttet AS');
+        $this->requirement($customer, 'Databehandleravtale', 'mandatory');
+        $show = "/app/supplier-management/{$supplier->id}";
+        $this->assertTrue($this->actingAs($assurer)->get($show)->viewData('page')['props']['assurance']['state']['decision_required']);
+
+        $this->actingAs($assurer)->post("{$show}/end", ['reason' => 'Avtalen er sagt opp.'])->assertSessionHasNoErrors();
+
+        // The state is shown as it is; no decision can be registered, so none is asked for.
+        $state = $this->actingAs($assurer)->get($show)->viewData('page')['props']['assurance']['state'];
+        $this->assertSame(['mandatory_open', false], [$state['state'], $state['decision_required']]);
+        $register = fn (array $query): array => array_column($this->actingAs($assurer)->get('/app/supplier-management?'.http_build_query($query))->viewData('page')['props']['suppliers'], 'control_status', 'name');
+        $this->assertSame(['Avsluttet AS' => ['decision' => null, 'decision_required' => false, 'has_state' => true]], $register(['status' => 'all']));
+        $this->assertSame([], $register(['status' => 'all', 'decision_required' => 1]));
+        $this->assertSame(0, SupplierAssuranceDecision::query()->count());
+    }
+
     /** @return array<string, mixed> */
     private function decision(string $decision, array $overrides = []): array
     {
