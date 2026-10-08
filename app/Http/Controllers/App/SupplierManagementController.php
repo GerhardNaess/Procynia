@@ -6,10 +6,19 @@ use App\Http\Controllers\Controller;
 use App\Models\ImprovementCase;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
+use App\Models\SupplierAssuranceDecision;
+use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
+use App\Models\SupplierProfile;
+use App\Models\SupplierProfileChange;
+use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
+use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
+use App\Services\Suppliers\Assurance\SupplierDueDiligenceService;
+use App\Services\Suppliers\Assurance\SupplierFollowUpPlan;
+use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierAttentionService;
 use App\Services\Suppliers\SupplierComplianceRequirementService;
@@ -55,8 +64,20 @@ use Inertia\Response;
  * supplier assessment of how a supplier performs — is not used here: criticality is how important
  * the supplier is, a register decision (plan §9.2).
  *
+ * The leverandørprofil (supplier-assurance-v2-plan §4) is shown here with its history and written by
+ * SupplierProfileController (supplier.edit; supplier.assure grants nothing there). Krav og
+ * kvalifikasjoner — which control requirements apply and why — is SupplierRequirementPayload's, and
+ * is changed by SupplierRequirementOverrideController and SupplierControlRequirementController
+ * (supplier.assure).
+ *
+ * Kontrollstatus (supplier-assurance-v2-plan §9.5) — the decision in force and the state now, kept
+ * apart — is computed by SupplierAssuranceResolver on the register and the page; decisions are
+ * written by SupplierAssuranceDecisionController (supplier.assure).
+ *
  * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
- * reasons inline on the supplier page — read from the supplier's own data only.
+ * reasons inline on the supplier page — read from the supplier's own data only, Leverandørkontroll's
+ * signals included. «Neste kontroller» is SupplierFollowUpPlan's. Both are computed on read; neither
+ * writes anything when a date passes.
  *
  * An ended supplier is read-only until it is reopened.
  */
@@ -66,6 +87,9 @@ class SupplierManagementController extends Controller
     private const STATUS_FILTER_OPEN = '';
 
     private const STATUS_FILTER_ALL = 'all';
+
+    /** The Beslutning filter's choice for suppliers with no decision registered. */
+    private const DECISION_FILTER_NONE = 'none';
 
     public function __construct(
         private readonly CustomerContext $customerContext,
@@ -77,6 +101,9 @@ class SupplierManagementController extends Controller
         private readonly SupplierRiskService $risks,
         private readonly SupplierComplianceRequirementService $requirements,
         private readonly SupplierAttentionService $attention,
+        private readonly SupplierRequirementPayload $controlRequirements,
+        private readonly SupplierAssuranceResolver $assurance,
+        private readonly SupplierDueDiligenceService $dueDiligence,
     ) {}
 
     public function index(Request $request): Response
@@ -89,6 +116,10 @@ class SupplierManagementController extends Controller
         $category = in_array($request->query('category'), Supplier::CATEGORIES, true) ? (string) $request->query('category') : '';
         $criticality = in_array($request->query('criticality'), Supplier::CRITICALITIES, true) ? (string) $request->query('criticality') : '';
         $attentionOnly = $request->boolean('attention');
+        // Kontrollstatus (supplier-assurance-v2-plan §9.5): two separate filters — the decision in
+        // force, and the computed «Krever beslutning».
+        $decision = in_array($request->query('decision'), [...SupplierAssuranceDecision::DECISIONS, self::DECISION_FILTER_NONE], true) ? (string) $request->query('decision') : '';
+        $decisionRequiredOnly = $request->boolean('decision_required');
 
         $query = $this->access->visibleSuppliers($user);
 
@@ -131,10 +162,27 @@ class SupplierManagementController extends Controller
             $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $findings[(int) $supplier->id] !== [])->values();
         }
 
+        $decisions = $this->assurance->decisionsInForce($suppliers->map(fn (Supplier $supplier): int => (int) $supplier->id)->all());
+        $states = $this->assurance->forSuppliers($suppliers, $decisions);
+        $control = fn (Supplier $supplier): array => [
+            'decision' => ($decisions[(int) $supplier->id] ?? null)?->decision,
+            // Never on an ended supplier: it is not followed up, and no decision can be registered (§13.3).
+            'decision_required' => ! $supplier->isEnded() && (bool) ($states[(int) $supplier->id]['decision_required'] ?? false),
+            'has_state' => ($states[(int) $supplier->id] ?? null) !== null,
+        ];
+
+        if ($decision !== '') {
+            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => ($control($supplier)['decision'] ?? self::DECISION_FILTER_NONE) === $decision)->values();
+        }
+
+        if ($decisionRequiredOnly) {
+            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $control($supplier)['decision_required'])->values();
+        }
+
         $canEdit = $this->access->canEdit($user);
 
         return Inertia::render('App/SupplierManagement/Index', [
-            'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier))->all(),
+            'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier) + ['control_status' => $control($supplier)])->all(),
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleSuppliers($user)->count(),
             // The worklist of the whole register the user can see, whatever the filters above.
@@ -145,7 +193,14 @@ class SupplierManagementController extends Controller
                 'category' => $category,
                 'criticality' => $criticality,
                 'attention' => $attentionOnly,
+                'decision' => $decision,
+                'decision_required' => $decisionRequiredOnly,
             ],
+            'assurance_decisions' => SupplierAssuranceDecision::DECISIONS,
+            // The Kontrollstatus column and filters, only once the customer has started
+            // Leverandørkontroll — a customer without control requirements sees the register as in v1.
+            'control_status_enabled' => SupplierControlRequirement::query()->where('customer_id', (int) $user->customer_id)->exists()
+                || SupplierAssuranceDecision::query()->where('customer_id', (int) $user->customer_id)->exists(),
             'statuses' => Supplier::STATUSES,
             'initial_statuses' => Supplier::INITIAL_STATUSES,
             'categories' => Supplier::CATEGORIES,
@@ -171,12 +226,20 @@ class SupplierManagementController extends Controller
         $criticalityChanges = $supplier->criticalityChanges()->with('changedBy:id,name')->get();
         $assessments = $supplier->assessments()->with('assessedBy:id,name')->get();
         $documents = $supplier->documents()->with('updatedBy:id,name')->get();
+        $undeletable = $this->documentsInControls($documents);
         $today = now();
+        // Dokumentasjon: supplier.edit, or supplier.assure so the person who controls can register the
+        // documentation they rely on (supplier-assurance-v2-plan §13.2).
+        $canDocument = $canEdit || $this->access->canAssure($user);
         $canAssess = $this->access->canAssess($user);
         $canDelete = $this->access->canDelete($user);
+        $controlRequirements = $this->controlRequirements->forSupplier($user, $supplier);
+        $assurance = $this->controlRequirements->assurance($user, $supplier, $controlRequirements['applicable'] ?? null);
+        $row = $this->row($supplier, $assessments->first()?->assessed_on?->toDateString());
+        $dueDiligence = $this->dueDiligence->payload($user, $supplier, $today);
 
         return Inertia::render('App/SupplierManagement/Show', [
-            'supplier' => $this->row($supplier, $assessments->first()?->assessed_on?->toDateString()) + [
+            'supplier' => $row + [
                 'contact_name' => $supplier->contact_name,
                 'contact_email' => $supplier->contact_email,
                 'contact_phone' => $supplier->contact_phone,
@@ -190,7 +253,34 @@ class SupplierManagementController extends Controller
                 'status' => $changes->last()?->from_status ?? $supplier->status,
             ],
             'criticality' => $this->criticalityPayload($supplier, $criticalityChanges),
+            'profile' => $this->profilePayload($supplier),
+            // Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2): computed on read, never stored.
+            // null for a customer that has no control requirements.
+            'control_requirements' => $controlRequirements,
+            // Kontrollstatus (supplier-assurance-v2-plan §9.5): the decision in force and the state now,
+            // kept apart. null when nothing applies and nothing was decided.
+            'assurance' => $assurance,
+            // Ta i bruk warns — never blocks — when a decision is needed or the decision in force is
+            // «Ikke godkjent for nye kjøp» (supplier-assurance-v2-plan §9.6).
+            'activate_warning' => ($assurance['state']['decision_required'] ?? false)
+                || ($assurance['decision']['decision'] ?? null) === SupplierAssuranceDecision::DECISION_NOT_APPROVED,
             'attention' => $this->attention->findingsForSupplier($supplier),
+            // Aktsomhet og bærekraft (supplier-assurance-v2-plan §11, §22.1): the assessments, newest
+            // first, and whether the profile makes one expected. null for a customer that has not
+            // started Leverandørkontroll and a supplier never assessed.
+            'due_diligence' => $dueDiligence,
+            // Neste kontroller (supplier-assurance-v2-plan §14): computed from the same rows as Krav og
+            // kvalifikasjoner, never stored. Only once the customer has started Leverandørkontroll, and
+            // never for an ended supplier — it is no longer followed up.
+            'follow_up_plan' => $open && $controlRequirements !== null && SupplierControlRequirement::query()->where('customer_id', (int) $supplier->customer_id)->exists()
+                ? SupplierFollowUpPlan::build(
+                    $controlRequirements['applicable'],
+                    $documents,
+                    $row['next_review_on'] !== null ? Carbon::parse($row['next_review_on']) : null,
+                    $today,
+                    ($dueDiligence['next_on'] ?? null) !== null ? Carbon::parse($dueDiligence['next_on']) : null,
+                ) + ['preview' => SupplierFollowUpPlan::PREVIEW]
+                : null,
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
                 'id' => (int) $assessment->id,
                 'assessed_on' => $assessment->assessed_on?->toDateString(),
@@ -206,24 +296,33 @@ class SupplierManagementController extends Controller
                 'id' => (int) $document->id,
                 'document_type' => $document->document_type,
                 'title' => $document->title,
+                'standard' => $document->standard,
                 'location' => $document->location,
                 'valid_from' => $document->valid_from?->toDateString(),
                 'valid_until' => $document->valid_until?->toDateString(),
                 'comment' => $document->comment,
                 'status' => $document->validityStatus($today),
+                // Used as the basis of a control, or renewing such a row: kept (plan §10.4).
+                'deletable' => ! isset($undeletable[(int) $document->id]),
                 'updated_at' => $document->updated_at?->toIso8601String(),
                 'updated_by_name' => $document->updatedBy?->name,
             ])->all(),
             // null, not empty: the person cannot read Avvik og forbedringer, so nothing is said about it.
             'improvement_cases' => $this->improvements->casesFor($user, $supplier),
-            'improvement_handoff' => $canEdit && $open ? $this->improvements->formOptions($user) + [
-                'link_options' => $this->improvements->linkOptions($user, $supplier),
+            // supplier.edit hands off from the supplier and its assessments and links cases;
+            // supplier.assure hands off from a control or an aktsomhetsvurdering (supplier-assurance-v2-plan §13.2).
+            'improvement_handoff' => ($canEdit || $this->access->canAssure($user)) && $open ? $this->improvements->formOptions($user) + [
+                'link_options' => $canEdit ? $this->improvements->linkOptions($user, $supplier) : [],
                 'types' => ImprovementCase::TYPES,
+                'can_from_supplier' => $canEdit,
             ] : null,
             // null, not empty: the person cannot read Risiko, so nothing is said about it.
             'risks' => $this->risks->risksFor($user, $supplier),
-            'risk_handoff' => $canEdit && $open && $this->risks->canReadRisks($user) ? $this->risks->formOptions($user) + [
-                'link_options' => $this->risks->linkOptions($user, $supplier),
+            // supplier.edit creates from the supplier and links; supplier.assure creates from an
+            // aktsomhetsvurdering (supplier-assurance-v2-plan §11.2, §13.2).
+            'risk_handoff' => ($canEdit || $this->access->canAssure($user)) && $open && $this->risks->canReadRisks($user) ? $this->risks->formOptions($user) + [
+                'link_options' => $canEdit ? $this->risks->linkOptions($user, $supplier) : [],
+                'can_from_supplier' => $canEdit,
             ] : null,
             // null, not empty: the person cannot read Etterlevelse og revisjon. No compliance status.
             'requirements' => $this->requirements->requirementsFor($user, $supplier),
@@ -245,10 +344,14 @@ class SupplierManagementController extends Controller
                 'can_end' => $canEdit && $open,
                 'can_reopen' => $canEdit && ! $open,
                 'can_change_criticality' => $canEdit && $open,
-                // Dokumentasjon: supplier.edit, and only while the supplier is not ended.
-                'can_manage_documents' => $canEdit && $open,
-                // Says why the documentation is read-only, for someone who could otherwise change it.
+                // The profile is supplier.edit only — never supplier.assure (supplier-assurance-v2-plan §13.2).
+                'can_edit_profile' => $canEdit && $open,
+                // Dokumentasjon: supplier.edit or supplier.assure, and only while the supplier is not ended.
+                'can_manage_documents' => $canDocument && $open,
+                // Says why the risk, case and requirement links are missing, for someone who could otherwise make them.
                 'has_edit_right' => $canEdit,
+                // Says why the documentation is read-only, for someone who could otherwise change it.
+                'has_document_right' => $canDocument,
                 // Only an active supplier is assessed (plan §4.3).
                 'can_assess' => $canAssess && $supplier->status === Supplier::STATUS_ACTIVE,
                 // Says why Vurder leverandør is missing, for someone who could otherwise assess.
@@ -264,6 +367,7 @@ class SupplierManagementController extends Controller
             'criteria' => SupplierAssessment::CRITERIA,
             'results' => SupplierAssessment::RESULTS,
             'document_types' => SupplierDocument::TYPES,
+            'document_standards' => SupplierDocument::STANDARD_SUGGESTIONS,
             'today' => $today->toDateString(),
             'owner_options' => $canEdit && $open ? $this->access->ownerCandidates($user) : [],
         ]);
@@ -541,6 +645,36 @@ class SupplierManagementController extends Controller
      * @param  Collection<int, SupplierCriticalityChange>  $changes
      * @return array<string, mixed>
      */
+    /**
+     * The documentation rows that may not be deleted: those named in a control, and every row renewing
+     * one of them (SupplierDocument::isDeletable(), for the whole list in one query).
+     *
+     * @param  Collection<int, SupplierDocument>  $documents
+     * @return array<int, true>
+     */
+    private function documentsInControls(Collection $documents): array
+    {
+        $kept = SupplierRequirementEvaluationDocument::query()
+            ->whereIn('supplier_document_id', $documents->pluck('id'))
+            ->distinct()
+            ->pluck('supplier_document_id')
+            ->mapWithKeys(fn ($id): array => [(int) $id => true])
+            ->all();
+        $replacedBy = $documents->pluck('replaced_by_document_id', 'id');
+
+        foreach (array_keys($kept) as $id) {
+            $seen = [];
+
+            while (($next = $replacedBy->get($id)) !== null && ! isset($seen[$id])) {
+                $seen[$id] = true;
+                $id = (int) $next;
+                $kept[$id] = true;
+            }
+        }
+
+        return $kept;
+    }
+
     private function criticalityPayload(Supplier $supplier, $changes): array
     {
         $latest = $changes->first();
@@ -568,6 +702,49 @@ class SupplierManagementController extends Controller
                 'at' => $supplier->created_at?->toIso8601String(),
                 'by_name' => $supplier->createdBy?->name,
             ] : null,
+        ];
+    }
+
+    /**
+     * Leverandørprofil: the current answers (null before anyone has filled it in), which questions are
+     * asked for this supplier, whether it is complete, the four criticality answers it is read with,
+     * and every save newest first with the whole profile before and after. The answers are codes; the
+     * page names them.
+     *
+     * @return array<string, mixed>
+     */
+    private function profilePayload(Supplier $supplier): array
+    {
+        $profile = $supplier->profile()->with('updatedBy:id,name')->first();
+        $answers = $profile?->answers();
+        $basis = $supplier->classification();
+
+        return [
+            'answers' => $answers,
+            'visible' => SupplierProfile::visibleFields($supplier, $answers ?? SupplierProfile::emptyAnswers()),
+            'complete' => $answers !== null && SupplierProfile::isComplete($supplier, $answers),
+            'completed_at' => $profile?->completed_at?->toIso8601String(),
+            'updated_at' => $profile?->updated_at?->toIso8601String(),
+            'updated_by_name' => $profile?->updatedBy?->name,
+            // Shown read-only on the profile: they change under Kritikalitet.
+            'basis' => $basis !== null ? array_intersect_key($basis, array_flip(Supplier::CRITICALITY_QUESTIONS)) : null,
+            'history' => $supplier->profileChanges()->with('changedBy:id,name')->get()
+                ->map(fn (SupplierProfileChange $change): array => [
+                    'id' => (int) $change->id,
+                    'from' => $change->from_profile,
+                    'to' => $change->to_profile,
+                    'reason' => $change->reason,
+                    'changed_at' => $change->changed_at?->toIso8601String(),
+                    'changed_by_name' => $change->changedBy?->name,
+                ])->all(),
+            'options' => [
+                'groups' => SupplierProfile::GROUPS,
+                'answers' => SupplierProfile::ANSWERS,
+                'data_roles' => SupplierProfile::DATA_ROLES,
+                'data_locations' => SupplierProfile::DATA_LOCATIONS,
+                'sectors' => SupplierProfile::SECTORS,
+                'high_risk_categories' => SupplierProfile::HIGH_RISK_CATEGORIES,
+            ],
         ];
     }
 

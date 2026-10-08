@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Link } from '@inertiajs/react';
 import { ATTENTION_TARGETS, attentionCategoryLabel, attentionFindingText, attentionPanel, attentionTotalLabel } from './supplierManagement';
+import { attentionFindingItems } from './assuranceFollowUp';
 
 /**
  * Why one supplier needs attention: each finding in a sentence, in 16 px, amber like the other
- * modules' follow-up text. With `withLinks` each sentence is followed by where on the supplier page it
- * is followed up. Nothing when there are no findings.
+ * modules' follow-up text. A Leverandørkontroll finding lists its requirements under it, each with
+ * why, so the reason is readable without opening the supplier. With `withLinks` each sentence is
+ * followed by where on the supplier page it is followed up, and each requirement links to its row.
+ * Nothing when there are no findings.
  */
 export function SupplierAttentionFindings({ findings = [], tr, formatDate, withLinks = false }) {
     if (findings.length === 0) {
@@ -29,6 +32,17 @@ export function SupplierAttentionFindings({ findings = [], tr, formatDate, withL
                                         {tr.attention?.[target.label] ?? target.fallback}
                                     </a>
                                 </>
+                            )}
+                            {(finding.requirements ?? []).length > 0 && (
+                                <ul className="mt-1 space-y-1 pl-1" data-testid="supplier-attention-requirements">
+                                    {attentionFindingItems(finding, tr, formatDate).map((item) => (
+                                        <li key={item.id} className="break-words" data-requirement-id={item.id}>
+                                            {withLinks
+                                                ? <a href={`#control-requirement-${item.id}`} className="text-amber-900 underline decoration-amber-400 underline-offset-2 hover:text-amber-950">{item.text}</a>
+                                                : item.text}
+                                        </li>
+                                    ))}
+                                </ul>
                             )}
                         </span>
                     </li>

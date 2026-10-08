@@ -125,7 +125,7 @@ class SupplierDocumentTest extends TestCase
         $reader = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSESS, CustomerPermissionCatalog::SUPPLIER_DELETE]);
         $page = $this->actingAs($reader)->get("/app/supplier-management/{$supplier->id}")->assertOk()->viewData('page')['props'];
         $this->assertSame(['Databehandleravtale'], array_column($page['documents'], 'title'));
-        $this->assertSame([false, false], [$page['permissions']['can_manage_documents'], $page['permissions']['has_edit_right']]);
+        $this->assertSame([false, false], [$page['permissions']['can_manage_documents'], $page['permissions']['has_document_right']]);
         $this->actingAs($reader)->post($url, $this->documentPayload())->assertForbidden();
         $this->actingAs($reader)->patch("{$url}/{$document->id}", $this->documentPayload(['title' => 'Endret']))->assertForbidden();
         $this->actingAs($reader)->post("{$url}/{$document->id}/renew", $this->documentPayload())->assertForbidden();
@@ -140,7 +140,7 @@ class SupplierDocumentTest extends TestCase
         $this->actingAs($editor)->delete("{$url}/{$document->id}")->assertSessionHas('error');
         $this->assertSame(['Databehandleravtale', 1, null], [$document->fresh()->title, $supplier->documents()->count(), $document->fresh()->replaced_by_document_id]);
         $page = $this->actingAs($editor)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props'];
-        $this->assertSame([false, true, 1], [$page['permissions']['can_manage_documents'], $page['permissions']['has_edit_right'], count($page['documents'])]);
+        $this->assertSame([false, true, 1], [$page['permissions']['can_manage_documents'], $page['permissions']['has_document_right'], count($page['documents'])]);
 
         // Another customer's supplier and document: 404 whichever way they are named, and no row can cross.
         $otherEditor = $this->supplierUser($other, [CustomerPermissionCatalog::SUPPLIER_EDIT]);

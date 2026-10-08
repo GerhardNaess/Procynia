@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\ImprovementCase;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
+use App\Models\SupplierControlRequirement;
 use App\Models\SupplierImprovementCase;
 use App\Models\User;
 use App\Support\CustomerPermissionCatalog;
@@ -31,7 +32,10 @@ use Tests\TestCase;
  *    read-only; another customer's supplier is 404; linking takes a case the person can read;
  *  - neither side shows the other's data to someone who cannot read it;
  *  - a supplier with cases is ended, never deleted; a case Avvik og forbedringer deletes takes the
- *    row with it.
+ *    row with it;
+ *  - Leverandørkontroll (supplier-assurance-v2-plan §7.1, §13.2, §20): a control short of
+ *    Dokumentert is followed up with supplier.assure, not supplier.edit; the row keeps which control,
+ *    at most one provenance, and the control is never changed.
  */
 class SupplierImprovementHandoffTest extends TestCase
 {
@@ -222,6 +226,72 @@ class SupplierImprovementHandoffTest extends TestCase
         DB::table('improvement_cases')->where('customer_id', $customer->id)->delete();
         $this->assertFalse($supplier->improvementCaseLinks()->exists());
         $this->assertTrue($supplier->fresh()->isDeletable());
+    }
+
+    public function test_a_control_short_of_documented_is_followed_up_with_supplier_assure_and_keeps_its_provenance(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $area = $this->area($customer, 'Innkjøp');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $this->grant($customer, $assurer, [CustomerPermissionCatalog::IMPROVEMENT_VIEW, CustomerPermissionCatalog::IMPROVEMENT_EDIT], [$area]);
+        $editor = $this->supplierManager($customer, $area);
+        $supplier = $this->supplier($customer, $editor, 'Acme AS');
+        $other = $this->supplier($customer, $editor, 'Annen AS');
+        $requirement = SupplierControlRequirement::query()->create([
+            'customer_id' => $customer->id, 'title' => 'Databehandleravtale', 'theme' => 'privacy', 'level' => 'mandatory',
+            'control_point' => 'before_contract', 'applies_when' => [],
+        ]);
+        // An earlier Dokumentert, then Mangler — the control in force.
+        $documented = $this->control($supplier, $requirement, 'documented');
+        $missing = $this->control($supplier, $requirement, 'missing');
+        $foreign = $this->control($other, $requirement, 'missing');
+        $url = "/app/supplier-management/{$supplier->id}/improvement-cases";
+        $payload = fn (int $evaluationId, array $overrides = []): array => $this->handoffPayload($area, $assurer, ['supplier_requirement_evaluation_id' => $evaluationId, 'title' => 'DBA mangler'] + $overrides);
+
+        // supplier.edit does not hand off a control; supplier.assure does not hand off the supplier.
+        $this->actingAs($editor)->post($url, $payload($missing))->assertForbidden();
+        $this->actingAs($assurer)->post($url, $this->handoffPayload($area, $assurer))->assertForbidden();
+        // Only this supplier's control, short of Dokumentert, and never together with an assessment.
+        foreach ([$documented, $foreign] as $refused) {
+            $this->actingAs($assurer)->post($url, $payload($refused))->assertSessionHasErrors('supplier_requirement_evaluation_id');
+        }
+        $this->actingAs($assurer)->post($url, $payload($missing, ['supplier_assessment_id' => $this->assessment($supplier, SupplierAssessment::RESULT_UNSATISFACTORY)->id]))
+            ->assertSessionHasErrors('supplier_requirement_evaluation_id');
+        $this->assertSame(0, SupplierImprovementCase::query()->count());
+
+        $this->actingAs($assurer)->post($url, $payload($missing))->assertSessionHasNoErrors();
+        $link = $supplier->improvementCaseLinks()->sole();
+        $this->assertSame(['handoff', $missing, null], [$link->origin, (int) $link->supplier_requirement_evaluation_id, $link->supplier_assessment_id]);
+        // The control is untouched: still Mangler, still the one in force.
+        $this->assertSame('missing', DB::table('supplier_requirement_evaluations')->where('id', $missing)->value('status'));
+
+        // The supplier page and the case page say which control; the row offers it on the control in force.
+        $page = $this->actingAs($assurer)->get("/app/supplier-management/{$supplier->id}")->assertOk()->viewData('page')['props'];
+        $this->assertSame(['requirement_title' => 'Databehandleravtale', 'evaluated_on' => now()->toDateString()], $page['improvement_cases'][0]['evaluation']);
+        $this->assertFalse($page['improvement_handoff']['can_from_supplier']);
+        $this->assertSame([], $page['improvement_handoff']['link_options']);
+        $this->assertTrue(collect($page['control_requirements']['applicable'])->sole()['can_follow_up']);
+        $this->assertFalse(collect($this->actingAs($editor)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props']['control_requirements']['applicable'])->sole()['can_follow_up']);
+        $origin = $this->actingAs($assurer)->get("/app/improvements/{$link->improvement_case_id}")->assertOk()->viewData('page')['props']['supplier_origin'];
+        $this->assertSame('Databehandleravtale', $origin[0]['evaluation']['requirement_title']);
+
+        // The database: at most one provenance; a linked case carries none; never another supplier's control.
+        $this->assertDatabaseRefuses(fn () => DB::table('supplier_improvement_cases')->where('id', $link->id)
+            ->update(['supplier_assessment_id' => $this->assessment($supplier, SupplierAssessment::RESULT_PARTIALLY_SATISFACTORY)->id]), 'two provenances');
+        $this->assertDatabaseRefuses(fn () => DB::table('supplier_improvement_cases')->where('id', $link->id)
+            ->update(['origin' => 'linked', 'handoff_key' => null]), 'a linked case from a control');
+        $this->assertDatabaseRefuses(fn () => DB::table('supplier_improvement_cases')->where('id', $link->id)
+            ->update(['supplier_requirement_evaluation_id' => $foreign]), "another supplier's control");
+    }
+
+    private function control(Supplier $supplier, SupplierControlRequirement $requirement, string $status): int
+    {
+        return (int) DB::table('supplier_requirement_evaluations')->insertGetId([
+            'customer_id' => $supplier->customer_id, 'supplier_id' => $supplier->id, 'requirement_id' => $requirement->id,
+            'status' => $status, 'rationale' => 'Ikke mottatt.', 'evaluated_on' => now()->toDateString(), 'recorded_at' => now(),
+            'requirement_title' => $requirement->title, 'requirement_level' => $requirement->level, 'requirement_theme' => $requirement->theme,
+            'applicability_reason' => 'Gjelder alle leverandører', 'supplier_name' => $supplier->name,
+        ]);
     }
 
     /**

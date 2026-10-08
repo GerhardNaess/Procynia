@@ -7,15 +7,38 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import SupplierAttention from './SupplierAttention';
 import SupplierForm from './SupplierForm';
+import SupplierTabs from './SupplierTabs';
 import { supplierHelp } from './supplierHelp';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import { formatLongDate } from '../Improvements/improvementStatus';
+import { DECISION_TONES, decisionLabel } from './assuranceStatus';
 import { SUPPLIER_STATUS_TONES, categoryLabel, countLabel, criticalityLabel, emptyCriticality, nextReviewText, statusLabel } from './supplierManagement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 const REGISTER_URL = '/app/supplier-management';
+
+/**
+ * Kontrollstatus in the register (plan §9.5): the decision in force, and — as its own marker, never
+ * folded into it — «Krever beslutning». Nothing for a supplier with no requirements and no decision.
+ */
+function ControlStatus({ status, tr }) {
+    const a = tr.assurance ?? {};
+
+    if (! status || (! status.decision && ! status.has_state)) {
+        return null;
+    }
+
+    return (
+        <span className="flex flex-wrap gap-2" data-testid="register-control-status">
+            {status.decision
+                ? <StatusBadge tone={DECISION_TONES[status.decision] ?? 'slate'}>{decisionLabel(status.decision, tr)}</StatusBadge>
+                : <span className="text-base text-slate-600">{a.column_none ?? 'Ingen beslutning'}</span>}
+            {status.decision_required && <span data-testid="register-decision-required"><StatusBadge tone="rose">{a.decision_required ?? 'Krever beslutning'}</StatusBadge></span>}
+        </span>
+    );
+}
 
 function Owner({ item, tr }) {
     return item.owner_name ?? <span className="text-amber-800">{tr.no_owner ?? 'Mangler ansvarlig'}</span>;
@@ -44,6 +67,8 @@ export default function SupplierManagementIndex() {
         permissions = {},
         owner_options: ownerOptions = [],
         attention = null,
+        assurance_decisions: assuranceDecisions = [],
+        control_status_enabled: controlStatusEnabled = false,
         locale = 'no',
     } = usePage().props;
 
@@ -58,6 +83,8 @@ export default function SupplierManagementIndex() {
     const [category, setCategory] = useState(filters.category ?? '');
     const [criticality, setCriticality] = useState(filters.criticality ?? '');
     const [attentionOnly, setAttentionOnly] = useState(Boolean(filters.attention));
+    const [decision, setDecision] = useState(filters.decision ?? '');
+    const [decisionRequiredOnly, setDecisionRequiredOnly] = useState(Boolean(filters.decision_required));
 
     const form = useForm({
         name: '',
@@ -81,6 +108,8 @@ export default function SupplierManagementIndex() {
             category: category || undefined,
             criticality: criticality || undefined,
             attention: attentionOnly ? 1 : undefined,
+            decision: decision || undefined,
+            decision_required: decisionRequiredOnly ? 1 : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -90,6 +119,8 @@ export default function SupplierManagementIndex() {
         setCategory('');
         setCriticality('');
         setAttentionOnly(false);
+        setDecision('');
+        setDecisionRequiredOnly(false);
         router.get(REGISTER_URL, {}, { replace: true });
     };
 
@@ -98,11 +129,14 @@ export default function SupplierManagementIndex() {
         form.post(REGISTER_URL, { preserveScroll: true });
     };
 
-    const filtered = Boolean(filters.search || filters.status || filters.category || filters.criticality || filters.attention);
+    const filtered = Boolean(filters.search || filters.status || filters.category || filters.criticality || filters.attention || filters.decision || filters.decision_required);
+    // Kontrollstatus only once the customer has started Leverandørkontroll (plan §17).
+    const hasControlStatus = Boolean(controlStatusEnabled);
 
     return (
         <CustomerAppLayout title={tr.index_title ?? 'Leverandører'} showPageTitle={false}>
             <div className="space-y-6">
+                <SupplierTabs current="suppliers" tr={tr} />
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
                         <p className="text-base font-semibold text-violet-700">{tr.module_name ?? 'Leverandøroppfølging'}</p>
@@ -186,6 +220,30 @@ export default function SupplierManagementIndex() {
                                     ))}
                                 </select>
                             </div>
+                            {hasControlStatus && (
+                                <div className="min-w-0">
+                                    <label htmlFor="supplier-decision-filter" className={FILTER_LABEL}>{tr.decision_filter ?? 'Beslutning'}</label>
+                                    <select id="supplier-decision-filter" value={decision} onChange={(event) => setDecision(event.target.value)} className={`mt-1 ${INPUT}`}>
+                                        <option value="">{tr.decision_filter_all ?? 'Alle beslutninger'}</option>
+                                        {assuranceDecisions.map((value) => (
+                                            <option key={value} value={value}>{decisionLabel(value, tr)}</option>
+                                        ))}
+                                        <option value="none">{tr.decision_filter_none ?? 'Ingen beslutning'}</option>
+                                    </select>
+                                </div>
+                            )}
+                            {hasControlStatus && (
+                                <label className="flex min-h-10 items-center gap-2 text-base font-semibold text-slate-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={decisionRequiredOnly}
+                                        onChange={(event) => setDecisionRequiredOnly(event.target.checked)}
+                                        className="h-5 w-5 rounded border-slate-300"
+                                        data-testid="supplier-decision-required-filter"
+                                    />
+                                    {tr.decision_required_filter ?? 'Bare leverandører som krever beslutning'}
+                                </label>
+                            )}
                             <label className="flex min-h-10 items-center gap-2 text-base font-semibold text-slate-700">
                                 <input
                                     type="checkbox"
@@ -230,6 +288,12 @@ export default function SupplierManagementIndex() {
                                                 <dd className="min-w-0 break-words text-slate-800">{nextReview(item)}</dd>
                                                 <dt className="font-semibold text-slate-600">{tr.col_owner ?? 'Intern ansvarlig'}</dt>
                                                 <dd className="min-w-0 break-words text-slate-800"><Owner item={item} tr={tr} /></dd>
+                                                {hasControlStatus && (
+                                                    <>
+                                                        <dt className="font-semibold text-slate-600">{tr.col_control_status ?? 'Kontrollstatus'}</dt>
+                                                        <dd className="min-w-0 break-words text-slate-800"><ControlStatus status={item.control_status} tr={tr} /></dd>
+                                                    </>
+                                                )}
                                             </dl>
                                         </li>
                                     ))}
@@ -245,6 +309,7 @@ export default function SupplierManagementIndex() {
                                                 <th className="px-4 pb-3">{tr.col_deliverable ?? 'Leverer'}</th>
                                                 <th className="px-4 pb-3">{tr.col_owner ?? 'Intern ansvarlig'}</th>
                                                 <th className="px-4 pb-3">{tr.col_next_review ?? 'Neste vurdering'}</th>
+                                                {hasControlStatus && <th className="px-4 pb-3">{tr.col_control_status ?? 'Kontrollstatus'}</th>}
                                                 <th className="pb-3 pl-4">{tr.col_status ?? 'Status'}</th>
                                             </tr>
                                         </thead>
@@ -260,6 +325,7 @@ export default function SupplierManagementIndex() {
                                                     <td className="max-w-md px-4 py-3 align-top text-slate-700"><span className="line-clamp-2 break-words">{item.deliverable_description}</span></td>
                                                     <td className="px-4 py-3 align-top text-slate-700"><Owner item={item} tr={tr} /></td>
                                                     <td className="px-4 py-3 align-top text-slate-700">{nextReview(item)}</td>
+                                                    {hasControlStatus && <td className="px-4 py-3 align-top"><ControlStatus status={item.control_status} tr={tr} /></td>}
                                                     <td className="py-3 pl-4 align-top">
                                                         <StatusBadge tone={SUPPLIER_STATUS_TONES[item.status] ?? 'slate'}>{statusLabel(item.status, tr)}</StatusBadge>
                                                     </td>

@@ -37,7 +37,7 @@ function Location({ location, d }) {
  * Legg til, Rediger and Registrer fornyet share one form. A renewal keeps the type of the document
  * it renews, so the type is shown, not asked.
  */
-function DocumentForm({ supplierId, mode, document, types, onDone, tr }) {
+function DocumentForm({ supplierId, mode, document, types, standards = [], onDone, tr }) {
     const d = tr.documents ?? {};
     const form = useForm(documentFormData(mode, document));
     const id = (field) => `supplier-document-${field}`;
@@ -62,6 +62,7 @@ function DocumentForm({ supplierId, mode, document, types, onDone, tr }) {
             <div>
                 <h3 className="text-lg font-semibold text-slate-950">{heading}</h3>
                 {mode === 'renew' && <p className={HINT}>{d.renew_intro ?? 'Registrer den nye utgaven med ny gyldighet og plassering. Den forrige blir stående og markeres som erstattet.'}</p>}
+                {mode === 'edit' && document?.deletable === false && <p className={HINT} data-testid="document-edit-used-hint">{d.edit_used_hint}</p>}
             </div>
 
             {mode === 'renew' ? (
@@ -101,6 +102,24 @@ function DocumentForm({ supplierId, mode, document, types, onDone, tr }) {
                     className={`mt-1 ${INPUT}`}
                 />
                 {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
+            </div>
+
+            <div>
+                <label htmlFor={id('standard')} className={LABEL}>{d.standard ?? 'Standard'}</label>
+                <p id={id('standard-hint')} className={HINT}>{d.standard_hint ?? 'Valgfritt. For eksempel «ISO 27001» eller «Miljøfyrtårn».'}</p>
+                <input
+                    id={id('standard')}
+                    type="text"
+                    list={id('standard-options')}
+                    aria-describedby={id('standard-hint')}
+                    value={form.data.standard}
+                    onChange={(event) => form.setData('standard', event.target.value)}
+                    className={`mt-1 ${INPUT} md:max-w-md`}
+                />
+                <datalist id={id('standard-options')}>
+                    {standards.map((standard) => <option key={standard} value={standard} />)}
+                </datalist>
+                {form.errors.standard && <p className={ERROR}>{form.errors.standard}</p>}
             </div>
 
             <div>
@@ -169,16 +188,65 @@ function DocumentForm({ supplierId, mode, document, types, onDone, tr }) {
 }
 
 /**
+ * Bekreft kravene på nytt (docs/supplier-assurance-v2-plan.md §10.3): on a renewed document, the
+ * requirements whose control rests on an earlier edition — all chosen to begin with. Each one chosen
+ * gets a new control with the same result, this edition and today's date; nothing happens unless the
+ * person sends it.
+ */
+function ReconfirmForm({ supplierId, document, requirements, onDone, tr }) {
+    const r = tr.control?.reconfirm ?? {};
+    const form = useForm({ requirement_ids: requirements.map((requirement) => requirement.id), rationale: '' });
+    const id = `reconfirm-${document.id}`;
+
+    const toggle = (requirementId) => form.setData('requirement_ids', form.data.requirement_ids.includes(requirementId)
+        ? form.data.requirement_ids.filter((item) => item !== requirementId)
+        : [...form.data.requirement_ids, requirementId]);
+
+    const send = (event) => {
+        event.preventDefault();
+        form.post(`/app/supplier-management/${supplierId}/documents/${document.id}/reconfirm`, { preserveScroll: true, onSuccess: onDone });
+    };
+
+    return (
+        <form onSubmit={send} className="mt-4 space-y-4 border-t border-slate-100 pt-4" data-testid="reconfirm-form">
+            <h3 className="text-lg font-semibold text-slate-950">{r.heading ?? 'Bekreft kravene på nytt'}</h3>
+            <p className={HINT}>{r.intro}</p>
+            <fieldset>
+                <legend className={LABEL}>{r.requirements ?? 'Krav'}<RequiredMark /></legend>
+                {requirements.map((requirement) => (
+                    <label key={requirement.id} className="flex min-h-10 items-start gap-3 py-1 text-base text-slate-900">
+                        <input type="checkbox" checked={form.data.requirement_ids.includes(requirement.id)} onChange={() => toggle(requirement.id)} className="mt-1 h-5 w-5 shrink-0" />
+                        <span className="min-w-0 break-words">{requirement.title}</span>
+                    </label>
+                ))}
+                {form.errors.requirement_ids && <p className={ERROR}>{form.errors.requirement_ids}</p>}
+            </fieldset>
+            <div>
+                <label htmlFor={`${id}-rationale`} className={LABEL}>{tr.control?.reason_label ?? 'Begrunnelse'}<RequiredMark /></label>
+                <textarea id={`${id}-rationale`} rows={3} required aria-required value={form.data.rationale} onChange={(event) => form.setData('rationale', event.target.value)} className={`mt-1 ${INPUT}`} />
+                {form.errors.rationale && <p className={ERROR}>{form.errors.rationale}</p>}
+            </div>
+            <div className="flex flex-wrap justify-end gap-3">
+                <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+                <button type="submit" disabled={form.processing || form.data.requirement_ids.length === 0 || ! form.data.rationale.trim()} className={PRIMARY_ACTION}>{r.submit ?? 'Bekreft kravene'}</button>
+            </div>
+        </form>
+    );
+}
+
+/**
  * Dokumentasjon on the supplier page: which documentation exists, where it is kept, how long it is
  * valid and whether it has expired — a description of each document, never the document. Current
  * rows first, replaced ones after them, each as a card so nothing scrolls sideways on a phone.
  *
  * Legg til, Rediger, Registrer fornyet and Slett are offered only when the server says this person
- * may change the documentation; for an ended supplier someone with the right is told why not.
+ * may change the documentation; for an ended supplier someone with the right is told why not. A row
+ * used in a control is never offered Slett, and says why; a renewed edition offers «Bekreft kravene
+ * på nytt» when the server lists requirements for it.
  */
-export default function SupplierDocuments({ supplierId, supplierStatus, documents = [], types = [], permissions = {}, locale, tr }) {
+export default function SupplierDocuments({ supplierId, supplierStatus, documents = [], types = [], standards = [], reconfirmable = {}, permissions = {}, locale, tr }) {
     const d = tr.documents ?? {};
-    // What is open: { mode: 'create' } or { mode: 'edit'|'renew', document }, one at a time.
+    // What is open: { mode: 'create' } or { mode: 'edit'|'renew'|'reconfirm', document }, one at a time.
     const [open, setOpen] = useState(null);
     const canManage = permissions.can_manage_documents ?? false;
     const date = (iso) => formatLongDate(iso, locale);
@@ -206,6 +274,7 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                                 <div className="min-w-0">
                                     <p className="text-base font-semibold text-slate-600">{documentTypeLabel(document.document_type, tr)}</p>
                                     <p className="break-words text-lg font-semibold text-slate-950">{document.title}</p>
+                                    {document.standard && <p className="break-words text-base text-slate-700" data-testid="document-standard">{d.standard ?? 'Standard'}: {document.standard}</p>}
                                 </div>
                                 <StatusBadge tone={DOCUMENT_STATUS_TONES[document.status] ?? 'slate'}>{documentStatusLabel(document.status, tr)}</StatusBadge>
                             </div>
@@ -234,6 +303,7 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                                 )}
                             </dl>
                             {document.status === 'replaced' && <p className="mt-2 text-base text-slate-600">{d.replaced_hint ?? 'Erstattet av en fornyet utgave.'}</p>}
+                            {document.deletable === false && <p className="mt-2 text-base text-slate-600" data-testid="document-used-in-control">{d.used_in_control}</p>}
 
                             {canManage && open === null && (
                                 <div className="mt-3 flex flex-wrap gap-2">
@@ -241,11 +311,19 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                                     {document.status !== 'replaced' && (
                                         <button type="button" onClick={() => setOpen({ mode: 'renew', document })} className={SECONDARY_ACTION}>{d.renew ?? 'Registrer fornyet'}</button>
                                     )}
-                                    <button type="button" onClick={() => destroy(document)} className={DESTRUCTIVE_ACTION}>{d.delete ?? 'Slett'}</button>
+                                    {(reconfirmable[document.id] ?? []).length > 0 && (
+                                        <button type="button" onClick={() => setOpen({ mode: 'reconfirm', document })} className={PRIMARY_ACTION}>{tr.control?.reconfirm?.open ?? 'Bekreft kravene på nytt'}</button>
+                                    )}
+                                    {document.deletable !== false && (
+                                        <button type="button" onClick={() => destroy(document)} className={DESTRUCTIVE_ACTION}>{d.delete ?? 'Slett'}</button>
+                                    )}
                                 </div>
                             )}
-                            {canManage && open?.document?.id === document.id && (
-                                <DocumentForm supplierId={supplierId} mode={open.mode} document={document} types={types} onDone={() => setOpen(null)} tr={tr} />
+                            {open?.mode === 'reconfirm' && open.document.id === document.id && (
+                                <ReconfirmForm supplierId={supplierId} document={document} requirements={reconfirmable[document.id] ?? []} onDone={() => setOpen(null)} tr={tr} />
+                            )}
+                            {canManage && open?.document?.id === document.id && open.mode !== 'reconfirm' && (
+                                <DocumentForm supplierId={supplierId} mode={open.mode} document={document} types={types} standards={standards} onDone={() => setOpen(null)} tr={tr} />
                             )}
                         </li>
                     ))}
@@ -256,9 +334,9 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                 <button type="button" onClick={() => setOpen({ mode: 'create' })} className={`mt-4 ${PRIMARY_ACTION}`}>{d.add ?? 'Legg til dokumentasjon'}</button>
             )}
             {canManage && open?.mode === 'create' && (
-                <DocumentForm supplierId={supplierId} mode="create" document={null} types={types} onDone={() => setOpen(null)} tr={tr} />
+                <DocumentForm supplierId={supplierId} mode="create" document={null} types={types} standards={standards} onDone={() => setOpen(null)} tr={tr} />
             )}
-            {! canManage && permissions.has_edit_right && supplierStatus === 'ended' && (
+            {! canManage && permissions.has_document_right && supplierStatus === 'ended' && (
                 <p className="mt-4 text-base text-slate-600" data-testid="documents-read-only">{d.reopen_to_change ?? 'Leverandøren er avsluttet. Gjenåpne den for å endre dokumentasjonen.'}</p>
             )}
         </section>

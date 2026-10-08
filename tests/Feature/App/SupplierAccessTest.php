@@ -75,6 +75,7 @@ class SupplierAccessTest extends TestCase
         $this->assertFalse($access->canOpenModule($owner));
         $this->assertFalse($access->canEdit($owner));
         $this->assertFalse($access->canAssess($owner));
+        $this->assertFalse($access->canAssure($owner));
         $this->assertFalse($access->canDelete($owner));
 
         $this->grantAll($customer, $owner, [CustomerPermissionCatalog::SUPPLIER_VIEW, CustomerPermissionCatalog::SUPPLIER_EDIT]);
@@ -86,7 +87,7 @@ class SupplierAccessTest extends TestCase
         $this->assertFalse($access->canDelete($owner));
     }
 
-    public function test_edit_assess_and_delete_are_separate_and_each_needs_view(): void
+    public function test_edit_assess_assure_and_delete_are_separate_and_each_needs_view(): void
     {
         ['customer' => $customer] = $this->context('grc');
         $access = app(SupplierAccessService::class);
@@ -94,6 +95,8 @@ class SupplierAccessTest extends TestCase
         $cases = [
             CustomerPermissionCatalog::SUPPLIER_EDIT => 'canEdit',
             CustomerPermissionCatalog::SUPPLIER_ASSESS => 'canAssess',
+            // Leverandørkontroll (supplier-assurance-v2-plan §13.2): implies nothing, implied by nothing.
+            CustomerPermissionCatalog::SUPPLIER_ASSURE => 'canAssure',
             CustomerPermissionCatalog::SUPPLIER_DELETE => 'canDelete',
         ];
 

@@ -12,16 +12,27 @@ use App\Models\ImprovementCase;
 use App\Models\Risk;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
+use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierComplianceRequirement;
+use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
+use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierImprovementCase;
+use App\Models\SupplierProfile;
+use App\Models\SupplierProfileChange;
+use App\Models\SupplierRequirementEvaluation;
+use App\Models\SupplierRequirementEvaluationDocument;
+use App\Models\SupplierRequirementOverride;
 use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -37,7 +48,8 @@ use Illuminate\Support\Facades\DB;
  * supplier role.
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
- * assessments, their documentation, the run's fagområder, the cases created in Avvik og
+ * leverandørprofil and profile history, the kontrollkrav, overrides and controls with their
+ * documentation snapshots, the assurance decisions, the aktsomhetsvurderinger, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
  * forbedringer, the risks in Risiko and the kravkilde and requirements in Etterlevelse og revisjon,
  * with the rows linking them to suppliers, go with it. Risks
  * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
@@ -133,11 +145,13 @@ class SupplierE2EFixture
 
     /**
      * An active supplier of the run's customer, owned by the supplier manager, classified with the
-     * given level and interval (Nei to all four questions) — or not classified without a level.
+     * given level and interval (Ja to the questions in $yes, Nei to the rest) — or not classified
+     * without a level.
      *
+     * @param  list<string>  $yes
      * @return array{id: int, name: string}
      */
-    public static function activeSupplier(string $suffix, string $name, ?string $criticality = null, ?int $intervalMonths = null): array
+    public static function activeSupplier(string $suffix, string $name, ?string $criticality = null, ?int $intervalMonths = null, array $yes = []): array
     {
         $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
         $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
@@ -155,6 +169,7 @@ class SupplierE2EFixture
 
         if ($criticality !== null) {
             $supplier->forceFill(['criticality' => $criticality, 'review_interval_months' => $intervalMonths]
+                + array_fill_keys($yes, true)
                 + array_fill_keys(Supplier::CRITICALITY_QUESTIONS, false));
         }
 
@@ -264,7 +279,165 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
+    /**
+     * Gives the supplier manager supplier.assure (Leverandørkontroll) and registers two catalogue
+     * requirements by hand — no templates: «Databehandleravtale», mandatory, for data processors, and
+     * «Oversikt over underleverandører», important, for suppliers that use subcontractors.
+     *
+     * @return array{dpa_title: string, subcontractors_title: string}
+     */
+    public static function seedAssurance(string $suffix): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $manager, $name): array {
+            self::role($customer, $name('Leverandørkontrollør'), [CustomerPermissionCatalog::SUPPLIER_ASSURE], $manager);
+            $requirement = fn (string $title, string $level, array $rule): SupplierControlRequirement => SupplierControlRequirement::query()->create([
+                'customer_id' => $customer->id,
+                'title' => $title,
+                'theme' => 'privacy',
+                'level' => $level,
+                'control_point' => 'before_contract',
+                'applies_when' => $rule,
+                'basis_text' => 'Personvernforordningen art. 28',
+                'created_by' => $manager->id,
+                'updated_by' => $manager->id,
+            ]);
+            $dpa = $requirement($name('Databehandleravtale'), 'mandatory', [['processor']]);
+            $subcontractors = $requirement($name('Oversikt over underleverandører'), 'important', [['subcontractors']]);
+
+            return ['dpa_title' => $dpa->title, 'subcontractors_title' => $subcontractors->title];
+        });
+    }
+
+    /**
+     * Kontroll forfalt with explicit historical dates, instead of moving the clock: a Viktig
+     * requirement for every supplier, controlled every 6 months, and a Dokumentert control of it on
+     * the supplier dated 7 months ago, resting on a report without expiry. Its control date passed a
+     * month ago. Written as SupplierRequirementEvaluationService would store it.
+     *
+     * @return array{requirement_title: string, document_title: string, due_on: string}
+     */
+    public static function seedOverdueControl(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+        $evaluatedOn = now()->subMonthsNoOverflow(7)->toDateString();
+
+        return DB::transaction(function () use ($supplier, $manager, $name, $evaluatedOn): array {
+            $requirement = SupplierControlRequirement::query()->create([
+                'customer_id' => $supplier->customer_id,
+                'title' => $name('Uavhengig sikkerhetsrapport'),
+                'theme' => 'information_security',
+                'level' => 'important',
+                'control_point' => 'ongoing',
+                'control_interval_months' => 6,
+                'applies_when' => [],
+                'created_by' => $manager->id,
+                'updated_by' => $manager->id,
+            ]);
+            $document = SupplierDocument::query()->create([
+                'customer_id' => $supplier->customer_id,
+                'supplier_id' => $supplier->id,
+                'document_type' => 'audit_report',
+                'title' => $name('SOC 2-rapport'),
+            ]);
+            $evaluationId = DB::table('supplier_requirement_evaluations')->insertGetId([
+                'customer_id' => $supplier->customer_id, 'supplier_id' => $supplier->id, 'requirement_id' => $requirement->id,
+                'status' => SupplierRequirementEvaluation::STATUS_DOCUMENTED, 'rationale' => 'Rapporten dekker kravet.',
+                'evaluated_on' => $evaluatedOn, 'evaluated_by_user_id' => $manager->id, 'recorded_at' => now(),
+                'requirement_title' => $requirement->title, 'requirement_level' => $requirement->level, 'requirement_theme' => $requirement->theme,
+                'applicability_reason' => 'Gjelder alle leverandører', 'supplier_name' => $supplier->name, 'criticality' => $supplier->criticality,
+            ]);
+            DB::table('supplier_requirement_evaluation_documents')->insert([
+                'customer_id' => $supplier->customer_id, 'evaluation_id' => $evaluationId, 'supplier_document_id' => $document->id,
+                'document_type' => $document->document_type, 'document_title' => $document->title,
+            ]);
+
+            return [
+                'requirement_title' => $requirement->title,
+                'document_title' => $document->title,
+                'due_on' => Carbon::parse($evaluatedOn)->addMonthsNoOverflow(6)->toDateString(),
+            ];
+        });
+    }
+
+    /**
+     * A product supplier whose profile makes an aktsomhetsvurdering relevant (supplier-assurance-v2-plan
+     * §11.3): textiles, produced outside Norway/the EEA with subcontractors, labour intensity not
+     * clarified. Written as the profile itself, without a history row — the journey does not read it.
+     *
+     * @return array{high_risk_category: string}
+     */
+    public static function seedProductProfile(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        (new SupplierProfile)->forceFill([
+            'supplier_id' => $supplier->id,
+            'customer_id' => $supplier->customer_id,
+            'production_outside_eea' => 'yes',
+            'high_risk_categories' => ['textiles'],
+            'uses_subcontractors' => 'yes',
+            'labour_intensive' => 'unknown',
+            'updated_by' => $manager->id,
+        ])->save();
+
+        return ['high_risk_category' => 'textiles'];
+    }
+
+    /**
+     * Template overlap (phase 8): the customer already uses IT/SaaS-leverandør — applied through
+     * SupplierRequirementTemplateLibrary as «Ta i bruk kravmal» does — and has edited one of its
+     * requirements locally (S2, renamed and given a basis text).
+     *
+     * @return array{edited_title: string}
+     */
+    public static function seedItSaasInUse(string $suffix): array
+    {
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        app(SupplierRequirementTemplateLibrary::class)->apply($manager, RequirementTemplates::IT_SAAS);
+        $edited = self::namer($suffix)('MFA hos driftspartner');
+        SupplierControlRequirement::query()->where('customer_id', $manager->customer_id)->where('template_item_key', 'S2')->sole()
+            ->forceFill(['title' => $edited, 'basis_text' => 'Avtale pkt. 7', 'updated_by' => $manager->id])->save();
+
+        return ['edited_title' => $edited];
+    }
+
+    /**
+     * A critical ICT supplier's profile: processes personal data as a databehandler and stores our data
+     * in the EEA, without privileged access or subcontractors. Written as the profile itself, without a
+     * history row — the journey does not read it.
+     *
+     * @return array{sector: string}
+     */
+    public static function seedIctProfile(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        (new SupplierProfile)->forceFill([
+            'supplier_id' => $supplier->id,
+            'customer_id' => $supplier->customer_id,
+            'data_role' => 'processor',
+            'special_category_data' => 'no',
+            'stores_our_data' => 'yes',
+            'data_location' => 'eea',
+            'confidential_information' => 'no',
+            'privileged_access' => 'no',
+            'uses_subcontractors' => 'no',
+            'sectors' => ['ict'],
+            'updated_by' => $manager->id,
+        ])->save();
+
+        return ['sector' => 'ict'];
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assurance_decisions: int, due_diligence_assessments: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -274,6 +447,14 @@ class SupplierE2EFixture
             'suppliers' => Supplier::query()->whereIn('customer_id', $customerIds)->count(),
             'status_changes' => SupplierStatusChange::query()->whereIn('customer_id', $customerIds)->count(),
             'criticality_changes' => SupplierCriticalityChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'profiles' => SupplierProfile::query()->whereIn('customer_id', $customerIds)->count(),
+            'profile_changes' => SupplierProfileChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'control_requirements' => SupplierControlRequirement::query()->whereIn('customer_id', $customerIds)->count(),
+            'requirement_overrides' => SupplierRequirementOverride::query()->whereIn('customer_id', $customerIds)->count(),
+            'requirement_evaluations' => SupplierRequirementEvaluation::query()->whereIn('customer_id', $customerIds)->count(),
+            'evaluation_documents' => SupplierRequirementEvaluationDocument::query()->whereIn('customer_id', $customerIds)->count(),
+            'assurance_decisions' => SupplierAssuranceDecision::query()->whereIn('customer_id', $customerIds)->count(),
+            'due_diligence_assessments' => SupplierDueDiligenceAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
             // Also by the run's suffix in the title, wherever it might have landed.

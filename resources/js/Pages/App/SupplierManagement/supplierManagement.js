@@ -312,6 +312,7 @@ export function documentFormData(mode, document = null) {
         return {
             document_type: document.document_type,
             title: document.title ?? '',
+            standard: document.standard ?? '',
             location: document.location ?? '',
             valid_from: document.valid_from ?? '',
             valid_until: document.valid_until ?? '',
@@ -322,6 +323,7 @@ export function documentFormData(mode, document = null) {
     return {
         document_type: mode === 'renew' && document ? document.document_type : '',
         title: mode === 'renew' && document ? document.title : '',
+        standard: mode === 'renew' && document ? (document.standard ?? '') : '',
         location: '',
         valid_from: '',
         valid_until: '',
@@ -360,9 +362,30 @@ export function caseStatusLabel(status, ti = {}) {
  * @param {object|null} assessment  the assessment followed up, or null
  * @param {(date: string) => string} formatDate
  */
-export function caseHandoffPrefill(supplier, assessment, tr = {}, formatDate = (date) => date) {
+export function caseHandoffPrefill(supplier, assessment, tr = {}, formatDate = (date) => date, evaluation = null, dueDiligence = null) {
     const c = tr.cases ?? {};
     const title = (c.prefill_title ?? 'Leverandør: :name').replace(':name', supplier.name);
+
+    if (dueDiligence) {
+        const intro = (c.prefill_description_due_diligence ?? 'Sak opprettet fra aktsomhetsvurderingen av :name :date. Konklusjon: :conclusion.')
+            .replace(':name', supplier.name)
+            .replace(':date', formatDate(dueDiligence.assessed_on))
+            .replace(':conclusion', tr.due_diligence?.conclusions?.[dueDiligence.conclusion] ?? dueDiligence.conclusion);
+        const rationale = (c.prefill_rationale_due_diligence ?? 'Begrunnelse fra aktsomhetsvurderingen: :rationale').replace(':rationale', dueDiligence.rationale ?? '');
+
+        return { title: `${title} – ${tr.due_diligence?.case_title ?? 'aktsomhet'}`, description: `${intro}\n\n${rationale}` };
+    }
+
+    if (evaluation) {
+        const intro = (c.prefill_description_evaluation ?? 'Sak opprettet fra kontrollen av kravet «:requirement» hos :name :date. Resultat: :result.')
+            .replace(':requirement', evaluation.requirement_title ?? '')
+            .replace(':name', supplier.name)
+            .replace(':date', formatDate(evaluation.evaluated_on))
+            .replace(':result', tr.control?.display_statuses?.[evaluation.status] ?? evaluation.status);
+        const rationale = (c.prefill_rationale_evaluation ?? 'Begrunnelse fra kontrollen: :rationale').replace(':rationale', evaluation.rationale ?? '');
+
+        return { title: `${title} – ${evaluation.requirement_title ?? ''}`, description: `${intro}\n\n${rationale}` };
+    }
 
     if (! assessment) {
         return { title, description: (c.prefill_description ?? 'Sak opprettet fra Leverandøroppfølging for :name.').replace(':name', supplier.name) };
@@ -382,12 +405,22 @@ export function assessmentNeedsFollowUp(assessment) {
     return Boolean(assessment) && assessment.overall_result !== 'satisfactory';
 }
 
-/** How a listed case came to concern the supplier: created here, from an assessment, or linked later. */
+/** How a listed case came to concern the supplier: created here, from an assessment or a control, or linked later. */
 export function caseOriginText(entry, tr = {}, formatDate = (date) => date) {
     const c = tr.cases ?? {};
 
     if (entry.origin === 'linked') {
         return c.linked ?? 'Koblet til senere';
+    }
+
+    if (entry.due_diligence_assessed_on) {
+        return (c.from_due_diligence ?? 'Opprettet fra aktsomhetsvurderingen :date').replace(':date', formatDate(entry.due_diligence_assessed_on));
+    }
+
+    if (entry.evaluation) {
+        return (c.from_evaluation ?? 'Opprettet fra kontrollen av «:requirement» :date')
+            .replace(':requirement', entry.evaluation.requirement_title)
+            .replace(':date', formatDate(entry.evaluation.evaluated_on));
     }
 
     return entry.assessed_on
@@ -437,11 +470,15 @@ export function riskLevelText(level, trRisk = {}) {
 }
 
 /** How a listed risk came to concern the supplier: created here, or linked later. */
-export function riskOriginText(entry, tr = {}) {
+export function riskOriginText(entry, tr = {}, formatDate = (date) => date) {
     const r = tr.risks ?? {};
 
-    return entry.origin === 'linked'
-        ? (r.linked ?? 'Koblet til senere')
+    if (entry.origin === 'linked') {
+        return r.linked ?? 'Koblet til senere';
+    }
+
+    return entry.due_diligence_assessed_on
+        ? (r.from_due_diligence ?? 'Opprettet fra aktsomhetsvurderingen :date').replace(':date', formatDate(entry.due_diligence_assessed_on))
         : (r.from_supplier ?? 'Opprettet fra leverandøren');
 }
 
@@ -475,9 +512,27 @@ const ATTENTION_FALLBACKS = {
     document_expiring: ':document «:title» utløper om :days dager (:date).',
     document_expiring_one: ':document «:title» utløper i morgen (:date).',
     document_expiring_today: ':document «:title» utløper i dag.',
+    decision_required_one: '1 obligatorisk krav krever beslutning:',
+    decision_required_many: ':count obligatoriske krav krever beslutning:',
+    control_overdue_one: '1 kontrollkrav er forfalt:',
+    control_overdue_many: ':count kontrollkrav er forfalt:',
+    requirement_not_evaluated_one: '1 obligatorisk eller viktig krav er ikke vurdert:',
+    requirement_not_evaluated_many: ':count obligatoriske eller viktige krav er ikke vurdert:',
+    profile_incomplete: 'Leverandøren er :level, og leverandørprofilen er ikke fylt ut.',
+    due_diligence_missing: 'Leverandørprofilen gjør en aktsomhetsvurdering relevant, og ingen er registrert.',
+    due_diligence_overdue: 'Neste aktsomhetsvurdering var :date og er forfalt.',
 };
 
+/** Findings that name requirements: the sentence counts them, attentionFindingItems() lists them. */
+export const ATTENTION_LIST_KEYS = ['decision_required', 'control_overdue', 'requirement_not_evaluated'];
+
 const ATTENTION_CATEGORY_FALLBACKS = {
+    decision_required: 'Krever beslutning',
+    control_overdue: 'Kontroll forfalt',
+    requirement_not_evaluated: 'Krav ikke vurdert',
+    profile_incomplete: 'Profil ikke fylt ut',
+    due_diligence_missing: 'Aktsomhetsvurdering mangler',
+    due_diligence_overdue: 'Aktsomhetsvurdering forfalt',
     not_assessed: 'Ikke vurdert',
     review_overdue: 'Vurdering forfalt',
     missing_owner: 'Mangler ansvarlig',
@@ -487,6 +542,12 @@ const ATTENTION_CATEGORY_FALLBACKS = {
 
 /** Where on the supplier page a finding is followed up. */
 export const ATTENTION_TARGETS = {
+    decision_required: { anchor: 'supplier-assurance-heading', label: 'go_to_assurance', fallback: 'Gå til Kontrollstatus' },
+    control_overdue: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
+    requirement_not_evaluated: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
+    profile_incomplete: { anchor: 'supplier-profile-heading', label: 'go_to_profile', fallback: 'Gå til leverandørprofil' },
+    due_diligence_missing: { anchor: 'supplier-due-diligence-heading', label: 'go_to_due_diligence', fallback: 'Gå til Aktsomhet og bærekraft' },
+    due_diligence_overdue: { anchor: 'supplier-due-diligence-heading', label: 'go_to_due_diligence', fallback: 'Gå til Aktsomhet og bærekraft' },
     not_assessed: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
     review_overdue: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
     missing_owner: { anchor: 'supplier-details-heading', label: 'go_to_details', fallback: 'Gå til Om leverandøren' },
@@ -519,10 +580,17 @@ export function attentionFindingText(finding, tr = {}, formatDate = (date) => da
         key = finding.days === 0 ? 'document_expiring_today' : 'document_expiring_one';
     }
 
+    if (ATTENTION_LIST_KEYS.includes(key)) {
+        const count = (finding.requirements ?? []).length;
+        const plural = `${key}_${count === 1 ? 'one' : 'many'}`;
+
+        return (a[plural] ?? ATTENTION_FALLBACKS[plural]).replace(':count', String(count));
+    }
+
     const template = a[key] ?? ATTENTION_FALLBACKS[key] ?? key;
     const values = {
         level: criticalityLabel(finding.criticality, tr),
-        date: formatDate(finding.next_review_on ?? finding.valid_until ?? ''),
+        date: formatDate(finding.next_review_on ?? finding.next_on ?? finding.valid_until ?? ''),
         document: a.documents?.[finding.document_type] ?? 'Dokumentet',
         title: finding.title ?? '',
         days: String(finding.days ?? ''),

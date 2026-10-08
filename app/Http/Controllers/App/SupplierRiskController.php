@@ -33,12 +33,20 @@ class SupplierRiskController extends Controller
         private readonly SupplierRiskService $risks,
     ) {}
 
+    /**
+     * From the supplier: supplier.edit. From an aktsomhetsvurdering: supplier.assure. The service
+     * decides which, from what is handed over.
+     */
     public function store(Request $request, int $supplierId): RedirectResponse
     {
-        [$user, $supplier] = $this->editableSupplier($supplierId);
+        $user = $this->customerContext->currentUser();
+        abort_unless($user instanceof User && $this->access->canOpenModule($user), 403);
+        $supplier = $this->access->findVisibleSupplier($user, $supplierId) ?? abort(404);
 
         $validated = $request->validate(
-            array_intersect_key(RiskCreator::rules(), array_flip(self::CREATE_FIELDS)),
+            array_intersect_key(RiskCreator::rules(), array_flip(self::CREATE_FIELDS)) + [
+                'supplier_due_diligence_assessment_id' => ['nullable', 'integer'],
+            ],
             RiskValidationMessages::messages(),
             RiskValidationMessages::attributes(),
         );

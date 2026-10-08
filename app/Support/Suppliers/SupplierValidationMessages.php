@@ -16,6 +16,7 @@ final class SupplierValidationMessages
             'required' => __('procynia.supplier_management.validation.rules.required'),
             'integer' => __('procynia.supplier_management.validation.rules.choose'),
             'in' => __('procynia.supplier_management.validation.rules.choose'),
+            'array' => __('procynia.supplier_management.validation.rules.choose'),
             'string' => __('procynia.supplier_management.validation.rules.required'),
             'email' => __('procynia.supplier_management.validation.rules.email'),
             'max' => [

@@ -5,6 +5,7 @@ namespace App\Services\Suppliers;
 use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Models\Supplier;
+use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierRisk;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
@@ -25,7 +26,8 @@ use Illuminate\Validation\ValidationException;
  * inherent and residual risk, treatment, tiltak, acceptance and review. The supplier keeps a row
  * saying the risk concerns it (SupplierRisk) and nothing else. Criticality never sets a risk level.
  *
- * WHO. supplier.edit on a supplier that is not ended (plan §9.2 — creating in another module), and
+ * WHO. supplier.edit on a supplier that is not ended (plan §9.2 — creating in another module) — from
+ * an aktsomhetsvurdering supplier.assure instead (supplier-assurance-v2-plan §11.2, §13.2) — and
  * on the Risiko side: risk.create in the chosen fagområde with an owner who can read risks there
  * (checked by RiskCreator, as for any new risk); risk.edit on the risk to link or unlink it. The
  * supplier gets no fagområde, and nothing is guessed.
@@ -89,14 +91,22 @@ class SupplierRiskService
      */
     public function create(User $user, Supplier $supplier, array $validated): Risk
     {
-        abort_unless($this->suppliers->canEdit($user), 403);
+        $dueDiligenceId = $validated['supplier_due_diligence_assessment_id'] ?? null;
+        $fromDueDiligence = ! in_array($dueDiligenceId, [null, ''], true);
+        unset($validated['supplier_due_diligence_assessment_id']);
+
+        // From an aktsomhetsvurdering (supplier-assurance-v2-plan §11.2, §13.2): supplier.assure, the
+        // person who assessed it. From the supplier itself: supplier.edit (v1). risk.create is
+        // RiskCreator's either way.
+        abort_unless($fromDueDiligence ? $this->suppliers->canAssure($user) : $this->suppliers->canEdit($user), 403);
 
         if (! $this->canReadRisks($user)) {
             throw ValidationException::withMessages(['business_area_id' => __('procynia.risk.validation.area_not_allowed')]);
         }
 
-        return DB::transaction(function () use ($user, $supplier, $validated): Risk {
+        return DB::transaction(function () use ($user, $supplier, $validated, $fromDueDiligence, $dueDiligenceId): Risk {
             $locked = $this->lockOpen($supplier, 'title');
+            $assessmentId = $fromDueDiligence ? $this->dueDiligenceOf($locked, $dueDiligenceId) : null;
 
             $risk = $this->creator->create($user, $validated);
 
@@ -104,12 +114,32 @@ class SupplierRiskService
                 'customer_id' => (int) $locked->customer_id,
                 'supplier_id' => (int) $locked->id,
                 'risk_id' => (int) $risk->id,
+                'supplier_due_diligence_assessment_id' => $assessmentId,
                 'origin' => SupplierRisk::ORIGIN_CREATED_FROM_SUPPLIER,
                 'created_by' => $user->id,
             ]);
 
             return $risk;
         });
+    }
+
+    /**
+     * One of this supplier's aktsomhetsvurderinger, whatever its conclusion: whether a risk to the
+     * business follows from it is the person's judgement, never derived from the areas.
+     */
+    private function dueDiligenceOf(Supplier $supplier, mixed $assessmentId): int
+    {
+        $assessment = SupplierDueDiligenceAssessment::query()
+            ->where('customer_id', $supplier->customer_id)
+            ->where('supplier_id', $supplier->id)
+            ->whereKey((int) $assessmentId)
+            ->first();
+
+        if ($assessment === null) {
+            throw ValidationException::withMessages(['supplier_due_diligence_assessment_id' => __('procynia.supplier_management.validation.due_diligence_not_available')]);
+        }
+
+        return (int) $assessment->id;
     }
 
     /** Koble til eksisterende risiko: one the person can edit in Risiko, not already listed here. */
@@ -176,7 +206,7 @@ class SupplierRiskService
             return null;
         }
 
-        $links = $supplier->riskLinks()->get()->keyBy('risk_id');
+        $links = $supplier->riskLinks()->with('dueDiligence:id,assessed_on')->get()->keyBy('risk_id');
 
         if ($links->isEmpty()) {
             return [];
@@ -201,6 +231,7 @@ class SupplierRiskService
                 'level' => $this->level($latest->get((int) $risk->id)),
                 'url' => route('app.risk.show', ['riskId' => $risk->id]),
                 'origin' => $links[(int) $risk->id]->origin,
+                'due_diligence_assessed_on' => $links[(int) $risk->id]->dueDiligence?->assessed_on?->toDateString(),
                 'can_unlink' => in_array((int) $risk->business_area_id, $editableAreas, true),
             ])
             ->values()

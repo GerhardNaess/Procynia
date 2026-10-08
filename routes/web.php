@@ -34,11 +34,17 @@ use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
+use App\Http\Controllers\App\SupplierAssuranceDecisionController;
 use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\SupplierControlRequirementController;
 use App\Http\Controllers\App\SupplierDocumentController;
+use App\Http\Controllers\App\SupplierDueDiligenceController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
+use App\Http\Controllers\App\SupplierProfileController;
+use App\Http\Controllers\App\SupplierRequirementEvaluationController;
+use App\Http\Controllers\App\SupplierRequirementOverrideController;
 use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -61,6 +67,7 @@ use App\Http\Controllers\PublicRegistrationController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -461,6 +468,14 @@ Route::prefix('app')
         Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
             Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
             Route::post('/', [SupplierManagementController::class, 'store'])->name('store');
+            // Kontrollkrav: supplier.view reads, supplier.assure writes (supplier-assurance-v2-plan §13.2).
+            Route::get('/control-requirements', [SupplierControlRequirementController::class, 'index'])->name('control-requirements.index');
+            Route::post('/control-requirements', [SupplierControlRequirementController::class, 'store'])->name('control-requirements.store');
+            Route::post('/control-requirements/templates/{templateKey}', [SupplierControlRequirementController::class, 'applyTemplate'])->whereIn('templateKey', RequirementTemplates::keys())->name('control-requirements.apply-template');
+            Route::patch('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'update'])->whereNumber('requirementId')->name('control-requirements.update');
+            Route::post('/control-requirements/{requirementId}/retire', [SupplierControlRequirementController::class, 'retire'])->whereNumber('requirementId')->name('control-requirements.retire');
+            Route::post('/control-requirements/{requirementId}/reactivate', [SupplierControlRequirementController::class, 'reactivate'])->whereNumber('requirementId')->name('control-requirements.reactivate');
+            Route::delete('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'destroy'])->whereNumber('requirementId')->name('control-requirements.destroy');
             Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
             Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');
             Route::delete('/{supplierId}', [SupplierManagementController::class, 'destroy'])->whereNumber('supplierId')->name('destroy');
@@ -473,7 +488,19 @@ Route::prefix('app')
             Route::post('/{supplierId}/assessments', [SupplierAssessmentController::class, 'store'])->whereNumber('supplierId')->name('assessments.store');
             // Vurder / Endre kritikalitet: the only way criticality changes after registration.
             Route::post('/{supplierId}/criticality', [SupplierManagementController::class, 'changeCriticality'])->whereNumber('supplierId')->name('criticality');
-            // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit).
+            // Leverandørprofil: supplier.edit only, never supplier.assure (supplier-assurance-v2-plan §13.2).
+            Route::post('/{supplierId}/profile', [SupplierProfileController::class, 'update'])->whereNumber('supplierId')->name('profile');
+            // Krav og kvalifikasjoner: a requirement for this supplier, and include/exclude/clear (supplier.assure).
+            Route::post('/{supplierId}/control-requirements', [SupplierControlRequirementController::class, 'storeForSupplier'])->whereNumber('supplierId')->name('control-requirements.store-for-supplier');
+            Route::post('/{supplierId}/requirement-overrides', [SupplierRequirementOverrideController::class, 'store'])->whereNumber('supplierId')->name('requirement-overrides.store');
+            // Kontroller krav: a new, immutable control with its documentation snapshot (supplier.assure).
+            Route::post('/{supplierId}/requirement-evaluations', [SupplierRequirementEvaluationController::class, 'store'])->whereNumber('supplierId')->name('requirement-evaluations.store');
+            Route::post('/{supplierId}/documents/{documentId}/reconfirm', [SupplierRequirementEvaluationController::class, 'reconfirm'])->whereNumber(['supplierId', 'documentId'])->name('requirement-evaluations.reconfirm');
+            // Registrer beslutning: a new, immutable assurance decision with a snapshot of the control state (supplier.assure).
+            Route::post('/{supplierId}/assurance-decisions', [SupplierAssuranceDecisionController::class, 'store'])->whereNumber('supplierId')->name('assurance-decisions.store');
+            // Aktsomhetsvurdering: a new, immutable due diligence assessment (supplier.assure).
+            Route::post('/{supplierId}/due-diligence-assessments', [SupplierDueDiligenceController::class, 'store'])->whereNumber('supplierId')->name('due-diligence.store');
+            // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit or supplier.assure).
             Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
             Route::post('/{supplierId}/documents/{documentId}/renew', [SupplierDocumentController::class, 'renew'])->whereNumber(['supplierId', 'documentId'])->name('documents.renew');

@@ -148,6 +148,14 @@ final class CustomerPermissionCatalog
     /** Registering supplier assessments. supplier.edit does not imply it, and it does not imply edit. */
     public const SUPPLIER_ASSESS = 'supplier.assess';
 
+    /*
+     * Leverandørkontroll: the control function — which requirements we hold suppliers to, whether
+     * each is documented, and the decision about the supplier (docs/supplier-assurance-v2-plan.md
+     * §13.2). Neither supplier.edit nor supplier.assess implies it, and it implies neither: it never
+     * changes master data, criticality, lifecycle or the leverandørprofil.
+     */
+    public const SUPPLIER_ASSURE = 'supplier.assure';
+
     /** Deleting a supplier registered by mistake, while nothing has been recorded on it. */
     public const SUPPLIER_DELETE = 'supplier.delete';
 
@@ -205,6 +213,7 @@ final class CustomerPermissionCatalog
                 self::SUPPLIER_VIEW,
                 self::SUPPLIER_EDIT,
                 self::SUPPLIER_ASSESS,
+                self::SUPPLIER_ASSURE,
                 self::SUPPLIER_DELETE,
             ],
         ];

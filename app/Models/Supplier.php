@@ -6,6 +6,7 @@ use DomainException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * En leverandør i Leverandøroppfølging: the supplier as a company or party — the master object
@@ -170,9 +171,9 @@ class Supplier extends Model
     /**
      * Whether the supplier may be deleted at all, before any permission is considered. Deleting is
      * for a supplier registered by mistake and never used: one that has changed status or
-     * criticality, has been assessed, has documentation registered, concerns a case in Avvik og
-     * forbedringer or a risk in Risiko, or has a requirement in Etterlevelse og revisjon applying to
-     * it has a history — a real decision was made about it — and is ended instead. The
+     * criticality, has been assessed, has documentation registered, has a leverandørprofil, concerns
+     * a case in Avvik og forbedringer or a risk in Risiko, or has a requirement in Etterlevelse og
+     * revisjon applying to it has a history — a real decision was made about it — and is ended instead. The
      * classification it was registered with is the supplier's own and does not count. The database
      * refuses the delete as well (NO ACTION from every child table).
      */
@@ -182,6 +183,18 @@ class Supplier extends Model
             && ! $this->criticalityChanges()->exists()
             && ! $this->assessments()->exists()
             && ! $this->documents()->exists()
+            // Every profile save writes a history row, so the profile and its history go together.
+            && ! $this->profile()->exists()
+            && ! $this->profileChanges()->exists()
+            // Leverandørkontroll (phase 2): a requirement for this supplier, and any override.
+            && ! $this->controlRequirements()->exists()
+            && ! $this->requirementOverrides()->exists()
+            // Phase 3: any control.
+            && ! $this->requirementEvaluations()->exists()
+            // Phase 4: any assurance decision.
+            && ! $this->assuranceDecisions()->exists()
+            // Phase 7: any aktsomhetsvurdering.
+            && ! $this->dueDiligenceAssessments()->exists()
             && ! $this->improvementCaseLinks()->exists()
             && ! $this->riskLinks()->exists()
             && ! $this->requirementLinks()->exists();
@@ -209,6 +222,20 @@ class Supplier extends Model
     public function criticalityChanges(): HasMany
     {
         return $this->hasMany(SupplierCriticalityChange::class, 'supplier_id')
+            ->orderByDesc('changed_at')
+            ->orderByDesc('id');
+    }
+
+    /** The leverandørprofil — absent until someone fills it in (no backfill). */
+    public function profile(): HasOne
+    {
+        return $this->hasOne(SupplierProfile::class, 'supplier_id');
+    }
+
+    /** Newest first. */
+    public function profileChanges(): HasMany
+    {
+        return $this->hasMany(SupplierProfileChange::class, 'supplier_id')
             ->orderByDesc('changed_at')
             ->orderByDesc('id');
     }
@@ -258,5 +285,43 @@ class Supplier extends Model
     public function requirementLinks(): HasMany
     {
         return $this->hasMany(SupplierComplianceRequirement::class, 'supplier_id');
+    }
+
+    /** Kontrollkrav for this one supplier — never the catalogue, which is applied by rule. */
+    public function controlRequirements(): HasMany
+    {
+        return $this->hasMany(SupplierControlRequirement::class, 'supplier_id');
+    }
+
+    /** Every manual override of the requirement profile, newest first. */
+    public function requirementOverrides(): HasMany
+    {
+        return $this->hasMany(SupplierRequirementOverride::class, 'supplier_id')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+    }
+
+    /** Controls of the supplier's requirements, newest control date first. */
+    public function requirementEvaluations(): HasMany
+    {
+        return $this->hasMany(SupplierRequirementEvaluation::class, 'supplier_id')
+            ->orderByDesc('evaluated_on')
+            ->orderByDesc('id');
+    }
+
+    /** Kontrollbeslutninger, the decision in force first. */
+    /** Aktsomhetsvurderinger, newest first (supplier-assurance-v2-plan §11). History; never changed. */
+    public function dueDiligenceAssessments(): HasMany
+    {
+        return $this->hasMany(SupplierDueDiligenceAssessment::class, 'supplier_id')
+            ->orderByDesc('assessed_on')
+            ->orderByDesc('id');
+    }
+
+    public function assuranceDecisions(): HasMany
+    {
+        return $this->hasMany(SupplierAssuranceDecision::class, 'supplier_id')
+            ->orderByDesc('decided_on')
+            ->orderByDesc('id');
     }
 }

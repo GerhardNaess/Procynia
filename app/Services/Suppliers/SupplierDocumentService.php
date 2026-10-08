@@ -24,7 +24,11 @@ use Illuminate\Validation\ValidationException;
  * An ended supplier is read-only: every write locks the supplier row and checks its status inside
  * the lock, so nothing lands on a supplier being ended at the same moment.
  *
- * Authorization is the caller's (supplier.edit through SupplierAccessService).
+ * A row given as the basis of a control — or one renewing such a row — is never deleted
+ * (supplier-assurance-v2-plan §10.4): checked here inside the lock, and refused by the database's
+ * NO ACTION reference too. Correcting it is still allowed; the control keeps its snapshot.
+ *
+ * Authorization is the caller's (supplier.edit or supplier.assure through SupplierAccessService).
  */
 class SupplierDocumentService
 {
@@ -34,6 +38,7 @@ class SupplierDocumentService
         return [
             'document_type' => ['required', 'string', Rule::in(SupplierDocument::TYPES)],
             'title' => ['required', 'string', 'max:255'],
+            'standard' => ['nullable', 'string', 'max:255'],
             'location' => ['nullable', 'string', 'max:2000'],
             'valid_from' => ['nullable', 'date_format:Y-m-d'],
             'valid_until' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:valid_from'],
@@ -98,11 +103,17 @@ class SupplierDocumentService
 
     /**
      * Removes a row registered by mistake. A row it replaced points back to nothing and is current
-     * again.
+     * again. Never a row a control rests on, nor one renewing it.
      */
     public function delete(SupplierDocument $document): void
     {
-        $this->whileOpen($document->supplier, fn () => $document->delete());
+        $this->whileOpen($document->supplier, function () use ($document): void {
+            if (! $document->isDeletable()) {
+                throw ValidationException::withMessages(['title' => __('procynia.supplier_management.validation.document_used_in_control')]);
+            }
+
+            $document->delete();
+        });
     }
 
     /**
@@ -132,6 +143,7 @@ class SupplierDocumentService
     {
         $fields = [
             'title' => trim((string) $validated['title']),
+            'standard' => $this->optional($validated['standard'] ?? null),
             'location' => $this->optional($validated['location'] ?? null),
             'valid_from' => $validated['valid_from'] ?? null,
             'valid_until' => $validated['valid_until'] ?? null,

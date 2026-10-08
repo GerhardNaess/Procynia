@@ -27,12 +27,13 @@ const DESCRIPTION_PARTS = [
  * suggestion (the supplier's name); fagområde, årsak, hendelse, konsekvens and risikoeier are the
  * person's. Nothing is created before they press «Opprett risiko».
  */
-function CreateForm({ supplier, handoff, onDone, tr, trRisk }) {
+function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate, tr, trRisk }) {
     const r = tr.risks ?? {};
     const ts = trRisk.structured ?? {};
     const ref = useRef(null);
     const form = useForm({
         title: (r.prefill_title ?? 'Leverandør: :name').replace(':name', supplier.name),
+        supplier_due_diligence_assessment_id: dueDiligence?.id ?? null,
         cause: '',
         event: '',
         consequence: '',
@@ -60,6 +61,7 @@ function CreateForm({ supplier, handoff, onDone, tr, trRisk }) {
             <div>
                 <h3 className="text-lg font-semibold text-slate-950">{r.form_heading ?? 'Opprett risiko'}</h3>
                 <p className={HINT}>{r.form_intro ?? 'Det opprettes en ny risiko i Risiko. Der vurderes og behandles den. Leverandøren viser bare at risikoen gjelder den.'}</p>
+                {dueDiligence && <p className={HINT} data-testid="risk-from-due-diligence">{riskOriginText({ origin: 'created_from_supplier', due_diligence_assessed_on: dueDiligence.assessed_on }, tr, formatDate)}</p>}
             </div>
 
             <div>
@@ -101,6 +103,7 @@ function CreateForm({ supplier, handoff, onDone, tr, trRisk }) {
                 </select>
                 {form.errors.owner_user_id && <p className={ERROR}>{form.errors.owner_user_id}</p>}
             </div>
+            {form.errors.supplier_due_diligence_assessment_id && <p className={ERROR}>{form.errors.supplier_due_diligence_assessment_id}</p>}
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
@@ -160,7 +163,7 @@ function LinkForm({ supplierId, options, onDone, tr }) {
  *
  * The risk is assessed and treated in Risiko; this page only starts it and shows where it stands.
  */
-export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, tr, trRisk }) {
+export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, fromDueDiligence = null, onDueDiligenceDone = () => {}, formatDate = (date) => date, tr, trRisk }) {
     const r = tr.risks ?? {};
     // 'create', 'link' or null — one form at a time.
     const [panel, setPanel] = useState(null);
@@ -170,7 +173,9 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
     }
 
     const canCreate = Boolean(handoff) && (handoff.area_options ?? []).length > 0;
-    const idle = panel === null;
+    // Creating from the supplier and linking are supplier.edit; from an aktsomhetsvurdering supplier.assure.
+    const fromSupplier = Boolean(handoff?.can_from_supplier);
+    const idle = panel === null && fromDueDiligence === null;
 
     const unlink = (entry) => {
         if (! window.confirm(r.unlink_confirm ?? 'Fjerne koblingen mellom risikoen og leverandøren? Risikoen blir værende i Risiko.')) {
@@ -207,8 +212,8 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
                                     </dd>
                                 </div>
                             </dl>
-                            <p className="mt-2 text-base text-slate-600">{riskOriginText(entry, tr)}</p>
-                            {handoff && idle && entry.can_unlink && (
+                            <p className="mt-2 text-base text-slate-600">{riskOriginText(entry, tr, formatDate)}</p>
+                            {fromSupplier && idle && entry.can_unlink && (
                                 <button type="button" onClick={() => unlink(entry)} className={`mt-3 ${DESTRUCTIVE_ACTION}`}>{r.unlink ?? 'Fjern koblingen'}</button>
                             )}
                         </li>
@@ -216,7 +221,7 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
                 </ul>
             )}
 
-            {handoff && idle && (
+            {fromSupplier && idle && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     {canCreate && (
                         <button type="button" onClick={() => setPanel('create')} className={PRIMARY_ACTION}>{r.create ?? 'Opprett risiko'}</button>
@@ -224,15 +229,18 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
                     <button type="button" onClick={() => setPanel('link')} className={SECONDARY_ACTION}>{r.link ?? 'Koble til eksisterende risiko'}</button>
                 </div>
             )}
-            {handoff && ! canCreate && idle && (
+            {fromSupplier && ! canCreate && idle && (
                 <p className="mt-3 text-base text-slate-600" data-testid="risks-no-areas">{r.no_areas ?? 'Du har ikke tilgang til å opprette risikoer i Risiko.'}</p>
             )}
             {! handoff && hasEditRight && supplier.status === 'ended' && (
                 <p className="mt-4 text-base text-slate-600" data-testid="risks-read-only">{r.reopen_to_follow_up ?? 'Leverandøren er avsluttet. Gjenåpne den for å opprette eller koble risikoer.'}</p>
             )}
 
+            {canCreate && fromDueDiligence !== null && (
+                <CreateForm key={`due-diligence-${fromDueDiligence.id}`} supplier={supplier} handoff={handoff} dueDiligence={fromDueDiligence} onDone={onDueDiligenceDone} formatDate={formatDate} tr={tr} trRisk={trRisk} />
+            )}
             {canCreate && panel === 'create' && (
-                <CreateForm supplier={supplier} handoff={handoff} onDone={() => setPanel(null)} tr={tr} trRisk={trRisk} />
+                <CreateForm supplier={supplier} handoff={handoff} onDone={() => setPanel(null)} formatDate={formatDate} tr={tr} trRisk={trRisk} />
             )}
             {handoff && panel === 'link' && (
                 <LinkForm supplierId={supplier.id} options={handoff.link_options ?? []} onDone={() => setPanel(null)} tr={tr} />

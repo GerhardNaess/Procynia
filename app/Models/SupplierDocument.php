@@ -17,12 +17,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * is not ended. A renewed document is a new row; the old one points at it (replaced_by_document_id)
  * and reads as Erstattet.
  *
+ * Once a row is the basis of a control it can no longer be deleted — nor can a row that renews it,
+ * so the chain from the control to the current edition stays (supplier-assurance-v2-plan §10.4). It
+ * can still be corrected: the control keeps its own snapshot.
+ *
  * Written only by SupplierDocumentService. Has no access rules of its own — reach it only through a
  * supplier from SupplierAccessService::visibleSuppliers().
  */
 class SupplierDocument extends Model
 {
-    /** Avtale · Databehandleravtale · Taushetserklæring · Sertifikat · Forsikringsbevis · Sikkerhetsdokumentasjon · Annet. */
+    /**
+     * Avtale · Databehandleravtale · Taushetserklæring · Sertifikat · Forsikringsbevis ·
+     * Sikkerhetsdokumentasjon · Egenerklæring · Etiske retningslinjer · Revisjonsrapport ·
+     * Kontrollrapport · Underleverandørliste · Offentlig attest · Økonomisk dokumentasjon ·
+     * Miljødokumentasjon · Policy/rutine · Annet (the v2 types: supplier-assurance-v2-plan §10.1).
+     */
     public const TYPES = [
         'agreement',
         'data_processing_agreement',
@@ -30,8 +39,20 @@ class SupplierDocument extends Model
         'certificate',
         'insurance_certificate',
         'security_documentation',
+        'self_declaration',
+        'code_of_conduct',
+        'audit_report',
+        'control_report',
+        'subcontractor_list',
+        'public_certificate',
+        'financial_statement',
+        'environmental_documentation',
+        'policy',
         'other',
     ];
+
+    /** Suggestions for «Standard» in the form; free text, never read by a rule (§10.1). */
+    public const STANDARD_SUGGESTIONS = ['ISO 27001', 'ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 22301', 'Miljøfyrtårn', 'EMAS', 'SOC 2 Type II'];
 
     public const STATUS_VALID = 'valid';
 
@@ -52,6 +73,7 @@ class SupplierDocument extends Model
         'supplier_id',
         'document_type',
         'title',
+        'standard',
         'location',
         'valid_from',
         'valid_until',
@@ -106,6 +128,24 @@ class SupplierDocument extends Model
         }
 
         return (int) CarbonImmutable::parse($today->toDateString())->diffInDays(CarbonImmutable::parse($this->valid_until->toDateString()), false);
+    }
+
+    /**
+     * Not the basis of any control, and neither is any row it renews (directly or further back): the
+     * row may be deleted as registered by mistake. Otherwise the history would lose its evidence or
+     * the way from it to the current edition.
+     */
+    public function isDeletable(): bool
+    {
+        $chain = [(int) $this->id];
+        $frontier = $chain;
+
+        while ($frontier !== []) {
+            $frontier = self::query()->whereIn('replaced_by_document_id', $frontier)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $chain = [...$chain, ...$frontier];
+        }
+
+        return ! SupplierRequirementEvaluationDocument::query()->whereIn('supplier_document_id', $chain)->exists();
     }
 
     public function supplier(): BelongsTo
