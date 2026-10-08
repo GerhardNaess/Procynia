@@ -22,22 +22,28 @@ final readonly class CustomerAiCapacity
 
     public const STATUS_EXHAUSTED = 'exhausted';
 
-    /** Neither the plan nor the customer defines a shared capacity. Nothing is metered against it. */
+    /** No override and no tier: no commercial limit. Usage is recorded and observed, never refused. */
     public const STATUS_NOT_CONFIGURED = 'not_configured';
 
-    /** Where the included units came from (CustomerAiCapacityService::resolveIncluded()). */
-    public const SOURCE_CUSTOMER = 'customer';
+    /**
+     * Where the included units came from (CustomerAiCapacityService::resolveIncluded()). Basis and
+     * the options are never a source: AI capacity is its own commercial dimension.
+     */
+    public const SOURCE_OVERRIDE = 'override';
 
-    public const SOURCE_BASIS = 'basis';
+    public const SOURCE_TIER = 'tier';
 
-    public const SOURCE_NONE = 'none';
+    public const SOURCE_UNCONFIGURED = 'unconfigured';
 
     public function __construct(
         public int $customerId,
         public BillingPeriod $period,
         public ?int $includedUnits,
         public string $includedSource,
-        // A technical default, not a decided commercial level — the customer is told it may change.
+        // The customer's selected AI capacity tier, whether or not an override wins over it.
+        public ?string $tierKey,
+        public ?string $tierName,
+        // A placeholder tier, not a decided commercial level — the customer is told it may change.
         public bool $isProvisional,
         // Exact figures, for comparisons. Displayed figures are derived from them below.
         public float $usedUnitsExact,
@@ -99,6 +105,10 @@ final readonly class CustomerAiCapacity
         return [
             'customer_id' => $this->customerId,
             'is_configured' => $this->isConfigured(),
+            'source' => $this->includedSource,
+            // Shown only when the tier is what sizes the capacity; an override is a negotiated
+            // amount, not a tier level.
+            'tier_name' => $this->includedSource === self::SOURCE_TIER ? $this->tierName : null,
             'included' => $this->includedUnits,
             'used' => $this->usedUnits,
             'reserved' => $this->reservedUnits,

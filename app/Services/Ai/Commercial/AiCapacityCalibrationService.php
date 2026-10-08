@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Internal measurements for deciding the commercial AI capacity later — never a customer view, and
- * never an automatic adjustment: nothing here changes nok_per_unit, the Basis capacity or an
- * operation estimate. It reads the ledger (trusted rows) and reports.
+ * never an automatic adjustment: nothing here changes nok_per_unit, a capacity tier, an override or
+ * an operation estimate. It reads the ledger (trusted rows) and reports.
  *
  * Answers, per customer and window: what AI cost and how many units, which features, operations
  * and models drive it, how often the current capacity would have stopped the customer
@@ -56,8 +56,12 @@ class AiCapacityCalibrationService
             'customer' => (string) $customer->name,
             'period_start' => $period->start->toIso8601String(),
             'period_end' => $period->end->toIso8601String(),
+            // override | tier | unconfigured — never Basis or an option.
             'included_units' => $capacity->includedUnits,
             'included_source' => $capacity->includedSource,
+            // The selected tier, reported even when an override is what sizes the capacity.
+            'tier_key' => $capacity->tierKey,
+            'tier_name' => $capacity->tierName,
             'calls' => $totals['calls'],
             'settled_cost_nok' => $totals['settled_cost_nok'],
             'used_units' => round($this->units->unitsForCost($totals['settled_cost_nok']), 2),

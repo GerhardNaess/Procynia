@@ -90,6 +90,7 @@ class Customer extends Model
         'included_users',
         'included_ai_credits',
         'included_ai_units',
+        'ai_capacity_tier',
         'billing_discount_percent',
         'ai_access_status',
     ];

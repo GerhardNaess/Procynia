@@ -90,7 +90,9 @@ class AiCapacityAnalysis extends Command
 
         $this->table(['Measure', 'Value'], [
             ['Customer', "{$report['customer']} (#{$report['customer_id']})"],
-            ['Included units (period)', ($report['included_units'] ?? 'none').' · source '.$report['included_source']],
+            ['AI capacity tier', $this->tier($report)],
+            ['Included units (period)', $report['included_units'] ?? 'none (no commercial limit)'],
+            ['Capacity source', $report['included_source']],
             ['AI calls', $report['calls']],
             ['Settled cost NOK', $report['settled_cost_nok']],
             ['Units used', $report['used_units']],
@@ -110,15 +112,23 @@ class AiCapacityAnalysis extends Command
     private function overview(array $overview): void
     {
         $this->table(
-            ['Customer', 'Included', 'Calls', 'Settled NOK', 'Units used', 'Reserved', 'Peak', 'Would block'],
+            ['Customer', 'Tier', 'Included', 'Source', 'Calls', 'Settled NOK', 'Units used', 'Reserved', 'Peak', 'Would block'],
             array_map(fn (array $row): array => [
                 "{$row['customer']} (#{$row['customer_id']})",
+                $row['tier_key'] ?? '–',
                 $row['included_units'] ?? 'none',
+                $row['included_source'],
                 $row['calls'], $row['settled_cost_nok'], $row['used_units'], $row['reserved_units'],
                 $row['peak_concurrency'], $row['verdicts']['would_have_blocked'],
             ], $overview['customers']),
         );
 
         $this->line(sprintf('Customers: %d · median settled cost %s NOK · heaviest %s NOK', count($overview['customers']), $overview['median_cost_nok'], $overview['max_cost_nok']));
+    }
+
+    /** @param array<string, mixed> $report */
+    private function tier(array $report): string
+    {
+        return $report['tier_key'] === null ? 'none selected' : "{$report['tier_name']} ({$report['tier_key']})";
     }
 }

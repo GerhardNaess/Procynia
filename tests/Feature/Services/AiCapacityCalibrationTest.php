@@ -10,6 +10,7 @@ use App\Models\CustomerBillingPeriod;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Commercial\AiCapacityCalibrationService;
+use App\Services\Modules\ModuleEntitlementService;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -82,9 +83,51 @@ class AiCapacityCalibrationTest extends TestCase
         $this->assertSame(60.0, $report['used_units']);
         $this->assertSame(5.0, $report['reserved_units']);
         $this->assertSame(100, $report['included_units']);
+        $this->assertSame('override', $report['included_source']);
         $this->assertSame(2, $report['verdicts']['would_have_blocked']);
         $this->assertSame(1, $report['verdicts']['warn']);
         $this->assertEqualsCanonicalizing(['wiki', 'tender', 'quality'], array_values(array_unique(array_column($report['breakdown'], 'feature'))));
+    }
+
+    public function test_the_report_names_the_tier_and_the_source_and_never_basis(): void
+    {
+        config()->set('ai_customer_capacity.tiers', [
+            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
+        ]);
+        $tiered = $this->customer(['ai_capacity_tier' => 'tier_a']);
+        $overridden = $this->customer(['ai_capacity_tier' => 'tier_a', 'included_ai_units' => 9000]);
+        $unconfigured = $this->customer();
+        // Holding Basis changes nothing: it is not a capacity source.
+        app(ModuleEntitlementService::class)->activatePackage($unconfigured, 'basis');
+
+        foreach ([$tiered, $overridden, $unconfigured] as $customer) {
+            $this->attempt($customer, ['cost_nok' => 1.0, 'started_at' => now()->subHour(), 'finished_at' => now()->subHour(), 'capacity_verdict' => 'allow']);
+        }
+
+        $calibration = app(AiCapacityCalibrationService::class);
+        $expected = [
+            [$tiered, 2000, 'tier', 'tier_a'],
+            [$overridden, 9000, 'override', 'tier_a'],
+            [$unconfigured, null, 'unconfigured', null],
+        ];
+
+        foreach ($expected as [$customer, $units, $source, $tier]) {
+            $report = $calibration->customerReport($customer, $this->window());
+            $this->assertSame($units, $report['included_units']);
+            $this->assertSame($source, $report['included_source']);
+            $this->assertSame($tier, $report['tier_key']);
+        }
+
+        $this->artisan('ai:capacity-analysis', ['--customer' => $tiered->id])
+            ->expectsOutputToContain('Tier A (tier_a)')
+            ->expectsOutputToContain('Capacity source')
+            ->doesntExpectOutputToContain('basis')
+            ->assertSuccessful();
+
+        $this->artisan('ai:capacity-analysis', ['--customer' => $unconfigured->id])
+            ->expectsOutputToContain('none selected')
+            ->expectsOutputToContain('unconfigured')
+            ->assertSuccessful();
     }
 
     public function test_the_window_follows_the_billing_period(): void
