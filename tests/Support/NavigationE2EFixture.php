@@ -8,6 +8,7 @@ use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\ImprovementCase;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -96,12 +97,7 @@ class NavigationE2EFixture
             ]);
 
             foreach ($packages as $package) {
-                CustomerPackageEntitlement::query()->create([
-                    'customer_id' => $customer->id,
-                    'package_key' => $package,
-                    'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
-                    'activated_at' => now(),
-                ]);
+                app(ModuleEntitlementService::class)->activatePackage($customer, $package);
             }
 
             $person = User::query()->create([

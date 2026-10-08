@@ -7,24 +7,21 @@
  *
  *  - A **technical module** is what the product is built out of (`wiki`, `quality`, `risk`, ...).
  *    Code asks "does this customer have module X", never "did they buy package Y".
- *  - A **commercial package** is what a customer buys. One package switches on several modules,
- *    and the same module is reached through more than one package.
+ *  - A **commercial package** is what a customer buys, and switches on one or more modules.
  *
- * The governance packages form a ladder — Basis → Styring → ISO → GRC — and each one lists every
- * module it carries, including those of the step below. That is written out rather than inherited:
- * the mapping stays one plain list per package, and nothing has to resolve a chain to answer it.
- * Anbud (`tender`) is not on the ladder. It is an add-on that combines with any step, or stands
- * alone, and no governance package carries it.
+ * The catalog is Basis plus independent options:
  *
- * `kind` says which of the two a package is. A customer holds at most one `main` package — the step
- * of the ladder it is on; moving to another step replaces it — and any number of `addon` packages
- * beside it. Which step is the customer's is answered by
- * ModuleEntitlementService::effectiveMainPackage(), and nowhere else.
+ *  - Basis (`kind: base`) is the mandatory foundation — Wiki, Kvalitet and Avvik og forbedringer.
+ *    Every customer is given it at creation (`default_package`) and it cannot be cancelled.
+ *  - Each option (`kind: option`) carries one module and is ordered and cancelled on its own:
+ *    Risiko, Mål og KPI, Etterlevelse og revisjon, Leverandøroppfølging and Anbud. No option
+ *    requires another. Anbud also carries Wiki, because its requirement answers are drawn from the
+ *    Enterprise Wiki — the one real technical dependency, and Basis carries Wiki anyway.
  *
- * There is no mandatory package. Wiki is an ordinary module, carried by every package that needs
- * it: the whole ladder, and Anbud, whose requirement answers are drawn from the Enterprise Wiki. A
- * customer with no package holds no module at all — which is why a new customer is handed
- * `default_package` when it is created.
+ * Styring, ISO and GRC are not packages a customer holds. They survive only as `bundles`: named
+ * selections of options, so that activating one is a shortcut for activating each option in it
+ * (ModuleEntitlementService::activatePackage()). Afterwards the customer simply holds those
+ * options, and can cancel any one of them alone.
  *
  * Because entitlements are stored per package and resolved through this mapping at read time,
  * extending a package here reaches every customer who already holds it, with no data migration.
@@ -43,12 +40,12 @@ return [
         // Mål og KPI. A general management area, not a part of Risiko or Kvalitet — which is why it
         // is its own module.
         'objectives' => ['sort_order' => 35],
-        // Avvik og forbedringer. Classic quality management, so it is on every step of the ladder
-        // from Basis up. Its own module so the rail and the route guard name it directly.
+        // Avvik og forbedringer. Classic quality management, so it is part of Basis. Its own module so
+        // the rail and the route guard name it directly.
         'improvements' => ['sort_order' => 37],
-        // Etterlevelse og revisjon (Krav and Revisjoner) — from ISO up.
+        // Etterlevelse og revisjon (Krav and Revisjoner) — an option.
         'compliance' => ['sort_order' => 40],
-        // Leverandøroppfølging — GRC only. Its routes are `app.supplier-management.`, never
+        // Leverandøroppfølging — an option. Its routes are `app.supplier-management.`, never
         // `app.suppliers.`, which is Anbud's.
         'supplier' => ['sort_order' => 50],
         'contracts' => ['sort_order' => 60],
@@ -63,46 +60,61 @@ return [
 
     'packages' => [
 
-        // Basis.
+        // Basis: the mandatory foundation.
         'basis' => [
-            'kind' => 'main',
+            'kind' => 'base',
             'orderable' => true,
             'sort_order' => 10,
             'modules' => ['wiki', 'quality', 'improvements'],
         ],
 
-        // Styring: Basis, plus Risiko and Mål og KPI.
-        'governance' => [
-            'kind' => 'main',
+        // The options, one module each, in product order.
+        'risk' => [
+            'kind' => 'option',
             'orderable' => true,
             'sort_order' => 20,
-            'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives'],
+            'modules' => ['risk'],
         ],
 
-        // ISO: Styring, plus Etterlevelse og revisjon.
-        'iso' => [
-            'kind' => 'main',
+        'objectives' => [
+            'kind' => 'option',
             'orderable' => true,
             'sort_order' => 30,
-            'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance'],
+            'modules' => ['objectives'],
         ],
 
-        // GRC: ISO, plus Leverandøroppfølging — the module that makes GRC more than ISO.
-        'grc' => [
-            'kind' => 'main',
+        'compliance' => [
+            'kind' => 'option',
             'orderable' => true,
             'sort_order' => 40,
-            'modules' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance', 'supplier'],
+            'modules' => ['compliance'],
         ],
 
-        // Anbud: the add-on. It carries Wiki because the bid engine answers requirements from it.
-        'tender' => [
-            'kind' => 'addon',
+        'supplier' => [
+            'kind' => 'option',
             'orderable' => true,
             'sort_order' => 50,
+            'modules' => ['supplier'],
+        ],
+
+        // Anbud carries Wiki because the bid engine answers requirements from it.
+        'tender' => [
+            'kind' => 'option',
+            'orderable' => true,
+            'sort_order' => 60,
             'modules' => ['wiki', 'tender'],
         ],
 
+    ],
+
+    /**
+     * Named selections of options — never held as packages. Activating one activates Basis and each
+     * option listed; nothing records that it was a bundle. No price, no discount: a grouping only.
+     */
+    'bundles' => [
+        'governance' => ['risk', 'objectives'],
+        'iso' => ['risk', 'objectives', 'compliance'],
+        'grc' => ['risk', 'objectives', 'compliance', 'supplier'],
     ],
 
     /**

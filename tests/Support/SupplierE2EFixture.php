@@ -19,6 +19,7 @@ use App\Models\SupplierImprovementCase;
 use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -73,12 +74,7 @@ class SupplierE2EFixture
                 'nationality_id' => $template->nationality_id,
                 'is_active' => true,
             ]);
-            CustomerPackageEntitlement::query()->create([
-                'customer_id' => $customer->id,
-                'package_key' => 'grc',
-                'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
-                'activated_at' => now(),
-            ]);
+            app(ModuleEntitlementService::class)->activatePackage($customer, 'grc');
 
             $manager = self::person($customer, $suffix, $password, $name('Leverandøransvarlig'), 'ansvarlig');
             self::role($customer, $name('Leverandørforvalter'), [
@@ -96,9 +92,10 @@ class SupplierE2EFixture
     }
 
     /**
-     * For the package-change journey (tests/e2e/package-change.spec.js): the run's GRC customer
-     * with a System Owner who also holds supplier.view — the explicit grant System Owner needs like
-     * everyone else — and one active supplier already registered.
+     * For the option journey (tests/e2e/package-change.spec.js): the run's customer holding Basis,
+     * Risiko and Leverandøroppfølging — nothing else — with a System Owner who also holds risk.view
+     * (all fagområder) and supplier.view, the explicit grants System Owner needs like everyone else,
+     * and one active supplier already registered.
      *
      * @return array{email: string, supplier_name: string}
      */
@@ -107,10 +104,17 @@ class SupplierE2EFixture
         self::seedJourney($suffix, $password);
 
         $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $entitlements = app(ModuleEntitlementService::class);
+
+        foreach (['objectives', 'compliance'] as $option) {
+            $entitlements->cancelOption($customer, $option);
+        }
+
         $name = self::namer($suffix);
         $owner = self::person($customer, $suffix, $password, $name('Systemeier'), 'eier');
         $owner->forceFill(['role' => User::ROLE_CUSTOMER_ADMIN, 'bid_role' => User::BID_ROLE_SYSTEM_OWNER])->save();
-        self::role($customer, $name('Leverandørinnsyn'), [CustomerPermissionCatalog::SUPPLIER_VIEW], $owner);
+        self::role($customer, $name('Leverandør- og risikoinnsyn'), [CustomerPermissionCatalog::SUPPLIER_VIEW, CustomerPermissionCatalog::RISK_VIEW], $owner)
+            ->syncBusinessAreas(true, []);
         $supplier = self::activeSupplier($suffix, $name('Driftspartner AS'));
 
         return ['email' => $owner->email, 'supplier_name' => $supplier['name']];

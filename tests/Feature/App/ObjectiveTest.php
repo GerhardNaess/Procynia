@@ -4,13 +4,13 @@ namespace Tests\Feature\App;
 
 use App\Models\BusinessArea;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use DomainException;
 use Illuminate\Database\QueryException;
@@ -996,10 +996,7 @@ class ObjectiveTest extends TestCase
 
         if ($entitled) {
             // Styring is the lowest step of the ladder that carries Mål og KPI.
-            CustomerPackageEntitlement::query()->updateOrCreate(
-                ['customer_id' => $customer->id, 'package_key' => 'governance'],
-                ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-            );
+            app(ModuleEntitlementService::class)->activatePackage($customer, 'governance');
         }
 
         $owner = User::query()->create([

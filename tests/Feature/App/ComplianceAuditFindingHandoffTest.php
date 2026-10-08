@@ -6,11 +6,11 @@ use App\Models\BusinessArea;
 use App\Models\ComplianceAudit;
 use App\Models\ComplianceAuditFinding;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseProcess;
 use App\Models\QualityItem;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -378,18 +378,10 @@ class ComplianceAuditFindingHandoffTest extends TestCase
         $this->actingAs($auditor)->post($this->url($audit, $finding), $this->handoffPayload($finding, $area, $auditor))->assertSessionHasNoErrors();
         $case = ImprovementCase::query()->findOrFail($finding->fresh()->improvement_case_id);
 
-        // Down to Basis: Avvik og forbedringer stays, Etterlevelse og revisjon goes. The auditor's
+        // Etterlevelse og revisjon cancelled: Avvik og forbedringer stays with Basis. The auditor's
         // role still carries compliance.view.
-        $customer->packageEntitlements()->where('package_key', 'iso')->update([
-            'status' => CustomerPackageEntitlement::STATUS_REVOKED,
-            'deactivated_at' => now(),
-        ]);
-        CustomerPackageEntitlement::query()->create([
-            'customer_id' => $customer->id,
-            'package_key' => 'basis',
-            'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
-            'activated_at' => now(),
-        ]);
+        // Cancelling the option is all it takes.
+        app(ModuleEntitlementService::class)->cancelOption($customer, 'compliance');
 
         $this->assertAuditOriginHidden($this->caseProps($auditor, $case), $audit, $finding);
     }

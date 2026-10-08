@@ -4,13 +4,13 @@ namespace Tests\Feature\App;
 
 use App\Models\BusinessArea;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Kpi;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Objective;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\KpiLifecycleService;
 use App\Services\Objectives\KpiMeasurementService;
 use App\Services\Objectives\KpiPeriods;
@@ -585,10 +585,7 @@ class ObjectiveAttentionTest extends TestCase
             'is_active' => true,
         ]);
 
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'governance'],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'governance');
 
         $owner = User::query()->create([
             'name' => 'System Owner',

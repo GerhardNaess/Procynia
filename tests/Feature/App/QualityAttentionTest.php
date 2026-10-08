@@ -3,7 +3,6 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\Language;
@@ -13,6 +12,7 @@ use App\Models\QualityItemDocument;
 use App\Models\QualityItemRelation;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Quality\QualityActivityControlService;
 use App\Services\Quality\QualityAttentionService;
 use App\Services\Quality\QualityItemService;
@@ -300,10 +300,7 @@ class QualityAttentionTest extends TestCase
             'is_active' => true,
         ]);
 
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'basis'],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
 
         return $customer;
     }

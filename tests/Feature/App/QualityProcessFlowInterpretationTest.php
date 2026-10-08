@@ -3,7 +3,6 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
@@ -15,6 +14,7 @@ use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
 use App\Services\Ai\Quality\ProcessFlowInterpretationAiClient;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Services\Quality\QualityProcessFlowValidator;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -2172,10 +2172,7 @@ class QualityProcessFlowInterpretationTest extends TestCase
             ])->save();
         }
 
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'basis'],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
 
         return [
             'customer' => $customer,

@@ -3,7 +3,6 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -11,6 +10,7 @@ use App\Models\QualityItem;
 use App\Models\QualityItemRelation;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -503,10 +503,7 @@ class QualityPermissionTest extends TestCase
             'is_active' => true,
         ]);
 
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'basis'],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
 
         $owner = User::query()->create([
             'name' => 'System Owner',

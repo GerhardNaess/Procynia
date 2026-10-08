@@ -5,7 +5,6 @@ namespace Tests\Feature\App;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\BusinessArea;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -17,6 +16,7 @@ use App\Models\Risk;
 use App\Models\RiskWikiSource;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -463,10 +463,7 @@ class RiskWikiKnowledgeTest extends TestCase
             'is_active' => true,
         ]);
 
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'governance'],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'governance');
 
         $owner = User::query()->create([
             'name' => 'System Owner',

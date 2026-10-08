@@ -17,11 +17,12 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Bundle → module → permission → navigation, end to end on the server.
+ * Package → module → permission → navigation, end to end on the server.
  *
- * The package catalog is the real one in config/procynia_modules.php — Basis, Styring
- * (`governance`), ISO, GRC, with Anbud (`tender`) as a separate add-on. Nothing here overrides it:
- * packages are configuration, the rail and the Styring landing page only ever see modules.
+ * The package catalog is the real one in config/procynia_modules.php — Basis plus the independent
+ * options Risiko, Mål og KPI, Etterlevelse og revisjon, Leverandøroppfølging and Anbud. Nothing here
+ * overrides it: packages are configuration, the rail and the Styring landing page only ever see
+ * modules. Any combination of options is valid; none requires another.
  *
  * What a person sees is read from the two places it is decided:
  *
@@ -76,20 +77,17 @@ class NavigationEntitlementMatrixTest extends TestCase
      */
     public static function packageProvider(): array
     {
-        $styring = ['quality', 'risk', 'objectives', 'improvements'];
-        $iso = [...$styring, 'compliance'];
-        $grc = [...$iso, 'suppliers'];
-
         return [
             'Basis' => [['basis'], ['wiki', 'quality', 'improvements'], ['quality', 'improvements'], false],
-            'Basis + Anbud' => [['basis', 'tender'], ['wiki', 'tender', 'quality', 'improvements'], ['quality', 'improvements'], true],
-            'Styring' => [['governance'], ['wiki', 'quality', 'risk', 'objectives', 'improvements'], $styring, false],
-            'Styring + Anbud' => [['governance', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements'], $styring, true],
-            'ISO' => [['iso'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, false],
-            'ISO + Anbud' => [['iso', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance'], $iso, true],
-            // GRC is ISO plus Leverandøroppfølging, and nothing else.
-            'GRC' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $grc, false],
-            'GRC + Anbud' => [['grc', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], $grc, true],
+            'Basis + Risiko' => [['basis', 'risk'], ['wiki', 'quality', 'risk', 'improvements'], ['quality', 'risk', 'improvements'], false],
+            // Leverandøroppfølging needs neither Etterlevelse og revisjon nor Risiko.
+            'Basis + Leverandøroppfølging' => [['basis', 'supplier'], ['wiki', 'quality', 'improvements', 'supplier'], ['quality', 'improvements', 'suppliers'], false],
+            'Basis + Etterlevelse og revisjon + Anbud' => [['basis', 'compliance', 'tender'], ['wiki', 'tender', 'quality', 'improvements', 'compliance'], ['quality', 'improvements', 'compliance'], true],
+            'Basis + Risiko + Mål og KPI + Leverandøroppfølging' => [['basis', 'risk', 'objectives', 'supplier'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'supplier'], ['quality', 'risk', 'objectives', 'improvements', 'suppliers'], false],
+            'Basis + alle opsjoner' => [['basis', 'risk', 'objectives', 'compliance', 'supplier', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'], true],
+            // A bundle is a shortcut: GRC activates Basis and four options, nothing more.
+            'GRC as a bundle' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'], false],
+            // A row-level edge: Anbud without Basis, as a customer created before Basis was mandatory.
             'Anbud alone' => [['tender'], ['wiki', 'tender'], [], true],
         ];
     }
@@ -113,7 +111,7 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->assertSame($governance, $this->governanceKeys($user));
         $this->assertSame($tender, in_array('tender', $props['entitlements']['modules'], true), 'Anbud is an add-on of its own');
 
-        // Every package carries Wiki; the view permission gates it.
+        // Basis and Anbud both carry Wiki; the view permission gates it.
         $this->assertContains('wiki', $props['entitlements']['modules']);
         $this->actingAs($user)->get('/app/wiki')->assertOk();
 
@@ -203,15 +201,25 @@ class NavigationEntitlementMatrixTest extends TestCase
         $this->actingAs($user)->get('/app/governance')->assertForbidden();
     }
 
-    public function test_only_the_new_package_keys_are_in_the_catalog(): void
+    public function test_only_basis_and_the_options_are_in_the_catalog(): void
     {
         $this->assertSame(
-            ['basis', 'governance', 'iso', 'grc', 'tender'],
+            ['basis', 'risk', 'objectives', 'compliance', 'supplier', 'tender'],
             array_keys(app(ModuleEntitlementService::class)->packages()),
         );
 
-        // A row left over from the old catalog grants nothing.
-        $customer = $this->customerWith(['quality', 'core']);
+        // A row left over from an old catalog grants nothing — the ladder steps included.
+        ['customer' => $customer] = $this->context(null);
+
+        foreach (['quality', 'core', 'governance', 'iso', 'grc'] as $retired) {
+            CustomerPackageEntitlement::query()->create([
+                'customer_id' => $customer->id,
+                'package_key' => $retired,
+                'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
+                'activated_at' => now(),
+            ]);
+        }
+
         $this->assertSame([], app(ModuleEntitlementService::class)->modulesFor($customer));
     }
 
@@ -284,12 +292,7 @@ class NavigationEntitlementMatrixTest extends TestCase
         ['customer' => $customer] = $this->context(null);
 
         foreach ($packages as $package) {
-            CustomerPackageEntitlement::query()->create([
-                'customer_id' => $customer->id,
-                'package_key' => $package,
-                'status' => CustomerPackageEntitlement::STATUS_ACTIVE,
-                'activated_at' => now(),
-            ]);
+            app(ModuleEntitlementService::class)->activatePackage($customer, $package);
         }
 
         return $customer;

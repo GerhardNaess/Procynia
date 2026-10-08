@@ -3,7 +3,6 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
@@ -12,6 +11,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityItem;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -587,10 +587,7 @@ class WikiPermissionTest extends TestCase
         // Module entitlements are a separate gate that runs before any of this — the virksomhet
         // has bought the module, which is what makes the permission question the one being asked.
         foreach (['basis', 'tender'] as $package) {
-            CustomerPackageEntitlement::query()->updateOrCreate(
-                ['customer_id' => $customer->id, 'package_key' => $package],
-                ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-            );
+            app(ModuleEntitlementService::class)->activatePackage($customer, $package);
         }
 
         return $customer;

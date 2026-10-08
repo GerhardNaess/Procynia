@@ -5,7 +5,6 @@ namespace Tests\Feature\App;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -18,6 +17,7 @@ use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessRevision;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -2006,10 +2006,7 @@ class QualityProcessBlueprintTest extends TestCase
         $owner = $this->user($customer, User::ROLE_CUSTOMER_ADMIN, User::BID_ROLE_SYSTEM_OWNER);
 
         if ($grantQuality) {
-            CustomerPackageEntitlement::query()->updateOrCreate(
-                ['customer_id' => $customer->id, 'package_key' => 'basis'],
-                ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-            );
+            app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
         }
 
         return ['customer' => $customer, 'owner' => $owner];

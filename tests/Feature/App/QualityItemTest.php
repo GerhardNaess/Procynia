@@ -4,7 +4,6 @@ namespace Tests\Feature\App;
 
 use App\Jobs\Quality\ProjectQualityItemToGraph;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -23,6 +22,7 @@ use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessIo;
 use App\Models\QualityProcessStep;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -1278,10 +1278,7 @@ class QualityItemTest extends TestCase
 
     private function grant(Customer $customer, string $package): void
     {
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => $package],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, $package);
     }
 
     private function item(Customer $customer, string $type, string $title, ?string $code = null): QualityItem

@@ -6,14 +6,14 @@ use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
-use App\Models\ImprovementCase;
+use App\Models\Objective;
 use App\Models\Risk;
 use App\Models\SavedNotice;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierDocument;
+use App\Models\SupplierRisk;
 use App\Models\SupplierStatusChange;
-use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -26,12 +26,13 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Moving between steps of the ladder and cancelling Anbud.
+ * Ordering and cancelling options, one at a time, on top of the mandatory Basis.
  *
- * What is defended: the customer is on one main package, the steps below it read as included in
- * it, moving down or cancelling only takes access away — never data, roles or permissions — and
- * moving back up finds everything as it was. Which modules each package carries is
- * CustomerModuleEntitlementTest's.
+ * What is defended: every option is ordered and cancelled on its own, Basis never is, cancelling
+ * only takes access away — never data, links, roles or permissions — and ordering again finds
+ * everything as it was. Existing ladder customers are moved to exactly the options they had. Which
+ * module each package carries, and that the rail follows module and permission together, is
+ * CustomerModuleEntitlementTest's and NavigationEntitlementMatrixTest's.
  */
 class PackageChangeTest extends TestCase
 {
@@ -39,7 +40,9 @@ class PackageChangeTest extends TestCase
     use CreatesSupplierScenarios;
     use UsesProjectPostgresConnection;
 
-    /** Each test decides for itself whether the customer holds Anbud. */
+    private const OPTIONS = ['risk', 'objectives', 'compliance', 'supplier', 'tender'];
+
+    /** Each test decides for itself which options the customer holds. */
     protected bool $customersHoldTenderPackage = false;
 
     protected function setUp(): void
@@ -62,49 +65,58 @@ class PackageChangeTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_grc_is_the_one_active_main_package_and_the_steps_below_are_included_in_it(): void
+    public function test_each_option_is_ordered_on_its_own_and_adds_only_its_module(): void
     {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
-        // A row left standing by an order from before package changes replaced the main package.
-        $this->grant($customer, 'basis');
+        foreach (self::OPTIONS as $option) {
+            ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
 
-        $this->assertSame('grc', app(ModuleEntitlementService::class)->effectiveMainPackage($customer));
+            $this->actingAs($owner)->post("/app/billing/packages/{$option}/request")
+                ->assertRedirect(route('app.billing.index'))
+                ->assertSessionHas('success');
 
-        $packages = $this->overview($owner);
-
-        $this->assertSame(
-            ['basis' => 'included', 'governance' => 'included', 'iso' => 'included', 'grc' => 'active', 'tender' => 'available'],
-            $packages->mapWithKeys(fn (array $row): array => [$row['key'] => $row['status']])->all(),
-        );
-        $this->assertSame(['grc', 'grc', 'grc'], $packages->take(3)->pluck('included_in')->all());
-        $this->assertSame([null, null, null, 'change', 'order'], $packages->pluck('action')->all());
-        // Only the row that holds the access carries a date; Basis's own stale row does not.
-        $this->assertNull($packages->firstWhere('key', 'basis')['activated_at']);
-        $this->assertNotNull($packages->firstWhere('key', 'grc')['activated_at']);
-        $this->assertSame(['supplier'], $packages->firstWhere('key', 'iso')['modules_lost']);
-        $this->assertSame(['compliance', 'supplier'], $packages->firstWhere('key', 'governance')['modules_lost']);
+            $this->assertSame(['basis', $option], $this->activeKeys($customer), $option);
+            $this->assertSame(
+                [$option],
+                array_values(array_diff(app(ModuleEntitlementService::class)->modulesFor($customer), ['wiki', 'quality', 'improvements'])),
+                "{$option} adds its own module and nothing else",
+            );
+        }
     }
 
-    public function test_iso_as_the_main_package_includes_the_steps_below_and_offers_grc_as_an_upgrade(): void
+    public function test_each_option_is_cancelled_on_its_own_and_basis_never_is(): void
     {
-        ['owner' => $owner] = $this->context('iso');
+        foreach (self::OPTIONS as $option) {
+            ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
+            $this->activate($customer, self::OPTIONS);
 
-        $packages = $this->overview($owner);
+            $this->actingAs($owner)->post("/app/billing/packages/{$option}/cancel")
+                ->assertRedirect(route('app.billing.index'))
+                ->assertSessionHas('success');
 
-        $this->assertSame(['included', 'included', 'active', 'available'], $packages->take(4)->pluck('status')->all());
-        $this->assertSame(['iso', 'iso', null, null], $packages->take(4)->pluck('included_in')->all());
-        $grc = $packages->firstWhere('key', 'grc');
-        $this->assertSame(['upgrade', 'upgrade', ['supplier']], [$grc['action'], $grc['direction'], $grc['modules_gained']]);
+            $this->assertSame(['basis', ...array_values(array_diff(self::OPTIONS, [$option]))], $this->activeKeys($customer), $option);
+            $this->assertSame(CustomerPackageEntitlement::STATUS_REVOKED, $this->row($customer, $option)->status);
+            $this->assertNotNull($this->row($customer, $option)->deactivated_at);
+        }
+
+        // Basis is not an option: there is no cancelling it, and the overview offers no action.
+        ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
+        $this->actingAs($owner)->post('/app/billing/packages/basis/cancel')->assertNotFound();
+        $this->assertSame(['basis'], $this->activeKeys($customer));
+
+        $basis = collect($this->actingAs($owner)->get('/app/billing')->assertOk()->viewData('page')['props']['module_packages'])->firstWhere('key', 'basis');
+        $this->assertSame(['base', 'active', null], [$basis['kind'], $basis['status'], $basis['action']]);
     }
 
     /**
-     * The central requirement: GRC → ISO takes Leverandøroppfølging away, keeps every supplier row,
-     * and GRC again brings it all back.
+     * The central requirement: Leverandøroppfølging cancelled while Risiko stays, every supplier row
+     * kept, permissions alone opening nothing, and ordering it again bringing it all back.
      */
-    public function test_moving_down_to_iso_hides_suppliers_without_deleting_them_and_grc_brings_them_back(): void
+    public function test_cancelling_suppliers_hides_them_without_deleting_anything_and_ordering_again_brings_them_back(): void
     {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
+        ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
+        $this->activate($customer, ['risk', 'supplier']);
         $manager = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT, CustomerPermissionCatalog::SUPPLIER_ASSESS]);
+        $this->grantAll($customer, $manager, [CustomerPermissionCatalog::RISK_VIEW]);
 
         $this->actingAs($manager)->post('/app/supplier-management', $this->supplierPayload($manager, ['name' => 'Drift AS']))->assertSessionHasNoErrors();
         $supplier = Supplier::query()->where('customer_id', $customer->id)->sole();
@@ -119,141 +131,225 @@ class PackageChangeTest extends TestCase
         $before = $this->supplierRows($customer);
         $rolesBefore = $manager->customerRoles()->pluck('customer_roles.id')->all();
 
-        $this->actingAs($owner)->post('/app/billing/packages/iso/request')
-            ->assertRedirect(route('app.billing.index'))
-            ->assertSessionHas('success');
+        $this->actingAs($owner)->post('/app/billing/packages/supplier/cancel')->assertSessionHas('success');
 
-        $this->assertSame(['iso'], app(ModuleEntitlementService::class)->activePackageKeys($customer));
-        $this->assertSame(CustomerPackageEntitlement::STATUS_REVOKED, $this->row($customer, 'grc')->status);
-        $this->assertNotNull($this->row($customer, 'grc')->deactivated_at);
+        // Only Leverandøroppfølging went; Risiko is untouched.
+        $this->assertSame(['basis', 'risk'], $this->activeKeys($customer));
         $this->assertFalse($customer->fresh()->hasModule('supplier'));
-        $this->assertTrue($customer->fresh()->hasModule('compliance'));
+        $this->assertTrue($customer->fresh()->hasModule('risk'));
+        $this->actingAs($manager)->get('/app/risk')->assertOk();
 
-        // The permission is still there; without the entitlement it opens nothing.
+        // The permission is still there; without the module it opens nothing.
         $this->assertSame($rolesBefore, $manager->customerRoles()->pluck('customer_roles.id')->all());
         $this->actingAs($manager)->get('/app/supplier-management')->assertRedirect(route('app.dashboard'));
         $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->assertRedirect(route('app.dashboard'));
-        $this->assertSame($before, $this->supplierRows($customer), 'Moving down deletes no supplier data.');
+        $this->assertSame($before, $this->supplierRows($customer), 'Cancelling deletes no supplier data.');
 
-        $this->actingAs($owner)->post('/app/billing/packages/grc/request')->assertSessionHas('success');
+        $this->actingAs($owner)->post('/app/billing/packages/supplier/request')->assertSessionHas('success');
 
-        $this->assertSame(['grc'], app(ModuleEntitlementService::class)->activePackageKeys($customer));
+        $this->assertSame(['basis', 'risk', 'supplier'], $this->activeKeys($customer));
+        $this->assertSame(1, $customer->packageEntitlements()->where('package_key', 'supplier')->count(), 'the row is reactivated, never duplicated');
         $this->assertSame($before, $this->supplierRows($customer));
         $page = $this->actingAs($manager)->get('/app/supplier-management')->assertOk()->viewData('page');
         $this->assertStringContainsString('Drift AS', json_encode($page['props'], JSON_UNESCAPED_UNICODE));
         $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->assertOk();
+
+        // The module alone grants no access: a colleague without supplier.view is still refused.
+        $this->actingAs($this->member($customer))->get('/app/supplier-management')->assertForbidden();
     }
 
-    public function test_moving_down_to_basis_keeps_risks_requirements_and_cases(): void
+    /** A supplier's link to a risk outlives Risiko being cancelled, shows nothing meanwhile, and works again after. */
+    public function test_a_supplier_risk_link_survives_cancelling_risk_and_is_hidden_until_risk_is_back(): void
     {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
+        ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
+        $this->activate($customer, ['risk', 'supplier']);
+        $manager = $this->supplierUser($customer, []);
+        $this->grantAll($customer, $manager, [CustomerPermissionCatalog::RISK_VIEW]);
+        $supplier = $this->supplier($customer, $manager, 'Drift AS');
+        $risk = Risk::query()->create([
+            'customer_id' => $customer->id, 'business_area_id' => $this->area($customer, 'Drift')->id, 'title' => 'Tap av driftsleverandør',
+            'cause' => 'Én leverandør', 'event' => 'Konkurs', 'consequence' => 'Stans', 'status' => Risk::STATUS_IDENTIFIED,
+        ]);
+        SupplierRisk::query()->create(['customer_id' => $customer->id, 'supplier_id' => $supplier->id, 'risk_id' => $risk->id, 'origin' => SupplierRisk::ORIGIN_LINKED]);
+        $risksOnSupplier = fn () => $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->assertOk()->viewData('page')['props']['risks'];
+
+        $this->assertSame(['Tap av driftsleverandør'], array_column($risksOnSupplier(), 'title'));
+
+        $this->actingAs($owner)->post('/app/billing/packages/risk/cancel')->assertSessionHas('success');
+
+        $this->assertNull($risksOnSupplier(), 'no risk data leaks through the supplier page');
+        $this->assertSame([1, 1], [Risk::query()->where('customer_id', $customer->id)->count(), SupplierRisk::query()->where('supplier_id', $supplier->id)->count()]);
+
+        $this->actingAs($owner)->post('/app/billing/packages/risk/request')->assertSessionHas('success');
+
+        $this->assertSame(['Tap av driftsleverandør'], array_column($risksOnSupplier(), 'title'));
+    }
+
+    public function test_cancelling_risk_objectives_compliance_and_tender_keeps_their_data_for_when_they_return(): void
+    {
+        ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
+        $this->activate($customer, ['risk', 'objectives', 'compliance', 'tender']);
         $area = $this->area($customer, 'Drift');
         Risk::query()->create([
             'customer_id' => $customer->id, 'business_area_id' => $area->id, 'title' => 'Tap av leverandør',
             'cause' => 'Én leverandør', 'event' => 'Konkurs', 'consequence' => 'Stans', 'status' => Risk::STATUS_IDENTIFIED,
         ]);
+        Objective::query()->create(['customer_id' => $customer->id, 'business_area_id' => $area->id, 'title' => 'Færre avvik']);
         $source = ComplianceSource::query()->create(['customer_id' => $customer->id, 'name' => 'ISO 27001', 'kind' => ComplianceSource::KIND_CONTRACT]);
         ComplianceRequirement::query()->create([
             'customer_id' => $customer->id, 'source_id' => $source->id, 'reference' => '5.1', 'title' => 'Ledelsens ansvar', 'requirement_text' => 'Ledelsen skal ...',
         ]);
-        $before = [Risk::query()->where('customer_id', $customer->id)->count(), ComplianceRequirement::query()->where('customer_id', $customer->id)->count(), ImprovementCase::query()->where('customer_id', $customer->id)->count()];
-
-        $this->actingAs($owner)->post('/app/billing/packages/basis/request')->assertSessionHas('success');
-
-        $this->assertSame(['basis'], app(ModuleEntitlementService::class)->activePackageKeys($customer));
-        $this->assertSame(['wiki', 'quality', 'improvements'], app(ModuleEntitlementService::class)->modulesFor($customer));
-        $this->assertSame($before, [Risk::query()->where('customer_id', $customer->id)->count(), ComplianceRequirement::query()->where('customer_id', $customer->id)->count(), ImprovementCase::query()->where('customer_id', $customer->id)->count()]);
-    }
-
-    public function test_anbud_is_cancelled_on_its_own_keeps_its_data_and_can_be_ordered_again(): void
-    {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('iso');
-        $this->grant($customer, 'tender');
         SavedNotice::query()->create([
             'customer_id' => $customer->id, 'external_id' => 'PKG-'.Str::random(8), 'title' => 'Anbud om drift', 'buyer_name' => 'Etaten', 'status' => 'ACTIVE',
         ]);
+        $counts = fn (): array => [
+            Risk::query()->where('customer_id', $customer->id)->count(),
+            Objective::query()->where('customer_id', $customer->id)->count(),
+            ComplianceRequirement::query()->where('customer_id', $customer->id)->count(),
+            SavedNotice::query()->where('customer_id', $customer->id)->count(),
+        ];
 
-        $cancel = collect(app(ModuleEntitlementService::class)->overviewFor($customer))->firstWhere('key', 'tender');
-        // Wiki stays with ISO, so Anbud alone is what goes.
-        $this->assertSame(['cancel', ['tender']], [$cancel['action'], $cancel['modules_lost']]);
+        foreach (['risk', 'objectives', 'compliance', 'tender'] as $option) {
+            $this->actingAs($owner)->post("/app/billing/packages/{$option}/cancel")->assertSessionHas('success');
+        }
 
-        $this->actingAs($owner)->post('/app/billing/packages/tender/cancel')
-            ->assertRedirect(route('app.billing.index'))
-            ->assertSessionHas('success');
-
-        $this->assertFalse($customer->fresh()->hasModule('tender'));
+        $this->assertSame(['basis'], $this->activeKeys($customer));
+        $this->assertSame([1, 1, 1, 1], $counts());
+        // Anbud's Wiki stays, carried by Basis.
         $this->assertTrue($customer->fresh()->hasModule('wiki'));
-        $this->assertSame('iso', app(ModuleEntitlementService::class)->effectiveMainPackage($customer), 'Cancelling Anbud leaves the main package alone.');
-        $this->assertSame(1, SavedNotice::query()->where('customer_id', $customer->id)->count());
         $this->actingAs($owner)->get('/app/bid-status')->assertRedirect(route('app.dashboard'));
 
-        $this->actingAs($owner)->post('/app/billing/packages/tender/request')->assertSessionHas('success');
+        foreach (['risk', 'objectives', 'compliance', 'tender'] as $option) {
+            $this->actingAs($owner)->post("/app/billing/packages/{$option}/request")->assertSessionHas('success');
+        }
 
-        $this->assertTrue($customer->fresh()->hasModule('tender'));
-        $this->assertSame(1, SavedNotice::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(['basis', 'risk', 'objectives', 'compliance', 'tender'], $this->activeKeys($customer));
+        $this->assertSame([1, 1, 1, 1], $counts());
+        $this->actingAs($owner)->get('/app/bid-status')->assertOk();
     }
 
-    public function test_a_main_package_cannot_be_cancelled_and_cancelling_an_inactive_add_on_changes_nothing(): void
+    public function test_ordering_or_cancelling_only_ever_reaches_the_signed_in_users_own_customer(): void
     {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
+        ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
+        ['customer' => $other] = $this->context('basis');
+        $this->activate($other, ['supplier', 'tender']);
 
-        $this->actingAs($owner)->post('/app/billing/packages/grc/cancel')->assertNotFound();
-        $this->actingAs($owner)->post('/app/billing/packages/tender/cancel')->assertSessionHas('error');
-        $this->actingAs($owner)->post('/app/billing/packages/grc/request')->assertSessionHas('error');
-
-        $this->assertSame(['grc'], app(ModuleEntitlementService::class)->activePackageKeys($customer));
-    }
-
-    public function test_a_package_change_only_ever_reaches_the_signed_in_users_own_customer(): void
-    {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
-        ['customer' => $other] = $this->context('grc');
-        $this->grant($other, 'tender');
-
-        $this->actingAs($owner)->post('/app/billing/packages/basis/request');
+        $this->actingAs($owner)->post('/app/billing/packages/risk/request');
+        $this->actingAs($owner)->post('/app/billing/packages/supplier/cancel');
         $this->actingAs($owner)->post('/app/billing/packages/tender/cancel');
 
-        $this->assertSame(['basis'], app(ModuleEntitlementService::class)->activePackageKeys($customer));
-        $this->assertSame(['grc', 'tender'], app(ModuleEntitlementService::class)->activePackageKeys($other));
+        $this->assertSame(['basis', 'risk'], $this->activeKeys($customer));
+        $this->assertSame(['basis', 'supplier', 'tender'], $this->activeKeys($other));
 
-        // Someone without billing access cannot change their own customer's package either.
+        // Someone without billing access cannot change their own customer's options either.
         $member = $this->member($other);
-        $this->actingAs($member)->post('/app/billing/packages/basis/request')->assertForbidden();
-        $this->actingAs($member)->post('/app/billing/packages/tender/cancel')->assertForbidden();
-        $this->assertSame(['grc', 'tender'], app(ModuleEntitlementService::class)->activePackageKeys($other));
+        $this->actingAs($member)->post('/app/billing/packages/risk/request')->assertForbidden();
+        $this->actingAs($member)->post('/app/billing/packages/supplier/cancel')->assertForbidden();
+        $this->assertSame(['basis', 'supplier', 'tender'], $this->activeKeys($other));
+
+        // A bundle is not orderable from the page, and an inactive option cannot be cancelled.
+        $this->actingAs($owner)->post('/app/billing/packages/grc/request')->assertNotFound();
+        $this->actingAs($owner)->post('/app/billing/packages/supplier/cancel')->assertSessionHas('error');
     }
 
-    public function test_moving_back_up_to_grc_gives_system_owner_no_supplier_access_of_its_own(): void
+    public function test_ordering_suppliers_and_compliance_gives_system_owner_no_access_of_its_own(): void
     {
-        ['customer' => $customer, 'owner' => $owner] = $this->context('grc');
+        ['customer' => $customer, 'owner' => $owner] = $this->context('basis');
 
-        $this->actingAs($owner)->post('/app/billing/packages/iso/request');
-        $this->actingAs($owner)->post('/app/billing/packages/grc/request');
+        $this->actingAs($owner)->post('/app/billing/packages/supplier/request');
+        $this->actingAs($owner)->post('/app/billing/packages/compliance/request');
 
         $this->assertTrue($customer->fresh()->hasModule('supplier'));
+        $this->assertTrue($customer->fresh()->hasModule('compliance'));
         $this->actingAs($owner->fresh())->get('/app/supplier-management')->assertForbidden();
         $this->actingAs($owner->fresh())->get('/app/compliance/requirements')->assertForbidden();
     }
 
-    // ---------------------------------------------------------------------
-
-    private function overview(User $owner)
+    /** Existing customers keep exactly what they had: each ladder step becomes Basis and its options. */
+    public function test_the_migration_moves_ladder_customers_to_basis_and_the_options_they_had(): void
     {
+        $customers = [];
 
-        return collect($this->actingAs($owner)->get('/app/billing')->assertOk()->viewData('page')['props']['module_packages']);
+        foreach (['grc' => ['grc', 'tender'], 'iso' => ['iso'], 'governance' => ['governance'], 'tender' => ['tender'], 'basis' => ['basis']] as $label => $rows) {
+            ['customer' => $customer] = $this->context(null);
+
+            foreach ($rows as $key) {
+                CustomerPackageEntitlement::query()->create([
+                    'customer_id' => $customer->id, 'package_key' => $key, 'status' => 'active', 'activated_at' => '2026-01-15 09:00:00',
+                ]);
+            }
+
+            $customers[$label] = $customer;
+        }
+
+        $before = array_map(fn (Customer $customer): array => $this->legacyModules($customer), $customers);
+        $migration = require database_path('migrations/2026_10_08_000001_split_governance_packages_into_options.php');
+        $migration->up();
+
+        $this->assertSame(['basis', 'risk', 'objectives', 'compliance', 'supplier', 'tender'], $this->activeKeys($customers['grc']));
+        $this->assertSame(['basis', 'risk', 'objectives', 'compliance'], $this->activeKeys($customers['iso']));
+        $this->assertSame(['basis', 'risk', 'objectives'], $this->activeKeys($customers['governance']));
+        // Basis is mandatory now: an Anbud-only customer gains it.
+        $this->assertSame(['basis', 'tender'], $this->activeKeys($customers['tender']));
+        $this->assertSame(['basis'], $this->activeKeys($customers['basis']));
+
+        foreach ($customers as $label => $customer) {
+            $this->assertSame([], array_values(array_diff($before[$label], app(ModuleEntitlementService::class)->modulesFor($customer))), "{$label} loses no module");
+        }
+
+        // An option dates from when the customer actually got that access.
+        $this->assertSame('2026-01-15', $this->row($customers['grc'], 'supplier')->activated_at->toDateString());
+        $this->assertSame(CustomerPackageEntitlement::STATUS_REVOKED, $this->row($customers['grc'], 'grc')->status);
+
+        // Running it again changes nothing, and down() puts every row back as it was.
+        $migration->up();
+        $this->assertSame(['basis', 'risk', 'objectives', 'compliance'], $this->activeKeys($customers['iso']));
+
+        $migration->down();
+        $this->assertSame(['grc', 'tender'], $customers['grc']->packageEntitlements()->active()->orderBy('package_key')->pluck('package_key')->all());
+        $this->assertSame(['tender'], $customers['tender']->packageEntitlements()->pluck('package_key')->all());
     }
 
-    private function grant(Customer $customer, string $packageKey): void
+    // ---------------------------------------------------------------------
+
+    /** @param  list<string>  $packages */
+    private function activate(Customer $customer, array $packages): void
     {
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => $packageKey],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()->subYear()],
-        );
+        foreach ($packages as $package) {
+            app(ModuleEntitlementService::class)->activatePackage($customer, $package);
+        }
+    }
+
+    /** @return list<string> */
+    private function activeKeys(Customer $customer): array
+    {
+        return app(ModuleEntitlementService::class)->activePackageKeys($customer->fresh());
     }
 
     private function row(Customer $customer, string $packageKey): CustomerPackageEntitlement
     {
         return $customer->packageEntitlements()->where('package_key', $packageKey)->sole();
+    }
+
+    /**
+     * What a customer's rows gave under the ladder, before the migration.
+     *
+     * @return list<string>
+     */
+    private function legacyModules(Customer $customer): array
+    {
+        $ladder = [
+            'basis' => ['wiki', 'quality', 'improvements'],
+            'governance' => ['wiki', 'quality', 'improvements', 'risk', 'objectives'],
+            'iso' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance'],
+            'grc' => ['wiki', 'quality', 'improvements', 'risk', 'objectives', 'compliance', 'supplier'],
+            'tender' => ['wiki', 'tender'],
+        ];
+
+        return array_values(array_unique(array_merge(...array_map(
+            fn (string $key): array => $ladder[$key],
+            $customer->packageEntitlements()->active()->pluck('package_key')->all(),
+        ))));
     }
 
     /** @return array<string, int> */

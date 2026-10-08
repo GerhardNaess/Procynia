@@ -8,8 +8,8 @@ cleanUpSupplierE2eData(suffix);
 
 /**
  * Text under 16 px in «Moduler og pakker» and its dialogs. Scoped to the section on purpose: the
- * rest of Abonnement (the AI capacity card) predates this change and is not what is checked here.
- * The «i» glyph of an InfoHint is left out — the button is named by its aria-label.
+ * rest of Abonnement (the AI capacity card) predates this page's package section and is not what
+ * is checked here. The «i» glyph of an InfoHint is left out — the button is named by its aria-label.
  */
 const smallTextInPackages = (page) => page.evaluate(() => {
     const roots = [document.querySelector('[data-testid="module-packages"]'), ...document.querySelectorAll('[role="dialog"]')].filter(Boolean);
@@ -48,13 +48,16 @@ async function expectReadable(page, name) {
     await page.setViewportSize(DESKTOP);
 }
 
+const rail = (page) => page.getByTestId('module-sidebar');
+
 /**
- * Moduler og pakker, end to end, in a GRC customer of the run's own: move down to ISO and back up.
- * That no supplier row is deleted, that permissions alone open nothing and that another customer
- * cannot be reached is PHP's (PackageChangeTest); this is the flow a System Owner actually takes,
- * with the page and its dialogs checked for text under 16 px and sideways scrolling at 390 px.
+ * Moduler og pakker, end to end, in a customer of the run's own holding Basis, Risiko and
+ * Leverandøroppfølging: cancel Leverandøroppfølging alone and order it again. That no supplier row
+ * is deleted, that permissions alone open nothing and that another customer cannot be reached is
+ * PHP's (PackageChangeTest); this is the flow a System Owner actually takes, with the page and its
+ * confirmation checked for text under 16 px and sideways scrolling at 390 px.
  */
-test('a GRC customer moves down to ISO and back, and its suppliers come back with it', async ({ page }) => {
+test('Leverandøroppfølging is cancelled on its own while Risiko stays, and comes back with its suppliers', async ({ page }) => {
     test.setTimeout(120_000);
 
     const person = await supplierFixture(`seedPackageJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
@@ -64,43 +67,47 @@ test('a GRC customer moves down to ISO and back, and its suppliers come back wit
 
     await page.goto('/app/supplier-management');
     await expect(page.getByRole('link', { name: person.supplier_name })).toBeVisible();
+    await expect(rail(page).getByTestId('module-suppliers')).toBeVisible();
+    await expect(rail(page).getByTestId('module-risk')).toBeVisible();
 
-    // One active main package; the steps below are included in it and offer nothing.
+    // Basis on its own, active, with nothing to press; then the five options.
     await page.goto('/app/billing');
-    await expect(page.getByTestId('package-status-grc')).toContainText('Aktiv');
-    for (const key of ['basis', 'governance', 'iso']) {
-        await expect(page.getByTestId(`package-status-${key}`)).toContainText('Inkludert i GRC');
-        await expect(page.getByTestId(`package-row-${key}`).getByRole('button')).toHaveCount(0);
+    const basis = page.getByTestId('package-row-basis');
+    await expect(basis).toContainText('Basis er grunnpakken i Procynia.');
+    await expect(page.getByTestId('package-status-basis')).toContainText('Aktiv');
+    await expect(basis.getByRole('button')).toHaveCount(0);
+    for (const [key, status, action] of [
+        ['risk', 'Aktiv', 'Avbestill'],
+        ['objectives', 'Ikke aktiv', 'Bestill'],
+        ['compliance', 'Ikke aktiv', 'Bestill'],
+        ['supplier', 'Aktiv', 'Avbestill'],
+        ['tender', 'Ikke aktiv', 'Bestill'],
+    ]) {
+        await expect(page.getByTestId(`package-status-${key}`)).toContainText(status);
+        await expect(page.getByTestId(`package-row-${key}`).getByRole('button', { name: action, exact: true })).toBeVisible();
     }
-    await expectReadable(page, '01-grc');
+    await expectReadable(page, '01-options');
 
-    // Endre pakke → ISO: the confirmation names what goes and says nothing is deleted.
-    await page.getByTestId('package-row-grc').getByRole('button', { name: 'Endre pakke' }).click();
-    await page.getByRole('radio', { name: 'Bytt ned til ISO' }).check();
-    await expectReadable(page, '02-change-select');
-    await page.getByRole('button', { name: 'Fortsett' }).click();
-    await expect(page.getByRole('heading', { name: 'Bytt fra GRC til ISO?' })).toBeVisible();
-    await expect(page.getByText('Leverandøroppfølging blir ikke lenger tilgjengelig.')).toBeVisible();
-    await expect(page.getByText(/Registrerte data og historikk slettes ikke/)).toBeVisible();
-    await expectReadable(page, '03-change-confirm');
-    await page.getByRole('button', { name: 'Bytt til ISO' }).click();
+    // Avbestill Leverandøroppfølging: the confirmation says what is kept.
+    await page.getByTestId('package-row-supplier').getByRole('button', { name: 'Avbestill' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Avbestill Leverandøroppfølging?' });
+    await expect(dialog).toContainText('Registrerte leverandører, vurderinger, dokumentasjon og historikk slettes ikke.');
+    await expectReadable(page, '02-cancel-confirm');
+    await dialog.getByRole('button', { name: 'Avbestill' }).click();
 
-    await expect(page.getByText('Pakken er endret til ISO.').first()).toBeVisible();
-    await expect(page.getByTestId('package-status-iso')).toContainText('Aktiv');
-    await expect(page.getByTestId('package-status-governance')).toContainText('Inkludert i ISO');
-    await expect(page.getByTestId('package-status-grc')).toContainText('Ikke aktiv');
+    await expect(page.getByText('Leverandøroppfølging er avbestilt. Ingen data er slettet.').first()).toBeVisible();
+    await expect(page.getByTestId('package-status-supplier')).toContainText('Ikke aktiv');
+    await expect(page.getByTestId('package-status-risk')).toContainText('Aktiv');
 
-    // Leverandøroppfølging is gone from the product.
-    await page.goto('/app/supplier-management');
-    await page.waitForURL(/\/app\/dashboard/);
-    await expect(page.getByText(/Leverandøroppfølging er ikke aktivert/)).toBeVisible();
+    // Leverandører is gone from the menu; Risiko is still there.
+    await expect(rail(page).getByTestId('module-suppliers')).toHaveCount(0);
+    await expect(rail(page).getByTestId('module-risk')).toBeVisible();
 
-    // Oppgrader back to GRC: the supplier registered before is there.
-    await page.goto('/app/billing');
-    await page.getByTestId('package-row-grc').getByRole('button', { name: 'Oppgrader' }).click();
-    await expect(page.getByText('Leverandøroppfølging blir tilgjengelig.')).toBeVisible();
-    await page.getByRole('button', { name: 'Bytt til GRC' }).click();
-    await expect(page.getByTestId('package-status-grc')).toContainText('Aktiv');
+    // Bestill again: the supplier registered before is there.
+    await page.getByTestId('package-row-supplier').getByRole('button', { name: 'Bestill' }).click();
+    await page.getByRole('dialog', { name: 'Bestill Leverandøroppfølging?' }).getByRole('button', { name: 'Bestill' }).click();
+    await expect(page.getByTestId('package-status-supplier')).toContainText('Aktiv');
+    await expect(rail(page).getByTestId('module-suppliers')).toBeVisible();
 
     await page.goto('/app/supplier-management');
     await expect(page.getByRole('link', { name: person.supplier_name })).toBeVisible();

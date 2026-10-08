@@ -3,7 +3,6 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\QualityItem;
@@ -11,6 +10,7 @@ use App\Models\QualityProcessBlueprint;
 use App\Models\QualityProcessRevision;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessFlowChangeAiClient;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Quality\QualityProcessBlueprintService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -682,10 +682,7 @@ class QualityProcessFlowChangeTest extends TestCase
             'included_ai_credits' => 20,
         ])->save();
 
-        CustomerPackageEntitlement::query()->updateOrCreate(
-            ['customer_id' => $customer->id, 'package_key' => 'basis'],
-            ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-        );
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
 
         return [
             'customer' => $customer,

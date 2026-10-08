@@ -4,13 +4,13 @@ namespace Tests\Concerns;
 
 use App\Models\BusinessArea;
 use App\Models\Customer;
-use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
 use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Str;
 
@@ -173,10 +173,7 @@ trait CreatesImprovementCaseScenarios
         ]);
 
         if ($package !== null) {
-            CustomerPackageEntitlement::query()->updateOrCreate(
-                ['customer_id' => $customer->id, 'package_key' => $package],
-                ['status' => CustomerPackageEntitlement::STATUS_ACTIVE, 'activated_at' => now()],
-            );
+            app(ModuleEntitlementService::class)->activatePackage($customer, $package);
         }
 
         $owner = User::query()->create([
