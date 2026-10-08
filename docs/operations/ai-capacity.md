@@ -2,21 +2,38 @@
 
 Kort produkt- og driftsnotat. Ingen tall her er kommersielle beslutninger.
 
-## Produktregel
+## Produktmodell (låst)
 
-**Basis gir én felles AI-kapasitet. Alle AI-funksjoner i Procynia bruker samme pool. Opsjoner gir tilgang til funksjoner, ikke separate AI-pooler.**
+**Basis + opsjoner + AI-kapasitet — tre separate kommersielle dimensjoner.**
 
-- **Basis** (obligatorisk): Wiki, Kvalitet, Avvik og forbedringer. Basis er den eneste kommersielle kilden til inkludert AI-kapasitet.
-- **Opsjoner**: Risiko, Mål og KPI, Etterlevelse og revisjon, Leverandøroppfølging, Anbud. En opsjon øker aldri kapasiteten og har aldri egen pool. Styring / ISO / GRC er bare bestillingssnarveier, ikke et tilgangs- eller kapasitetshierarki.
-- **Gamle abonnementsplaner** (free/pro/max/ultra/enterprise) brukes ikke til AI-kapasitet. De styrer fortsatt Anbud AI-sak-kvoten (`included_ai_credits`) i overgangen.
+- **Basis** er grunnproduktet: Wiki, Kvalitet, Avvik og forbedringer. Egen pris. Basis gir **ikke** AI-kapasitet.
+- **Opsjoner** gir funksjonalitet: Risiko, Mål og KPI, Etterlevelse og revisjon, Leverandøroppfølging, Anbud. Egne priser. En opsjon gir aldri AI-kapasitet og har aldri egen pool. Å bestille eller avbestille en opsjon endrer ikke antall AI-enheter. Styring / ISO / GRC er bare bestillingssnarveier.
+- **AI-kapasitet** er en egen dimensjon: kundens valgte AI-kapasitetsnivå (eller en kundeoverstyring). **Én felles AI-pool per kunde** som alle AI-funksjoner i alle moduler bruker.
+- **Gamle abonnementsplaner** (free/pro/max/ultra/enterprise) er ikke kilde til AI-kapasitet. De lever under panseret for brukergrenser, Anbud AI-sak-kvoten (`included_ai_credits`), Stripe legacy mapping og admin.
+
+**AI-nivåer og priser er ikke endelig fastsatt.** Nivåene under er tekniske plassholdere til produksjonsdata er samlet inn.
 
 ## Kilde for inkludert kapasitet
 
-`CustomerAiCapacityService::resolveIncluded()`, i denne rekkefølgen:
+`CustomerAiCapacityService::resolveIncluded()`, i denne rekkefølgen (`source` i payload og rapport):
 
-1. `customers.included_ai_units`: kundespesifikk mengde per faktureringsperiode. Dette er foreløpig mekanismen for Enterprise og annen særskilt kapasitet (Admin → Kunder → AI-kontroll → «Sett AI-enheter», revisjonslogget). Ingen egen Enterprise-prismotor.
-2. Basis: `config/ai_customer_capacity.php` `basis.included_units_per_month` × periodens lengde (12 for årlig). **Teknisk plassholder** (2 000), merket `is_provisional`. Kunden ser «AI-kapasiteten er under innfasing, og nivået kan bli justert.»
-3. Ingen: kunden er «unmetered». Forbruket registreres og observeres, men stoppes aldri.
+1. `override` — `customers.included_ai_units`: eksplisitt kundeoverstyring per faktureringsperiode (Enterprise/særskilt kapasitet). Admin → Kunder → AI-kontroll → «Sett AI-enheter», revisjonslogget. Går foran nivået.
+2. `tier` — `customers.ai_capacity_tier`: en nøkkel i `config/ai_customer_capacity.php` `tiers`, `included_units_per_month` × periodens lengde (12 for årlig). Admin → AI-kontroll → «Velg AI-kapasitetsnivå», revisjonslogget (`ai_capacity_tier_changed`). Merket `is_provisional` så lenge `tiers_provisional` er `true`; kunden ser «AI-kapasiteten er under innfasing, og nivået kan bli justert.»
+3. `unconfigured` — verken overstyring eller nivå. Ingen kommersiell grense: forbruket registreres og observeres (`capacity_verdict = unmetered`), men stoppes aldri. Kunden ser «AI-kapasitet er ikke konfigurert ennå» og forbruket i perioden, aldri «0 av 0».
+
+Basis er **ikke** fallback. En nøkkel som ikke finnes i katalogen gir `unconfigured`.
+
+### AI-kapasitetsnivåer (plassholdere)
+
+| Nøkkel | Internt navn | Enheter/mnd | Status |
+|---|---|---|---|
+| `level_1` | Level 1 (placeholder) | 1 000 | teknisk plassholder |
+| `level_2` | Level 2 (placeholder) | 2 500 | teknisk plassholder |
+| `level_3` | Level 3 (placeholder) | 5 000 | teknisk plassholder |
+
+- Nøytrale nøkler med vilje; kommersielle navn, antall nivåer og enheter besluttes senere.
+- `active: false` skjuler nivået i admin, men en kunde som allerede har det beholder det.
+- Ingen pris på nivåene og ingen Stripe-pris for AI-kapasitet ennå. Når prisen besluttes: egen `BillingProduct`/Stripe price per nivå, koblet til nøkkelen.
 
 `nok_per_unit` (0,10) er en **teknisk kalibreringsverdi**, ikke en pris. Den vises aldri for kunden, markedsføres ikke og skal ikke brukes som grunnlag for prisstrategi.
 
@@ -45,4 +62,4 @@ Strict (`AI_CONTEXT_ENFORCEMENT`) er en annen mekanisme: korrekt attribusjon. Ca
 
 `php artisan ai:capacity-analysis` (se kommandoens `--help`). Rapporten gir forbruk, kostnad, enheter, «would have blocked», estimatpresisjon per operasjon og samtidighetstopp.
 
-Anbefaling (ikke en runtime-regel): samle minst **14 dager**, helst **én full faktureringsperiode** for representative kunder, før inkludert kapasitet og `nok_per_unit` låses. Systemet justerer aldri `nok_per_unit`, `included_units_per_month` eller operasjonsestimater selv. Dette bestemmes eksplisitt.
+Anbefaling (ikke en runtime-regel): samle minst **14 dager**, helst **én full faktureringsperiode** for representative kunder, før inkludert kapasitet og `nok_per_unit` låses. Rapporten viser valgt nivå, inkluderte enheter og kilde (`override` / `tier` / `unconfigured`) per kunde. Systemet justerer aldri `nok_per_unit`, nivåene eller operasjonsestimater selv. Dette bestemmes eksplisitt.

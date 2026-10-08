@@ -116,8 +116,35 @@ describe('the card stays simple and customer-safe', () => {
         assert.ok(!/AiQuotaCard|ai_quota|included_ai_credits|KI-tilbud/.test(billing));
     });
 
-    test('plans carry no AI capacity — Basis is its only source', () => {
+    test('no plan, Basis or option sizes the capacity on the page', () => {
         assert.ok(!/included_ai_units|includedAiUnits|AI-enheter per måned/.test(billing));
+        assert.ok(!/Basis (gir|inkluderer)[^'.]*AI|inkludert i Basis|felles AI-kapasitet/i.test(billing + card));
+    });
+
+    test('Basis, the options and the AI capacity are three separate blocks, in that order', () => {
+        const basis = billing.indexOf('data-testid="subscription-card"');
+        const options = billing.indexOf('data-testid="module-packages"');
+        const ai = billing.indexOf('<AiCapacityCard');
+
+        assert.ok(basis !== -1 && options !== -1 && ai !== -1);
+        assert.ok(basis < options && options < ai, 'Basis → Opsjoner → AI-kapasitet');
+        // The AI card is outside both other sections, not nested in the Basis card.
+        assert.ok(billing.lastIndexOf('</section>', ai) > options);
+        assert.ok(!billing.slice(basis, options).includes('ai_capacity'), 'AI capacity is not mixed into the Basis card');
+    });
+
+    test('an unconfigured capacity is said so honestly, with usage, never as 0 of 0', () => {
+        const unconfigured = card.slice(card.indexOf('if (!isConfigured(capacity))'), card.indexOf('const reserved ='));
+
+        assert.match(unconfigured, /ikke konfigurert ennå/);
+        assert.match(unconfigured, /ikke satt en kommersiell kapasitetsgrense/);
+        assert.match(unconfigured, /ai-capacity-used/);
+        assert.ok(!/headline\(|role="progressbar"|ai-capacity-remaining|ai-capacity-included/.test(unconfigured));
+    });
+
+    test('the selected tier is named only when it sizes the capacity, and never with a price', () => {
+        assert.match(card, /capacity\.tier_name && \(/);
+        assert.ok(!/kr\/mnd|per AI-enhet|price|pris/i.test(card));
     });
 
     test('a provisional level is said to be phasing in, and never explains the conversion', () => {

@@ -310,7 +310,7 @@ export default function BillingIndex() {
                         <PageHelpButton
                             buttonLabel={tb.page_help_button ?? 'Hjelp'}
                             title={tb.page_help_title ?? 'Om abonnement, tilleggstjenester og fakturaer'}
-                            intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og en felles AI-kapasitet.'}
+                            intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og en separat AI-kapasitet. Alle AI-funksjoner i Procynia bruker den samme AI-kapasiteten.'}
                             sections={[
                                 {
                                     title: tb.page_help_section_overview ?? 'Hva du finner her',
@@ -321,7 +321,7 @@ export default function BillingIndex() {
                                         },
                                         {
                                             title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
-                                            text: tb.page_help_item_ai_capacity_text ?? 'Abonnementet inkluderer en felles AI-kapasitet. Kapasiteten brukes når Procynia benytter AI til analyse, generering eller bearbeiding av innhold. Alle AI-funksjoner bruker den samme kapasiteten.',
+                                            text: tb.page_help_item_ai_capacity_text ?? 'AI-kapasiteten er en egen del av abonnementet, atskilt fra Basis og opsjonene. Den brukes når Procynia benytter AI til analyse, generering eller bearbeiding av innhold. Alle AI-funksjoner bruker den samme kapasiteten, og den endres ikke når opsjoner bestilles eller avbestilles.',
                                         },
                                         {
                                             title: tb.page_help_item_modules_title ?? 'Moduler og pakker',
@@ -361,8 +361,6 @@ export default function BillingIndex() {
                     />
                 </section>
 
-                <AiCapacityCard capacity={aiCapacity} texts={aiCapacityText} locale={locale} />
-
                 {showAddonsWithoutSubscriptionWarning && (
                     <AlertBox>
                         {alertText.addons_without_subscription ?? 'Kontoen har aktive tillegg, men ingen aktivt abonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
@@ -377,7 +375,7 @@ export default function BillingIndex() {
                         <InfoHint
                             size="sm"
                             label="Vis forklaring for abonnement"
-                            text={cardText.hint ?? 'Abonnementet består av Basis, valgfrie opsjoner og en felles AI-kapasitet. Opsjonene bestilles under Moduler og pakker.'}
+                            text={cardText.hint ?? 'Abonnementet består av Basis, valgfrie opsjoner og en separat AI-kapasitet. Opsjonene bestilles under Moduler og pakker.'}
                         />
                     </div>
 
@@ -500,6 +498,9 @@ export default function BillingIndex() {
                         ))}
                     </ul>
                 </section>
+
+                {/* The third, separate part of the subscription: one AI pool, not sized by Basis or the options. */}
+                <AiCapacityCard capacity={aiCapacity} texts={aiCapacityText} locale={locale} />
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">

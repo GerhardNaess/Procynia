@@ -17,9 +17,10 @@ use Illuminate\Support\Facades\DB;
  *
  * NO PROVIDER CALL. Usage is written straight into the ledger as settled attempts, tagged with the
  * spec's correlation id; a billing period is added only when none covers today. The E2E customer
- * holds Basis and several options; its capacity override is cleared for the spec so the capacity
- * comes from Basis alone, remembered outside the spec (so an interrupted run is restored by the next
- * sweep) and put back by cleanup().
+ * holds Basis and several options. For the spec its override is cleared and it is given its own AI
+ * capacity tier, so the capacity comes from the tier alone — never from Basis or an option. The
+ * previous override and tier, and any option the spec cancels, are remembered outside the spec (so
+ * an interrupted run is restored by the next sweep) and put back by cleanup().
  */
 final class AiCapacityE2EFixture
 {
@@ -29,17 +30,21 @@ final class AiCapacityE2EFixture
 
     private const OVERRIDE_CACHE_KEY = 'e2e:ai-capacity:previous-included-ai-units';
 
+    private const CANCELLED_CACHE_KEY = 'e2e:ai-capacity:cancelled-options';
+
+    public const TIER = 'level_2';
+
     /** @return array<string, mixed> The capacity the page must show, as the service computes it, plus the customer's packages. */
     public static function seed(string $suffix): array
     {
         $customer = self::customer();
 
         if (! Cache::has(self::OVERRIDE_CACHE_KEY)) {
-            Cache::forever(self::OVERRIDE_CACHE_KEY, ['value' => $customer->included_ai_units]);
+            Cache::forever(self::OVERRIDE_CACHE_KEY, ['value' => $customer->included_ai_units, 'tier' => $customer->ai_capacity_tier]);
         }
 
         DB::transaction(function () use ($customer, $suffix): void {
-            $customer->forceFill(['included_ai_units' => null])->save();
+            $customer->forceFill(['included_ai_units' => null, 'ai_capacity_tier' => self::TIER])->save();
             $now = CarbonImmutable::now('UTC');
 
             $covered = CustomerBillingPeriod::query()->where('customer_id', $customer->id)
@@ -71,7 +76,28 @@ final class AiCapacityE2EFixture
             }
         });
 
-        return app(CustomerAiCapacityService::class)->forCustomer($customer->fresh())->toArray()
+        return self::capacity();
+    }
+
+    /** Cancels one option the customer holds — remembered so cleanup() orders it again. */
+    public static function cancelOption(string $package): array
+    {
+        $customer = self::customer();
+        $cancelled = Cache::get(self::CANCELLED_CACHE_KEY, []);
+
+        if (app(ModuleEntitlementService::class)->cancelOption($customer, $package)) {
+            Cache::forever(self::CANCELLED_CACHE_KEY, array_values(array_unique([...$cancelled, $package])));
+        }
+
+        return self::capacity();
+    }
+
+    /** @return array<string, mixed> */
+    private static function capacity(): array
+    {
+        $customer = self::customer();
+
+        return app(CustomerAiCapacityService::class)->forCustomer($customer)->toArray()
             + ['packages' => app(ModuleEntitlementService::class)->activePackageKeys($customer)];
     }
 
@@ -84,9 +110,18 @@ final class AiCapacityE2EFixture
         CustomerBillingPeriod::query()->where('provider_subscription_id', 'like', $tag.'%')->delete();
 
         if (Cache::has(self::OVERRIDE_CACHE_KEY)) {
-            self::customer()->forceFill(['included_ai_units' => Cache::get(self::OVERRIDE_CACHE_KEY)['value'] ?? null])->save();
+            $previous = Cache::get(self::OVERRIDE_CACHE_KEY);
+            self::customer()->forceFill([
+                'included_ai_units' => $previous['value'] ?? null,
+                'ai_capacity_tier' => $previous['tier'] ?? null,
+            ])->save();
             Cache::forget(self::OVERRIDE_CACHE_KEY);
         }
+
+        foreach (Cache::get(self::CANCELLED_CACHE_KEY, []) as $package) {
+            app(ModuleEntitlementService::class)->activatePackage(self::customer(), $package);
+        }
+        Cache::forget(self::CANCELLED_CACHE_KEY);
     }
 
     /** @return array{attempts: int, periods: int} */

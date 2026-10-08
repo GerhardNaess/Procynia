@@ -72,7 +72,7 @@ class BillingAiCapacityTest extends TestCase
 
     public function test_a_customer_without_a_defined_capacity_is_told_so_rather_than_shown_zero(): void
     {
-        // Not holding Basis and no customer-specific amount.
+        // No AI capacity tier and no customer-specific amount.
         $customer = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
 
         $this->actingAs($this->owner($customer))->get('/app/billing')
@@ -83,18 +83,36 @@ class BillingAiCapacityTest extends TestCase
                 ->where('ai_capacity.included', null));
     }
 
-    public function test_a_basis_capacity_is_marked_provisional_and_a_customer_amount_is_not(): void
+    public function test_basis_and_options_give_no_capacity_the_tier_does_and_an_override_wins(): void
     {
+        config()->set('ai_customer_capacity.tiers', [
+            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
+        ]);
         $customer = $this->customer();
         app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
-        foreach (['risk', 'compliance', 'supplier', 'tender'] as $option) {
+        foreach (['risk', 'objectives', 'compliance', 'supplier', 'tender'] as $option) {
             app(ModuleEntitlementService::class)->activatePackage($customer, $option);
         }
+        $this->attempt($customer, 12.0);
+
+        // Basis and every option, but no AI capacity tier: honestly unconfigured, usage still shown.
+        $this->actingAs($this->owner($customer))->get('/app/billing')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('ai_capacity.is_configured', false)
+                ->where('ai_capacity.source', 'unconfigured')
+                ->where('ai_capacity.included', null)
+                ->where('ai_capacity.used', 120)
+                ->where('ai_capacity.tier_name', null));
+
+        $customer->update(['ai_capacity_tier' => 'tier_a']);
 
         $this->actingAs($this->owner($customer))->get('/app/billing')
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->where('ai_capacity.included', 2000)
+                ->where('ai_capacity.source', 'tier')
+                ->where('ai_capacity.tier_name', 'Tier A')
                 ->where('ai_capacity.is_provisional', true));
 
         $customer->update(['included_ai_units' => 5000]);
@@ -103,7 +121,20 @@ class BillingAiCapacityTest extends TestCase
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->where('ai_capacity.included', 5000)
+                ->where('ai_capacity.source', 'override')
+                ->where('ai_capacity.tier_name', null)
                 ->where('ai_capacity.is_provisional', false));
+    }
+
+    public function test_the_customer_sees_the_translated_name_of_a_real_tier(): void
+    {
+        $customer = $this->customer(['ai_capacity_tier' => 'level_2']);
+
+        $this->actingAs($this->owner($customer))->get('/app/billing')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('ai_capacity.source', 'tier')
+                ->where('ai_capacity.tier_name', 'Nivå 2'));
     }
 
     public function test_the_page_carries_no_internal_cost_or_token_figures(): void
@@ -123,7 +154,7 @@ class BillingAiCapacityTest extends TestCase
                 $this->assertStringNotContainsString('12.34', json_encode($props['ai_capacity']));
                 $this->assertArrayNotHasKey('included_ai_credits', (array) ($props['subscription'] ?? []));
 
-                // The old plans are not offered on the page at all: Basis is the only AI source.
+                // The old plans are not offered on the page at all, and no price is shown.
                 $this->assertArrayNotHasKey('available_plans', $props);
             });
     }
