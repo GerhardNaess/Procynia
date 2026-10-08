@@ -5,6 +5,7 @@ namespace App\Services\Suppliers;
 use App\Models\ImprovementCase;
 use App\Models\Supplier;
 use App\Models\SupplierAssessment;
+use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierImprovementCase;
 use App\Models\SupplierRequirementEvaluation;
 use App\Models\User;
@@ -26,8 +27,8 @@ use Illuminate\Validation\ValidationException;
  * WHO. supplier.edit on a supplier that is not ended (plan §9.2 — creating in another module), and
  * improvement.edit in the chosen fagområde with an owner who can read cases there — both checked by
  * the creator as for any new case. From a control (Leverandørkontroll, supplier-assurance-v2-plan
- * §7.1, §13.2) it is supplier.assure instead of supplier.edit: the person who controls follows up
- * what the control found. The case never changes the control or removes a blocker. The person chooses the type, the area, the owner and the frist;
+ * §7.1, §13.2) or from an aktsomhetsvurdering concluding «Tiltak kreves» (§11.3) it is supplier.assure
+ * instead of supplier.edit: the person who controls follows up what the control found. The case never changes the control or removes a blocker. The person chooses the type, the area, the owner and the frist;
  * nothing is guessed, and the supplier gets no fagområde.
  *
  * ATOMIC. One transaction: the supplier row is locked against a simultaneous Avslutt, the form's
@@ -83,22 +84,30 @@ class SupplierImprovementHandoffService
 
     /**
      * Hand off. $validated holds type, title, description, business_area_id, owner_user_id,
-     * due_date, handoff_key and, from an assessment, supplier_assessment_id, or, from a control,
-     * supplier_requirement_evaluation_id — never both.
+     * due_date, handoff_key and at most one of: supplier_assessment_id (from a leverandørvurdering),
+     * supplier_requirement_evaluation_id (from a control), supplier_due_diligence_assessment_id (from an
+     * aktsomhetsvurdering concluding «Tiltak kreves»).
      *
      * @param  array<string, mixed>  $validated
      */
     public function handOff(User $user, Supplier $supplier, array $validated): ImprovementCase
     {
-        $fromControl = ! in_array($validated['supplier_requirement_evaluation_id'] ?? null, [null, ''], true);
+        $given = fn (string $key): bool => ! in_array($validated[$key] ?? null, [null, ''], true);
+        $fromControl = $given('supplier_requirement_evaluation_id');
+        $fromDueDiligence = $given('supplier_due_diligence_assessment_id');
 
-        abort_unless($fromControl ? $this->suppliers->canAssure($user) : $this->suppliers->canEdit($user), 403);
+        // From Leverandørkontroll (a control or an aktsomhetsvurdering): supplier.assure. From the
+        // supplier or a leverandørvurdering: supplier.edit (v1).
+        abort_unless($fromControl || $fromDueDiligence ? $this->suppliers->canAssure($user) : $this->suppliers->canEdit($user), 403);
 
-        if ($fromControl && ! in_array($validated['supplier_assessment_id'] ?? null, [null, ''], true)) {
-            throw ValidationException::withMessages(['supplier_requirement_evaluation_id' => __('procynia.supplier_management.validation.evaluation_not_for_follow_up')]);
+        // At most one provenance (the database checks it too).
+        if ((int) $fromControl + (int) $fromDueDiligence + (int) $given('supplier_assessment_id') > 1) {
+            throw ValidationException::withMessages([
+                $fromDueDiligence ? 'supplier_due_diligence_assessment_id' : 'supplier_requirement_evaluation_id' => __('procynia.supplier_management.validation.'.($fromDueDiligence ? 'due_diligence_not_for_follow_up' : 'evaluation_not_for_follow_up')),
+            ]);
         }
 
-        return DB::transaction(function () use ($user, $supplier, $validated, $fromControl): ImprovementCase {
+        return DB::transaction(function () use ($user, $supplier, $validated, $fromControl, $fromDueDiligence): ImprovementCase {
             $locked = $this->lockOpen($supplier, 'title');
 
             $earlier = SupplierImprovementCase::query()
@@ -112,8 +121,9 @@ class SupplierImprovementHandoffService
                 return ImprovementCase::query()->findOrFail($earlier->improvement_case_id);
             }
 
-            $assessmentId = $fromControl ? null : $this->assessmentToFollowUp($locked, $validated['supplier_assessment_id'] ?? null);
+            $assessmentId = $fromControl || $fromDueDiligence ? null : $this->assessmentToFollowUp($locked, $validated['supplier_assessment_id'] ?? null);
             $evaluationId = $fromControl ? $this->evaluationToFollowUp($locked, $validated['supplier_requirement_evaluation_id']) : null;
+            $dueDiligenceId = $fromDueDiligence ? $this->dueDiligenceToFollowUp($locked, $validated['supplier_due_diligence_assessment_id']) : null;
 
             $case = $this->creator->create($user, [
                 'type' => $validated['type'],
@@ -131,6 +141,7 @@ class SupplierImprovementHandoffService
                 'improvement_case_id' => (int) $case->id,
                 'supplier_assessment_id' => $assessmentId,
                 'supplier_requirement_evaluation_id' => $evaluationId,
+                'supplier_due_diligence_assessment_id' => $dueDiligenceId,
                 'origin' => SupplierImprovementCase::ORIGIN_HANDOFF,
                 'handoff_key' => (string) $validated['handoff_key'],
                 'created_by' => $user->id,
@@ -205,7 +216,7 @@ class SupplierImprovementHandoffService
             return null;
         }
 
-        $links = $supplier->improvementCaseLinks()->with(['assessment:id,assessed_on', 'evaluation:id,requirement_title,evaluated_on'])->get()->keyBy('improvement_case_id');
+        $links = $supplier->improvementCaseLinks()->with(['assessment:id,assessed_on', 'evaluation:id,requirement_title,evaluated_on', 'dueDiligence:id,assessed_on'])->get()->keyBy('improvement_case_id');
 
         if ($links->isEmpty()) {
             return [];
@@ -230,6 +241,7 @@ class SupplierImprovementHandoffService
                     'origin' => $link->origin,
                     'assessed_on' => $link->assessment?->assessed_on?->toDateString(),
                     'evaluation' => $this->evaluationOrigin($link),
+                    'due_diligence_assessed_on' => $link->dueDiligence?->assessed_on?->toDateString(),
                 ];
             })
             ->values()
@@ -268,7 +280,7 @@ class SupplierImprovementHandoffService
      * read in Leverandøroppfølging. Null for everyone else, and for a case that concerns no supplier:
      * no name, no link, nothing about the supplier.
      *
-     * @return list<array{name: string, url: string, from_supplier: bool, assessed_on: string|null, evaluation: array{requirement_title: string, evaluated_on: string|null}|null}>|null
+     * @return list<array{name: string, url: string, from_supplier: bool, assessed_on: string|null, evaluation: array{requirement_title: string, evaluated_on: string|null}|null, due_diligence_assessed_on: string|null}>|null
      */
     public function provenanceFor(User $user, ImprovementCase $case): ?array
     {
@@ -279,7 +291,7 @@ class SupplierImprovementHandoffService
         $links = SupplierImprovementCase::query()
             ->where('customer_id', $case->customer_id)
             ->where('improvement_case_id', $case->id)
-            ->with(['assessment:id,assessed_on', 'evaluation:id,requirement_title,evaluated_on'])
+            ->with(['assessment:id,assessed_on', 'evaluation:id,requirement_title,evaluated_on', 'dueDiligence:id,assessed_on'])
             ->orderBy('id')
             ->get();
 
@@ -295,6 +307,7 @@ class SupplierImprovementHandoffService
                 'from_supplier' => $link->origin === SupplierImprovementCase::ORIGIN_HANDOFF,
                 'assessed_on' => $link->assessment?->assessed_on?->toDateString(),
                 'evaluation' => $this->evaluationOrigin($link),
+                'due_diligence_assessed_on' => $link->dueDiligence?->assessed_on?->toDateString(),
             ])
             ->values()
             ->all();
@@ -353,6 +366,26 @@ class SupplierImprovementHandoffService
         }
 
         return (int) $evaluation->id;
+    }
+
+    /**
+     * From an aktsomhetsvurdering (supplier-assurance-v2-plan §11.3): one of this supplier's that
+     * concluded «Tiltak kreves» — the conclusion that offers the hand-off. A high level in an area
+     * never does by itself; the person's conclusion does.
+     */
+    private function dueDiligenceToFollowUp(Supplier $supplier, mixed $assessmentId): int
+    {
+        $assessment = SupplierDueDiligenceAssessment::query()
+            ->where('customer_id', $supplier->customer_id)
+            ->where('supplier_id', $supplier->id)
+            ->whereKey((int) $assessmentId)
+            ->first();
+
+        if ($assessment === null || $assessment->conclusion !== SupplierDueDiligenceAssessment::CONCLUSION_MEASURES_REQUIRED) {
+            throw ValidationException::withMessages(['supplier_due_diligence_assessment_id' => __('procynia.supplier_management.validation.due_diligence_not_for_follow_up')]);
+        }
+
+        return (int) $assessment->id;
     }
 
     /**

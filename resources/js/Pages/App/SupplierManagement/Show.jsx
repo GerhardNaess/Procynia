@@ -12,6 +12,7 @@ import { SupplierAttentionFindings } from './SupplierAttention';
 import SupplierCriticality from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
 import SupplierDocuments from './SupplierDocuments';
+import SupplierDueDiligence from './SupplierDueDiligence';
 import SupplierFollowUpPlan from './SupplierFollowUpPlan';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
@@ -54,6 +55,7 @@ export default function SupplierManagementShow() {
         activate_warning: activateWarning = false,
         attention = [],
         follow_up_plan: followUpPlan = null,
+        due_diligence: dueDiligence = null,
         review_intervals: reviewIntervals = [],
         assessments = [],
         criteria = [],
@@ -82,9 +84,13 @@ export default function SupplierManagementShow() {
     const a = tr.assurance ?? {};
     // Which panel is open: 'edit', 'end', 'reopen', 'activate' or none. One at a time.
     const [panel, setPanel] = useState(null);
-    // «Følg opp i Avvik og forbedringer», from the supplier ({ assessment: null }), an assessment or a control ({ evaluation }).
+    // «Følg opp i Avvik og forbedringer», from the supplier ({ assessment: null }), an assessment, a control ({ evaluation }) or an aktsomhetsvurdering ({ dueDiligence }).
     const [followUp, setFollowUp] = useState(null);
     const canFollowUp = (improvementHandoff?.area_options ?? []).length > 0;
+    // «Opprett risiko» from an aktsomhetsvurdering: the assessment it comes from, or null.
+    const [riskFrom, setRiskFrom] = useState(null);
+    const canCreateRisk = (riskHandoff?.area_options ?? []).length > 0;
+    const date = (value) => formatLongDate(value, locale);
 
     const form = useForm({
         name: item.name ?? '',
@@ -232,6 +238,16 @@ export default function SupplierManagementShow() {
                     />
                 )}
 
+                <SupplierDueDiligence
+                    supplierId={item.id}
+                    data={dueDiligence}
+                    applicable={controlRequirements?.applicable ?? []}
+                    onFollowUp={canFollowUp && followUp === null ? (assessment) => setFollowUp({ dueDiligence: assessment }) : null}
+                    onCreateRisk={canCreateRisk && riskFrom === null ? (assessment) => setRiskFrom(assessment) : null}
+                    formatDate={date}
+                    tr={tr}
+                />
+
                 <SupplierFollowUpPlan plan={followUpPlan} formatDate={(date) => formatLongDate(date, locale)} tr={tr} />
 
                 <SupplierAssessment
@@ -264,6 +280,9 @@ export default function SupplierManagementShow() {
                     risks={risks}
                     handoff={riskHandoff}
                     hasEditRight={permissions.has_edit_right ?? false}
+                    fromDueDiligence={riskFrom}
+                    onDueDiligenceDone={() => setRiskFrom(null)}
+                    formatDate={date}
                     tr={tr}
                     trRisk={translations?.risk ?? {}}
                 />

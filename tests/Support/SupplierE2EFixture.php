@@ -17,6 +17,7 @@ use App\Models\SupplierComplianceRequirement;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
+use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierImprovementCase;
 use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
@@ -46,7 +47,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Cleanup removes the run's customer; its suppliers, their status and criticality history, their
  * leverandørprofil and profile history, the kontrollkrav, overrides and controls with their
- * documentation snapshots, the assurance decisions, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
+ * documentation snapshots, the assurance decisions, the aktsomhetsvurderinger, their assessments, their documentation, the run's fagområder, the cases created in Avvik og
  * forbedringer, the risks in Risiko and the kravkilde and requirements in Etterlevelse og revisjon,
  * with the rows linking them to suppliers, go with it. Risks
  * are removed first: a risk holds its fagområde with RESTRICT. The history triggers allow that
@@ -362,7 +363,32 @@ class SupplierE2EFixture
         });
     }
 
-    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assurance_decisions: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
+    /**
+     * A product supplier whose profile makes an aktsomhetsvurdering relevant (supplier-assurance-v2-plan
+     * §11.3): textiles, produced outside Norway/the EEA with subcontractors, labour intensity not
+     * clarified. Written as the profile itself, without a history row — the journey does not read it.
+     *
+     * @return array{high_risk_category: string}
+     */
+    public static function seedProductProfile(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        (new SupplierProfile)->forceFill([
+            'supplier_id' => $supplier->id,
+            'customer_id' => $supplier->customer_id,
+            'production_outside_eea' => 'yes',
+            'high_risk_categories' => ['textiles'],
+            'uses_subcontractors' => 'yes',
+            'labour_intensive' => 'unknown',
+            'updated_by' => $manager->id,
+        ])->save();
+
+        return ['high_risk_category' => 'textiles'];
+    }
+
+    /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assurance_decisions: int, due_diligence_assessments: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
         $customerIds = Customer::query()->where('name', '~', self::pattern($suffix))->pluck('id');
@@ -379,6 +405,7 @@ class SupplierE2EFixture
             'requirement_evaluations' => SupplierRequirementEvaluation::query()->whereIn('customer_id', $customerIds)->count(),
             'evaluation_documents' => SupplierRequirementEvaluationDocument::query()->whereIn('customer_id', $customerIds)->count(),
             'assurance_decisions' => SupplierAssuranceDecision::query()->whereIn('customer_id', $customerIds)->count(),
+            'due_diligence_assessments' => SupplierDueDiligenceAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
             // Also by the run's suffix in the title, wherever it might have landed.

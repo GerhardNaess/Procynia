@@ -27,6 +27,8 @@ final class RequirementTemplates
 
     public const DATA_PROCESSOR = 'data_processor';
 
+    public const HUMAN_RIGHTS_RISK = 'human_rights_risk';
+
     /** @var array<string, array{version: string, items: list<string>, gates: list<string>}> */
     public const TEMPLATES = [
         self::PUBLIC_SECTOR_GENERAL => [
@@ -43,6 +45,13 @@ final class RequirementTemplates
             'version' => '1',
             'items' => ['P1', 'P2', 'P3', 'P4', 'P5', 'S4', 'S6', 'S8'],
             'gates' => ['P1', 'P2', 'P4', 'S4'],
+        ],
+        // Mal 4 (phase 7). The plan's «+ aktsomhetsvurdering» is not an item: the assessment is its own
+        // record (SupplierDueDiligenceService), expected by the same profile facts (signal 10).
+        self::HUMAN_RIGHTS_RISK => [
+            'version' => '1',
+            'items' => ['H1', 'H2', 'H3', 'E1', 'M1'],
+            'gates' => ['H1'],
         ],
     ];
 

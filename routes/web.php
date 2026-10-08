@@ -39,6 +39,7 @@ use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierControlRequirementController;
 use App\Http\Controllers\App\SupplierDocumentController;
+use App\Http\Controllers\App\SupplierDueDiligenceController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\SupplierProfileController;
@@ -497,6 +498,8 @@ Route::prefix('app')
             Route::post('/{supplierId}/documents/{documentId}/reconfirm', [SupplierRequirementEvaluationController::class, 'reconfirm'])->whereNumber(['supplierId', 'documentId'])->name('requirement-evaluations.reconfirm');
             // Registrer beslutning: a new, immutable assurance decision with a snapshot of the control state (supplier.assure).
             Route::post('/{supplierId}/assurance-decisions', [SupplierAssuranceDecisionController::class, 'store'])->whereNumber('supplierId')->name('assurance-decisions.store');
+            // Aktsomhetsvurdering: a new, immutable due diligence assessment (supplier.assure).
+            Route::post('/{supplierId}/due-diligence-assessments', [SupplierDueDiligenceController::class, 'store'])->whereNumber('supplierId')->name('due-diligence.store');
             // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit or supplier.assure).
             Route::post('/{supplierId}/documents', [SupplierDocumentController::class, 'store'])->whereNumber('supplierId')->name('documents.store');
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');

@@ -94,10 +94,11 @@ class SupplierFollowUpPlanTest extends TestCase
             $this->document(['id' => 8, 'title' => 'Uten utløp', 'document_type' => 'other']),
         ];
 
-        $plan = Plan::build($requirements, $documents, CarbonImmutable::parse('2027-03-01'), $today);
+        $plan = Plan::build($requirements, $documents, CarbonImmutable::parse('2027-03-01'), $today, CarbonImmutable::parse('2026-10-07'));
 
         $this->assertSame([
             ['control', '2026-10-01', true, 1, null],
+            ['due_diligence', '2026-10-07', true, null, null],
             ['acceptance', '2026-11-15', false, 2, null],
             ['document_renewal', '2026-12-01', false, 1, 5],
             ['document', '2027-01-01', false, null, 6],

@@ -5,6 +5,7 @@ namespace Tests\Unit\Services\Suppliers;
 use App\Models\Supplier;
 use App\Models\SupplierProfile;
 use App\Services\Suppliers\Assurance\SupplierProfilePredicates;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -102,6 +103,36 @@ class SupplierProfilePredicatesTest extends TestCase
             ),
             $all,
         ));
+    }
+
+    /** @return array<string, array{0: array<string, mixed>|null, 1: bool}> */
+    public static function dueDiligenceProfiles(): array
+    {
+        $clear = ['production_outside_eea' => 'no', 'high_risk_categories' => [], 'uses_subcontractors' => 'no', 'labour_intensive' => 'no'];
+
+        return [
+            'no profile' => [null, false],
+            'everything answered no' => [$clear, false],
+            'a high-risk category' => [['high_risk_categories' => ['textiles']] + $clear, true],
+            'production outside the EEA' => [['production_outside_eea' => 'yes'] + $clear, true],
+            // «Ikke avklart» and not answered count as holding (plan §2 pkt. 3).
+            'production outside the EEA not clarified' => [['production_outside_eea' => 'unknown'] + $clear, true],
+            'production outside the EEA not answered' => [['production_outside_eea' => null] + $clear, true],
+            'labour intensive without subcontractors' => [['labour_intensive' => 'yes'] + $clear, false],
+            'labour intensive, subcontractors not clarified' => [['labour_intensive' => 'yes', 'uses_subcontractors' => 'unknown'] + $clear, true],
+        ];
+    }
+
+    /** @param  array<string, mixed>|null  $answers */
+    #[DataProvider('dueDiligenceProfiles')]
+    public function test_due_diligence_is_relevant_by_the_plans_rule(?array $answers, bool $relevant): void
+    {
+        $supplier = $this->supplier(['criticality' => 'critical']);
+        $facts = SupplierProfilePredicates::evaluate($supplier, $answers === null ? null : $this->answers($answers));
+
+        $this->assertSame($relevant, SupplierProfilePredicates::dueDiligenceRelevant($facts));
+        // Not a predicate a requirement's rule may use.
+        $this->assertNotContains('due_diligence_relevant', SupplierProfilePredicates::all());
     }
 
     /** @param  array<string, mixed>  $attributes */

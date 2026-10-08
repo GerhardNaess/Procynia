@@ -104,6 +104,18 @@ final class RequirementLibrary
             'theme' => 'continuity', 'level' => 'important', 'applies_when' => [['critical_delivery']],
             'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['policy'],
         ],
+        'H1' => [
+            'theme' => 'human_rights', 'level' => 'mandatory', 'applies_when' => [['high_risk_products'], ['production_outside_eea']],
+            'control_point' => 'before_contract', 'control_interval_months' => 12, 'accepted_document_types' => ['self_declaration'],
+        ],
+        'H2' => [
+            'theme' => 'human_rights', 'level' => 'important', 'applies_when' => [['high_risk_products']],
+            'control_point' => 'ongoing', 'control_interval_months' => 12, 'accepted_document_types' => ['subcontractor_list'],
+        ],
+        'H3' => [
+            'theme' => 'human_rights', 'level' => 'important', 'applies_when' => [['high_risk_products', 'criticality_important']],
+            'control_point' => 'ongoing', 'control_interval_months' => 24, 'accepted_document_types' => ['audit_report', 'control_report'],
+        ],
     ];
 
     /** @return array{theme: string, level: string, applies_when: list<list<string>>, control_point: string, control_interval_months: int|null, accepted_document_types: list<string>}|null */

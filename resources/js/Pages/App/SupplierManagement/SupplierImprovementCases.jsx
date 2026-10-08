@@ -25,10 +25,10 @@ const TERM = 'text-base font-semibold text-slate-600';
  * assessments. Title and description start as a visible suggestion; the person chooses the type, the
  * fagområde, the ansvarlig and the frist. Nothing is created before they press «Opprett sak».
  */
-function HandoffForm({ supplier, assessment, evaluation, handoff, onDone, locale, tr, ti }) {
+function HandoffForm({ supplier, assessment, evaluation, dueDiligence, handoff, onDone, locale, tr, ti }) {
     const c = tr.cases ?? {};
     const ref = useRef(null);
-    const prefill = caseHandoffPrefill(supplier, assessment, tr, (iso) => formatLongDate(iso, locale), evaluation);
+    const prefill = caseHandoffPrefill(supplier, assessment, tr, (iso) => formatLongDate(iso, locale), evaluation, dueDiligence);
     const form = useForm({
         type: '',
         title: prefill.title,
@@ -38,6 +38,7 @@ function HandoffForm({ supplier, assessment, evaluation, handoff, onDone, locale
         due_date: '',
         supplier_assessment_id: assessment?.id ?? null,
         supplier_requirement_evaluation_id: evaluation?.id ?? null,
+        supplier_due_diligence_assessment_id: dueDiligence?.id ?? null,
         handoff_key: newHandoffKey(),
     });
     const owners = ownersForArea(handoff.owner_options ?? [], form.data.business_area_id);
@@ -121,6 +122,7 @@ function HandoffForm({ supplier, assessment, evaluation, handoff, onDone, locale
 
             {form.errors.supplier_assessment_id && <p className={ERROR}>{form.errors.supplier_assessment_id}</p>}
             {form.errors.supplier_requirement_evaluation_id && <p className={ERROR}>{form.errors.supplier_requirement_evaluation_id}</p>}
+            {form.errors.supplier_due_diligence_assessment_id && <p className={ERROR}>{form.errors.supplier_due_diligence_assessment_id}</p>}
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
@@ -180,8 +182,9 @@ function LinkForm({ supplierId, options, onDone, tr, ti }) {
  *
  * The case is worked in Avvik og forbedringer; this page only starts it (`followUp` — from the
  * supplier, the assessment Vurderinger asked to follow up, or the control Krav og kvalifikasjoner
- * asked to follow up) and shows where it stands. Starting from the supplier and linking are
- * supplier.edit (`handoff.can_from_supplier`); from a control it is supplier.assure.
+ * asked to follow up, or an aktsomhetsvurdering concluding «Tiltak kreves») and shows where it
+ * stands. Starting from the supplier and linking are supplier.edit (`handoff.can_from_supplier`);
+ * from a control or an aktsomhetsvurdering it is supplier.assure.
  */
 export default function SupplierImprovementCases({ supplier, cases, handoff, followUp, setFollowUp, hasEditRight, locale, tr, ti }) {
     const c = tr.cases ?? {};
@@ -254,10 +257,11 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
 
             {canHandOff && followUp !== null && (
                 <HandoffForm
-                    key={followUp.evaluation ? `evaluation-${followUp.evaluation.id}` : (followUp.assessment?.id ?? 'supplier')}
+                    key={followUp.dueDiligence ? `due-diligence-${followUp.dueDiligence.id}` : followUp.evaluation ? `evaluation-${followUp.evaluation.id}` : (followUp.assessment?.id ?? 'supplier')}
                     supplier={supplier}
                     assessment={followUp.assessment ?? null}
                     evaluation={followUp.evaluation ?? null}
+                    dueDiligence={followUp.dueDiligence ?? null}
                     handoff={handoff}
                     onDone={() => setFollowUp(null)}
                     locale={locale}

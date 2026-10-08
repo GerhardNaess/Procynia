@@ -20,6 +20,7 @@ const KIND_FALLBACKS = {
     acceptance: 'Midlertidig aksept utløper: :title',
     document: 'Dokumentasjon utløper: «:document»',
     assessment: 'Neste leverandørvurdering',
+    due_diligence: 'Neste aktsomhetsvurdering',
 };
 
 /** How many entries «Neste kontroller» shows before «Vis alle», unless the server says otherwise. */

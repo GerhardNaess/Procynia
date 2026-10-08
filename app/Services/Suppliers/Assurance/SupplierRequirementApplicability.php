@@ -198,7 +198,7 @@ class SupplierRequirementApplicability
      * @param  list<string>  $uncertain
      * @return list<list<array{predicate: string, uncertain: bool}>>
      */
-    private static function holdingGroups(array $rule, array $facts, array $uncertain): array
+    public static function holdingGroups(array $rule, array $facts, array $uncertain): array
     {
         $holding = [];
 

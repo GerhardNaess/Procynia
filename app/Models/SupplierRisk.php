@@ -26,6 +26,7 @@ class SupplierRisk extends Model
         'customer_id',
         'supplier_id',
         'risk_id',
+        'supplier_due_diligence_assessment_id',
         'origin',
         'created_by',
     ];
@@ -33,6 +34,12 @@ class SupplierRisk extends Model
     public function supplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class, 'supplier_id');
+    }
+
+    /** The aktsomhetsvurdering a risk created from the supplier came from, if any. */
+    public function dueDiligence(): BelongsTo
+    {
+        return $this->belongsTo(SupplierDueDiligenceAssessment::class, 'supplier_due_diligence_assessment_id');
     }
 
     public function risk(): BelongsTo

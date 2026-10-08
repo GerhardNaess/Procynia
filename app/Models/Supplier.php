@@ -193,6 +193,8 @@ class Supplier extends Model
             && ! $this->requirementEvaluations()->exists()
             // Phase 4: any assurance decision.
             && ! $this->assuranceDecisions()->exists()
+            // Phase 7: any aktsomhetsvurdering.
+            && ! $this->dueDiligenceAssessments()->exists()
             && ! $this->improvementCaseLinks()->exists()
             && ! $this->riskLinks()->exists()
             && ! $this->requirementLinks()->exists();
@@ -308,6 +310,14 @@ class Supplier extends Model
     }
 
     /** Kontrollbeslutninger, the decision in force first. */
+    /** Aktsomhetsvurderinger, newest first (supplier-assurance-v2-plan §11). History; never changed. */
+    public function dueDiligenceAssessments(): HasMany
+    {
+        return $this->hasMany(SupplierDueDiligenceAssessment::class, 'supplier_id')
+            ->orderByDesc('assessed_on')
+            ->orderByDesc('id');
+    }
+
     public function assuranceDecisions(): HasMany
     {
         return $this->hasMany(SupplierAssuranceDecision::class, 'supplier_id')

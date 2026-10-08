@@ -23,7 +23,9 @@ use Carbon\CarbonInterface;
  *  - acceptance: a Midlertidig akseptert requirement — accepted_until;
  *  - document: a documentation row (v1) that is not replaced and has «Gyldig til», unless a
  *    requirement's control already rests on it (then it is listed there, with the requirement);
- *  - assessment: Neste leverandørvurdering (v1, SupplierReviewSchedule), when given.
+ *  - assessment: Neste leverandørvurdering (v1, SupplierReviewSchedule), when given;
+ *  - due_diligence: Neste aktsomhetsvurdering — the one in force's assessed_on + its
+ *    review_interval_months (SupplierDueDiligenceService::nextOn()), when given.
  *
  * A requirement controlled «ved endring» has no date and is listed apart under on_change. A
  * requirement with no control yet has no date either — Ikke vurdert is a state, raised by Trenger
@@ -45,8 +47,10 @@ class SupplierFollowUpPlan
 
     public const KIND_ASSESSMENT = 'assessment';
 
+    public const KIND_DUE_DILIGENCE = 'due_diligence';
+
     /** Same date: this order. */
-    public const KINDS = [self::KIND_ACCEPTANCE, self::KIND_CONTROL, self::KIND_DOCUMENT_RENEWAL, self::KIND_DOCUMENT, self::KIND_ASSESSMENT];
+    public const KINDS = [self::KIND_ACCEPTANCE, self::KIND_CONTROL, self::KIND_DOCUMENT_RENEWAL, self::KIND_DOCUMENT, self::KIND_ASSESSMENT, self::KIND_DUE_DILIGENCE];
 
     /** How many entries «Neste kontroller» shows before «Vis alle». */
     public const PREVIEW = 5;
@@ -56,7 +60,7 @@ class SupplierFollowUpPlan
      * @param  iterable<SupplierDocument>  $documents  the supplier's documentation rows as they are now
      * @return array{entries: list<array{kind: string, date: string|null, overdue: bool, requirement: array{id: int, title: string, level: string}|null, document: array{id: int, title: string, document_type: string}|null}>, on_change: list<array{id: int, title: string}>}
      */
-    public static function build(iterable $requirements, iterable $documents, ?CarbonInterface $nextReviewOn, CarbonInterface $today): array
+    public static function build(iterable $requirements, iterable $documents, ?CarbonInterface $nextReviewOn, CarbonInterface $today, ?CarbonInterface $nextDueDiligenceOn = null): array
     {
         $todayString = $today->toDateString();
         $entries = [];
@@ -119,6 +123,10 @@ class SupplierFollowUpPlan
 
         if ($nextReviewOn !== null) {
             $entries[] = $entry(self::KIND_ASSESSMENT, $nextReviewOn->toDateString(), $nextReviewOn->toDateString() < $todayString);
+        }
+
+        if ($nextDueDiligenceOn !== null) {
+            $entries[] = $entry(self::KIND_DUE_DILIGENCE, $nextDueDiligenceOn->toDateString(), $nextDueDiligenceOn->toDateString() < $todayString);
         }
 
         // Overdue first, a date-less one (a replaced document) before any dated one; then by date,

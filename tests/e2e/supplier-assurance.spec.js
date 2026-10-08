@@ -426,7 +426,7 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
 
     const templates = page.getByTestId('requirement-templates');
     await expect(templates.getByRole('heading', { name: 'Kravmaler', exact: true })).toBeVisible();
-    await expect(templates.getByTestId('requirement-template')).toHaveCount(3);
+    await expect(templates.getByTestId('requirement-template')).toHaveCount(4);
     const itSaas = templates.getByTestId('requirement-template').filter({ hasText: 'IT/SaaS-leverandør' });
     await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
     await expectReadable(page, '13-templates');
@@ -538,4 +538,85 @@ test('an overdue control is found from the register, controlled again, and leave
     await row.getByTestId('evaluation-history').locator('summary').click();
     await expect(row.getByTestId('evaluation-entry')).toHaveCount(2);
     await expectReadable(page, '19-supplier-control-renewed');
+});
+
+/**
+ * Aktsomhet (plan §11, §15.1, §16.2 mal 4): a product supplier whose profile names textiles made
+ * outside the EEA. Once template 4 is applied, the register's existing filter says an
+ * aktsomhetsvurdering is missing; on the supplier the card says why it is relevant, maps the profile
+ * — «Ikke avklart» shown as such — and takes an assessment area by area, with a conclusion the person
+ * chooses. The finding is gone and the assessment reads in the history. Access, immutability, signal
+ * 11 and the hand-offs to Avvik and Risiko are PHP's (SupplierDueDiligenceTest).
+ */
+test('a product supplier with human rights risk gets an aktsomhetsvurdering, and Trenger oppmerksomhet follows', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Arbeidstøy ${suffix} AS')`);
+    await supplierFixture(`seedProductProfile('${suffix}', ${supplier.id})`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/app/supplier-management/control-requirements');
+
+    // Template 4, next to the others, through the same «Ta i bruk kravmal».
+    const template = page.getByTestId('requirement-template').filter({ hasText: 'Produktleverandør med menneskerettighetsrisiko' });
+    await expect(template).toContainText('5 krav · 1 obligatoriske');
+    await template.getByRole('button', { name: 'Ta i bruk kravmal' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Ta i bruk kravmal: Produktleverandør med menneskerettighetsrisiko' });
+    await dialog.getByRole('button', { name: 'Legg til 5 kontrollkrav' }).click();
+    await expect(page.getByText('5 kontrollkrav ble lagt til.', { exact: true })).toBeVisible();
+
+    // The register: the existing filter carries the new signal.
+    await page.goto('/app/supplier-management');
+    await page.getByTestId('supplier-attention-filter').check();
+    await page.getByRole('button', { name: 'Søk', exact: true }).click();
+    const item = page.getByTestId('supplier-attention-item').filter({ hasText: supplier.name });
+    await expect(item).toContainText('Leverandørprofilen gjør en aktsomhetsvurdering relevant, og ingen er registrert.');
+    await expect(page.getByTestId('supplier-attention-categories')).toContainText('Aktsomhetsvurdering mangler');
+    await expectReadable(page, '20-register-due-diligence-missing');
+
+    // The supplier: why it is relevant, what the profile maps, and the requirements that investigate it.
+    await item.getByRole('link', { name: supplier.name }).click();
+    await expect(page.getByTestId('supplier-attention').getByRole('link', { name: 'Gå til Aktsomhet og bærekraft' })).toHaveAttribute('href', '#supplier-due-diligence-heading');
+    const card = page.getByTestId('supplier-due-diligence');
+    await expect(card.getByTestId('due-diligence-relevance')).toContainText('Aktsomhetsvurdering er relevant for leverandøren');
+    await expect(card.getByTestId('due-diligence-relevance')).toContainText('Gjelder fordi');
+    await expect(card.getByTestId('due-diligence-mapping')).toContainText('Ikke avklart');
+    await expect(card.getByTestId('due-diligence-none')).toBeVisible();
+    await expect(card.getByTestId('due-diligence-requirements')).toContainText('Egenerklæring om menneskerettigheter og arbeidsforhold i leverandørkjeden');
+    await expectReadable(page, '21-supplier-due-diligence-missing');
+
+    // The assessment: each area chosen, the conclusion chosen; the interval follows the conclusion.
+    await card.getByRole('button', { name: 'Registrer aktsomhetsvurdering' }).click();
+    const form = card.getByTestId('due-diligence-form');
+    const levels = {
+        child_labour_risk: 'Lav',
+        forced_labour_risk: 'Lav',
+        working_conditions_risk: 'Forhøyet',
+        discrimination_risk: 'Lav',
+        freedom_of_association_risk: 'Ukjent',
+        environment_risk: 'Høy',
+    };
+    for (const [area, level] of Object.entries(levels)) {
+        await form.getByTestId(`due-diligence-area-${area}`).getByLabel(level, { exact: true }).check();
+    }
+    await form.getByTestId('due-diligence-conclusion-measures_required').getByRole('radio').check();
+    await expect(form.getByLabel('Ny vurdering om')).toHaveValue('12');
+    await form.getByLabel('Begrunnelse').fill('Overtid og kjemikaliebruk hos syfabrikken må følges opp.');
+    await expectReadable(page, '22-due-diligence-form');
+    await form.getByRole('button', { name: 'Registrer aktsomhetsvurdering' }).click();
+    await expect(page.getByText('Aktsomhetsvurderingen er registrert.', { exact: true })).toBeVisible();
+
+    // The latest assessment, the six areas in words, the next date; the finding is gone.
+    await expect(card.getByTestId('due-diligence-conclusion')).toHaveText('Tiltak kreves');
+    const areas = card.getByTestId('due-diligence-current-areas');
+    await expect(areas.locator('[data-area="working_conditions_risk"]')).toContainText('Forhøyet');
+    await expect(areas.locator('[data-area="freedom_of_association_risk"]')).toContainText('Ukjent');
+    await expect(card.getByTestId('due-diligence-next')).toContainText('Neste aktsomhetsvurdering');
+    await expect(page.locator('[data-finding="due_diligence_missing"]')).toHaveCount(0);
+    await card.getByTestId('due-diligence-history').locator('summary').click();
+    await expect(card.getByTestId('due-diligence-history-entry')).toHaveCount(1);
+    await expectReadable(page, '23-supplier-due-diligence-assessed');
 });

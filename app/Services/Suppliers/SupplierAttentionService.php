@@ -6,9 +6,12 @@ use App\Models\Supplier;
 use App\Models\SupplierAssessment;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDocument;
+use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierProfile;
 use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
+use App\Services\Suppliers\Assurance\SupplierDueDiligenceService;
+use App\Services\Suppliers\Assurance\SupplierProfilePredicates;
 use App\Services\Suppliers\Assurance\SupplierRequirementStatus;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -46,8 +49,10 @@ use Illuminate\Support\Collection;
  *
  * One finding per rule and supplier, listing its requirements. A requirement already named under
  * Krever beslutning is not named again under Kontroll forfalt or Krav ikke vurdert: the decision is
- * what it needs. A customer without control requirements gets none of the four. Signals 10–11
- * (aktsomhetsvurdering) arrive with phase 7.
+ * what it needs. A customer without control requirements gets none of the four.
+ *
+ * Phase 7 adds Aktsomhetsvurdering mangler (10) and Aktsomhetsvurdering forfalt (11) — see
+ * dueDiligenceFindingsFor().
  *
  * An ended supplier raises nothing: it is no longer followed up. A supplier under evaluation
  * (onboarding) is not expected to be assessed yet, so only the owner and documentation rules apply
@@ -85,6 +90,10 @@ class SupplierAttentionService
 
     public const PROFILE_INCOMPLETE = 'profile_incomplete';
 
+    public const DUE_DILIGENCE_MISSING = 'due_diligence_missing';
+
+    public const DUE_DILIGENCE_OVERDUE = 'due_diligence_overdue';
+
     /** Why a requirement is under Kontroll forfalt. */
     public const OVERDUE_ACCEPTANCE = 'acceptance_expired';
 
@@ -100,6 +109,8 @@ class SupplierAttentionService
         self::CONTROL_OVERDUE,
         self::REQUIREMENT_NOT_EVALUATED,
         self::PROFILE_INCOMPLETE,
+        self::DUE_DILIGENCE_MISSING,
+        self::DUE_DILIGENCE_OVERDUE,
         self::NOT_ASSESSED,
         self::REVIEW_OVERDUE,
         self::MISSING_OWNER,
@@ -111,6 +122,7 @@ class SupplierAttentionService
         private readonly SupplierAccessService $access,
         private readonly SupplierReviewSchedule $schedule,
         private readonly SupplierAssuranceResolver $assurance,
+        private readonly SupplierDueDiligenceService $dueDiligence,
     ) {}
 
     /**
@@ -200,7 +212,9 @@ class SupplierAttentionService
             ->whereNull('supplier_id')
             ->where('status', SupplierControlRequirement::STATUS_ACTIVE)
             ->exists();
-        $profiles = $hasCatalogue ? SupplierProfile::query()
+        $dueDiligence = $this->dueDiligence->inForce($customerId, $ids);
+        // Signal 9 needs the catalogue; signal 10 any applying requirement, a supplier's own included.
+        $profiles = $hasCatalogue || array_filter($assuranceRows) !== [] ? SupplierProfile::query()
             ->where('customer_id', $customerId)
             ->whereIn('supplier_id', $ids)
             ->get()
@@ -212,6 +226,7 @@ class SupplierAttentionService
             $id = (int) $supplier->id;
             $findings[$id] = $supplier->isEnded() ? [] : [
                 ...$this->assuranceFindingsFor($supplier, $assuranceRows[$id] ?? [], ($decisions[$id] ?? null)?->decision, $hasCatalogue, $profiles->get($id)),
+                ...$this->dueDiligenceFindingsFor($supplier, $assuranceRows[$id] ?? [], $profiles->get($id), $dueDiligence[$id] ?? null, $today),
                 ...$this->findingsFor($supplier, $latest->get($id), $documents->get($id, collect()), $today),
             ];
         }
@@ -275,6 +290,40 @@ class SupplierAttentionService
         }
 
         return $findings;
+    }
+
+    /**
+     * Signals 10–11 (docs/supplier-assurance-v2-plan.md §15.1), for a supplier that is not ended and
+     * has at least one requirement applying — like signals 6–9, a customer that has not started
+     * Leverandørkontroll gets neither.
+     *
+     *  - Aktsomhetsvurdering mangler (10): due_diligence_relevant from the profile, and no assessment.
+     *  - Aktsomhetsvurdering forfalt (11): active, and the next assessment (assessed_on +
+     *    review_interval_months) has passed — due today is not overdue.
+     *
+     * The two never meet: one needs no assessment, the other one. Neither reads the areas or the
+     * conclusion — «Høy» is not a signal; the person's follow-up of it is in Avvik og Risiko.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function dueDiligenceFindingsFor(Supplier $supplier, array $rows, ?SupplierProfile $profile, ?SupplierDueDiligenceAssessment $current, CarbonImmutable $today): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
+        if ($current === null) {
+            $relevant = SupplierProfilePredicates::dueDiligenceRelevant(SupplierProfilePredicates::for($supplier, $profile));
+
+            return $relevant ? [['key' => self::DUE_DILIGENCE_MISSING]] : [];
+        }
+
+        if ($supplier->status === Supplier::STATUS_ACTIVE && $this->dueDiligence->isOverdue($current, $today)) {
+            return [['key' => self::DUE_DILIGENCE_OVERDUE, 'next_on' => $this->dueDiligence->nextOn($current)?->toDateString()]];
+        }
+
+        return [];
     }
 
     /**

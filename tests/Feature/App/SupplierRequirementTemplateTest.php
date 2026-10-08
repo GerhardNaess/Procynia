@@ -71,8 +71,8 @@ class SupplierRequirementTemplateTest extends TestCase
             'control_point' => 'ongoing', 'applies_when' => [['personal_data']],
         ]);
 
-        // supplier.view reads the three templates; edit, assess, delete and System Owner apply nothing.
-        $this->assertSame(['public_sector_general', 'it_saas', 'data_processor'], array_keys($templates($reader)));
+        // supplier.view reads the templates; edit, assess, delete and System Owner apply nothing.
+        $this->assertSame(['public_sector_general', 'it_saas', 'data_processor', 'human_rights_risk'], array_keys($templates($reader)));
         $this->assertSame([11, 5, 11], [count($templates($reader)['it_saas']['items']), $templates($reader)['it_saas']['mandatory_count'], $templates($reader)['it_saas']['to_create_count']]);
         foreach ([CustomerPermissionCatalog::SUPPLIER_EDIT, CustomerPermissionCatalog::SUPPLIER_ASSESS, CustomerPermissionCatalog::SUPPLIER_DELETE] as $key) {
             $apply($this->supplierUser($customer, [$key]), 'it_saas')->assertForbidden();
@@ -121,6 +121,18 @@ class SupplierRequirementTemplateTest extends TestCase
         $apply($foreignAssurer, 'it_saas')->assertSessionHas('success', '11 kontrollkrav ble lagt til.');
         $this->assertSame(13, SupplierControlRequirement::query()->where('customer_id', $customer->id)->count());
         $this->assertSame(11, SupplierControlRequirement::query()->where('customer_id', $foreignCustomer->id)->count());
+
+        // Template 4 (phase 7) through the same engine: its five items, once, with provenance; E1 and M1
+        // are the library's items, not copies.
+        $this->assertSame([5, 1, 5], [count($templates($assurer)['human_rights_risk']['items']), $templates($assurer)['human_rights_risk']['mandatory_count'], $templates($assurer)['human_rights_risk']['to_create_count']]);
+        $apply($assurer, 'human_rights_risk')->assertSessionHas('success', '5 kontrollkrav ble lagt til.');
+        $h1 = SupplierControlRequirement::query()->where('customer_id', $customer->id)->where('template_item_key', 'H1')->sole();
+        $this->assertSame(
+            ['Egenerklæring om menneskerettigheter og arbeidsforhold i leverandørkjeden', 'human_rights', 'mandatory', [['high_risk_products'], ['production_outside_eea']], null, 'human_rights_risk', '1'],
+            [$h1->title, $h1->theme, $h1->level, $h1->applies_when, $h1->basis_text, $h1->template_key, $h1->template_version],
+        );
+        $apply($assurer, 'human_rights_risk')->assertSessionHas('success', 'Alle kravene i malen fantes allerede. Ingen kontrollkrav ble lagt til.');
+        $this->assertSame(18, SupplierControlRequirement::query()->where('customer_id', $customer->id)->count());
     }
 
     public function test_a_requirement_from_a_template_is_the_customers_own_and_runs_through_the_control_chain_without_compliance(): void

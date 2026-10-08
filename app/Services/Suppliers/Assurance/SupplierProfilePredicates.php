@@ -54,6 +54,15 @@ final class SupplierProfilePredicates
     public const SECTOR_PREFIX = 'sector:';
 
     /**
+     * When an aktsomhetsvurdering is expected (docs/supplier-assurance-v2-plan.md §11.3,
+     * «due_diligence_relevant»): high_risk_products ∨ production_outside_eea ∨ (labour_intensive ∧
+     * subcontractors), as groups over the predicates above, so «Ikke avklart» counts as it does for
+     * requirements and a wholly empty profile does not. Not a predicate a requirement's rule may use:
+     * it decides signal 10 and what the Aktsomhet card says, nothing else.
+     */
+    public const DUE_DILIGENCE_RULE = [['high_risk_products'], ['production_outside_eea'], ['labour_intensive', 'subcontractors']];
+
+    /**
      * Every predicate name a rule may use.
      *
      * @return list<string>
@@ -150,6 +159,22 @@ final class SupplierProfilePredicates
         }
 
         return self::holding($facts);
+    }
+
+    /**
+     * Whether an aktsomhetsvurdering is expected, from the predicates that hold (for()/evaluate()).
+     *
+     * @param  list<string>  $facts
+     */
+    public static function dueDiligenceRelevant(array $facts): bool
+    {
+        foreach (self::DUE_DILIGENCE_RULE as $group) {
+            if (array_diff($group, $facts) === []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** No profile, or a profile where nothing is answered. */

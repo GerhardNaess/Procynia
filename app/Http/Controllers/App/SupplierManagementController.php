@@ -16,6 +16,7 @@ use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
+use App\Services\Suppliers\Assurance\SupplierDueDiligenceService;
 use App\Services\Suppliers\Assurance\SupplierFollowUpPlan;
 use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\SupplierAccessService;
@@ -102,6 +103,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierAttentionService $attention,
         private readonly SupplierRequirementPayload $controlRequirements,
         private readonly SupplierAssuranceResolver $assurance,
+        private readonly SupplierDueDiligenceService $dueDiligence,
     ) {}
 
     public function index(Request $request): Response
@@ -233,6 +235,7 @@ class SupplierManagementController extends Controller
         $controlRequirements = $this->controlRequirements->forSupplier($user, $supplier);
         $assurance = $this->controlRequirements->assurance($user, $supplier, $controlRequirements['applicable'] ?? null);
         $row = $this->row($supplier, $assessments->first()?->assessed_on?->toDateString());
+        $dueDiligence = $this->dueDiligence->payload($user, $supplier, $today);
 
         return Inertia::render('App/SupplierManagement/Show', [
             'supplier' => $row + [
@@ -261,6 +264,10 @@ class SupplierManagementController extends Controller
             'activate_warning' => ($assurance['state']['decision_required'] ?? false)
                 || ($assurance['decision']['decision'] ?? null) === SupplierAssuranceDecision::DECISION_NOT_APPROVED,
             'attention' => $this->attention->findingsForSupplier($supplier),
+            // Aktsomhet og bærekraft (supplier-assurance-v2-plan §11, §22.1): the assessments, newest
+            // first, and whether the profile makes one expected. null for a customer that has not
+            // started Leverandørkontroll and a supplier never assessed.
+            'due_diligence' => $dueDiligence,
             // Neste kontroller (supplier-assurance-v2-plan §14): computed from the same rows as Krav og
             // kvalifikasjoner, never stored. Only once the customer has started Leverandørkontroll, and
             // never for an ended supplier — it is no longer followed up.
@@ -270,6 +277,7 @@ class SupplierManagementController extends Controller
                     $documents,
                     $row['next_review_on'] !== null ? Carbon::parse($row['next_review_on']) : null,
                     $today,
+                    ($dueDiligence['next_on'] ?? null) !== null ? Carbon::parse($dueDiligence['next_on']) : null,
                 ) + ['preview' => SupplierFollowUpPlan::PREVIEW]
                 : null,
             'assessments' => $assessments->map(fn (SupplierAssessment $assessment): array => [
@@ -301,7 +309,7 @@ class SupplierManagementController extends Controller
             // null, not empty: the person cannot read Avvik og forbedringer, so nothing is said about it.
             'improvement_cases' => $this->improvements->casesFor($user, $supplier),
             // supplier.edit hands off from the supplier and its assessments and links cases;
-            // supplier.assure hands off from a control (supplier-assurance-v2-plan §13.2).
+            // supplier.assure hands off from a control or an aktsomhetsvurdering (supplier-assurance-v2-plan §13.2).
             'improvement_handoff' => ($canEdit || $this->access->canAssure($user)) && $open ? $this->improvements->formOptions($user) + [
                 'link_options' => $canEdit ? $this->improvements->linkOptions($user, $supplier) : [],
                 'types' => ImprovementCase::TYPES,
@@ -309,8 +317,11 @@ class SupplierManagementController extends Controller
             ] : null,
             // null, not empty: the person cannot read Risiko, so nothing is said about it.
             'risks' => $this->risks->risksFor($user, $supplier),
-            'risk_handoff' => $canEdit && $open && $this->risks->canReadRisks($user) ? $this->risks->formOptions($user) + [
-                'link_options' => $this->risks->linkOptions($user, $supplier),
+            // supplier.edit creates from the supplier and links; supplier.assure creates from an
+            // aktsomhetsvurdering (supplier-assurance-v2-plan §11.2, §13.2).
+            'risk_handoff' => ($canEdit || $this->access->canAssure($user)) && $open && $this->risks->canReadRisks($user) ? $this->risks->formOptions($user) + [
+                'link_options' => $canEdit ? $this->risks->linkOptions($user, $supplier) : [],
+                'can_from_supplier' => $canEdit,
             ] : null,
             // null, not empty: the person cannot read Etterlevelse og revisjon. No compliance status.
             'requirements' => $this->requirements->requirementsFor($user, $supplier),

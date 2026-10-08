@@ -43,7 +43,7 @@ class SupplierRequirementTemplatesTest extends TestCase
 
         $used = [];
 
-        $this->assertSame([RequirementTemplates::PUBLIC_SECTOR_GENERAL, RequirementTemplates::IT_SAAS, RequirementTemplates::DATA_PROCESSOR], RequirementTemplates::keys());
+        $this->assertSame([RequirementTemplates::PUBLIC_SECTOR_GENERAL, RequirementTemplates::IT_SAAS, RequirementTemplates::DATA_PROCESSOR, RequirementTemplates::HUMAN_RIGHTS_RISK], RequirementTemplates::keys());
 
         foreach (RequirementTemplates::TEMPLATES as $key => $template) {
             $this->assertMatchesRegularExpression('/^[a-z_]+$/', $key);
@@ -112,6 +112,31 @@ class SupplierRequirementTemplatesTest extends TestCase
                 [],
                 ['public_contract_terms' => 'yes', 'on_site_work' => 'yes', 'significant_environmental_impact' => 'no'],
                 ['E1', 'E2', 'F1', 'L1'],
+            ],
+            // Mal 4 (phase 7).
+            'Menneskerettighetsrisiko: textiles, Standard' => [
+                RequirementTemplates::HUMAN_RIGHTS_RISK,
+                [],
+                ['high_risk_categories' => ['textiles'], 'production_outside_eea' => 'no', 'significant_environmental_impact' => 'no'],
+                ['H1', 'H2', 'E1'],
+            ],
+            'Menneskerettighetsrisiko: textiles, Viktig, environmental impact' => [
+                RequirementTemplates::HUMAN_RIGHTS_RISK,
+                ['criticality' => 'important'],
+                ['high_risk_categories' => ['textiles'], 'production_outside_eea' => 'yes', 'significant_environmental_impact' => 'yes'],
+                ['H1', 'H2', 'H3', 'E1', 'M1'],
+            ],
+            'Menneskerettighetsrisiko: production outside EEA not clarified, no category' => [
+                RequirementTemplates::HUMAN_RIGHTS_RISK,
+                ['criticality' => 'important'],
+                ['high_risk_categories' => [], 'production_outside_eea' => 'unknown', 'significant_environmental_impact' => 'no'],
+                ['H1', 'E1'],
+            ],
+            'Menneskerettighetsrisiko: none of it' => [
+                RequirementTemplates::HUMAN_RIGHTS_RISK,
+                [],
+                ['high_risk_categories' => [], 'production_outside_eea' => 'no', 'significant_environmental_impact' => 'no'],
+                ['E1'],
             ],
         ];
     }

@@ -18,7 +18,7 @@ use Illuminate\Http\Request;
  * of its assessments, or one of its controls), «Koble til eksisterende sak» and removing such a link
  * (docs/supplier-management-v1-plan.md §7.4, supplier-assurance-v2-plan §7.1).
  *
- * supplier.edit (from a control: supplier.assure) on a supplier reached through SupplierAccessService — another customer's is a 404 —
+ * supplier.edit (from a control or an aktsomhetsvurdering: supplier.assure) on a supplier reached through SupplierAccessService — another customer's is a 404 —
  * together with the right in Avvik og forbedringer, which SupplierImprovementHandoffService and
  * ImprovementCaseCreator check. The case's fields follow ImprovementCaseCreator::rules(), except
  * Hendelsesdato, which the hand-off does not ask for.
@@ -32,8 +32,8 @@ class SupplierImprovementController extends Controller
     ) {}
 
     /**
-     * From the supplier or an assessment: supplier.edit. From a control: supplier.assure. The service
-     * decides which, from what is handed off.
+     * From the supplier or an assessment: supplier.edit. From a control or an aktsomhetsvurdering:
+     * supplier.assure. The service decides which, from what is handed off.
      */
     public function store(Request $request, int $supplierId): RedirectResponse
     {
@@ -46,6 +46,7 @@ class SupplierImprovementController extends Controller
             'handoff_key' => ['required', 'uuid'],
             'supplier_assessment_id' => ['nullable', 'integer'],
             'supplier_requirement_evaluation_id' => ['nullable', 'integer'],
+            'supplier_due_diligence_assessment_id' => ['nullable', 'integer'],
         ], ImprovementValidationMessages::messages(), ImprovementValidationMessages::attributes());
 
         $this->handoff->handOff($user, $supplier, $validated);
