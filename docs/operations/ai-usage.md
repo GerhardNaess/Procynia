@@ -157,7 +157,7 @@ Global stop varsler ikke kunden. Det er en driftshendelse, ikke en opplysning om
 
 ### Kunde-UX
 
-`/app/billing` har en egen AI-kapasitet-seksjon med plan, inkludert, ekstra kapasitet, brukt, gjenstående, periode, neste reset og status. Autorisasjonen er uendret (`canManageCustomerBilling()`: System Owner og Bid Manager). AI-arbeidsflaten viser den samme tilstanden som én linje.
+AI-sak-kvoten vises i Anbud AI-arbeidsflaten (plan, inkludert, ekstra kapasitet, brukt, gjenstående, periode, neste reset og status). `/app/billing` viser **ikke** lenger AI-saker: Abonnement viser den felles AI-kapasiteten i AI-enheter — se `docs/operations/ai-capacity.md`. Autorisasjonen er uendret (`canManageCustomerBilling()`: System Owner og Bid Manager).
 
 Status formidles alltid med tekst og ikke bare farge: badge-etikett, statusbeskrivelse og en tekstlabel til progressbaren. Unlimited får ingen progressbar, fordi en full bar ville si det motsatte av sannheten.
 
