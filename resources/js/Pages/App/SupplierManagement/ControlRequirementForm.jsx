@@ -1,7 +1,7 @@
 import { useForm } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
-import { anchorLabel, controlPointLabel, intervalLabel, levelLabel, requirementFormData, themeLabel, toggleCode } from './controlRequirements';
+import { anchorLabel, controlPointLabel, intervalLabel, levelLabel, requirementFormData, requirementKeepsRule, themeLabel, toggleCode } from './controlRequirements';
 
 const LABEL = 'block text-base font-semibold text-slate-900';
 const HINT = 'text-base text-slate-600';
@@ -29,6 +29,12 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
     const docs = tr.documents?.types ?? {};
     const form = useForm(requirementFormData(requirement));
     const forSupplier = supplierId !== null || requirement?.supplier_specific;
+    const ruleModes = requirementKeepsRule(requirement) ? ['keep', 'all', 'conditions'] : ['all', 'conditions'];
+    const ruleModeLabel = (mode) => ({
+        keep: f.rule_keep ?? 'Behold regelen slik den er',
+        all: f.rule_all ?? 'Alle leverandører',
+        conditions: f.rule_conditions ?? 'Når ett av disse gjelder leverandøren',
+    })[mode];
     const anchorOptions = options.anchor_options ?? null;
     const maxConditions = options.max_conditions ?? 6;
     const prefix = requirement ? `control-requirement-${requirement.id}` : (supplierId ? 'control-requirement-own' : 'control-requirement-new');
@@ -104,12 +110,16 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
             {! forSupplier && (
                 <fieldset className={FIELDSET} data-testid="control-requirement-rule">
                     <legend className={LABEL}>{f.rule ?? 'Hvilke leverandører gjelder kravet?'}<RequiredMark /></legend>
-                    {['all', 'conditions'].map((mode) => (
+                    {ruleModes.map((mode) => (
                         <label key={mode} className={CHOICE}>
                             <input type="radio" name={`${prefix}-rule-mode`} value={mode} checked={form.data.rule_mode === mode} onChange={() => form.setData('rule_mode', mode)} className="mt-1 h-5 w-5 shrink-0" />
-                            <span>{mode === 'all' ? (f.rule_all ?? 'Alle leverandører') : (f.rule_conditions ?? 'Når ett av disse gjelder leverandøren')}</span>
+                            <span className="min-w-0 break-words">
+                                {ruleModeLabel(mode)}
+                                {mode === 'keep' && requirement?.rule_text && <span className="block text-slate-700" data-testid="control-requirement-kept-rule">{requirement.rule_text}</span>}
+                            </span>
                         </label>
                     ))}
+                    {form.data.rule_mode === 'keep' && <p className={HINT}>{f.rule_keep_hint}</p>}
                     {form.data.rule_mode === 'conditions' && (
                         <div className="mt-2 border-t border-slate-100 pt-2" data-testid="control-requirement-conditions">
                             <p className={HINT}>{(f.conditions_hint ?? 'Velg opptil :max.').replace(':max', String(maxConditions))}</p>
@@ -129,7 +139,7 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
                         </div>
                     )}
                     <FieldError message={form.errors.conditions ?? form.errors['conditions.0'] ?? form.errors.rule_mode} />
-                    <div className="mt-3 border-t border-slate-100 pt-2">
+                    {form.data.rule_mode !== 'keep' && <div className="mt-3 border-t border-slate-100 pt-2">
                         <p className={LABEL}>{f.criticality_scope ?? 'Kritikalitet'}</p>
                         {[['', f.scope_all ?? 'Alle kritikalitetsnivåer'], ['important', f.scope_important ?? 'Bare for Viktig og Kritisk'], ['critical', f.scope_critical ?? 'Bare for Kritisk']].map(([scope, label]) => (
                             <label key={scope || 'all'} className={CHOICE}>
@@ -137,7 +147,7 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
                                 <span>{label}</span>
                             </label>
                         ))}
-                    </div>
+                    </div>}
                 </fieldset>
             )}
 

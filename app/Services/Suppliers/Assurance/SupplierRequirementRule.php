@@ -22,6 +22,13 @@ final class SupplierRequirementRule
 
     public const MODE_CONDITIONS = 'conditions';
 
+    /**
+     * On an edit only: keep the stored rule as it is. Offered when the rule is one the form cannot
+     * write (a template's, e.g. «personopplysninger og data utenfor EØS»), so saving the text never
+     * widens or narrows who the requirement applies to.
+     */
+    public const MODE_KEEP = 'keep';
+
     public const SCOPE_IMPORTANT = 'important';
 
     public const SCOPE_CRITICAL = 'critical';

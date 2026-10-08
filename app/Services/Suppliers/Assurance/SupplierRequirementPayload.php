@@ -13,6 +13,7 @@ use App\Models\SupplierRequirementOverride;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
@@ -286,6 +287,10 @@ class SupplierRequirementPayload
             'rule' => SupplierRequirementRule::toForm((array) $requirement->applies_when),
             'applies_to_count' => $counts[(int) $requirement->id] ?? 0,
             'deletable' => ! $requirement->overrides_exists && ! $requirement->evaluations_exists,
+            // Where it came from, quietly: the template's name, never a key. The row is the customer's.
+            'template' => $requirement->template_key !== null && RequirementTemplates::find($requirement->template_key) !== null
+                ? ['name' => RequirementTemplates::name($requirement->template_key), 'version' => $requirement->template_version]
+                : null,
         ]));
     }
 

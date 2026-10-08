@@ -405,3 +405,70 @@ test('a decision is registered on the control state, and stays as it was when th
     await expect(registerRow.getByTestId('register-decision-required')).toHaveCount(0);
     await expectReadable(page, '12-register');
 });
+
+/**
+ * Kravmaler (plan §16): the IT/SaaS template is previewed and applied on Kontrollkrav — what is added,
+ * nothing matched on title — and its requirements land in the catalogue next to the customer's own,
+ * which are untouched. On a supplier the profile decides which of them apply, in Krav og
+ * kvalifikasjoner like any other requirement; one the profile does not trigger is not there.
+ * Access, duplicates, provenance and the control chain are PHP's (SupplierRequirementTemplateTest).
+ */
+test('a requirement template fills Kontrollkrav, and the profile decides which of its requirements apply', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    const catalogue = await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Skytjeneste ${suffix} AS', 'important', 12, ['processes_personal_data', 'has_system_access'])`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/app/supplier-management/control-requirements');
+
+    const templates = page.getByTestId('requirement-templates');
+    await expect(templates.getByRole('heading', { name: 'Kravmaler', exact: true })).toBeVisible();
+    await expect(templates.getByTestId('requirement-template')).toHaveCount(3);
+    const itSaas = templates.getByTestId('requirement-template').filter({ hasText: 'IT/SaaS-leverandør' });
+    await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
+    await expectReadable(page, '13-templates');
+
+    // The preview: eleven to add, none «already there» — the customer's own Databehandleravtale is not matched on title.
+    await itSaas.getByRole('button', { name: 'Ta i bruk kravmal' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Ta i bruk kravmal: IT/SaaS-leverandør' });
+    await expect(dialog.getByRole('heading', { name: 'Legges til i Kontrollkrav (11)' })).toBeVisible();
+    await expect(dialog.getByTestId('template-item-new')).toHaveCount(11);
+    await expect(dialog.getByTestId('template-item-existing')).toHaveCount(0);
+    await expect(dialog).toContainText('Eksisterende kontrollkrav endres ikke, og ingen krav slettes.');
+    await expectReadable(page, '14-template-preview');
+    await dialog.getByRole('button', { name: 'Legg til 11 kontrollkrav' }).click();
+    await expect(page.getByText('11 kontrollkrav ble lagt til.', { exact: true })).toBeVisible();
+    await expect(itSaas.getByTestId('requirement-template-complete')).toHaveText('Alle kravene er lagt til');
+
+    // In the catalogue, next to the customer's own requirements, which are still there.
+    const rows = page.getByTestId('control-catalogue-row');
+    await expect(rows).toHaveCount(13);
+    await expect(rows.filter({ hasText: catalogue.dpa_title })).toHaveCount(1);
+    await expect(rows.filter({ hasText: catalogue.subcontractors_title })).toHaveCount(1);
+    await expect(rows.filter({ hasText: 'Tilgangsstyring og MFA' }).getByTestId('control-template-origin')).toHaveText('Fra kravmal: IT/SaaS-leverandør');
+    await expectReadable(page, '15-catalogue-with-template');
+
+    // On the supplier: the profile decides.
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+    const profile = page.getByTestId('supplier-profile');
+    await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
+    const form = profile.getByTestId('profile-form');
+    await answer(form, 'data_role', 'Databehandler');
+    await answer(form, 'stores_our_data', 'Ja');
+    await answer(form, 'data_location', 'Annet land i EØS');
+    await form.getByRole('button', { name: 'Lagre profil' }).click();
+    await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
+
+    const section = page.getByTestId('supplier-control-requirements');
+    const applicable = section.getByTestId('control-requirement-row');
+    await expect(applicable.filter({ hasText: 'Tilgangsstyring og MFA' })).toHaveCount(1);
+    await expect(applicable.filter({ hasText: 'Tilgangsstyring og MFA' }).getByTestId('requirement-reason')).toContainText('Gjelder fordi');
+    await expect(applicable.filter({ hasText: 'Underdatabehandlere oversikt og godkjenning' })).toContainText('Ikke vurdert');
+    // Data in EØS: the transfer requirement does not apply; the customer's own requirement still does.
+    await expect(applicable.filter({ hasText: 'Overføringsgrunnlag utenfor EØS' })).toHaveCount(0);
+    await expect(applicable.filter({ hasText: catalogue.dpa_title })).toHaveCount(1);
+    await expectReadable(page, '16-template-requirements-on-supplier');
+});

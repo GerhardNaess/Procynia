@@ -64,7 +64,7 @@ class SupplierControlRequirementService
 
         if (! $forSupplier) {
             $rules += [
-                'rule_mode' => ['required', 'string', Rule::in([SupplierRequirementRule::MODE_ALL, SupplierRequirementRule::MODE_CONDITIONS])],
+                'rule_mode' => ['required', 'string', Rule::in([SupplierRequirementRule::MODE_ALL, SupplierRequirementRule::MODE_CONDITIONS, SupplierRequirementRule::MODE_KEEP])],
                 'conditions' => ['nullable', 'array', 'max:'.SupplierRequirementRule::MAX_GROUPS],
                 'conditions.*' => ['string', Rule::in(SupplierRequirementRule::conditions())],
                 'criticality_scope' => ['nullable', 'string', Rule::in(['', SupplierRequirementRule::SCOPE_IMPORTANT, SupplierRequirementRule::SCOPE_CRITICAL])],
@@ -202,11 +202,17 @@ class SupplierControlRequirementService
             return $value !== '' ? $value : null;
         };
 
-        $rule = $requirement->supplier_id !== null ? [] : SupplierRequirementRule::fromForm(
+        $keep = ($validated['rule_mode'] ?? null) === SupplierRequirementRule::MODE_KEEP;
+
+        if ($keep && ! $requirement->exists) {
+            throw ValidationException::withMessages(['rule_mode' => __('procynia.supplier_management.validation.rules.choose', ['attribute' => __('procynia.supplier_management.control.fields.rule_mode')])]);
+        }
+
+        $rule = $requirement->supplier_id !== null ? [] : ($keep ? (array) $requirement->applies_when : SupplierRequirementRule::fromForm(
             (string) ($validated['rule_mode'] ?? SupplierRequirementRule::MODE_ALL),
             (array) ($validated['conditions'] ?? []),
             $validated['criticality_scope'] ?? null,
-        );
+        ));
 
         if (($validated['rule_mode'] ?? null) === SupplierRequirementRule::MODE_CONDITIONS && $rule === []) {
             throw ValidationException::withMessages(['conditions' => __('procynia.supplier_management.validation.conditions_required')]);

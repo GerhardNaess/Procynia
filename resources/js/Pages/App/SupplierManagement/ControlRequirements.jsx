@@ -5,6 +5,7 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import ControlRequirementForm from './ControlRequirementForm';
+import RequirementTemplates from './RequirementTemplates';
 import SupplierTabs from './SupplierTabs';
 import { LEVEL_TONES, anchorLabel, appliesToText, controlPointLabel, groupByTheme, intervalLabel, levelLabel } from './controlRequirements';
 import { supplierHelp } from './supplierHelp';
@@ -17,9 +18,10 @@ const HINT = 'text-base text-slate-600';
  * by theme, each requirement with when it applies — in words — and to how many suppliers it applies
  * now. Everyone with supplier.view reads it; only supplier.assure is offered changes, and the server
  * refuses them otherwise. A requirement for one supplier is on that supplier's page, not here.
+ * Kravmaler add requirements here; once added they are ordinary requirements, edited like any other.
  */
 export default function SupplierControlRequirementsIndex() {
-    const { translations = {}, requirements = [], form: formOptions = null, permissions = {}, errors = {} } = usePage().props;
+    const { translations = {}, requirements = [], templates = [], form: formOptions = null, permissions = {}, errors = {} } = usePage().props;
     const tr = translations?.supplier_management ?? {};
     const c = tr.control ?? {};
     const k = c.catalogue ?? {};
@@ -71,6 +73,8 @@ export default function SupplierControlRequirementsIndex() {
                     </section>
                 )}
 
+                <RequirementTemplates templates={templates} canManage={canManage} tr={tr} />
+
                 {groups.length === 0 ? (
                     <section className={CARD} data-testid="control-catalogue-empty">
                         <p className="text-base text-slate-900">{k.none ?? 'Ingen kontrollkrav er registrert ennå.'}</p>
@@ -92,6 +96,11 @@ export default function SupplierControlRequirementsIndex() {
                                     <p className="mt-1 break-words text-base text-slate-700">
                                         {controlPointLabel(row.control_point, tr)} · {intervalLabel(row.control_interval_months, tr)}
                                     </p>
+                                    {row.template && (
+                                        <p className="mt-1 break-words text-base text-slate-600" data-testid="control-template-origin">
+                                            {(tr.templates?.from_template ?? 'Fra kravmal: :name').replace(':name', row.template.name)}
+                                        </p>
+                                    )}
                                     {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
                                     {row.basis_text && <p className="mt-1 break-words text-base text-slate-700">{c.basis ?? 'Grunnlag'}: {row.basis_text}</p>}
                                     {row.anchor && (

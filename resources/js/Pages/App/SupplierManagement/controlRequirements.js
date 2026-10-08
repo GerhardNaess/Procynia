@@ -88,7 +88,11 @@ export function anchorLabel(anchor) {
  * form cannot write (none in this phase) falls back to «Alle leverandører».
  */
 export function requirementFormData(requirement = null) {
-    const rule = requirement?.rule ?? { rule_mode: 'all', conditions: [], criticality_scope: '' };
+    // A stored rule the simple form cannot write (a template's) is kept unless the person replaces it.
+    const keep = requirementKeepsRule(requirement);
+    const rule = keep
+        ? { rule_mode: 'keep', conditions: [], criticality_scope: '' }
+        : (requirement?.rule ?? { rule_mode: 'all', conditions: [], criticality_scope: '' });
 
     return {
         title: requirement?.title ?? '',
@@ -104,6 +108,24 @@ export function requirementFormData(requirement = null) {
         rule_mode: rule.rule_mode,
         conditions: rule.conditions ?? [],
         criticality_scope: rule.criticality_scope ?? '',
+    };
+}
+
+/** A catalogue requirement whose rule the form cannot write: the server sent `rule: null`. */
+export function requirementKeepsRule(requirement) {
+    return Boolean(requirement) && ! requirement.supplier_specific && Object.hasOwn(requirement, 'rule') && requirement.rule === null;
+}
+
+/**
+ * What applying a template would do, from what the server sent: the items to add, and the items the
+ * customer already has — matched by the server on the template item, never on the title.
+ */
+export function templatePreview(template) {
+    const items = template?.items ?? [];
+
+    return {
+        toCreate: items.filter((item) => ! item.existing),
+        existing: items.filter((item) => Boolean(item.existing)),
     };
 }
 

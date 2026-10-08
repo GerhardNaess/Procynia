@@ -7,6 +7,7 @@ use App\Models\SupplierControlRequirement;
 use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierControlRequirementService;
 use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
+use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -29,6 +30,7 @@ class SupplierControlRequirementController extends Controller
         private readonly SupplierAccessService $access,
         private readonly SupplierControlRequirementService $requirements,
         private readonly SupplierRequirementPayload $payload,
+        private readonly SupplierRequirementTemplateLibrary $templates,
     ) {}
 
     public function index(): Response
@@ -39,6 +41,7 @@ class SupplierControlRequirementController extends Controller
         return Inertia::render('App/SupplierManagement/ControlRequirements', [
             'requirements' => $this->payload->catalogue($user),
             'form' => $canManage ? $this->payload->formOptions($user) : null,
+            'templates' => $this->templates->overview($user),
             'permissions' => ['can_manage' => $canManage],
         ]);
     }
@@ -49,6 +52,23 @@ class SupplierControlRequirementController extends Controller
         $this->requirements->create($user, $this->validated($request));
 
         return back()->with('success', __('procynia.supplier_management.flash.control_requirement_created'));
+    }
+
+    /** Ta i bruk kravmal: adds the template's items the customer does not have yet to the catalogue. */
+    public function applyTemplate(string $templateKey): RedirectResponse
+    {
+        $user = $this->assuringUser();
+        ['created' => $created, 'existing' => $existing] = $this->templates->apply($user, $templateKey);
+
+        $message = $created === 0
+            ? __('procynia.supplier_management.flash.template_nothing_added')
+            : trans_choice('procynia.supplier_management.flash.template_applied', $created, ['count' => $created]);
+
+        if ($created > 0 && $existing > 0) {
+            $message .= ' '.trans_choice('procynia.supplier_management.flash.template_existing', $existing, ['count' => $existing]);
+        }
+
+        return back()->with('success', $message);
     }
 
     /** Krav for denne leverandøren: always applies to that supplier, no rule. */

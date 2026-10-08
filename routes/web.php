@@ -66,6 +66,7 @@ use App\Http\Controllers\PublicRegistrationController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -469,6 +470,7 @@ Route::prefix('app')
             // Kontrollkrav: supplier.view reads, supplier.assure writes (supplier-assurance-v2-plan §13.2).
             Route::get('/control-requirements', [SupplierControlRequirementController::class, 'index'])->name('control-requirements.index');
             Route::post('/control-requirements', [SupplierControlRequirementController::class, 'store'])->name('control-requirements.store');
+            Route::post('/control-requirements/templates/{templateKey}', [SupplierControlRequirementController::class, 'applyTemplate'])->whereIn('templateKey', RequirementTemplates::keys())->name('control-requirements.apply-template');
             Route::patch('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'update'])->whereNumber('requirementId')->name('control-requirements.update');
             Route::post('/control-requirements/{requirementId}/retire', [SupplierControlRequirementController::class, 'retire'])->whereNumber('requirementId')->name('control-requirements.retire');
             Route::post('/control-requirements/{requirementId}/reactivate', [SupplierControlRequirementController::class, 'reactivate'])->whereNumber('requirementId')->name('control-requirements.reactivate');
