@@ -94,7 +94,7 @@ describe('the header block matches the reference', () => {
 
 describe('nothing but the framing moved', () => {
     test('the cards and their grids are untouched', () => {
-        for (const card of ['SummaryCard', 'AiQuotaCard', 'ConfirmDialog']) {
+        for (const card of ['SummaryCard', 'AiCapacityCard', 'ConfirmDialog']) {
             assert.ok(billing.includes(`<${card}`), `${card} should still be rendered`);
         }
 

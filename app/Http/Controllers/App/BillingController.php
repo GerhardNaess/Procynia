@@ -5,7 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\BillingProduct;
 use App\Models\Customer;
-use App\Services\Ai\Commercial\AiQuotaStatusService;
+use App\Services\Ai\Commercial\CustomerAiCapacityService;
 use App\Services\Billing\BillingService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\SubscriptionService;
@@ -45,7 +45,6 @@ class BillingController extends Controller
                 'billing_interval' => $basePlanLine?->billingPrice?->interval ?? $customer->billing_interval,
                 'cancel_at_period_end' => $basePlanLine?->status === 'pending_cancel',
                 'included_users' => $customer->included_users,
-                'included_ai_credits' => $customer->included_ai_credits,
             ];
         }
 
@@ -96,9 +95,9 @@ class BillingController extends Controller
             'subscription' => $subscriptionData,
             'invoices' => $invoices,
             'billing_lines' => $billingLines,
-            // The same commercial state the hard stop enforces, so the page can never claim the
-            // customer has capacity that the guard would refuse.
-            'ai_quota' => app(AiQuotaStatusService::class)->forCustomer($customer)->toArray(),
+            // The shared AI capacity, in AI units — the same figures the capacity gate reads. The
+            // Anbud AI-case quota is Tender's own and is shown in the AI workspace, not here.
+            'ai_capacity' => app(CustomerAiCapacityService::class)->forCustomer($customer)->toArray(),
             // Resolved server-side: the page renders this verdict rather than deciding for itself
             // which packages are active.
             'module_packages' => app(ModuleEntitlementService::class)->overviewFor($customer),
@@ -304,7 +303,8 @@ class BillingController extends Controller
                 'key' => $planKey,
                 'name' => $plan['name'] ?? ucfirst($planKey),
                 'included_users' => $plan['included_users'] ?? null,
-                'included_ai_credits' => $plan['included_ai_credits'] ?? null,
+                // Per month; a yearly period includes twelve times this.
+                'included_ai_units' => $plan['included_ai_units'] ?? null,
                 'is_current' => $currentPlan === $planKey,
                 'intervals' => $intervals,
             ];

@@ -146,7 +146,7 @@ class BillingControllerTest extends TestCase
                 && data_get($page, 'props.subscription.plan') === 'ultra'
                 && data_get($page, 'props.subscription.billing_interval') === BillingPrice::INTERVAL_YEARLY
                 && data_get($page, 'props.subscription.included_users') === 15
-                && data_get($page, 'props.subscription.included_ai_credits') === 60
+                && ! array_key_exists('included_ai_credits', (array) data_get($page, 'props.subscription'))
                 && data_get($page, 'props.subscription.cancel_at_period_end') === false
                 && $billingLines->contains(fn (array $line): bool => $line['billing_price_key'] === $price->key && $line['quantity'] === 2)
                 && $billingLines->doesntContain(fn (array $line): bool => $line['billing_price_key'] === 'base_plan_ultra_yearly');
@@ -174,7 +174,7 @@ class BillingControllerTest extends TestCase
                 && data_get($page, 'props.subscription.plan_label') === 'Ultra'
                 && data_get($page, 'props.subscription.billing_interval') === BillingPrice::INTERVAL_YEARLY
                 && data_get($page, 'props.subscription.included_users') === 15
-                && data_get($page, 'props.subscription.included_ai_credits') === 60
+                && ! array_key_exists('included_ai_credits', (array) data_get($page, 'props.subscription'))
                 && data_get($page, 'props.subscription.cancel_at_period_end') === false;
         });
     }

@@ -2,11 +2,12 @@ import { router, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
-import AiQuotaCard from '../../../Components/App/AiQuotaCard';
+import AiCapacityCard from '../../../Components/App/AiCapacityCard';
 import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import { formatUnits } from '../../../Support/aiCapacity';
 import { packageActionLabel, packageConfirmation, packageStatus, splitPackages } from '../../../Support/packagePresentation';
 
 function classNames(...values) {
@@ -104,7 +105,8 @@ export default function BillingIndex() {
         subscription,
         invoices = [],
         billing_lines: billingLines = [],
-        ai_quota: aiQuota = null,
+        // The shared AI capacity, in AI units (CustomerAiCapacityService). No tokens, no money.
+        ai_capacity: aiCapacity = null,
         // Resolved by ModuleEntitlementService. The page renders this verdict; it never decides
         // on its own which packages or modules are active.
         module_packages: modulePackages = [],
@@ -115,8 +117,8 @@ export default function BillingIndex() {
     } = page;
 
     const tb = translations.billing ?? {};
-    const aiQuotaText = translations.ai_quota ?? {};
     const planChangeText = tb.plan_change ?? {};
+    const aiCapacityText = tb.ai_capacity ?? {};
     const summaryText = tb.summary ?? {};
     const alertText = tb.alerts ?? {};
     const subscriptionText = tb.stripe_subscription ?? {};
@@ -267,7 +269,7 @@ export default function BillingIndex() {
             ? formatPlanIntervalPrice(currentPlanIntervalOption.price_nok, currentPlanIntervalOption.interval)
             : null,
         includedUsers: currentPlanOption.included_users ?? null,
-        includedAiCredits: currentPlanOption.included_ai_credits ?? null,
+        includedAiUnits: currentPlanOption.included_ai_units ?? null,
     } : null;
     const selectedPlanSummary = selectedPlan ? {
         label: planChangeText.selected_plan ?? 'Valgt abonnement',
@@ -280,7 +282,7 @@ export default function BillingIndex() {
             ? formatPlanIntervalPrice(selectedIntervalOption.price_nok, selectedIntervalOption.interval)
             : null,
         includedUsers: selectedPlan.included_users ?? null,
-        includedAiCredits: selectedPlan.included_ai_credits ?? null,
+        includedAiUnits: selectedPlan.included_ai_units ?? null,
     } : null;
     const isSamePlanSelection = normalizeKey(selectedPlanKey) === currentPlanKey
         && normalizeKey(selectedInterval) === currentIntervalKey;
@@ -457,6 +459,10 @@ export default function BillingIndex() {
                                             text: tb.page_help_item_subscription_text ?? 'Viser plan, periode, inkluderte brukere og AI-kapasitet.',
                                         },
                                         {
+                                            title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
+                                            text: tb.page_help_item_ai_capacity_text ?? 'Abonnementet inkluderer en felles AI-kapasitet. Kapasiteten brukes når Procynia benytter AI til analyse, generering eller bearbeiding av innhold. Alle AI-funksjoner bruker den samme kapasiteten.',
+                                        },
+                                        {
                                             title: tb.page_help_item_modules_title ?? 'Moduler og pakker',
                                             text: tb.page_help_item_modules_text ?? 'Viser hvilke pakker kundemiljøet har, og hvilke moduler hver pakke aktiverer.',
                                         },
@@ -494,7 +500,7 @@ export default function BillingIndex() {
                     />
                 </section>
 
-                <AiQuotaCard quota={aiQuota} texts={aiQuotaText} locale={locale} />
+                <AiCapacityCard capacity={aiCapacity} texts={aiCapacityText} locale={locale} />
 
                 {showAddonsWithoutSubscriptionWarning && (
                     <AlertBox>
@@ -531,15 +537,6 @@ export default function BillingIndex() {
                                 </>
                             )}
 
-                            {subscription?.included_ai_credits !== undefined && subscription?.included_ai_credits !== null && (
-                                <>
-                                    <dt className="flex items-center gap-1.5 text-slate-600">
-                                        {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
-                                        <InfoHint size="sm" label="Vis forklaring for KI-tilbud" text={tb.hint_ai_credits} />
-                                    </dt>
-                                    <dd className="font-medium text-slate-900">{subscription.included_ai_credits}</dd>
-                                </>
-                            )}
                         </dl>
 
                         <div className="flex flex-wrap gap-3 pt-2">
@@ -804,13 +801,13 @@ export default function BillingIndex() {
                                                     </dd>
                                                 </div>
                                             )}
-                                            {planPreviewSummary.includedAiCredits !== null && planPreviewSummary.includedAiCredits !== undefined && (
+                                            {planPreviewSummary.includedAiUnits !== null && planPreviewSummary.includedAiUnits !== undefined && (
                                                 <div>
                                                     <dt className="text-slate-600">
-                                                        {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
+                                                        {planChangeText.included_ai_units ?? 'AI-enheter per måned'}
                                                     </dt>
                                                     <dd className="mt-1 font-medium text-slate-900">
-                                                        {planPreviewSummary.includedAiCredits}
+                                                        {formatUnits(planPreviewSummary.includedAiUnits, locale)}
                                                     </dd>
                                                 </div>
                                             )}
@@ -940,13 +937,13 @@ export default function BillingIndex() {
                                                     </div>
                                                 </>
                                             )}
-                                            {selectedPlanSummary.includedAiCredits !== null && selectedPlanSummary.includedAiCredits !== undefined && (
+                                            {selectedPlanSummary.includedAiUnits !== null && selectedPlanSummary.includedAiUnits !== undefined && (
                                                 <>
                                                     <div className="text-slate-600">
-                                                        {planChangeText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
+                                                        {planChangeText.included_ai_units ?? 'AI-enheter per måned'}
                                                     </div>
                                                     <div className="font-semibold text-slate-900">
-                                                        {selectedPlanSummary.includedAiCredits}
+                                                        {formatUnits(selectedPlanSummary.includedAiUnits, locale)}
                                                     </div>
                                                 </>
                                             )}
