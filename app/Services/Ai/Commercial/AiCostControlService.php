@@ -15,6 +15,7 @@ use App\Models\Customer;
 use App\Models\CustomerAiCaseUsage;
 use App\Models\CustomerAiQuotaPeriod;
 use App\Models\CustomerAiUsageReservation;
+use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Operational\AiOperationalAlertService;
 use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
@@ -39,6 +40,7 @@ class AiCostControlService
         private readonly AiPaymentPolicyService $paymentPolicy,
         private readonly AiOperationalAlertService $operationalAlerts,
         private readonly CustomerAiCapacityService $capacity,
+        private readonly AiUsageMeter $usageMeter,
     ) {}
 
     /**
@@ -49,6 +51,26 @@ class AiCostControlService
      * NOK ceiling must be able to stop a customer whose commercial plan says unlimited.
      */
     public function authorize(AiCallContext $context): AiCostControlDecision
+    {
+        return $this->decide($context, null);
+    }
+
+    /**
+     * authorize() for the call that is about to reach the provider: the same decision, plus the
+     * call's usage attempt opened — with its reserved estimate — inside the transaction that holds
+     * the customer row lock. A concurrent call for the same customer waits for that lock and then
+     * already sees this reservation, so two calls can never both admit themselves into the same
+     * free capacity. The returned decision carries the attempt; the meter finishes it.
+     *
+     * Only the provider boundary (OpenAiClient) admits. A preflight check (Wiki Ask) authorises
+     * and opens nothing.
+     */
+    public function admit(AiCallContext $context, string $endpoint): AiCostControlDecision
+    {
+        return $this->decide($context, $endpoint);
+    }
+
+    private function decide(AiCallContext $context, ?string $endpoint): AiCostControlDecision
     {
         if ($this->runtimeControls->globalStopEnabled()) {
             throw new AiCostControlException(AiCostControlException::GLOBAL_STOP);
@@ -75,7 +97,7 @@ class AiCostControlService
         }
 
         try {
-            return $this->authorizeCustomer($context, $customer, $estimatedCostNok)->withBudgetReservation($budgetReservation, $estimatedCostNok);
+            return $this->authorizeCustomer($context, $customer, $estimatedCostNok, $endpoint)->withBudgetReservation($budgetReservation, $estimatedCostNok);
         } catch (Throwable $exception) {
             // A refusal after the NOK hold was taken must give the money back, or a blocked
             // customer would slowly consume the platform budget by being blocked.
@@ -85,123 +107,149 @@ class AiCostControlService
         }
     }
 
-    private function authorizeCustomer(AiCallContext $context, Customer $customer, ?float $estimatedCostNok): AiCostControlDecision
+    private function authorizeCustomer(AiCallContext $context, Customer $customer, ?float $estimatedCostNok, ?string $endpoint): AiCostControlDecision
     {
         $this->assertPaymentStateAllows($context, $customer);
 
-        return DB::transaction(function () use ($context, $estimatedCostNok): AiCostControlDecision {
+        return DB::transaction(function () use ($context, $estimatedCostNok, $endpoint): AiCostControlDecision {
             $customer = Customer::query()->lockForUpdate()->findOrFail($context->customerId);
-            if (($customer->ai_access_status ?? Customer::AI_ACCESS_ENABLED) === Customer::AI_ACCESS_SUSPENDED) {
-                $this->assertOverrideMayBypass($context, AiCostControlException::CUSTOMER_SUSPENDED, $customer);
+            $verdict = null;
+            $decision = $this->decideCustomer($context, $customer, $estimatedCostNok, $verdict);
+
+            if ($endpoint === null) {
+                return $decision;
             }
 
-            $policy = $this->quotaPolicies->resolve($customer);
-            if ($policy->type === AiQuotaPolicy::NONE) {
-                $this->assertOverrideMayBypass($context, AiCostControlException::NOT_INCLUDED, $customer);
-
-                // Nothing commercial left to meter once entitlement itself was overridden.
-                return new AiCostControlDecision($context, AiQuotaPolicy::NONE, null, 0, 0, 0, null, null, 'exhausted');
-            }
-
-            // The shared capacity applies to every module, so it is checked before the Anbud
-            // AI-case quota, under the same customer row lock.
-            $this->assertCapacityAllows($context, $customer, $estimatedCostNok);
-
-            if (! $context->commercialCredit || ($context->savedNoticeId ?? 0) <= 0) {
-                return new AiCostControlDecision($context, $policy->type, null, 0, $policy->type === AiQuotaPolicy::FINITE ? $policy->includedCredits : null, null, null, null, 'normal');
-            }
-
-            $now = CarbonImmutable::now(config('app.timezone') ?: 'UTC');
-            $periodStart = $now->startOfMonth()->toDateString();
-            $periodEnd = $now->endOfMonth()->toDateString();
-            DB::table('customer_ai_quota_periods')->insertOrIgnore([
-                'customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd,
-                'extra_credits' => 0, 'created_at' => now(), 'updated_at' => now(),
-            ]);
-            $period = CustomerAiQuotaPeriod::query()->where([
-                'customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd,
-            ])->lockForUpdate()->firstOrFail();
-
-            // A credit is a SavedNotice, not a provider call. Occupancy is therefore counted as
-            // distinct cases: one case that fans out into several parallel provider calls holds
-            // exactly one slot, and must never exhaust the plan against itself.
-            $committedNoticeIds = CustomerAiCaseUsage::query()
-                ->where(['customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd])
-                ->pluck('saved_notice_id')->map(fn ($id): int => (int) $id)->all();
-            $used = in_array((int) $context->savedNoticeId, $committedNoticeIds, true);
-            $committed = count($committedNoticeIds);
-            // An administrative withdrawal can push the net below the plan; the allowance floors at
-            // zero so the comparison below stays meaningful.
-            $included = $policy->type === AiQuotaPolicy::FINITE
-                ? max(0, $policy->includedCredits + (int) $period->extra_credits)
-                : null;
-            $remaining = $included !== null ? max(0, $included - $committed) : null;
-
-            if ($used) {
-                return new AiCostControlDecision($context, $policy->type, null, $committed, $included, $remaining, $periodStart, $periodEnd, $this->status($committed, $included));
-            }
-
-            if ($policy->type === AiQuotaPolicy::UNLIMITED) {
-                return new AiCostControlDecision($context, $policy->type, null, $committed, null, null, $periodStart, $periodEnd, 'normal');
-            }
-
-            $reservedNoticeIds = CustomerAiUsageReservation::query()->where([
-                'customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd,
-            ])->whereIn('status', [CustomerAiUsageReservation::STATUS_RESERVED, CustomerAiUsageReservation::STATUS_UNCERTAIN])
-                ->where('saved_notice_id', '!=', $context->savedNoticeId)
-                ->pluck('saved_notice_id')->map(fn ($id): int => (int) $id)->all();
-            $occupied = count(array_unique(array_merge($committedNoticeIds, $reservedNoticeIds)));
-
-            if ($occupied + 1 > $included) {
-                // An override still takes a reservation and still commits the credit: the ledger
-                // must record that the work happened, even when the allowance was exceeded.
-                $this->assertOverrideMayBypass($context, AiCostControlException::QUOTA_EXHAUSTED, $customer);
-            }
-
-            $reservation = CustomerAiUsageReservation::query()->create([
-                'customer_id' => $customer->id, 'saved_notice_id' => $context->savedNoticeId,
-                'period_start' => $periodStart, 'period_end' => $periodEnd,
-                'operation' => Str::limit($context->operation ?: 'tender.ai', 100, ''),
-                'correlation_key' => Str::limit($context->requestCorrelationId ?: (string) Str::uuid(), 128, ''),
-                'status' => CustomerAiUsageReservation::STATUS_RESERVED, 'reserved_at' => now(),
-            ]);
-
-            return new AiCostControlDecision($context, $policy->type, $reservation->id, $committed, $included, max(0, $included - $occupied - 1), $periodStart, $periodEnd, $this->status($occupied + 1, $included));
+            // Still under the lock: the reservation exists before the next caller can read.
+            return $decision->withAttempt($this->usageMeter->open(
+                $context,
+                trim((string) ($context->model ?? '')) ?: 'unknown',
+                $endpoint,
+                $estimatedCostNok,
+                $verdict,
+            ));
         });
+    }
+
+    /**
+     * Every customer-level rule, evaluated while the caller holds the customer row lock. $verdict
+     * receives the capacity gate's verdict for the attempt.
+     */
+    private function decideCustomer(AiCallContext $context, Customer $customer, ?float $estimatedCostNok, ?string &$verdict): AiCostControlDecision
+    {
+        if (($customer->ai_access_status ?? Customer::AI_ACCESS_ENABLED) === Customer::AI_ACCESS_SUSPENDED) {
+            $this->assertOverrideMayBypass($context, AiCostControlException::CUSTOMER_SUSPENDED, $customer);
+        }
+
+        $policy = $this->quotaPolicies->resolve($customer);
+        if ($policy->type === AiQuotaPolicy::NONE) {
+            $this->assertOverrideMayBypass($context, AiCostControlException::NOT_INCLUDED, $customer);
+
+            // Nothing commercial left to meter once entitlement itself was overridden.
+            return new AiCostControlDecision($context, AiQuotaPolicy::NONE, null, 0, 0, 0, null, null, 'exhausted');
+        }
+
+        // The shared capacity applies to every module, so it is checked before the Anbud
+        // AI-case quota, under the same customer row lock.
+        $verdict = $this->assertCapacityAllows($context, $customer, $estimatedCostNok);
+
+        if (! $context->commercialCredit || ($context->savedNoticeId ?? 0) <= 0) {
+            return new AiCostControlDecision($context, $policy->type, null, 0, $policy->type === AiQuotaPolicy::FINITE ? $policy->includedCredits : null, null, null, null, 'normal');
+        }
+
+        $now = CarbonImmutable::now(config('app.timezone') ?: 'UTC');
+        $periodStart = $now->startOfMonth()->toDateString();
+        $periodEnd = $now->endOfMonth()->toDateString();
+        DB::table('customer_ai_quota_periods')->insertOrIgnore([
+            'customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd,
+            'extra_credits' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $period = CustomerAiQuotaPeriod::query()->where([
+            'customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd,
+        ])->lockForUpdate()->firstOrFail();
+
+        // A credit is a SavedNotice, not a provider call. Occupancy is therefore counted as
+        // distinct cases: one case that fans out into several parallel provider calls holds
+        // exactly one slot, and must never exhaust the plan against itself.
+        $committedNoticeIds = CustomerAiCaseUsage::query()
+            ->where(['customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd])
+            ->pluck('saved_notice_id')->map(fn ($id): int => (int) $id)->all();
+        $used = in_array((int) $context->savedNoticeId, $committedNoticeIds, true);
+        $committed = count($committedNoticeIds);
+        // An administrative withdrawal can push the net below the plan; the allowance floors at
+        // zero so the comparison below stays meaningful.
+        $included = $policy->type === AiQuotaPolicy::FINITE
+            ? max(0, $policy->includedCredits + (int) $period->extra_credits)
+            : null;
+        $remaining = $included !== null ? max(0, $included - $committed) : null;
+
+        if ($used) {
+            return new AiCostControlDecision($context, $policy->type, null, $committed, $included, $remaining, $periodStart, $periodEnd, $this->status($committed, $included));
+        }
+
+        if ($policy->type === AiQuotaPolicy::UNLIMITED) {
+            return new AiCostControlDecision($context, $policy->type, null, $committed, null, null, $periodStart, $periodEnd, 'normal');
+        }
+
+        $reservedNoticeIds = CustomerAiUsageReservation::query()->where([
+            'customer_id' => $customer->id, 'period_start' => $periodStart, 'period_end' => $periodEnd,
+        ])->whereIn('status', [CustomerAiUsageReservation::STATUS_RESERVED, CustomerAiUsageReservation::STATUS_UNCERTAIN])
+            ->where('saved_notice_id', '!=', $context->savedNoticeId)
+            ->pluck('saved_notice_id')->map(fn ($id): int => (int) $id)->all();
+        $occupied = count(array_unique(array_merge($committedNoticeIds, $reservedNoticeIds)));
+
+        if ($occupied + 1 > $included) {
+            // An override still takes a reservation and still commits the credit: the ledger
+            // must record that the work happened, even when the allowance was exceeded.
+            $this->assertOverrideMayBypass($context, AiCostControlException::QUOTA_EXHAUSTED, $customer);
+        }
+
+        $reservation = CustomerAiUsageReservation::query()->create([
+            'customer_id' => $customer->id, 'saved_notice_id' => $context->savedNoticeId,
+            'period_start' => $periodStart, 'period_end' => $periodEnd,
+            'operation' => Str::limit($context->operation ?: 'tender.ai', 100, ''),
+            'correlation_key' => Str::limit($context->requestCorrelationId ?: (string) Str::uuid(), 128, ''),
+            'status' => CustomerAiUsageReservation::STATUS_RESERVED, 'reserved_at' => now(),
+        ]);
+
+        return new AiCostControlDecision($context, $policy->type, $reservation->id, $committed, $included, max(0, $included - $occupied - 1), $periodStart, $periodEnd, $this->status($occupied + 1, $included));
     }
 
     /**
      * The shared AI capacity gate: does this operation's estimate fit in what the customer has
      * left this billing period, after settled usage and open reservations?
      *
-     * The reservation that makes the next caller see this one is the attempt row the usage meter
-     * opens as pending with this same estimate — not a second reservation store. In `observe` mode
-     * (the default while the Anbud AI-case quota is still the commercial gate) a refusal is only
-     * logged.
+     * The reservation that makes the next caller see this one is the attempt row admit() opens as
+     * pending with this same estimate, before the customer lock is released — not a second
+     * reservation store. In `observe` mode (the default while the Anbud AI-case quota is still the
+     * commercial gate) a refusal is only logged. Returns the verdict recorded on the attempt.
      */
-    private function assertCapacityAllows(AiCallContext $context, Customer $customer, ?float $estimatedCostNok): void
+    private function assertCapacityAllows(AiCallContext $context, Customer $customer, ?float $estimatedCostNok): ?string
     {
         $mode = (string) config('ai_customer_capacity.enforcement', 'observe');
 
         if ($mode === 'off') {
-            return;
+            return null;
         }
 
-        $refusal = $this->capacity->refusalFor($customer, $estimatedCostNok);
+        $verdict = $this->capacity->evaluate($customer, $estimatedCostNok);
+        $refusal = CustomerAiCapacityService::refusalReason($verdict);
 
         if ($refusal === null) {
-            return;
+            return $verdict;
         }
 
         if ($mode !== 'enforce') {
             Log::notice('[AI_CAPACITY] Call would be refused by the shared AI capacity; observe mode lets it through.', [
-                'customer_id' => $customer->id, 'reason' => $refusal, 'operation' => $context->operation,
+                'customer_id' => $customer->id, 'reason' => $refusal, 'verdict' => $verdict, 'operation' => $context->operation,
             ]);
 
-            return;
+            return $verdict;
         }
 
         $this->assertOverrideMayBypass($context, $refusal, $customer);
+
+        return $verdict;
     }
 
     /**

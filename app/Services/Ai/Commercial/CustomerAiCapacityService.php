@@ -38,6 +38,16 @@ class CustomerAiCapacityService
 
     public const REFUSE_INSUFFICIENT = AiCostControlException::CAPACITY_INSUFFICIENT;
 
+    public const VERDICT_ALLOW = 'allow';
+
+    public const VERDICT_WARN = 'warn';
+
+    public const VERDICT_EXHAUSTED = 'exhausted';
+
+    public const VERDICT_INSUFFICIENT = 'insufficient';
+
+    public const VERDICT_UNMETERED = 'unmetered';
+
     public function __construct(
         private readonly AiUsageLedger $ledger,
         private readonly CustomerBillingPeriodResolver $billingPeriods,
@@ -71,29 +81,59 @@ class CustomerAiCapacityService
     }
 
     /**
-     * Can this customer start an AI operation estimated at $estimatedCostNok right now?
+     * What the gate says about starting an operation estimated at $estimatedCostNok right now:
+     *  - VERDICT_ALLOW:        it fits
+     *  - VERDICT_WARN:         it fits, but used + reserved + this estimate reaches the warning share
+     *  - VERDICT_EXHAUSTED:    settled usage alone has reached the included capacity
+     *  - VERDICT_INSUFFICIENT: what is left after reservations does not cover this estimate — not
+     *                          "everything is used", so it is never worded that way
+     *  - VERDICT_UNMETERED:    no capacity is defined for the customer
      *
-     * Null when it fits (or when no capacity is configured); otherwise the refusal reason:
-     *  - REFUSE_EXHAUSTED:    settled usage alone has reached the included capacity
-     *  - REFUSE_INSUFFICIENT: what is left after reservations does not cover this operation's
-     *                         estimate — not "everything is used", so it is never worded that way
+     * The first two admit, the next two refuse (in enforce mode). Recorded on the attempt either
+     * way, so observe mode shows how often the current capacity would have stopped someone.
      */
-    public function refusalFor(Customer|int $customer, ?float $estimatedCostNok, ?DateTimeInterface $at = null): ?string
+    public function evaluate(Customer|int $customer, ?float $estimatedCostNok, ?DateTimeInterface $at = null): string
     {
         $capacity = $this->forCustomer($customer, $at);
 
         if (! $capacity->isConfigured()) {
-            return null;
+            return self::VERDICT_UNMETERED;
         }
 
-        if ($capacity->usedUnitsExact >= (float) $capacity->includedUnits) {
-            return self::REFUSE_EXHAUSTED;
+        $included = (float) $capacity->includedUnits;
+
+        if ($capacity->usedUnitsExact >= $included) {
+            return self::VERDICT_EXHAUSTED;
         }
 
         $available = (float) $capacity->availableUnitsExact();
         $needed = $this->units->unitsForCost($estimatedCostNok);
 
-        return $available > 0 && $available >= $needed ? null : self::REFUSE_INSUFFICIENT;
+        if ($available <= 0 || $available < $needed) {
+            return self::VERDICT_INSUFFICIENT;
+        }
+
+        $projected = ($capacity->usedUnitsExact + $capacity->reservedUnitsExact + $needed) / $included * 100;
+
+        return $projected >= (float) config('ai_customer_capacity.thresholds.warning_percent', 80)
+            ? self::VERDICT_WARN
+            : self::VERDICT_ALLOW;
+    }
+
+    /** The refusal reason for a verdict, or null when the verdict admits the call. */
+    public static function refusalReason(string $verdict): ?string
+    {
+        return match ($verdict) {
+            self::VERDICT_EXHAUSTED => AiCostControlException::CAPACITY_EXHAUSTED,
+            self::VERDICT_INSUFFICIENT => AiCostControlException::CAPACITY_INSUFFICIENT,
+            default => null,
+        };
+    }
+
+    /** Null when an operation estimated at $estimatedCostNok may start, else the refusal reason. */
+    public function refusalFor(Customer|int $customer, ?float $estimatedCostNok, ?DateTimeInterface $at = null): ?string
+    {
+        return self::refusalReason($this->evaluate($customer, $estimatedCostNok, $at));
     }
 
     /** Units included in this billing period, or null when neither customer nor plan defines any. */

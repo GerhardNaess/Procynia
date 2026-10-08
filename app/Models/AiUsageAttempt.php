@@ -58,7 +58,7 @@ class AiUsageAttempt extends Model
         'started_at', 'finished_at',
         'cost_status', 'settlement_status', 'cost_usd', 'cost_nok', 'reserved_cost_nok', 'ai_model_price_id',
         'price_currency', 'price_input_per_1m', 'price_cached_input_per_1m', 'price_output_per_1m', 'fx_rate', 'fx_rate_date',
-        'price_state', 'fx_state',
+        'price_state', 'fx_state', 'capacity_verdict',
     ];
 
     protected function casts(): array

@@ -3,6 +3,7 @@
 namespace App\Data\Ai;
 
 use App\Data\Ai\Operational\AiBudgetReservation;
+use App\Models\AiUsageAttempt;
 
 /**
  * What the guard decided about one imminent provider call, and what it is now holding on its
@@ -26,6 +27,10 @@ final readonly class AiCostControlDecision
         // apart from the actual cost on purpose: it decides whether the call may start, and is
         // written to the attempt as `reserved_cost_nok` — never into `cost_nok`.
         public ?float $estimatedCostNok = null,
+        // The attempt opened for this call while the customer was locked (AiCostControlService::
+        // admit()). It already holds the call's reservation; the meter finishes it, never opens a
+        // second one. Null for a preflight authorize() and for calls without a customer.
+        public ?AiUsageAttempt $attempt = null,
     ) {}
 
     public function withBudgetReservation(AiBudgetReservation $reservation, ?float $estimatedCostNok = null): self
@@ -33,7 +38,16 @@ final readonly class AiCostControlDecision
         return new self(
             $this->context, $this->policy, $this->reservationId, $this->used, $this->included,
             $this->remaining, $this->periodStart, $this->periodEnd, $this->status, $reservation,
-            $estimatedCostNok,
+            $estimatedCostNok, $this->attempt,
+        );
+    }
+
+    public function withAttempt(?AiUsageAttempt $attempt): self
+    {
+        return new self(
+            $this->context, $this->policy, $this->reservationId, $this->used, $this->included,
+            $this->remaining, $this->periodStart, $this->periodEnd, $this->status, $this->budgetReservation,
+            $this->estimatedCostNok, $attempt,
         );
     }
 }

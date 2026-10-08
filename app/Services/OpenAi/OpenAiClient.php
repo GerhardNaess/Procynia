@@ -65,13 +65,16 @@ class OpenAiClient
     private function createResponseInContext(array $payload, int $timeoutSeconds, ?callable $onStats): array
     {
         $model = trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown';
-        $decision = $this->costControl->authorize($this->providerCallContext($model, 'responses'));
+        // admit() opens this call's attempt (and its reservation) under the customer lock; the
+        // meter finishes that attempt rather than opening another.
+        $decision = $this->costControl->admit($this->providerCallContext($model, 'responses'), 'responses');
 
         try {
             $result = $this->usageMeter->measureResponse(
                 $model,
                 fn (): array => $this->send('responses', $payload, $timeoutSeconds, $onStats),
                 $decision->estimatedCostNok,
+                $decision->attempt,
             );
             $this->costControl->finalize($decision);
 
@@ -92,7 +95,7 @@ class OpenAiClient
     {
         $endpoint = ltrim($endpoint, '/');
         $model = trim((string) ($payload['model'] ?? '')) ?: 'unknown';
-        $decision = $this->costControl->authorize($this->providerCallContext($model, $endpoint));
+        $decision = $this->costControl->admit($this->providerCallContext($model, $endpoint), $endpoint);
 
         try {
             // Every endpoint is measured: a provider call that reaches no ledger row would spend
@@ -102,6 +105,7 @@ class OpenAiClient
                 fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
                 $decision->estimatedCostNok,
                 $endpoint,
+                $decision->attempt,
             );
 
             if ($response->successful()) {

@@ -70,16 +70,15 @@ class AiUsageMeter
      *                                   Written when the attempt starts, so a call that never
      *                                   finishes (worker killed mid-call) still shows what it holds.
      */
-    public function measureResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null): array
+    public function measureResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null, ?AiUsageAttempt $opened = null): array
     {
-        return $this->measure($model, 'responses', $providerCall, reservedCostNok: $reservedCostNok);
+        return $this->measure($model, 'responses', $providerCall, reservedCostNok: $reservedCostNok, opened: $opened);
     }
 
     /** Measure a raw Responses API transport call used by legacy clients that need the HTTP object. */
-    public function measureHttpResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null, string $endpoint = 'responses'): Response
+    public function measureHttpResponse(string $model, Closure $providerCall, ?float $reservedCostNok = null, string $endpoint = 'responses', ?AiUsageAttempt $opened = null): Response
     {
-        $context = $this->contextScope->current();
-        $attempt = $this->start($context, $model, $endpoint, $reservedCostNok);
+        $attempt = $opened ?? $this->start($this->contextScope->current(), $model, $endpoint, $reservedCostNok);
         $startedAt = microtime(true);
 
         try {
@@ -117,10 +116,9 @@ class AiUsageMeter
     }
 
     /** @return array<string, mixed> */
-    private function measure(string $model, string $endpoint, Closure $providerCall, ?float $reservedCostNok = null): array
+    private function measure(string $model, string $endpoint, Closure $providerCall, ?float $reservedCostNok = null, ?AiUsageAttempt $opened = null): array
     {
-        $context = $this->contextScope->current();
-        $attempt = $this->start($context, $model, $endpoint, $reservedCostNok);
+        $attempt = $opened ?? $this->start($this->contextScope->current(), $model, $endpoint, $reservedCostNok);
         $startedAt = microtime(true);
 
         try {
@@ -145,7 +143,30 @@ class AiUsageMeter
         }
     }
 
-    private function start(AiCallContext $context, string $model, string $endpoint, ?float $reservedCostNok = null): ?AiUsageAttempt
+    /**
+     * Open the attempt for a call cost control is admitting, inside cost control's own transaction
+     * and customer lock — so the next caller for the same customer already sees this call's
+     * reservation. measure*() then finishes this row instead of opening a second one.
+     *
+     * Runs in a savepoint: a failed ledger write is rolled back on its own and returns null (the
+     * call then measures as before), instead of aborting the surrounding PostgreSQL transaction.
+     */
+    public function open(AiCallContext $context, string $model, string $endpoint, ?float $reservedCostNok, ?string $capacityVerdict = null): ?AiUsageAttempt
+    {
+        try {
+            return DB::transaction(fn (): ?AiUsageAttempt => $this->start($context, $model, $endpoint, $reservedCostNok, $capacityVerdict, rethrow: true));
+        } catch (Throwable $exception) {
+            Log::warning('[PROCYNIA][AI_USAGE_METER] Could not open AI usage attempt under cost control.', [
+                'customer_id' => $context->customerId,
+                'operation' => $context->operation,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    private function start(AiCallContext $context, string $model, string $endpoint, ?float $reservedCostNok = null, ?string $capacityVerdict = null, bool $rethrow = false): ?AiUsageAttempt
     {
         try {
             $attempt = AiUsageAttempt::query()->create([
@@ -172,6 +193,7 @@ class AiUsageMeter
                 // Open until the call finishes: a call killed mid-flight may still have been billed.
                 'settlement_status' => AiUsageAttempt::SETTLEMENT_PENDING,
                 'reserved_cost_nok' => $reservedCostNok === null ? null : round($reservedCostNok, 4),
+                'capacity_verdict' => $capacityVerdict,
                 'started_at' => now(),
             ]);
 
@@ -179,6 +201,10 @@ class AiUsageMeter
 
             return $attempt;
         } catch (Throwable $exception) {
+            if ($rethrow) {
+                throw $exception;
+            }
+
             Log::warning('[PROCYNIA][AI_USAGE_METER] Could not start AI usage attempt.', [
                 'customer_id' => $context->customerId,
                 'operation' => $context->operation,

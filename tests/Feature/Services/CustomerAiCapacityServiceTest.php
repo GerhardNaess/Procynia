@@ -3,6 +3,7 @@
 namespace Tests\Feature\Services;
 
 use App\Data\Ai\AiCallContext;
+use App\Data\Ai\AiCostControlDecision;
 use App\Data\Ai\CustomerAiCapacity;
 use App\Exceptions\Ai\AiCostControlException;
 use App\Models\AiModelPrice;
@@ -18,6 +19,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\User;
+use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\Ai\Commercial\AiUnitConverter;
 use App\Services\Ai\Commercial\CustomerAiCapacityService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
@@ -434,6 +436,110 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertStringContainsString('1. november 2026', $insufficient);
     }
 
+    // ── atomic admission ───────────────────────────────────────────────────
+
+    public function test_admission_reserves_before_the_lock_is_released_so_the_next_caller_sees_it(): void
+    {
+        config()->set('ai_customer_capacity.enforcement', 'enforce');
+        $customer = $this->customer(['included_ai_units' => 10]);
+        $this->seedPrices();
+        // Each call is 6 units: one fits in 10, a second does not.
+        config()->set('ai_customer_capacity.nok_per_unit', $this->estimateNok() / 6);
+
+        $first = $this->admit($customer);
+
+        $this->assertNotNull($first->attempt);
+        $this->assertSame(AiUsageAttempt::SETTLEMENT_PENDING, $first->attempt->settlement_status);
+        $this->assertEqualsWithDelta($this->estimateNok(), (float) $first->attempt->reserved_cost_nok, 0.0001);
+
+        // No provider call has happened yet; the reservation alone is what refuses the second.
+        try {
+            $this->admit($customer);
+            $this->fail('The second call must see the first one\'s reservation.');
+        } catch (AiCostControlException $exception) {
+            $this->assertSame(AiCostControlException::CAPACITY_INSUFFICIENT, $exception->reason);
+        }
+
+        $this->assertSame(1, AiUsageAttempt::query()->count());
+    }
+
+    public function test_a_call_through_the_client_leaves_exactly_one_attempt_with_its_verdict(): void
+    {
+        $customer = $this->customer(['included_ai_units' => 1000]);
+        $this->seedPrices();
+        $this->fakeProvider();
+
+        $this->callAi($customer);
+
+        $attempt = AiUsageAttempt::query()->sole();
+        $this->assertSame(AiUsageAttempt::SETTLEMENT_SETTLED, $attempt->settlement_status);
+        $this->assertSame(CustomerAiCapacityService::VERDICT_ALLOW, $attempt->capacity_verdict);
+        $this->assertGreaterThan(0.0, (float) $attempt->reserved_cost_nok);
+    }
+
+    public function test_a_preflight_authorisation_opens_no_attempt(): void
+    {
+        $customer = $this->customer(['included_ai_units' => 1000]);
+        $this->seedPrices();
+
+        app(AiCostControlService::class)->authorize(
+            (new AiCallContext(customerId: $customer->id, operation: 'wiki.ask', feature: 'wiki'))->forProviderCall('gpt-4.1-mini', 'responses'),
+        );
+
+        $this->assertSame(0, AiUsageAttempt::query()->count());
+    }
+
+    public function test_observe_mode_records_every_verdict_while_every_call_runs(): void
+    {
+        $customer = $this->customer(['included_ai_units' => 100]);
+        $this->seedPrices();
+        $this->fakeProvider();
+        $verdicts = [];
+
+        // allow → warn → exhausted, all admitted in observe mode.
+        foreach ([0.0, 8.0, 3.0] as $settledBefore) {
+            if ($settledBefore > 0) {
+                $this->attempt($customer, ['cost_nok' => $settledBefore]);
+            }
+            $this->callAi($customer);
+            $verdicts[] = AiUsageAttempt::query()->whereNotNull('capacity_verdict')->latest('id')->first()->capacity_verdict;
+        }
+
+        $this->assertSame([
+            CustomerAiCapacityService::VERDICT_ALLOW,
+            CustomerAiCapacityService::VERDICT_WARN,
+            CustomerAiCapacityService::VERDICT_EXHAUSTED,
+        ], $verdicts);
+        Http::assertSentCount(3);
+
+        // A customer without a defined capacity is recorded as unmetered, never as blocked.
+        $unmetered = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
+        $this->callAi($unmetered);
+        $this->assertSame(CustomerAiCapacityService::VERDICT_UNMETERED, AiUsageAttempt::query()->where('customer_id', $unmetered->id)->sole()->capacity_verdict);
+    }
+
+    public function test_a_timed_out_call_and_its_retry_each_hold_their_own_reservation_and_charge_once(): void
+    {
+        $customer = $this->customer(['included_ai_units' => 1000]);
+        $this->seedPrices();
+        Http::fakeSequence('https://openai.test/v1/responses')
+            ->pushFailedConnection('cURL error 28: Operation timed out')
+            ->push(['status' => 'completed', 'usage' => ['input_tokens' => 10_000, 'output_tokens' => 1_000, 'total_tokens' => 11_000]], 200);
+
+        $this->callIgnoringFailure($customer);
+        $this->callAi($customer);
+
+        [$first, $retry] = AiUsageAttempt::query()->orderBy('id')->get()->all();
+        $this->assertSame(AiUsageAttempt::SETTLEMENT_PENDING, $first->settlement_status);
+        $this->assertNull($first->cost_nok, 'The doubtful first attempt is never charged as actual.');
+        $this->assertSame(AiUsageAttempt::SETTLEMENT_SETTLED, $retry->settlement_status);
+        $this->assertSame(2, AiUsageAttempt::query()->count(), 'One attempt per provider call, no duplicates.');
+
+        $capacity = $this->capacity($customer);
+        $this->assertEqualsWithDelta((float) $retry->cost_nok / 0.10, $capacity->usedUnitsExact, 0.0001);
+        $this->assertEqualsWithDelta((float) $first->reserved_cost_nok / 0.10, $capacity->reservedUnitsExact, 0.0001);
+    }
+
     // ── Anbud keeps working ────────────────────────────────────────────────
 
     public function test_an_anbud_ai_case_still_takes_its_credit_and_draws_on_the_shared_capacity(): void
@@ -460,6 +566,13 @@ class CustomerAiCapacityServiceTest extends TestCase
     private function capacity(Customer $customer): CustomerAiCapacity
     {
         return app(CustomerAiCapacityService::class)->forCustomer($customer->fresh());
+    }
+
+    private function admit(Customer $customer): AiCostControlDecision
+    {
+        $context = (new AiCallContext(customerId: $customer->id, operation: 'tender.requirement_answer', feature: 'tender'))->forProviderCall('gpt-4.1-mini', 'responses');
+
+        return app(AiCallContextScope::class)->within($context, fn () => app(AiCostControlService::class)->admit($context, 'responses'));
     }
 
     private function callAi(Customer $customer): mixed
