@@ -90,7 +90,7 @@ class CustomerUserManagementTest extends TestCase
             $userLicenseOptions = collect(data_get($page, 'props.userLicenseOptions', []));
 
             return data_get($page, 'props.customerBilling.has_active_subscription') === true
-                && data_get($page, 'props.customerBilling.plan_label') === 'Pro'
+                && data_get($page, 'props.customerBilling.plan_label') === 'Basis'
                 && data_get($page, 'props.customerBilling.included_users') === 3
                 && data_get($page, 'props.customerBilling.current_billable_users') === 1
                 && data_get($page, 'props.canEditUserLicense') === true

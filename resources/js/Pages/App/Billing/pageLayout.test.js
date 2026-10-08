@@ -102,9 +102,9 @@ describe('nothing but the framing moved', () => {
     });
 
     test('the overlays keep their own widths, which the page container never set', () => {
-        // The dialog and the plan-change modal are fixed overlays, unaffected by the page wrapper.
+        // The confirm dialog is a fixed overlay, unaffected by the page wrapper. (The plan-change
+        // modal is gone: customers no longer pick a legacy plan.)
         assert.match(billing, /w-full max-w-md/);
-        assert.match(billing, /w-full max-w-4xl/);
     });
 
     test('flash messages still render above the content', () => {

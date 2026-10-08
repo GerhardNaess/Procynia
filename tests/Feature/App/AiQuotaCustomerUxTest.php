@@ -129,8 +129,7 @@ class AiQuotaCustomerUxTest extends TestCase
         $this->actingAs($owner)->get('/app/billing')
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->has('customer_plan')
-                ->has('available_plans')
+                ->has('subscription')
                 ->has('invoices')
                 ->has('billing_lines')
                 // Abonnement shows the shared AI capacity; AI cases are no longer its AI picture.

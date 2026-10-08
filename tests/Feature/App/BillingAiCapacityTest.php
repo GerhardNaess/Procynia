@@ -123,11 +123,8 @@ class BillingAiCapacityTest extends TestCase
                 $this->assertStringNotContainsString('12.34', json_encode($props['ai_capacity']));
                 $this->assertArrayNotHasKey('included_ai_credits', (array) ($props['subscription'] ?? []));
 
-                // The old plans carry no AI capacity: Basis is its only source.
-                foreach ($props['available_plans'] as $plan) {
-                    $this->assertArrayNotHasKey('included_ai_units', $plan);
-                    $this->assertArrayNotHasKey('included_ai_credits', $plan);
-                }
+                // The old plans are not offered on the page at all: Basis is the only AI source.
+                $this->assertArrayNotHasKey('available_plans', $props);
             });
     }
 

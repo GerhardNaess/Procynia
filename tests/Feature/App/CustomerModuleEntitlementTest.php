@@ -448,7 +448,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertSame(['wiki', 'tender'], $props['active_modules']);
 
         // The AI capacity block the page already had must survive the new section.
-        $this->assertArrayHasKey('ai_quota', $props);
+        $this->assertArrayHasKey('ai_capacity', $props);
     }
 
     public function test_an_ordered_package_shows_as_active_and_cannot_be_ordered_again(): void
