@@ -11,6 +11,7 @@ use App\Models\ImprovementCase;
 use App\Models\ImprovementCaseStatusChange;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAuditFindingHandoffService;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Improvements\ImprovementActionVerificationResolver;
 use App\Services\Improvements\ImprovementAttentionService;
 use App\Services\Improvements\ImprovementCaseAccessService;
@@ -52,6 +53,7 @@ class ImprovementCaseController extends Controller
         private readonly ImprovementCaseCreator $creator,
         private readonly ComplianceAuditFindingHandoffService $auditFindings,
         private readonly SupplierImprovementHandoffService $supplierHandoff,
+        private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
     ) {}
 
     public function index(Request $request): Response
@@ -168,6 +170,8 @@ class ImprovementCaseController extends Controller
         $today = now()->startOfDay();
 
         return Inertia::render('App/Improvements/Show', [
+            // «Lag kunnskapsartikkel»: the shared Wiki handoff (WikiKnowledgeHandoffService).
+            'knowledge_handoff' => $this->knowledgeHandoff->panel($user, 'improvement_case', $case),
             'case' => $this->caseRow($case) + [
                 'description' => $case->description,
                 'cause_analysis' => $case->cause_analysis,

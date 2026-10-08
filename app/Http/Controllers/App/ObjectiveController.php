@@ -8,6 +8,7 @@ use App\Models\Kpi;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Objectives\KpiMeasurementResolver;
 use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\ObjectiveAccessService;
@@ -47,6 +48,7 @@ class ObjectiveController extends Controller
         private readonly KpiMeasurementResolver $measurementResolver,
         private readonly KpiQualityContextService $qualityContext,
         private readonly ObjectiveAttentionService $attention,
+        private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
     ) {}
 
     public function index(Request $request): Response
@@ -146,6 +148,8 @@ class ObjectiveController extends Controller
         $latest = $this->measurementResolver->latestForKpis($kpis);
 
         return Inertia::render('App/Objectives/Show', [
+            // «Lag kunnskapsartikkel»: the shared Wiki handoff (WikiKnowledgeHandoffService).
+            'knowledge_handoff' => $this->knowledgeHandoff->panel($user, 'objective', $objective),
             // The KPIs come with the objective: whoever may read it reads them, nothing more.
             'kpis' => $kpis->map(fn (Kpi $kpi): array => $this->kpiPresenter->row($kpi, $latest[(int) $kpi->id] ?? null))->all(),
             'kpi_indicator' => $this->kpiPresenter->indicator($kpis, $latest),

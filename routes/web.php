@@ -365,6 +365,7 @@ Route::prefix('app')
             Route::get('/', [ObjectiveController::class, 'index'])->name('index');
             Route::post('/', [ObjectiveController::class, 'store'])->name('store');
             Route::get('/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('show');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'objective')->name('knowledge-handoff.store');
             Route::patch('/{objectiveId}', [ObjectiveController::class, 'update'])->whereNumber('objectiveId')->name('update');
             Route::delete('/{objectiveId}', [ObjectiveController::class, 'destroy'])->whereNumber('objectiveId')->name('destroy');
             // Lukk mål / Gjenåpne: the only ways status changes. Each writes an immutable history row.
@@ -391,6 +392,7 @@ Route::prefix('app')
             Route::get('/', [ImprovementCaseController::class, 'index'])->name('index');
             Route::post('/', [ImprovementCaseController::class, 'store'])->name('store');
             Route::get('/{caseId}', [ImprovementCaseController::class, 'show'])->whereNumber('caseId')->name('show');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'improvement_case')->name('knowledge-handoff.store');
             Route::patch('/{caseId}', [ImprovementCaseController::class, 'update'])->whereNumber('caseId')->name('update');
             Route::delete('/{caseId}', [ImprovementCaseController::class, 'destroy'])->whereNumber('caseId')->name('destroy');
             // Start behandling / Lukk / Avbryt / Gjenåpne: the only ways status changes. Each writes an
@@ -440,6 +442,7 @@ Route::prefix('app')
             Route::get('/audits', [ComplianceAuditController::class, 'index'])->name('audits.index');
             Route::post('/audits', [ComplianceAuditController::class, 'store'])->name('audits.store');
             Route::get('/audits/{auditId}', [ComplianceAuditController::class, 'show'])->whereNumber('auditId')->name('audits.show');
+            Route::post('/audits/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'compliance_audit')->name('audits.knowledge-handoff.store');
             Route::patch('/audits/{auditId}', [ComplianceAuditController::class, 'update'])->whereNumber('auditId')->name('audits.update');
             Route::delete('/audits/{auditId}', [ComplianceAuditController::class, 'destroy'])->whereNumber('auditId')->name('audits.destroy');
             Route::post('/audits/{auditId}/start', [ComplianceAuditController::class, 'start'])->whereNumber('auditId')->name('audits.start');
@@ -477,6 +480,7 @@ Route::prefix('app')
             Route::post('/control-requirements/{requirementId}/reactivate', [SupplierControlRequirementController::class, 'reactivate'])->whereNumber('requirementId')->name('control-requirements.reactivate');
             Route::delete('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'destroy'])->whereNumber('requirementId')->name('control-requirements.destroy');
             Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'supplier')->name('knowledge-handoff.store');
             Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');
             Route::delete('/{supplierId}', [SupplierManagementController::class, 'destroy'])->whereNumber('supplierId')->name('destroy');
             // Ta i bruk / Avslutt leverandør / Gjenåpne leverandør: the only ways status changes. Each

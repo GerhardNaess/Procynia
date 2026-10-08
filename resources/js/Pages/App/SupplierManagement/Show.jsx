@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import SupplierAssessment from './SupplierAssessment';
@@ -67,6 +68,7 @@ export default function SupplierManagementShow() {
         documents = [],
         document_types: documentTypes = [],
         document_standards: documentStandards = [],
+        knowledge_handoff: knowledgeHandoff = null,
         improvement_cases: improvementCases = null,
         improvement_handoff: improvementHandoff = null,
         risks = null,
@@ -330,6 +332,8 @@ export default function SupplierManagementShow() {
                             tr={tr}
                             ti={translations?.improvements ?? {}}
                         />
+
+                        <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`supplier-${item.id}`} />
 
                         <section className={CARD} aria-labelledby="supplier-status-heading" data-testid="supplier-status">
                             <h2 id="supplier-status-heading" className="text-xl font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h2>

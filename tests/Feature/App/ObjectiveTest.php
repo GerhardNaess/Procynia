@@ -831,7 +831,7 @@ class ObjectiveTest extends TestCase
             ->values()
             ->all();
         $this->assertSame([
-            'app.objectives.close', 'app.objectives.destroy', 'app.objectives.index', 'app.objectives.reopen',
+            'app.objectives.close', 'app.objectives.destroy', 'app.objectives.index', 'app.objectives.knowledge-handoff.store', 'app.objectives.reopen',
             'app.objectives.show', 'app.objectives.store', 'app.objectives.update',
         ], $historyRoutes);
     }

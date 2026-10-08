@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import { ObjectiveAttentionNote } from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
@@ -34,6 +35,7 @@ export default function ObjectiveShow() {
         kpi_indicator: kpiIndicator = null,
         affected_processes: affectedProcesses = null,
         attention = null,
+        knowledge_handoff: knowledgeHandoff = null,
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
@@ -207,6 +209,8 @@ export default function ObjectiveShow() {
                     canCreate={Boolean(permissions.can_create_kpi)}
                     tr={tk}
                 />
+
+                <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`objective-${objective.id}`} />
 
                 <ObjectiveHistory entries={statusHistory} statusLabels={statusLabels} locale={locale} tr={tr} />
             </div>

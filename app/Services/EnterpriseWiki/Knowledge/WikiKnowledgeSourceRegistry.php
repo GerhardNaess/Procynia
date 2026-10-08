@@ -4,7 +4,11 @@ namespace App\Services\EnterpriseWiki\Knowledge;
 
 use App\Models\EnterpriseWikiDocumentOrigin;
 use App\Models\QualityItem;
+use App\Services\EnterpriseWiki\Knowledge\Sources\ComplianceAuditKnowledgeSource;
+use App\Services\EnterpriseWiki\Knowledge\Sources\ImprovementCaseKnowledgeSource;
+use App\Services\EnterpriseWiki\Knowledge\Sources\ObjectiveKnowledgeSource;
 use App\Services\EnterpriseWiki\Knowledge\Sources\RiskKnowledgeSource;
+use App\Services\EnterpriseWiki\Knowledge\Sources\SupplierKnowledgeSource;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 
@@ -20,6 +24,10 @@ class WikiKnowledgeSourceRegistry
     /** @var array<string, class-string<WikiKnowledgeSource>> */
     public const SOURCES = [
         'risk' => RiskKnowledgeSource::class,
+        'compliance_audit' => ComplianceAuditKnowledgeSource::class,
+        'supplier' => SupplierKnowledgeSource::class,
+        'improvement_case' => ImprovementCaseKnowledgeSource::class,
+        'objective' => ObjectiveKnowledgeSource::class,
     ];
 
     /**
