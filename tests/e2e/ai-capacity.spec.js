@@ -82,6 +82,55 @@ test('the customer chooses its AI capacity level and the pool follows users and 
     await expect(card.getByTestId('ai-capacity-provisional')).toHaveText('AI-kapasiteten er under innfasing, og nivåene kan bli justert.');
     expect(capacity.used).toBeGreaterThanOrEqual(1200);
 
+    // Hierarchy: section heading > usage headline > option name > body text = labels, values above labels.
+    const fontPx = (locator) => locator.evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+    const sectionHeadings = [
+        basis.getByRole('heading', { name: 'Basis', exact: true }),
+        options.getByRole('heading', { name: 'Opsjoner', level: 2 }),
+        card.getByRole('heading', { name: 'AI-kapasitet' }),
+        page.getByRole('heading', { name: 'Fakturaer og betalinger' }),
+    ];
+    const headingPx = await fontPx(sectionHeadings[0]);
+    for (const heading of sectionHeadings) {
+        expect(await fontPx(heading)).toBe(headingPx);
+    }
+    expect(headingPx).toBeGreaterThanOrEqual(20);
+    expect(headingPx).toBeLessThanOrEqual(22);
+    expect(await fontPx(page.getByRole('heading', { level: 1 }))).toBeGreaterThan(headingPx);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+    const bodyPx = await fontPx(basis.getByText('Inneholder Wiki, Kvalitet og Avvik og forbedringer.'));
+    expect(bodyPx).toBe(16);
+    const headlinePx = await fontPx(card.getByTestId('ai-capacity-headline'));
+    expect(headlinePx).toBeGreaterThanOrEqual(18);
+    expect(headlinePx).toBeLessThan(headingPx);
+    const optionNamePx = await fontPx(options.getByRole('heading', { level: 3 }).first());
+    expect(optionNamePx).toBeGreaterThan(bodyPx);
+    expect(await fontPx(basis.getByText('Fakturering', { exact: true }))).toBe(16);
+    expect(await fontPx(basis.getByText('Månedlig', { exact: true }))).toBeGreaterThan(16);
+    expect(await fontPx(card.getByTestId('ai-capacity-used'))).toBeGreaterThan(16);
+
+    // «Endre nivå» sits right beside the level, as one group; the status badge stays on the heading row.
+    const levelGroup = card.getByTestId('ai-capacity-level-group');
+    await expect(levelGroup.getByTestId('ai-capacity-tier')).toBeVisible();
+    await expect(levelGroup.getByRole('button', { name: 'Endre nivå' })).toBeVisible();
+    await expect(levelGroup.getByTestId('ai-capacity-status')).toHaveCount(0);
+    const tierBox = await card.getByTestId('ai-capacity-tier').boundingBox();
+    const changeBox = await card.getByTestId('ai-capacity-change-level').boundingBox();
+    expect(changeBox.x - (tierBox.x + tierBox.width), 'the button is right beside the level').toBeLessThanOrEqual(24);
+    expect(changeBox.x - (tierBox.x + tierBox.width)).toBeGreaterThan(0);
+    expect(Math.abs((changeBox.y + changeBox.height / 2) - (tierBox.y + tierBox.height / 2))).toBeLessThanOrEqual(4);
+    const statusBox = await card.getByTestId('ai-capacity-status').boundingBox();
+    const headingBox = await card.getByRole('heading', { name: 'AI-kapasitet' }).boundingBox();
+    expect(statusBox.y).toBeLessThan(tierBox.y);
+    expect(Math.abs((statusBox.y + statusBox.height / 2) - (headingBox.y + headingBox.height / 2))).toBeLessThanOrEqual(6);
+
+    // Reading order inside the card.
+    const ys = [];
+    for (const id of ['ai-capacity-tier', 'ai-capacity-headline', 'ai-capacity-progress', 'ai-capacity-provisional', 'ai-capacity-used']) {
+        ys.push((await card.getByTestId(id).boundingBox()).y);
+    }
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+
     // Endre nivå: three levels, each with what it would include for this customer — no formula.
     await card.getByTestId('ai-capacity-change-level').click();
     const levels = page.getByRole('dialog', { name: 'Velg nivå for AI-kapasitet' });
@@ -148,13 +197,33 @@ test('the customer chooses its AI capacity level and the pool follows users and 
         expect(box.x + box.width).toBeLessThanOrEqual(390);
     }
 
-    // The bar uses the card's full width beside its percentage; the facts stack vertically.
+    // The bar uses the card's full width beside its percentage; the facts sit two by two.
     const cardBox = await card.boundingBox();
     const barBox = await bar.boundingBox();
     expect(barBox.width).toBeGreaterThan(cardBox.width * 0.6);
     const usedBox = await card.getByTestId('ai-capacity-used').boundingBox();
     const remainingBox = await card.getByTestId('ai-capacity-remaining').boundingBox();
-    expect(remainingBox.y).toBeGreaterThan(usedBox.y);
+    const includedBox = await card.getByTestId('ai-capacity-included').boundingBox();
+    expect(Math.abs(remainingBox.y - usedBox.y)).toBeLessThanOrEqual(2);
+    expect(remainingBox.x).toBeGreaterThan(usedBox.x);
+    expect(includedBox.y).toBeGreaterThan(usedBox.y);
+
+    // At 390 px the level and «Endre nivå» still read as one group: the button stays on the
+    // level's side of the card — beside it, or directly beneath it — never across from it.
+    const phoneTier = await card.getByTestId('ai-capacity-tier').boundingBox();
+    const phoneChange = await card.getByTestId('ai-capacity-change-level').boundingBox();
+    const besideIt = Math.abs((phoneChange.y + phoneChange.height / 2) - (phoneTier.y + phoneTier.height / 2)) <= 4
+        && phoneChange.x - (phoneTier.x + phoneTier.width) <= 24;
+    const beneathIt = Math.abs(phoneChange.x - phoneTier.x) <= 2 && phoneChange.y - (phoneTier.y + phoneTier.height) <= 12;
+    expect(besideIt || beneathIt, 'Endre nivå has drifted away from the level').toBe(true);
+    expect(phoneChange.x + phoneChange.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+
+    // Option rows stack: name above status and action, which stay inside the card.
+    for (const row of await options.locator('li').all()) {
+        const name = await row.getByRole('heading', { level: 3 }).boundingBox();
+        const badge = await row.locator('[data-testid^="package-status-"]').boundingBox();
+        expect(badge.y).toBeGreaterThan(name.y);
+    }
 
     await page.screenshot({ path: 'test-results/ai-capacity-phone.png', fullPage: true });
 

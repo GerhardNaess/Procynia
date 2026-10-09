@@ -1,5 +1,5 @@
 import { router, usePage } from '@inertiajs/react';
-import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
+import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AiCapacityCard from '../../../Components/App/AiCapacityCard';
@@ -8,9 +8,18 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { packageActionLabel, packageConfirmation, packageStatus, splitPackages } from '../../../Support/packagePresentation';
 
-function classNames(...values) {
-    return values.filter(Boolean).join(' ');
-}
+/**
+ * One type scale for the whole page, so a section heading always outranks the text explaining it
+ * and a value always outranks its label. Section headings had shrunk to body size and read like
+ * metadata under the intro.
+ */
+const SECTION_CARD = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6';
+const SECTION_HEADING = 'text-[1.375rem] font-semibold leading-8 tracking-tight text-slate-950';
+const SECTION_HELP = 'mt-1 max-w-3xl text-base leading-7 text-slate-600';
+const FACT_LABEL = 'text-base text-slate-600';
+const FACT_VALUE = 'mt-0.5 text-lg font-semibold text-slate-900';
+// Only the primary role carries its own focus ring; the others get the same one here.
+const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600';
 
 const STATUS_BADGE_TONES = {
     active: 'green',
@@ -49,23 +58,20 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
             <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-                <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+                <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
                 {(Array.isArray(message) ? message : [message]).map((line) => (
                     <p key={line} className="mt-2 text-base leading-6 text-slate-600">{line}</p>
                 ))}
                 <div className="mt-5 flex justify-end gap-3">
                     <button
                         onClick={onCancel}
-                        className={`rounded-lg px-4 py-2 text-base font-medium ${SECONDARY_COLOURS}`}
+                        className={`${SECONDARY_ACTION} ${FOCUS_RING}`}
                     >
                         {cancelLabel}
                     </button>
                     <button
                         onClick={onConfirm}
-                        className={classNames(
-                            'rounded-lg px-4 py-2 text-base font-medium',
-                            warning ? WARNING_COLOURS : PRIMARY_COLOURS
-                        )}
+                        className={warning ? `${WARNING_ACTION} ${FOCUS_RING}` : PRIMARY_ACTION}
                     >
                         {confirmLabel}
                     </button>
@@ -218,15 +224,15 @@ export default function BillingIndex() {
         const presentation = packageStatus(entry, modulesText);
 
         return (
-            <div data-testid={`package-status-${entry.key}`}>
+            <div data-testid={`package-status-${entry.key}`} className="flex flex-col items-start gap-1 sm:items-end">
                 <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>
                 {entry.status === 'requested' && entry.requested_at && (
-                    <div className="mt-1 text-base leading-6 text-slate-600">
+                    <div className="text-base leading-6 text-slate-600">
                         {(modulesText.requested_at ?? 'Bestilt :date').replace(':date', formatDate(entry.requested_at))}
                     </div>
                 )}
                 {entry.status === 'active' && entry.activated_at && (
-                    <div className="mt-1 text-base leading-6 text-slate-600">
+                    <div className="text-base leading-6 text-slate-600">
                         {(modulesText.activated_at ?? 'Aktivert :date').replace(':date', formatDate(entry.activated_at))}
                     </div>
                 )}
@@ -245,7 +251,7 @@ export default function BillingIndex() {
             <button
                 type="button"
                 onClick={() => setConfirmPackageKey(entry.key)}
-                className={`whitespace-nowrap rounded-lg px-4 py-2 text-base font-medium ${entry.action === 'cancel' ? SECONDARY_COLOURS : PRIMARY_COLOURS}`}
+                className={`whitespace-nowrap ${entry.action === 'cancel' ? `${SECONDARY_ACTION} ${FOCUS_RING}` : PRIMARY_ACTION}`}
             >
                 {label}
             </button>
@@ -317,10 +323,10 @@ export default function BillingIndex() {
                 )}
 
                 {/* 1. Basis: the base product and how the subscription is billed. Never options or AI capacity. */}
-                <section data-testid="subscription-card" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <section data-testid="subscription-card" className={SECTION_CARD}>
                     <div data-testid={basePackage ? `package-row-${basePackage.key}` : undefined}>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <h2 className="text-base font-semibold text-slate-900">{productLabel}</h2>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                            <h2 className={SECTION_HEADING}>{productLabel}</h2>
                             <div data-testid={basePackage ? `package-status-${basePackage.key}` : undefined}>
                                 {hasRegisteredSubscription ? (
                                     <StatusBadge tone={isEnding ? 'amber' : 'green'}>
@@ -336,7 +342,7 @@ export default function BillingIndex() {
                             </div>
                         </div>
                         {basisModules && (
-                            <p className="mt-1 text-base leading-6 text-slate-600">
+                            <p className={SECTION_HELP}>
                                 {(cardText.contains ?? 'Inneholder :modules.').replace(':modules', basisModules)}
                             </p>
                         )}
@@ -344,24 +350,26 @@ export default function BillingIndex() {
 
                     {hasRegisteredSubscription ? (
                         <>
-                            <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-2 text-base">
-                                <dt className="text-slate-600">{cardText.billing_interval ?? 'Fakturering'}</dt>
-                                <dd className="font-medium text-slate-900">{currentIntervalLabel}</dd>
+                            <dl data-testid="subscription-facts" className="mt-4 grid grid-cols-2 gap-x-8 gap-y-4 sm:flex sm:flex-wrap sm:gap-x-12">
+                                <div>
+                                    <dt className={FACT_LABEL}>{cardText.billing_interval ?? 'Fakturering'}</dt>
+                                    <dd className={FACT_VALUE}>{currentIntervalLabel}</dd>
+                                </div>
 
                                 {subscription.included_users !== null && subscription.included_users !== undefined && (
-                                    <>
-                                        <dt className="text-slate-600">{cardText.included_users ?? 'Inkluderte brukere'}</dt>
-                                        <dd className="font-medium text-slate-900">{subscription.included_users}</dd>
-                                    </>
+                                    <div>
+                                        <dt className={FACT_LABEL}>{cardText.included_users ?? 'Inkluderte brukere'}</dt>
+                                        <dd className={FACT_VALUE}>{subscription.included_users}</dd>
+                                    </div>
                                 )}
 
                                 {subscription.period_end && (
-                                    <>
-                                        <dt className="text-slate-600">
+                                    <div>
+                                        <dt className={FACT_LABEL}>
                                             {isEnding ? (cardText.ends_at ?? 'Avsluttes') : (cardText.next_invoice ?? 'Neste fakturadato')}
                                         </dt>
-                                        <dd className="font-medium text-slate-900">{formatDate(subscription.period_end)}</dd>
-                                    </>
+                                        <dd className={FACT_VALUE}>{formatDate(subscription.period_end)}</dd>
+                                    </div>
                                 )}
                             </dl>
 
@@ -370,7 +378,7 @@ export default function BillingIndex() {
                                     <button
                                         type="button"
                                         onClick={() => setConfirmCancel(true)}
-                                        className={`rounded-lg px-4 py-2 text-base font-medium ${WARNING_COLOURS}`}
+                                        className={`${WARNING_ACTION} ${FOCUS_RING}`}
                                     >
                                         {tb.cancel ?? 'Si opp abonnement'}
                                     </button>
@@ -379,7 +387,7 @@ export default function BillingIndex() {
                                     <button
                                         type="button"
                                         onClick={() => setConfirmResume(true)}
-                                        className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
+                                        className={PRIMARY_ACTION}
                                     >
                                         {tb.resume ?? 'Gjenoppta abonnement'}
                                     </button>
@@ -388,7 +396,7 @@ export default function BillingIndex() {
                         </>
                     ) : (
                         <>
-                            <p className="mt-3 text-base leading-6 text-slate-600">
+                            <p className="mt-3 text-base leading-7 text-slate-600">
                                 {cardText.empty ?? 'Ingen aktivt abonnement er registrert.'}
                             </p>
                             {basePackage && packageActionLabel(basePackage, modulesText) && (
@@ -399,11 +407,11 @@ export default function BillingIndex() {
                 </section>
 
                 {/* 2. Opsjoner: each option on its own. What Basis contains is not repeated here. */}
-                <section data-testid="module-packages" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-base font-semibold text-slate-900">
+                <section data-testid="module-packages" className={SECTION_CARD}>
+                    <h2 className={SECTION_HEADING}>
                         {modulesText.options_heading ?? 'Opsjoner'}
                     </h2>
-                    <p className="mt-1 text-base leading-6 text-slate-600">
+                    <p className={SECTION_HELP}>
                         {modulesText.options_help ?? 'Bestill og avbestill hver opsjon for seg. Brukere får tilgang gjennom rollene sine. Avbestilling sletter ikke data.'}
                     </p>
                     <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
@@ -411,16 +419,19 @@ export default function BillingIndex() {
                             <li
                                 key={entry.key}
                                 data-testid={`package-row-${entry.key}`}
-                                className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_10rem_9rem] sm:items-start"
+                                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
                             >
-                                <div className="min-w-0">
-                                    <h3 className="font-medium text-slate-900">{resolvePackageName(entry.key)}</h3>
+                                <div className="min-w-0 sm:flex-1">
+                                    <h3 className="text-lg font-semibold text-slate-900">{resolvePackageName(entry.key)}</h3>
                                     {packageDescriptions[entry.key] && (
-                                        <p className="mt-1 text-base leading-6 text-slate-600">{packageDescriptions[entry.key]}</p>
+                                        <p className="mt-0.5 text-base leading-6 text-slate-600">{packageDescriptions[entry.key]}</p>
                                     )}
                                 </div>
-                                {renderPackageStatus(entry)}
-                                <div className="sm:text-right">{renderPackageAction(entry)}</div>
+                                {/* Status and action belong to the row, but never outweigh the module's name. */}
+                                <div data-testid={`package-side-${entry.key}`} className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
+                                    {renderPackageStatus(entry)}
+                                    {renderPackageAction(entry)}
+                                </div>
                             </li>
                         ))}
                     </ul>
@@ -431,17 +442,17 @@ export default function BillingIndex() {
 
                 {/* Invoiced services outside Basis and the options (seats, one-off services). Only when there are any. */}
                 {hasProcyniaServices && (
-                    <section data-testid="other-services" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                        <h2 className="text-base font-semibold text-slate-900">
+                    <section data-testid="other-services" className={SECTION_CARD}>
+                        <h2 className={SECTION_HEADING}>
                             {servicesText.heading ?? 'Andre fakturerte tjenester'}
                         </h2>
-                        <p className="mt-1 text-base leading-6 text-slate-600">
+                        <p className={SECTION_HELP}>
                             {servicesText.help ?? 'Tjenester som faktureres i tillegg til Basis og opsjonene.'}
                         </p>
                         <div className="mt-4 overflow-x-auto">
                             <table className="w-full text-base">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
+                                    <tr className="border-b border-slate-200 text-left text-base font-medium text-slate-600">
                                         <th className="pb-2 pr-4">{servicesTableText.service ?? 'Tjeneste'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.type ?? 'Type'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.status ?? 'Status'}</th>
@@ -471,19 +482,19 @@ export default function BillingIndex() {
                     </section>
                 )}
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-base font-semibold text-slate-900">
+                <section data-testid="invoices" className={SECTION_CARD}>
+                    <h2 className={SECTION_HEADING}>
                         {invoicesText.heading ?? 'Fakturaer og betalinger'}
                     </h2>
-                    <p className="mt-2 text-base leading-6 text-slate-600">
+                    <p className={SECTION_HELP}>
                         {invoicesText.help ?? 'Her finner du utestående beløp, fakturahistorikk og eventuelle PDF-er.'}
                     </p>
 
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div className={FACT_LABEL}>
                             {invoicesText.outstanding_label ?? 'Utestående beløp'}
                         </div>
-                        <div className="mt-2 text-base font-semibold text-slate-900">
+                        <div className={FACT_VALUE}>
                             {outstandingAmountLabel ?? (invoicesText.no_outstanding ?? 'Ingen utestående beløp registrert.')}
                         </div>
                     </div>
@@ -492,7 +503,7 @@ export default function BillingIndex() {
                         <div className="mt-4 overflow-x-auto">
                             <table className="w-full text-base">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
+                                    <tr className="border-b border-slate-200 text-left text-base font-medium text-slate-600">
                                         <th className="pb-2 pr-4">{invoicesTableText.number ?? 'Fakturanummer'}</th>
                                         <th className="pb-2 pr-4">{invoicesTableText.date ?? 'Dato'}</th>
                                         <th className="pb-2 pr-4">{invoicesTableText.amount ?? 'Beløp'}</th>
@@ -519,7 +530,7 @@ export default function BillingIndex() {
                                                         href={invoice.invoice_pdf ?? invoice.hosted_invoice_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="text-base font-medium text-blue-700 hover:underline"
+                                                        className={`rounded text-base font-medium text-blue-700 hover:underline ${FOCUS_RING}`}
                                                     >
                                                         PDF
                                                     </a>
@@ -533,7 +544,7 @@ export default function BillingIndex() {
                             </table>
                         </div>
                     ) : (
-                        <p className="mt-4 text-base leading-6 text-slate-600">
+                        <p className="mt-4 text-base leading-7 text-slate-600">
                             {invoicesText.empty ?? 'Ingen fakturaer tilgjengelig.'}
                         </p>
                     )}

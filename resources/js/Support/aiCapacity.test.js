@@ -110,9 +110,9 @@ describe('the card stays simple and customer-safe', () => {
         assert.ok(!/text-(xs|sm)\b/.test(card), 'text-xs/text-sm is below 16 px');
     });
 
-    test('the bar takes the full width beside its percentage and the facts stack on phones', () => {
+    test('the bar takes the full width beside its percentage and the facts sit two by two on phones', () => {
         assert.match(card, /h-3 min-w-0 flex-1/);
-        assert.match(card, /grid grid-cols-1 gap-x-8 gap-y-3 text-base sm:grid-cols-2 lg:grid-cols-4/);
+        assert.match(card, /grid grid-cols-2 gap-x-6 gap-y-4 border-t border-slate-100 pt-4 lg:grid-cols-4/);
     });
 
     test('Abonnement no longer presents AI cases as its AI picture', () => {
