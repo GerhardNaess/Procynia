@@ -17,7 +17,55 @@ export const MY_TASK_MODULE_FALLBACKS = {
     tender: 'Anbud',
     wiki: 'Wiki',
     supplier: 'Leverandører',
+    risk: 'Risiko',
+    improvements: 'Avvik og forbedringer',
+    compliance: 'Etterlevelse og revisjon',
+    quality: 'Kvalitet',
+    objectives: 'Mål og KPI',
 };
+
+/**
+ * The groups narrowed to one module — the page's filter. `null` is every module. Groups that end up
+ * empty are dropped by visibleTaskGroups() as usual.
+ */
+export function filterTaskGroups(myTasks, module) {
+    if (! module) {
+        return myTasks;
+    }
+
+    const groups = Array.isArray(myTasks?.groups) ? myTasks.groups : [];
+
+    return {
+        ...myTasks,
+        groups: groups.map((group) => ({ ...group, tasks: (group.tasks ?? []).filter((task) => task.module === module) })),
+    };
+}
+
+/**
+ * The filter's options: every module that can give this person tasks, with its count, labelled.
+ * Only offered when there is more than one module to choose between.
+ */
+export function moduleFilterOptions(myTasks, labels = {}) {
+    const modules = Array.isArray(myTasks?.modules) ? myTasks.modules : [];
+
+    return modules.length > 1
+        ? modules.map((module) => ({ key: module.key, count: Number(module.count ?? 0), label: moduleLabel(module.key, labels) }))
+        : [];
+}
+
+/**
+ * One reason on a styringsmodul task, in the module's own words (info_center_page.my_tasks.reasons),
+ * with how many when the reason counts things. An unknown key falls back to itself, never to nothing.
+ */
+export function taskReasonText(task, reason, t = {}) {
+    const label = t?.reasons?.[task?.module]?.[reason?.key] ?? reason?.key ?? '';
+
+    if (Number.isInteger(reason?.count) && reason.count > 1) {
+        return `${label} (${(t?.count ?? ':count').replace(':count', String(reason.count))})`;
+    }
+
+    return label;
+}
 
 /**
  * The groups that have tasks, in the order the backend sent them, each with its label.

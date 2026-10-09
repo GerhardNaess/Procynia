@@ -152,6 +152,22 @@ class ImprovementAttentionService
     }
 
     /**
+     * The same findings over cases the caller already holds — for «Mine oppgaver»
+     * (ImprovementTaskSource). The cases must be active, of one customer, and already reached
+     * through ImprovementCaseAccessService.
+     *
+     * @param  EloquentCollection<int, ImprovementCase>  $cases
+     * @return array{
+     *     cases: list<array{case: ImprovementCase, reasons: array<string, string>}>,
+     *     actions: list<array{action: ImprovementAction, reasons: array<string, string>}>
+     * }
+     */
+    public function findingsForCases(EloquentCollection $cases, ?CarbonInterface $today = null): array
+    {
+        return $this->findings($cases->filter(fn (ImprovementCase $case): bool => $case->isActive())->values(), $this->day($today));
+    }
+
+    /**
      * Every finding over the given active cases, each case and each tiltak once with all its reasons.
      *
      * @param  EloquentCollection<int, ImprovementCase>  $cases

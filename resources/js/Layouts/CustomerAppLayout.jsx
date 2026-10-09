@@ -816,7 +816,13 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     onDeleteNotification={deleteNotification}
                                     onDeleteAllUnread={() => setIsDeleteUnreadOpen(true)}
                                     domainLabels={{
+                                        // Notification prefixes → the module names «Mine oppgaver» uses.
                                         supplier: translations.info_center_page?.my_tasks?.modules?.supplier,
+                                        risk: translations.info_center_page?.my_tasks?.modules?.risk,
+                                        improvement: translations.info_center_page?.my_tasks?.modules?.improvements,
+                                        compliance: translations.info_center_page?.my_tasks?.modules?.compliance,
+                                        quality: translations.info_center_page?.my_tasks?.modules?.quality,
+                                        objective: translations.info_center_page?.my_tasks?.modules?.objectives,
                                     }}
                                 />
 

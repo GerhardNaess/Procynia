@@ -79,6 +79,9 @@ class TenderTaskSource implements MyTaskSource
                     dueOn: $dueOn,
                     overdue: $dueOn !== null && $dueOn->lt($today),
                     details: ['item' => $payload],
+                    // «Frister innen 7 dager» is Oppfølging's own rule for aksjoner.
+                    dueSoonDays: MyTask::DEFAULT_DUE_SOON_DAYS,
+                    subject: ['prefix' => 'bid', 'metadata' => ['info_item_id' => (int) $item->id], 'saved_notice_id' => (int) $item->saved_notice_id],
                 );
             })
             ->values();

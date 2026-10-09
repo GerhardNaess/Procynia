@@ -2,7 +2,7 @@ import { Link, router, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import InfoHint from '../../../Components/App/InfoHint';
-import MyTaskGroups, { SupplierTaskCard } from './MyTasks';
+import MyTaskGroups, { GovernanceTaskCard, SupplierTaskCard } from './MyTasks';
 import { taskCountLabel } from './myTaskLabels';
 import { infoCenterPageHelp, myTasksPanelHelp } from './infoCenterHelp';
 
@@ -444,8 +444,10 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                 return <SupplierTaskCard task={task} locale={locale} t={mt} categories={supplierCategories} moduleLabels={mt.modules} />;
             case 'wiki':
                 return <WikiTaskCard task={task} locale={locale} />;
-            default:
+            case 'tender':
                 return task.item ? <InfoItemCard item={task.item} locale={locale} /> : null;
+            default:
+                return <GovernanceTaskCard task={task} locale={locale} t={mt} />;
         }
     };
     const pagination = infoCenter?.pagination ?? {};

@@ -18,6 +18,7 @@ use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
+use App\Services\BidWorkflowNotificationService;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\Doffin\DoffinSourceAdapter;
@@ -1086,7 +1087,7 @@ class NoticeController extends Controller
             : null;
         $closureComment = trim((string) ($validated['closure_comment'] ?? ''));
 
-        $record->infoItems()->create([
+        $infoItem = $record->infoItems()->create([
             'type' => (string) $validated['type'],
             'direction' => (string) $validated['direction'],
             'channel' => (string) $validated['channel'],
@@ -1104,6 +1105,12 @@ class NoticeController extends Controller
                 : null,
             'closure_comment' => $closureComment !== '' ? $closureComment : null,
         ]);
+
+        // Handing an open aksjon to someone is news to them, the same «Ny oppgave» a requirement
+        // assignment gives. The service skips the person who made the aksjon for themselves.
+        if ($infoItem->owner_user_id !== null && $infoItem->status !== SavedNoticeInfoItem::STATUS_CLOSED) {
+            app(BidWorkflowNotificationService::class)->taskAssigned($infoItem->setRelation('savedNotice', $record), $user);
+        }
 
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])

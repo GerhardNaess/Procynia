@@ -1,11 +1,12 @@
-# Varsler og «Mine oppgaver» — plan og arkitektur (punkt 6)
+# Varsler og «Mine oppgaver» — arkitektur (punkt 6)
 
-Status: **Fase 6A–6C merget til lokal `main`** (`feat/my-tasks-suppliers`, `7e1195bd`, merget med
-`--no-ff` i `6c8a9641`), ikke pushet. **Punkt 6 er ikke fullført:** fase 6D (øvrige styringsmoduler),
-automatiske fristpåminnelser (§8) og eventuelle senere forbedringer av oppgaveoversikten gjenstår.
+Status: **Punkt 6 er teknisk fullført.** Fase 6A–6C er merget til lokal `main` i `6c8a9641`; fase 6D,
+tildelingsvarsler for styringsmodulene, fristpåminnelser og språkrettingen er committet på
+`feat/punkt6-complete`, ikke merget, pushet eller deployet. E2E-suiten er ikke kjørt ferdig (§11).
+Driftsavhengigheter før produksjon: se §9.
 
-Dette dokumentet er kontrakten for hvordan styringsmodulene kobles til Procynias felles varselbjelle
-og «Mine oppgaver». Leverandører er første styringsmodul som bruker begge.
+Dette dokumentet er kontrakten for hvordan Procynias moduler bruker den felles varselbjellen og
+«Mine oppgaver».
 
 ---
 
@@ -17,231 +18,210 @@ og «Mine oppgaver». Leverandører er første styringsmodul som bruker begge.
 | **Mine oppgaver** (Oppfølging) | Hva må jeg gjøre, og når? | Arbeidet er gjort i modulen | Ingenting — leses live fra modulen |
 
 Et lest eller slettet varsel endrer aldri en oppgave. En oppgave forsvinner bare når modulens egne data
-sier at arbeidet er gjort, og flytter seg når modulens egen ansvarsfelt flytter seg.
+sier at arbeidet er gjort, og flytter seg når modulens eget ansvarsfelt flytter seg.
 
-## 2. Godkjente arkitekturbeslutninger
+## 2. Arkitekturbeslutninger
 
 1. **Ingen sentral oppgavetabell.** Oppgaver hentes fra modulenes egne tabeller og tjenester ved hver
    lesing.
-2. **Én felles oppgavekontrakt:** `MyTaskSource` (grensesnitt), `MyTask` (normalisert oppgave) og
+2. **Én felles kontrakt:** `MyTaskSource` (grensesnitt), `MyTask` (normalisert oppgave) og
    `MyTasksService` (samler, sorterer, grupperer) i `app/Services/MyTasks/`.
-3. **Domenelogikken blir i modulene.** Kilden spør modulens egne tjenester; den felles koden avgjør
-   aldri om noe trenger oppfølging.
+3. **Domenelogikken blir i modulene.** Hver kilde spør modulens egen «Trenger oppmerksomhet»-tjeneste
+   og tilgangstjeneste; den felles koden avgjør aldri om noe trenger oppfølging.
 4. **Varsler og oppgaver er forskjellige** (§1).
-5. **Eksisterende bjelle beholdes.** Nye moduler skriver `user_notifications` gjennom
-   `UserNotificationWriter`.
-6. **«Mine oppgaver» er standardvisningen** på eksisterende Oppfølging-side (`/app/info-center`) for
-   alle personas. Ingen ny side.
-7. **Modulens egne fristregler gjenbrukes.** Ingen generell 30-dagersgrense; Leverandørers 60 dager
-   for dokumentasjon (`SupplierDocument::EXPIRING_SOON_DAYS`) gjelder.
-8. **Tilgang håndheves ved lesing** — både for oppgaver og varsler (§5).
-9. **Ingen ny køinfrastruktur.** Varsler skrives synkront etter commit (`DB::afterCommit`).
-10. **Ingen e-post** i denne leveransen.
+5. **Én bjelle:** alle varsler skrives til `user_notifications` gjennom `UserNotificationWriter`.
+6. **«Mine oppgaver» er standardvisningen** på Oppfølging (`/app/info-center`) for alle personas.
+7. **Modulens egne fristregler gjenbrukes.** Ingen vilkårlig global grense (§6).
+8. **Tilgang håndheves ved lesing** — oppgaver, varsler og påminnelser (§5).
+9. **Ingen ny køinfrastruktur.** Varsler skrives synkront etter commit; påminnelser er én planlagt
+   kommando.
+10. **Ingen e-post.**
 
-## 3. Eksisterende infrastruktur som gjenbrukes
+## 3. Felles kontrakt
 
-| Komponent | Rolle |
-|---|---|
-| `user_notifications`, `UserNotificationService`, `UserNotificationController`, `NotificationBell.jsx` | Bjellen: liste, ulest-teller, les/slett, polling. Uendret oppførsel |
-| `BidWorkflowNotificationService`, `EnterpriseWikiReviewNotificationService` | Anbud- og Wiki-varsler. Skriver nå gjennom `UserNotificationWriter` |
-| `EnterpriseWikiReviewTaskService`, `EnterpriseWikiQaTaskService` | Wiki-oppgaver. Regler uendret, nå bak `WikiTaskSource` |
-| `SavedNoticeInfoItem` + `RequirementResponsibilityTaskService` | Anbud-aksjoner. Uendret, nå bak `TenderTaskSource` |
-| `SupplierAttentionService` («Trenger oppmerksomhet», 11 signaler) | Avgjør om og hvorfor en leverandør trenger oppfølging |
-| `SupplierAccessService` | All tilgang i Leverandører, også for oppgaver og varsler |
-| `SupplierReviewSchedule`, `SupplierDocument`, `SupplierAssuranceResolver`, `SupplierDueDiligenceService` | Fristene som vises |
-| `InfoCenterController`, `InfoCenter/Index.jsx` | Oppfølging-siden, videreutviklet |
-
-## 4. Felles kontrakt
-
-### 4.1 Oppgave (`MyTask`)
+### 3.1 Oppgave (`MyTask`)
 
 | Felt | Innhold |
 |---|---|
-| `id` | Stabil: modulprefiks + modulens id (`supplier-12`, `wiki-review-34`, `tender-item-56`). Aldri en databasenøkkel |
-| `module`, `type` | `tender` / `wiki` / `supplier`, og modulens egen type |
-| `title`, `subject_title` | Hva oppgaven gjelder, og objektet |
-| `assignee_user_id` | Ansvarlig (alltid den som leser) |
-| `due_on`, `overdue` | Tidligste relevante frist; om noe allerede er forfalt |
-| `group` | `overdue` / `this_week` / `later` / `no_due` |
-| `reasons` | Hvorfor den krever oppfølging, med `due_on`, `overdue`, `can_act` per årsak |
-| `can_act` | `false` når personen kan lese objektet, men mangler rettighet for minst én årsak |
-| `action_url` | Relativ lenke til modulens vanlige arbeidsflate |
+| `id` | Stabil: modulprefiks + modulens id (`risk-12`, `improvement-action-7`, `supplier-3`). Aldri en databasenøkkel |
+| `module`, `type` | Modulnøkkel (`config/procynia_modules.php`) og modulens egen oppgavetype |
+| `title`, `subject_title` | Hva oppgaven gjelder, og objektet den hører til |
+| `due_on`, `overdue`, `group` | Tidligste relevante frist; om noe er forfalt; `overdue` / `this_week` (til og med søndag) / `later` / `no_due` |
+| `reasons` | Hvorfor, i modulens ord, med `due_on`, `overdue`, `can_act` (og `count`) per årsak |
+| `can_act` | `false` når personen kan lese objektet, men mangler rettigheten minst én årsak krever |
+| `action_url` | Relativ lenke til modulens vanlige arbeidsflate (som har sin egen autorisasjon) |
+| `dueSoonDays` | Modulens eget «nærmer seg»-vindu for påminnelser (§6); `null` = felles 7 dager |
+| `subject` | Varselprefiks og objekt-id-er, slik at bjellen kan kontrollere tilgangen på nytt |
 
-Grupper: forfalt = kilden sier forfalt eller frist før i dag; «Denne uken» = til og med søndag i
-inneværende kalenderuke; «Senere» = senere frist; «Uten frist» = ingen dato. Sortering: gruppe, frist,
-modul, tittel.
-
-### 4.2 Kilde (`MyTaskSource`)
+### 3.2 Kilde (`MyTaskSource`)
 
 ```php
 public function module(): string;
+public function isAvailableFor(User $user): bool;   // modul + leserettighet, modulens eget svar
 public function openTasksFor(User $user, int $customerId, CarbonImmutable $today): Collection; // of MyTask
 ```
 
-Kilden returnerer ingenting uten modultilgang og leserettighet, og bare objekter personen kan lese.
-`MyTasksService` sjekker i tillegg at brukeren er aktiv og tilhører kunden.
+`MyTasksService` sjekker i tillegg at brukeren er aktiv og tilhører kunden, og bygger sidens
+modulfilter fra `isAvailableFor()` — et filter tilbyr aldri en modul personen ikke kan se.
 
-### 4.3 Varselskriving (`UserNotificationWriter`)
+### 3.3 Varselskriving (`UserNotificationWriter`)
 
-Én metode, `notify()`, som håndhever for alle moduler:
+Mottaker aktiv og i riktig kunde; aktøren varsles aldri om egen handling; `dedupe_key` gjør skrivingen
+idempotent; skrives etter commit (rollback varsler ingen); feil fanges, så et varsel aldri stopper
+brukerens handling.
 
-- mottaker er aktiv og tilhører kunden varselet gjelder (isolasjonsgrensen);
-- aktøren varsles aldri om egen handling;
-- `dedupe_key` gjør skrivingen idempotent — modulen bestemmer hva som er «samme situasjon»;
-- skrivingen skjer etter commit, så en rollback varsler ingen;
-- feil fanges (`rescue`), så en varslingsfeil aldri stopper brukerens handling.
+## 4. Integrerte moduler
 
-## 5. Sikkerhet
+| Modul | Oppgave | Ansvarlig | Årsaker / frist | Handlingsrettighet |
+|---|---|---|---|---|
+| **Anbud** | Åpen aksjon | `saved_notice_info_items.owner_user_id` | Oppfølgingsfrist | — |
+| **Wiki** | Gjennomgang / QA | `reviewer_user_id` / `qa_user_id` på gjeldende versjon | Ingen frist | — |
+| **Leverandører** | Én per leverandør med funn | `suppliers.owner_user_id` | `SupplierAttentionService` (11 signaler) | assure / assess / edit per årsak |
+| **Risiko** | Risiko med funn | `risks.owner_user_id` | `RiskAttentionService`: ikke vurdert, restrisiko, høy restrisiko, vurdering forfalt, aksept utløpt, tiltak forfalt | assess / accept / edit i fagområdet |
+| | Åpent risikotiltak | `risk_treatment_actions.owner_user_id` | Tiltakets frist | edit |
+| **Avvik og forbedringer** | Åpen sak (Åpen / Under arbeid) | `improvement_cases.owner_user_id` | Sakens frist; tiltak som venter på / ikke besto effektverifisering | edit / close |
+| | Aktivt tiltak (planlagt / under arbeid) | `improvement_actions.owner_user_id` | Tiltakets frist | edit |
+| **Etterlevelse og revisjon** | Aktivt krav med funn | `compliance_requirements.owner_user_id` | `ComplianceAttentionService`; neste revurdering | assess |
+| | Revisjon (planlagt / pågår, eller fullført med avvik uten oppfølging) | `compliance_audits.responsible_user_id` | Planlagt sluttdato; `ComplianceAuditAttentionService` | audit |
+| **Kvalitet** | Element i kraft med funn | `quality_items.owner_user_id` | `QualityAttentionService`: kontroll uten evidens / aktivitet, prosess uten styrende dokument, prosess forfalt til revisjon | edit |
+| **Mål og KPI** | Aktivt mål med passert måldato | `objectives.owner_user_id` | Måldato | edit |
+| | Aktiv KPI: ikke på mål, måling mangler, måling skal registreres | `kpis.owner_user_id`, ellers målets eier (modulens egen fallback) | Rapporteringsfrist (`KpiPeriods::reportingDeadline`) | measure |
+
+Avsluttede, utgåtte, kansellerte og fullførte objekter gir ingen oppgave. Revisjonsfunn,
+effektverifisering og kvalitetssjekker har ikke fått nye ansvarsfelt: der modulen ikke har en eier,
+er det heller ingen oppgave (se §10).
+
+## 5. Tilgangsstyring og kundeisolasjon
 
 ### 5.1 Oppgaver
 
-| Kilde | Krav for å se oppgaven |
-|---|---|
-| Anbud | Kunden har `tender`-modulen; saken er synlig via `SavedNoticeAccessService`; aksjonen er åpen og personen er ansvarlig |
-| Wiki | Kunden har `wiki`-modulen **og** personen har `wiki.view`; tildeling på gjeldende versjon |
-| Leverandører | `SupplierAccessService::canReadFromAnotherModule()` (modul + `supplier.view`); leverandøren er i `visibleSuppliers()`; personen er `owner_user_id`; leverandøren er ikke avsluttet |
+Hver kilde spør modulens egen tilgangstjeneste først: modulen (`ModuleEntitlementService`),
+leserettigheten (`*.view`), og der modulen har fagområder (Risiko, Avvik, Mål og KPI) objektets
+fagområde (`visibleRisks()`, `visibleCases()`, `visibleObjectives()`). Et tiltak vises bare på en
+risiko/sak personen ser. Å være ansvarlig gir ingen rettigheter. Mangler personen rettigheten en årsak
+krever, vises oppgaven med «Mangler rettighet» og en forklaring; backend avviser fortsatt handlingen.
 
-**Rettet svakhet (6A):** Wiki-oppgaver ble vist ut fra tildeling alene. En bruker som mistet
-Wiki-modulen eller `wiki.view` så fortsatt sidetitler i Oppfølging. Begge kreves nå.
+### 5.2 Oppfølging er modul-uavhengig
 
-### 5.1.1 Oppfølging er modul-uavhengig
+Oppfølging har ingen modulvakt. Uten Anbud er siden «Mine oppgaver» alene (ett panel, én visning,
+nøytral overskrift og hjelpetekst), og gamle lenker til Anbud-visningene lander der.
+`InfoCenterModuleMatrixTest` dekker seks modulkombinasjoner på norsk og engelsk.
 
-Oppfølging (`/app/info-center`) har ingen modulvakt og vises i toppmenyen for alle kunder. «Mine
-oppgaver» viser arbeid fra nøyaktig de modulene kunden har (verifisert for: bare Leverandører, bare
-Wiki, bare Anbud — som alltid inkluderer Wiki-modulen —, Leverandører + Wiki, alle, ingen;
-`InfoCenterModuleMatrixTest`).
+### 5.3 Varsler
 
-De øvrige visningene (Venter på svar, Opprettet av meg, Innkommende) og panelene Beslutninger,
-Avklaringer, Venter på svar og Frister innen 7 dager er lister over Anbud-aksjoner
-(`SavedNoticeInfoItem`). Uten Anbud-modulen:
-
-- aksjonene vises ikke (de tilhører saker kunden ikke kan åpne);
-- siden er «Mine oppgaver» alene: ett panel, én visning, nøytral overskrift uten «aksjoner»;
-- en gammel lenke til en annen visning lander på «Mine oppgaver».
-
-Med Anbud er siden som før.
-
-Hjelpeteksten følger samme regel (`infoCenter.tender_available` → `infoCenterHelp.js`). Uten Anbud
-forklarer den bare «Mine oppgaver» og omtaler ingen Anbud-visninger, og panelets forklaring er
-oversatt og nøytral. Med Anbud forklarer den visningene som før, pluss «Mine oppgaver».
-
-**Kjent, eksisterende avvik (ikke del av punkt 6):** `HandleInertiaRequests::share()` kjører før
-`SetCustomerLocale`, så de delte `translations` bygges alltid på standardspråket (`no`), også for en
-bruker med engelsk som foretrukket språk. Tekster controlleren selv skriver med `__()` (som den nøytrale
-overskriften) følger brukerens språk. Gjelder alle sider og finnes uendret på `main`; bør rettes som
-egen oppgave.
-
-### 5.2 Varsler
-
-`UserNotificationAccessScope` filtrerer i SQL ved hver lesing, før begrensning og telling, slik at et
-skjult varsel verken vises, telles som ulest, merkes lest av «Merk alle» eller slettes av «Slett
-uleste»:
+`UserNotificationAccessScope` filtrerer i SQL ved hver lesing, før begrensning og telling — et skjult
+varsel vises ikke, telles ikke som ulest og berøres ikke av «Merk alle» / «Slett uleste».
 
 | `event_type` | Krav |
 |---|---|
-| `bid.*` | `tender`-modul **og** saken (`saved_notice_id`) er synlig for personen. Prefiks alene er ikke nok — saksinnsyn er per person |
-| `watch_profile.*` | `tender`-modul (kunngjøringen er felles Doffin-data, profilen er personens egen) |
-| `wiki.*` | `wiki`-modul og `wiki.view`. Alle kundens sider er lesbare med `wiki.view`, så ingen sidesjekk trengs |
-| `supplier.*` | Modul + `supplier.view`, og `metadata.supplier_id` er i `visibleSuppliers()` — også en slettet leverandørs navn forsvinner |
-| Annet (`ai_quota.*`, fakturering) | Konto-nivå, ikke modulobjekter — vises |
+| `bid.*` | Anbud-modul og saken (`saved_notice_id`) synlig for personen |
+| `watch_profile.*` | Anbud-modul |
+| `wiki.*` | Wiki-modul og `wiki.view` |
+| `supplier.*` | Modul, `supplier.view`, `metadata.supplier_id` synlig |
+| `risk.*` | Modul, `risk.view`, `metadata.risk_id` i personens fagområder |
+| `improvement.*` | Modul, `improvement.view`, `metadata.improvement_case_id` synlig |
+| `compliance.*` | Modul, `compliance.view`, kravet eller revisjonen i metadata synlig |
+| `quality.*` | Modul, `quality.view`, `metadata.quality_item_id` finnes i kunden |
+| `objective.*` | Modul, `objective.view`, `metadata.objective_id` i personens fagområder |
+| Annet (`ai_quota.*`, fakturering) | Konto-nivå — vises |
 
-Varsler slettes ikke ved tap av tilgang; de vises igjen om tilgangen gjenopprettes.
+Metadata sammenlignes som tekst, så en ødelagt referanse skjuler bare sin egen rad. Et slettet objekt
+skjuler varslene sine. Varsler slettes ikke ved tap av tilgang; de vises igjen om tilgangen kommer
+tilbake. `target_url` gir aldri tilgang i seg selv.
 
-`target_url` er en vanlig, relativ lenke inn i modulens ruter, som kjører sin egen autorisasjon. Bjellen
-gir ingen tilgang (testet: lenken gir 403 etter tap av `supplier.view`).
+### 5.4 Kundeisolasjon
 
-### 5.3 Kundeisolasjon
+Alle kilder og skrivinger er scoped til brukerens `customer_id`; `UserNotificationWriter` og
+`AssignmentNotifier` nekter mottakere fra annen kunde, også når et eierfelt er tvunget på tvers.
 
-Alle kilder og skrivinger er scoped til brukerens `customer_id`; `UserNotificationWriter` nekter
-mottakere fra annen kunde; leverandørskjemaet avviser ansvarlig fra annen kunde.
+## 6. Varslingshendelser
 
-## 6. Fase 6A–6C (denne leveransen)
+**Tildeling** (bjellen, «Du er tildelt ansvar»): ved ny eier på et nytt objekt, eller endret eier.
+Aldri ved uendret eier, fjernet eier, eget valg, rollback, inaktiv mottaker, mottaker som ikke kan lese
+objektet, eller avsluttet objekt. `dedupe_key` = hendelse + objekt + mottaker + lagringstidspunkt.
 
-### 6A — Felles fundament
+| Hendelse | Utløses av |
+|---|---|
+| `bid.task_assigned` | Kravansvar (`RequirementResponsibilityTaskService`) og manuelt opprettet aksjon med ansvarlig |
+| `wiki.review_assigned`, `wiki.qa_assigned`, `wiki.changes_requested`, `wiki.page_published` | Wiki (uendret) |
+| `supplier.owner_assigned` | Ny intern ansvarlig for leverandør |
+| `risk.owner_assigned`, `risk.action_assigned` | Risikoeier / ansvarlig for risikotiltak |
+| `improvement.case_assigned`, `improvement.action_assigned` | Ansvarlig for sak / tiltak |
+| `compliance.requirement_assigned`, `compliance.audit_assigned` | Ansvarlig for krav / revisjon |
+| `quality.item_assigned` | Ansvarlig for kvalitetselement |
+| `objective.objective_assigned`, `objective.kpi_assigned` | Ansvarlig for mål / KPI |
 
-- `MyTask`, `MyTaskSource`, `MyTasksService`; `TenderTaskSource`, `WikiTaskSource`.
-- `InfoItemPayload` trukket ut av `InfoCenterController`, brukt av liste og oppgave.
-- `UserNotificationWriter`; Anbud og Wiki delegerer sin skriving dit (oppførsel uendret).
-- `UserNotificationAccessScope` i `UserNotificationService::visibleQuery()`.
-- N+1 i bjellen rettet: saker lastes med `with()` i stedet for `loadMissing()` per rad.
-- Indekser (`2026_10_09_000009_add_my_tasks_indexes`): `suppliers(customer_id, owner_user_id)` og
-  `saved_notice_info_items(owner_user_id, status)`. Wiki-kolonnene og bjellen var allerede indeksert.
+Styringsmodulenes tildelinger går gjennom `AssignmentObserver` (`created`/`updated`) →
+`AssignmentNotifier`, slik at alle skriveveier (skjema, overlevering fra annen modul, creator-tjenester)
+varsles likt. Ordinære dataendringer varsler ikke.
 
-### 6B — Leverandører i «Mine oppgaver»
+**Fristpåminnelser**: `{prefiks}.task_due_soon` og `{prefiks}.task_overdue` (§7).
 
-- `SupplierTaskSource`: **én oppgave per leverandør** personen er intern ansvarlig for og som har minst
-  ett funn i `SupplierAttentionService`. Hvert funn blir en årsak. Ingen nye regler.
-- Frist per årsak: neste vurdering, «Gyldig til», kontrollens oppfølgingsdato, neste
-  aktsomhetsvurdering. Oppgavens frist er den tidligste.
-- Handlingsrettighet per årsak, som modulens egne kontrollere sjekker: kontroll/beslutning/aktsomhet =
-  `supplier.assure`; vurdering = `supplier.assess`; dokumentasjon = `supplier.edit` eller
-  `supplier.assure`; profil = `supplier.edit`. Mangler den, vises oppgaven med «Mangler rettighet».
-- UI: «Mine oppgaver» gruppert Forfalt / Denne uken / Senere / Uten frist; hver modul har sitt kort;
-  tellingen samler alle kilder. Aksjonslisten for de andre visningene er uendret.
+## 7. Fristpåminnelser
 
-### 6C — Leverandører i bjellen
+`notifications:task-reminders` (planlagt daglig 06:45, `withoutOverlapping`) → `TaskDeadlineReminderService`.
 
-Nøyaktig én hendelse: **`supplier.owner_assigned`** — en leverandør får ny intern ansvarlig.
+- **Én mekanisme for alle moduler:** leser `MyTasksService::tasksFor()` for hver aktiv bruker — samme
+  liste personen ser, med modulenes tilgangsregler. Fullført, omfordelt, lukket eller utilgjengelig
+  arbeid er derfor ikke med; tilgangen kontrolleres på nytt hver kjøring.
+- **«Nærmer seg»** når fristen er innenfor modulens vindu: Leverandører 60 dager
+  (`SupplierDocument::EXPIRING_SOON_DAYS`), KPI-er sine egne rapporteringsdager, ellers Oppfølgings
+  «Frister innen 7 dager». **«Passert»** når oppgaven er forfalt.
+- **`dedupe_key`** = `task.{type}:{oppgave-id}:{frist}:{mottaker}`. Gjentatt kjøring (samme dag, etter
+  feil, ved retry) skriver ingenting nytt; en flyttet frist er en ny situasjon og varsles én gang; en
+  uendret frist aldri igjen. Oppgaver uten frist får ingen påminnelse; forfalt uten dato (f.eks. erstattet
+  dokument under en kontroll) én gang.
+- **Robust:** feil for én person eller kunde stopper ikke de andre (logges, telles).
+- Varselet bærer modulens prefiks og objekt, så bjellen skjuler det når tilgangen mistes.
 
-- Ved registrering når ansvarlig er en annen enn den som registrerer.
-- Ved endring av ansvarlig (`update`), når ansvarlig faktisk endres.
-- Aldri ved lagring uten ansvarsendring, aldri til den som gjør tildelingen, aldri ved rollback, aldri
-  til inaktiv bruker eller bruker uten `supplier.view`, aldri på tvers av kunder.
-- `dedupe_key` = `supplier.owner_assigned:{supplier}:{ny ansvarlig}:{updated_at}` — samme overlevering
-  gir ett varsel; A → B → A gir to.
-- Tekst på mottakerens språk (`supplier_management.notifications.*`), kilde «Leverandører» i bjellen,
-  lenke til leverandørsiden.
+Første kjøring etter innføring sender én «passert» for hver oppgave som allerede er forfalt — én gang.
 
-Andre tildelingshendelser ble vurdert: Leverandørmodulens datamodell har ingen andre ansvarsfelt
-(`assessed_by_user_id` er forfatterskap, ikke tildeling; ansvarlig for avvik og risiko eies av de
-modulene). Ingen nye felt eller prosesser er innført for å kunne varsle.
+## 8. Språk
 
-## 7. Ytelse
+`HandleInertiaRequests` bygde de delte `translations` før `SetCustomerLocale` når HTTP-kjernen ble
+løst etter at providerne hadde startet (tester og konsoll), fordi Inertia flytter sin middleware opp i
+prioritetslisten. I en vanlig forespørsel via `public/index.php` var rekkefølgen allerede riktig, så
+brukerne var ikke rammet. `AppServiceProvider` legger nå `SetCustomerLocale` foran Inertia i
+prioritetslisten i begge tilfeller (`SharedTranslationsLocaleTest`).
 
-- Oppfølging: hver kilde er én batch. Leverandørkilden gjenbruker `findingsForSuppliers()`, som leser
-  vurderinger, dokumenter, profiler og kontrollstatus én gang for alle personens leverandører.
-- Bjellen: konstant antall spørringer uansett antall varsler (testet: 2 og 8 varsler gir like mange
-  spørringer). Tilgangsfilteret legger til noen få spørringer per lesing (moduler, roller), ikke per rad.
-- Oppgavelisten er ikke paginert; antallet er begrenset til det som faktisk er tildelt personen.
+## 9. Drift
 
-## 8. Utsatt: fristvarsling (senere leveranse)
+- **Migrasjoner:** `2026_10_09_000009_add_my_tasks_indexes` (i `main`) og
+  `2026_10_10_000001_add_governance_owner_indexes` — kun indekser, reversible. Ingen nye tabeller.
+- **Scheduler:** samme `php artisan schedule:work` i Docker og Azure (`SchedulerContractTest`); én
+  replika. Ingen ny kø, ingen ny jobbklasse.
+- **Før produksjon:** kjør migrasjonene; restart scheduler og kø-workere etter deploy; vurder å varsle
+  brukerne om at forfalte oppgaver gir én påminnelse ved første kjøring.
 
-Ikke bygget nå. Anbefalt form når den bygges:
+## 10. Kjente begrensninger
 
-- Én daglig planlagt kommando per kunde (samme mønster som `BidWorkflowNotificationService::sweepCustomer()`),
-  ingen ny kø.
-- Den leser **samme kilde** som «Mine oppgaver» (`SupplierTaskSource` / `SupplierAttentionService`),
-  så varsel og oppgave aldri er uenige.
-- `dedupe_key` koder **situasjonen**, ikke sjekken: `supplier.deadline:{supplier}:{årsak}:{objekt}:{frist}:{mottaker}`.
-  En uendret situasjon gir ingen nye varsler; en flyttet frist eller nytt dokument gir ett nytt.
-- Terskler fra modulen: varsle når en årsak går fra «utløper snart» (60 dager) og når den blir forfalt
-  — maks to varsler per årsak, ikke daglig.
-- Én samlet melding per leverandør per kjøring når flere årsaker endrer seg samtidig, for å unngå støy.
-- Mottaker = intern ansvarlig, med samme tilgangskrav som oppgaven.
+- **Deaktiverte ansvarlige:** oppgaver som eies av en deaktivert bruker vises ikke for noen, og
+  modulenes «Mangler ansvarlig» gjelder bare slettede brukere. Om deaktivering skal flagge arbeidet
+  er en produktbeslutning.
+- **Ingen eier = ingen oppgave:** revisjonsfunn, effektverifisering og kvalitetssjekker uten egen eier
+  vises på eierens sak/revisjon/element, ikke som egne oppgaver.
+- **Kvalitet** har bare forfalt revisjon som frist; elementer uten funn er ikke oppgaver.
+- **Store lister:** oppgavelisten er ikke paginert. Spørringene er batchet per modul (konstant antall
+  uavhengig av antall oppgaver, testet).
 
-## 9. Fase 6D: øvrige styringsmodulene (senere)
-
-For hver modul (Avvik, Risiko, Etterlevelse, Mål og KPI, Kvalitet):
-
-1. Lag `XxxTaskSource implements MyTaskSource` som leser modulens eget ansvarsfelt og egne
-   «Trenger oppmerksomhet»-regler, med modulens access-service først.
-2. Legg kilden til i `MyTasksService`-konstruktøren.
-3. Skriv varsler gjennom `UserNotificationWriter` med prefiks `<modul>.`.
-4. Legg prefikset og regelen (modul + leserettighet + objektsjekk der innsyn er per objekt, f.eks.
-   Risiko-fagområder) til i `UserNotificationAccessScope`.
-5. Legg kort og etiketter i `MyTasks.jsx` / `info_center_page.my_tasks.modules`.
-6. Indekser kun ansvarsfeltene modulen faktisk leser.
-
-## 10. Tester
+## 11. Tester
 
 | Testsett | Dekker |
 |---|---|
-| `tests/Unit/MyTasks/MyTaskTest.php` | Gruppering, uke slutter søndag, detaljer kan ikke overstyre felles felt |
-| `tests/Unit/MyTasks/MyTasksTranslationsTest.php` | Samme nøkler på norsk og engelsk; alle nøkler koden ber om finnes |
-| `tests/Feature/App/InfoCenterModuleMatrixTest.php` | Seks modulkonfigurasjoner: oppgaver, telling, visninger, bjelle og ingen titler fra moduler kunden ikke har; hjelpetekst og gamle lenker per konfigurasjon, norsk og engelsk |
-| `resources/js/Pages/App/InfoCenter/infoCenterHelp.test.js` | Hjelpetekst med og uten Anbud, hvilke oversettelsesnøkler hver variant leser |
-| `tests/Feature/App/MyTasksAccessTest.php` | 6A: Wiki-oppgave skjules uten `wiki.view`/modul; Anbud-aksjon krever modul; bjellefilter for Wiki/sak/konto; «Merk alle» når ikke skjulte; N+1 |
-| `tests/Feature/App/InfoCenterSupplierTaskTest.php` | 6B: samlet oppgave, grupper, oppdatering, løst, omfordeling, tilgang, modul, kundeisolasjon, deaktivert bruker, årsaker = `SupplierAttentionService`-funn, handlingsrettighet per årsak og live, backend avviser fortsatt, konstant antall spørringer, tom tilstand |
-| `tests/Feature/App/SupplierOwnerNotificationTest.php` | 6C: første tildeling, omfordeling, uendret, egen tildeling, duplikater, rollback, inaktiv, kryss-kunde, tap av tilgang, slettet leverandør, les/slett påvirker ikke oppgaven, navigasjon |
-| Eksisterende Wiki-, Anbud- og bjelletester | Regresjon (oppdatert til ny standardvisning og `my_tasks`-payload) |
-| `resources/js/Pages/App/InfoCenter/myTaskLabels.test.js` m.fl. | Grupper, årsakstekst, kort per modul, rettighetsmerking |
+| `tests/Unit/MyTasks/*` | Gruppering, søndagsgrense, nøkkelparitet norsk/engelsk |
+| `MyTasksAccessTest`, `InfoCenterModuleMatrixTest` | Wiki/Anbud-tilgang, bjellefilter, modulkombinasjoner, hjelpetekst, gamle lenker, N+1 |
+| `InfoCenterSupplierTaskTest`, `SupplierOwnerNotificationTest` | Leverandører i oppgaver og bjelle |
+| `MyTasksGovernanceTest` | Fase 6D: alle fem moduler, eierskap, lukkede objekter, omfordeling, fagområde, modul, kundeisolasjon, handlingsrettighet, KPI-fallback, modulfilter, batching |
+| `GovernanceAssignmentNotificationTest` | Tildelingsvarsler for alle eierfelt og manuelle aksjoner, duplikater, rollback, tilgangstap, sletting, språk |
+| `TaskDeadlineReminderTest` | Vindu, én gang, flyttet frist, fullført/omfordelt/utilgjengelig, uten frist, 60/7 dager, inaktiv, engelsk, feilisolasjon, kommando og scheduler |
+| `SharedTranslationsLocaleTest` | Delte oversettelser på brukerens språk, innlogging, ingen lekkasje |
+| JS: `myTaskLabels.test.js`, `infoCenterHelp.test.js` m.fl. | Grupper, filter, årsakstekster, kort per modul, hjelpetekst |
+| E2E: `my-tasks-suppliers.spec.js`, `my-tasks-governance.spec.js`, `info-center-help.spec.js` | Brukerflyter i nettleser |
+
+**Testresultater ved commit (`feat/punkt6-complete`):**
+
+- PHP, hele suiten: 7 427 bestått, 3 hoppet over, 0 feilet. Testene som ble endret etterpå (139) er kjørt på nytt: alle bestått.
+- JS, hele enhetssuiten: 1 400 av 1 400 bestått.
+- E2E: `my-tasks-governance.spec.js` bestått. Den brede kjøringen ble stoppet ved test 104 av 274: de 103
+  fullførte besto, **171 E2E-tester ble ikke fullført** (test 104 i `package-change.spec.js` avbrutt, 170 ikke
+  startet). Hele E2E-suiten er derfor ikke verifisert grønn for denne grenen.

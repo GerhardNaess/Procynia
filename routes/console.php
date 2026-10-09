@@ -27,6 +27,12 @@ Schedule::command('notifications:bid-workflow')
     ->dailyAt('06:30')
     ->withoutOverlapping();
 
+// Fristpåminnelser for «Mine oppgaver», every module in one sweep: «nærmer seg» and «passert», each
+// once per task and deadline. After the bid-workflow sweep so the two never compete.
+Schedule::command('notifications:task-reminders')
+    ->dailyAt('06:45')
+    ->withoutOverlapping();
+
 // Private customer files nobody references any more (an interrupted upload, a failed deletion).
 Schedule::command('private-files:prune-orphans')
     ->dailyAt('03:40')

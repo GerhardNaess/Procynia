@@ -2,14 +2,20 @@
 
 namespace App\Services\Notifications;
 
+use App\Models\QualityItem;
 use App\Models\User;
 use App\Models\UserNotification;
+use App\Services\Compliance\ComplianceAccessService;
+use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Permissions\CustomerPermissionService;
+use App\Services\Risk\RiskAccessService;
 use App\Services\SavedNoticeAccessService;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Which of a person's own notifications they may still read.
@@ -41,18 +47,33 @@ use Illuminate\Database\Eloquent\Builder;
  * This hides; it does not authorize. target_url is a link into an ordinary route, which runs its own
  * guards whether or not the bell showed it.
  *
- * Fase 6D: a module that writes notifications adds its prefix and its rule here.
+ *  - risk.*           Risiko module and risk.view, and metadata.risk_id is a risk in one of the
+ *                     person's fagområder (RiskAccessService::visibleRisks()).
+ *  - improvement.*    Avvik og forbedringer, and metadata.improvement_case_id is visible
+ *                     (ImprovementCaseAccessService::visibleCases(), per fagområde).
+ *  - compliance.*     Etterlevelse og revisjon, and the requirement or audit named in metadata is
+ *                     visible (ComplianceAccessService).
+ *  - quality.*        Kvalitet and quality.view, and metadata.quality_item_id is an item of the
+ *                     customer that still exists.
+ *  - objective.*      Mål og KPI, and metadata.objective_id is visible (ObjectiveAccessService,
+ *                     per fagområde).
+ *
+ * The same rules hold for fristpåminnelser, which carry their module's prefix and object.
  */
 class UserNotificationAccessScope
 {
     /** The module prefixes this scope decides; an event outside them is not module data. */
-    private const GATED_PREFIXES = ['bid.', 'watch_profile.', 'wiki.', 'supplier.'];
+    private const GATED_PREFIXES = ['bid.', 'watch_profile.', 'wiki.', 'supplier.', 'risk.', 'improvement.', 'compliance.', 'quality.', 'objective.'];
 
     public function __construct(
         private readonly ModuleEntitlementService $entitlements,
         private readonly CustomerPermissionService $permissions,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly SupplierAccessService $supplierAccess,
+        private readonly RiskAccessService $riskAccess,
+        private readonly ImprovementCaseAccessService $improvementAccess,
+        private readonly ComplianceAccessService $complianceAccess,
+        private readonly ObjectiveAccessService $objectiveAccess,
     ) {}
 
     /** @param  Builder<UserNotification>  $query */
@@ -60,13 +81,21 @@ class UserNotificationAccessScope
     {
         $customer = $user->customer;
         $modules = $customer !== null ? $this->entitlements->modulesFor($customer) : [];
+        // The person's permissions read once — the same answer each module's canOpenModule() /
+        // canReadFromAnotherModule() gives (customer + its *.view), without a role query per module
+        // on every page the bell is drawn on.
+        $permissions = $user->customer_id !== null ? $this->permissions->effectivePermissions($user) : [];
+        $reads = fn (string $module, string $permission): bool => in_array($module, $modules, true) && in_array($permission, $permissions, true);
         $tender = in_array('tender', $modules, true);
-        $wiki = in_array('wiki', $modules, true) && $this->permissions->has($user, CustomerPermissionCatalog::WIKI_VIEW);
-        // canReadFromAnotherModule() asks for the module too; asked once here through $modules
-        // would be the same answer, so the access service stays the one that decides.
-        $supplier = $this->supplierAccess->canReadFromAnotherModule($user);
+        $wiki = $reads('wiki', CustomerPermissionCatalog::WIKI_VIEW);
+        $supplier = $reads('supplier', CustomerPermissionCatalog::SUPPLIER_VIEW);
+        $risk = $reads('risk', CustomerPermissionCatalog::RISK_VIEW);
+        $improvement = $reads('improvements', CustomerPermissionCatalog::IMPROVEMENT_VIEW);
+        $compliance = $reads('compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW);
+        $quality = $reads('quality', CustomerPermissionCatalog::QUALITY_VIEW);
+        $objective = $reads('objectives', CustomerPermissionCatalog::OBJECTIVE_VIEW);
 
-        return $query->where(function (Builder $visible) use ($user, $tender, $wiki, $supplier): void {
+        return $query->where(function (Builder $visible) use ($user, $tender, $wiki, $supplier, $risk, $improvement, $compliance, $quality, $objective): void {
             $visible
                 ->whereNull('event_type')
                 ->orWhere(function (Builder $ungated): void {
@@ -96,6 +125,41 @@ class UserNotificationAccessScope
                     ->where('event_type', 'like', 'supplier.%')
                     ->whereRaw("user_notifications.metadata->>'supplier_id' IN ({$supplierIds->toSql()})", $supplierIds->getBindings()));
             }
+
+            if ($risk) {
+                $this->allowObjects($visible, 'risk.', 'risk_id', $this->riskAccess->visibleRisks($user)->selectRaw('CAST(risks.id AS TEXT)'));
+            }
+
+            if ($improvement) {
+                $this->allowObjects($visible, 'improvement.', 'improvement_case_id', $this->improvementAccess->visibleCases($user)->selectRaw('CAST(improvement_cases.id AS TEXT)'));
+            }
+
+            if ($compliance) {
+                $this->allowObjects($visible, 'compliance.', 'compliance_requirement_id', $this->complianceAccess->visibleRequirements($user)->selectRaw('CAST(compliance_requirements.id AS TEXT)'));
+                $this->allowObjects($visible, 'compliance.', 'compliance_audit_id', $this->complianceAccess->visibleAudits($user)->selectRaw('CAST(compliance_audits.id AS TEXT)'));
+            }
+
+            if ($quality) {
+                $this->allowObjects($visible, 'quality.', 'quality_item_id', QualityItem::query()->where('quality_items.customer_id', (int) $user->customer_id)->selectRaw('CAST(quality_items.id AS TEXT)'));
+            }
+
+            if ($objective) {
+                $this->allowObjects($visible, 'objective.', 'objective_id', $this->objectiveAccess->visibleObjectives($user)->selectRaw('CAST(objectives.id AS TEXT)'));
+            }
         });
+    }
+
+    /**
+     * Rows of one module prefix whose object, named in metadata, is in the given visible set.
+     * Compared as text: metadata is JSON, and a cast of a malformed value would fail the whole bell
+     * rather than hide one row. A row without the key matches nothing and stays hidden.
+     *
+     * @param  Builder<Model>  $visibleIds  selecting one text column
+     */
+    private function allowObjects(Builder $visible, string $prefix, string $metadataKey, Builder $visibleIds): void
+    {
+        $visible->orWhere(fn (Builder $rows) => $rows
+            ->where('event_type', 'like', $prefix.'%')
+            ->whereRaw("user_notifications.metadata->>'{$metadataKey}' IN ({$visibleIds->toSql()})", $visibleIds->getBindings()));
     }
 }

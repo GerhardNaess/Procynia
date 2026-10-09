@@ -83,19 +83,14 @@ class RiskAttentionService
             return ['total' => 0, 'categories' => []];
         }
 
-        $customerId = (int) $user->customer_id;
-        $riskIds = $risks->pluck('id')->map(fn (mixed $id): int => (int) $id)->all();
-        $latest = RiskAssessment::latestForRisks($customerId, $riskIds);
-        $expired = $this->expiredAcceptances($customerId, $latest, $today);
-        $overdueActions = $this->overdueActions($customerId, $riskIds, $today);
-
+        $findings = $this->findingsForRisks($risks, $today);
         $byCategory = array_fill_keys(self::CATEGORIES, []);
         $flagged = [];
 
         foreach ($risks as $risk) {
             $id = (int) $risk->id;
 
-            foreach ($this->findingsFor($risk, $latest->get($id), $expired->get($id), $overdueActions->get($id), $today) as $key => $detail) {
+            foreach ($findings[$id] as $key => $detail) {
                 $byCategory[$key][] = $this->row($risk) + ['detail' => $detail];
                 $flagged[$id] = true;
             }
@@ -109,6 +104,45 @@ class RiskAttentionService
                 ->values()
                 ->all(),
         ];
+    }
+
+    /**
+     * The findings for each of the given risks, keyed by risk id and then by category, in display
+     * order — the same rules as the panel, for «Mine oppgaver» (RiskTaskSource). The risks must be
+     * of one customer and already reached through RiskAccessService; a closed risk has none. One
+     * batch whatever their number: assessments, acceptances and tiltak are each read once.
+     *
+     * @param  Collection<int, Risk>  $risks
+     * @return array<int, array<string, array<string, mixed>>>
+     */
+    public function findingsForRisks(Collection $risks, ?CarbonInterface $today = null): array
+    {
+        $today = CarbonImmutable::parse(($today ?? now())->toDateString());
+        $open = $risks->reject(fn (Risk $risk): bool => $risk->status === Risk::STATUS_CLOSED);
+        $findings = [];
+
+        foreach ($risks as $risk) {
+            $findings[(int) $risk->id] = [];
+        }
+
+        if ($open->isEmpty()) {
+            return $findings;
+        }
+
+        $customerId = (int) $open->first()->customer_id;
+        $riskIds = $open->pluck('id')->map(fn (mixed $id): int => (int) $id)->values()->all();
+        $latest = RiskAssessment::latestForRisks($customerId, $riskIds);
+        $expired = $this->expiredAcceptances($customerId, $latest, $today);
+        $overdueActions = $this->overdueActions($customerId, $riskIds, $today);
+
+        foreach ($open as $risk) {
+            $id = (int) $risk->id;
+            $found = $this->findingsFor($risk, $latest->get($id), $expired->get($id), $overdueActions->get($id), $today);
+            // Display order, whatever order the rules were checked in.
+            $findings[$id] = array_intersect_key(array_replace(array_flip(self::CATEGORIES), $found), $found);
+        }
+
+        return $findings;
     }
 
     /**

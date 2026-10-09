@@ -910,7 +910,7 @@ dagen etter). Ingen `next_*`-kolonner lagres.
 | Beregnet plan | Hva forfaller når | — |
 | Trenger oppmerksomhet | Forfalt / mangler / krever beslutning | — |
 | Avvik og forbedringer | Avvik, tiltak, effektverifisering, frister på tiltak | Rutinekontroller |
-| Bjella / Mine oppgaver | Ansvarstildeling (bjelle); samlet oppfølging per leverandør (Mine oppgaver) | Utenfor v2 — punkt 6, [notifications-and-tasks-plan.md](notifications-and-tasks-plan.md) |
+| Bjella / Mine oppgaver | Ansvarstildeling (bjelle); samlet oppfølging per leverandør (Mine oppgaver); fristpåminnelser 60 dager før dokumentasjon utløper | Punkt 6, [notifications-and-tasks-plan.md](notifications-and-tasks-plan.md) |
 
 **Eksempler (oppfølgingsplan fra kravmal):**
 
@@ -1630,7 +1630,7 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 | 3 | ~~Rett rekkefølgen for «siste kontroll» i `SupplierKnowledgeSource`~~ — **ferdig** (`ceaf1c1a`) | Liten retting | — |
 | 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); merget til lokal `main` i `e9add9d8`, ikke pushet | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
 | 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) — **teknisk fullført** på `feat/supplier-requirement-wiki-guidance` (§28); merget til lokal `main` i `2e4f72b4`, ikke pushet | Utvikling | — |
-| 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) — fase 6A–6C (felles fundament + Leverandører) **merget til lokal `main` i `6c8a9641`** (`feat/my-tasks-suppliers`, ikke pushet); 6D og fristvarsling gjenstår ([notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)) | Utvikling, felles | Godkjenning av 6A–6C |
+| 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) — **teknisk fullført**: 6A–6C merget til lokal `main` i `6c8a9641`; 6D (Risiko, Avvik, Etterlevelse, Kvalitet, Mål og KPI), tildelingsvarsler og fristpåminnelser (inkl. Leverandørers 60 dager) på `feat/punkt6-complete`, venter på commit og merge ([notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)) | Utvikling, felles | Godkjenning og merge |
 | 7 | Excel-import av leverandører og profiler | Planlagt | — |
 | 8 | Visning av nyere kravmalversjon; firøyneprinsipp på beslutning | Ved behov | — |
 | 9 | Kobling til Kvalitet (prosess) og Mål og KPI (leverandør-KPI) | Ved behov, eid av målmodulen | v1-plan §7.5–7.6 |
