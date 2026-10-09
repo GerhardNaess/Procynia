@@ -8,8 +8,8 @@ står i [§26](#26-gjeldende-implementeringsstatus).
 Sist statusgjennomgått mot koden: **2026-10-09** (`main` @ `170d9a84`).
 **v2.1 — filopplasting og privat dokumentlager:** **Teknisk fullført – produksjonsavhengigheter
 gjenstår** (merget til lokal `main` i `e9add9d8`; virusskanning blokkerer produksjon) — se §27.
-**Punkt 5 — veiledning fra Enterprise Wiki på kontrollkrav:** **teknisk fullført** på grenen
-`feat/supplier-requirement-wiki-guidance` (committet, ikke merget) — se §28.
+**Punkt 5 — veiledning fra Enterprise Wiki på kontrollkrav:** **teknisk fullført**, merget til lokal
+`main` i `2e4f72b4` (ikke pushet) — se §28.
 Utgangspunkt: `main` @ `b7e45e98` (2026-10-08). Bygger på [Leverandøroppfølging v1](supplier-management-v1-plan.md),
 som er ferdig og merget (`e74d4232`).
 
@@ -1628,7 +1628,7 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 | 2 | ~~Avklar synlighet av kravmaler til gaten er lukket~~ — **ferdig** (`ceaf1c1a`): merket som ikke kvalitetssikret | Produktbeslutning | — |
 | 3 | ~~Rett rekkefølgen for «siste kontroll» i `SupplierKnowledgeSource`~~ — **ferdig** (`ceaf1c1a`) | Liten retting | — |
 | 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); merget til lokal `main` i `e9add9d8`, ikke pushet | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
-| 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) — **teknisk fullført** på `feat/supplier-requirement-wiki-guidance` (§28); committet, ikke merget | Utvikling | — |
+| 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) — **teknisk fullført** på `feat/supplier-requirement-wiki-guidance` (§28); merget til lokal `main` i `2e4f72b4`, ikke pushet | Utvikling | — |
 | 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) | Planlagt, felles | Felles oppgavemodell |
 | 7 | Excel-import av leverandører og profiler | Planlagt | — |
 | 8 | Visning av nyere kravmalversjon; firøyneprinsipp på beslutning | Ved behov | — |
@@ -1767,8 +1767,9 @@ Oppdatering av den med v2.1 er en separat dokumentasjonsoppgave.
 ## 28. Punkt 5 — Veiledning fra Enterprise Wiki på kontrollkrav
 
 Status **2026-10-09:** **teknisk fullført**, sluttkontrollert og committet på
-`feat/supplier-requirement-wiki-guidance` (fra `main` @ `e9add9d8`). Ikke merget. Ingen
-produksjonsavhengigheter utover ordinær merge og migrasjon.
+`feat/supplier-requirement-wiki-guidance` (`ff146771`, fra `main` @ `e9add9d8`) og merget til lokal
+`main` i `2e4f72b4` (ikke pushet). Migrasjonen `2026_10_09_000008` kjøres ved ordinær deploy
+(`php artisan migrate`); ingen andre produksjonsavhengigheter.
 
 ### 28.1 Hva det er
 
