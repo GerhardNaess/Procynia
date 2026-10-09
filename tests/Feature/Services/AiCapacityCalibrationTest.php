@@ -11,9 +11,11 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Commercial\AiCapacityCalibrationService;
 use App\Services\Modules\ModuleEntitlementService;
+use App\Support\Statistics\Distribution;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -64,6 +66,55 @@ class AiCapacityCalibrationTest extends TestCase
         $this->assertSame('ok', $rows['wiki.verify_claim']['assessment']);
         $this->assertSame('too_low', $rows['wiki.generate_page']['assessment']);
         $this->assertSame('too_high', $rows['tender.requirement_answer']['assessment']);
+    }
+
+    public function test_operation_statistics_give_the_cost_distribution_and_failure_and_open_rates(): void
+    {
+        $customer = $this->customer();
+
+        foreach ([0.10, 0.20, 0.30, 0.40, 1.00] as $actual) {
+            $this->attempt($customer, ['operation_key' => 'wiki.verify_claim', 'reserved_cost_nok' => 0.50, 'cost_nok' => $actual]);
+        }
+        // A failed call that settled at zero, a pending and an unresolved call: never actual cost.
+        $this->attempt($customer, ['operation_key' => 'wiki.verify_claim', 'status' => AiUsageAttempt::STATUS_FAILED, 'cost_nok' => null, 'settlement_status' => AiUsageAttempt::SETTLEMENT_RELEASED]);
+        $this->attempt($customer, ['operation_key' => 'wiki.verify_claim', 'status' => AiUsageAttempt::STATUS_TIMEOUT, 'reserved_cost_nok' => 0.5, 'cost_nok' => null, 'settlement_status' => AiUsageAttempt::SETTLEMENT_PENDING]);
+        $this->attempt($customer, ['operation_key' => 'wiki.verify_claim', 'status' => AiUsageAttempt::STATUS_UNCERTAIN, 'reserved_cost_nok' => 0.5, 'cost_nok' => null, 'settlement_status' => AiUsageAttempt::SETTLEMENT_UNRESOLVED]);
+        // Wiki work on a supplier's handed-over source, for the attribution-key narrowing.
+        $this->attempt($customer, ['operation_key' => 'wiki.generate_page', 'resource_type' => 'supplier', 'cost_nok' => 2.0]);
+
+        $service = app(AiCapacityCalibrationService::class);
+        $row = collect($service->operationStatistics($this->filter()))->keyBy('operation_key')['wiki.verify_claim'];
+
+        $this->assertSame(8, $row['calls']);
+        $this->assertSame(5, $row['settled_calls']);
+        $this->assertSame(0.375, $row['failure_rate']);
+        $this->assertSame(0.25, $row['open_rate']);
+        $this->assertSame(0.4, $row['mean_actual_nok']);
+        $this->assertSame(0.3, $row['median_actual_nok']);
+        $this->assertSame(0.4, $row['p75_actual_nok']);
+        $this->assertSame(0.88, $row['p95_actual_nok']);
+        $this->assertSame(0.5, $row['mean_estimate_nok']);
+        $this->assertSame(1.25, $row['estimate_actual_ratio']);
+        $this->assertSame('too_low', $row['assessment']);
+
+        $this->assertSame(['wiki.generate_page'], array_column($service->operationStatistics($this->filter(), 'wiki.supplier'), 'operation_key'));
+        $this->assertSame([], $service->operationStatistics($this->filter(), 'wiki.risk'));
+    }
+
+    public function test_the_shared_distribution_matches_postgres_percentile_cont(): void
+    {
+        $values = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
+        $sql = DB::selectOne(
+            'SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY v) AS p50, PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY v) AS p75, PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY v) AS p95 FROM unnest(ARRAY['.implode(',', $values).']::numeric[]) AS v'
+        );
+        $stats = Distribution::describe($values);
+
+        $this->assertSame(8, $stats['n']);
+        $this->assertSame(3.875, $stats['mean']);
+        $this->assertEqualsWithDelta((float) $sql->p50, $stats['median'], 0.0001);
+        $this->assertEqualsWithDelta((float) $sql->p75, $stats['p75'], 0.0001);
+        $this->assertEqualsWithDelta((float) $sql->p95, $stats['p95'], 0.0001);
+        $this->assertNull(Distribution::describe([])['median']);
     }
 
     public function test_a_customer_report_reads_only_that_customer_and_counts_would_have_blocked(): void

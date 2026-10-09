@@ -70,14 +70,15 @@ class AiCapacityAnalysis extends Command
         }
 
         $this->newLine();
-        $this->info('Estimate vs actual (settled calls with an estimate)');
-        $accuracy = $calibration->estimateAccuracy(new AiUsageFilter($period, customerId: $customer?->id, operation: $operation));
+        $this->info('Per operation — Estimate vs actual (settled calls with an estimate), cost distribution, failure and open rates');
         $this->table(
-            ['Operation', 'Calls', 'Avg estimate NOK', 'Avg actual NOK', 'Median actual', 'p95 actual', 'Estimate/actual', 'Assessment'],
+            ['Operation', 'Calls', 'Failed %', 'Open %', 'Mean actual', 'Median', 'p75', 'p95', 'Mean estimate', 'Estimate/actual', 'Assessment'],
             array_map(fn (array $row): array => [
-                $row['operation_key'], $row['calls'], $row['avg_estimate_nok'], $row['avg_actual_nok'],
-                $row['median_actual_nok'], $row['p95_actual_nok'], $row['estimate_actual_ratio'] ?? '–', $row['assessment'],
-            ], $accuracy),
+                $row['operation_key'], $row['calls'],
+                round($row['failure_rate'] * 100, 1), round($row['open_rate'] * 100, 1),
+                $row['mean_actual_nok'] ?? '–', $row['median_actual_nok'] ?? '–', $row['p75_actual_nok'] ?? '–', $row['p95_actual_nok'] ?? '–',
+                $row['mean_estimate_nok'] ?? '–', $row['estimate_actual_ratio'] ?? '–', $row['assessment'] ?? '–',
+            ], $calibration->operationStatistics(new AiUsageFilter($period, customerId: $customer?->id, operation: $operation))),
         );
 
         return self::SUCCESS;

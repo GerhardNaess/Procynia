@@ -6,7 +6,9 @@ use App\Data\Ai\Usage\AiUsageFilter;
 use App\Data\Ai\Usage\AiUsagePeriod;
 use App\Models\AiUsageAttempt;
 use App\Models\Customer;
+use App\Services\Ai\Experience\AiExperienceAttribution;
 use App\Services\Ai\Usage\AiUsageLedger;
+use App\Support\Statistics\Distribution;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -103,13 +105,12 @@ class AiCapacityCalibrationService
             ->values()
             ->all();
 
-        $costs = array_map(fn (array $row): float => (float) $row['settled_cost_nok'], $rows);
-        sort($costs);
+        $costs = Distribution::describe(array_map(fn (array $row): float => (float) $row['settled_cost_nok'], $rows));
 
         return [
             'customers' => $rows,
-            'median_cost_nok' => $costs === [] ? 0.0 : round($this->percentile($costs, 0.5), 4),
-            'max_cost_nok' => $costs === [] ? 0.0 : round((float) end($costs), 4),
+            'median_cost_nok' => $costs['median'] ?? 0.0,
+            'max_cost_nok' => $costs['max'] ?? 0.0,
         ];
     }
 
@@ -121,46 +122,102 @@ class AiCapacityCalibrationService
      * cost exceeds the average estimate. too_high: the average estimate is more than TOO_HIGH_RATIO
      * times the average actual cost. Reported only; estimates are never changed automatically.
      *
+     * A projection of operationStatistics(), so the CLI and the Admin read the same figures.
+     *
      * @return list<array<string, mixed>>
      */
     public function estimateAccuracy(AiUsageFilter $filter): array
     {
+        return array_values(array_map(fn (array $row): array => [
+            'operation_key' => $row['operation_key'],
+            'calls' => $row['estimated_calls'],
+            'avg_estimate_nok' => $row['mean_estimate_nok'],
+            'avg_actual_nok' => $row['estimated_mean_actual_nok'],
+            'median_actual_nok' => $row['estimated_median_actual_nok'],
+            'p95_actual_nok' => $row['estimated_p95_actual_nok'],
+            'estimate_actual_ratio' => $row['estimate_actual_ratio'],
+            'assessment' => $row['assessment'],
+        ], array_filter($this->operationStatistics($filter), fn (array $row): bool => $row['estimated_calls'] > 0)));
+    }
+
+    /**
+     * Per operation, in one aggregate query: how often it runs, how often it fails or stays open,
+     * the distribution of its actual settled cost (mean, median, p75, p95) and how its preflight
+     * estimate compares with actual cost. Pending and unresolved calls count toward the open rate,
+     * never toward actual cost.
+     *
+     * $attributionKey narrows to one AiExperienceAttribution key (e.g. wiki.supplier).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function operationStatistics(AiUsageFilter $filter, ?string $attributionKey = null): array
+    {
+        $settled = "settlement_status = '".AiUsageAttempt::SETTLEMENT_SETTLED."' AND cost_nok IS NOT NULL";
+        $paired = "{$settled} AND reserved_cost_nok IS NOT NULL";
+        $open = "settlement_status IN ('".implode("', '", AiUsageAttempt::OPEN_SETTLEMENTS)."')";
+
         return $this->scope($filter)
-            ->where('settlement_status', AiUsageAttempt::SETTLEMENT_SETTLED)
-            ->whereNotNull('cost_nok')
-            ->whereNotNull('reserved_cost_nok')
+            ->when($attributionKey !== null, fn (Builder $query) => AiExperienceAttribution::constrain($query, $attributionKey))
             ->select('operation_key')
             ->selectRaw('COUNT(*) as calls')
-            ->selectRaw('AVG(reserved_cost_nok) as avg_estimate_nok')
-            ->selectRaw('AVG(cost_nok) as avg_actual_nok')
-            ->selectRaw('PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cost_nok) as median_actual_nok')
-            ->selectRaw('PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY cost_nok) as p95_actual_nok')
+            ->selectRaw("COUNT(*) FILTER (WHERE status <> '".AiUsageAttempt::STATUS_SUCCESS."') as failed_calls")
+            ->selectRaw("COUNT(*) FILTER (WHERE {$open}) as open_calls")
+            ->selectRaw("COUNT(*) FILTER (WHERE {$settled}) as settled_calls")
+            ->selectRaw("COALESCE(SUM(cost_nok) FILTER (WHERE {$settled}), 0) as settled_cost_nok")
+            ->selectRaw("AVG(cost_nok) FILTER (WHERE {$settled}) as mean_actual_nok")
+            ->selectRaw("PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cost_nok) FILTER (WHERE {$settled}) as median_actual_nok")
+            ->selectRaw("PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cost_nok) FILTER (WHERE {$settled}) as p75_actual_nok")
+            ->selectRaw("PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY cost_nok) FILTER (WHERE {$settled}) as p95_actual_nok")
+            ->selectRaw("COUNT(*) FILTER (WHERE {$paired}) as estimated_calls")
+            ->selectRaw("AVG(reserved_cost_nok) FILTER (WHERE {$paired}) as mean_estimate_nok")
+            ->selectRaw("AVG(cost_nok) FILTER (WHERE {$paired}) as estimated_mean_actual_nok")
+            ->selectRaw("PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cost_nok) FILTER (WHERE {$paired}) as estimated_median_actual_nok")
+            ->selectRaw("PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY cost_nok) FILTER (WHERE {$paired}) as estimated_p95_actual_nok")
             ->groupBy('operation_key')
             ->orderBy('operation_key')
             ->toBase()
             ->get()
             ->map(function (object $row): array {
-                $estimate = (float) $row->avg_estimate_nok;
-                $actual = (float) $row->avg_actual_nok;
-                $p95 = (float) $row->p95_actual_nok;
-                $ratio = $actual > 0 ? $estimate / $actual : null;
+                $calls = (int) $row->calls;
+                $estimate = $row->mean_estimate_nok === null ? null : (float) $row->mean_estimate_nok;
+                $pairedActual = $row->estimated_mean_actual_nok === null ? null : (float) $row->estimated_mean_actual_nok;
+                $pairedP95 = $row->estimated_p95_actual_nok === null ? null : (float) $row->estimated_p95_actual_nok;
+                $ratio = $estimate !== null && $pairedActual !== null && $pairedActual > 0 ? $estimate / $pairedActual : null;
+                $round = fn (mixed $value): ?float => $value === null ? null : round((float) $value, 4);
 
                 return [
                     'operation_key' => (string) $row->operation_key,
-                    'calls' => (int) $row->calls,
-                    'avg_estimate_nok' => round($estimate, 4),
-                    'avg_actual_nok' => round($actual, 4),
-                    'median_actual_nok' => round((float) $row->median_actual_nok, 4),
-                    'p95_actual_nok' => round($p95, 4),
+                    'calls' => $calls,
+                    'failed_calls' => (int) $row->failed_calls,
+                    'open_calls' => (int) $row->open_calls,
+                    'settled_calls' => (int) $row->settled_calls,
+                    'failure_rate' => $calls > 0 ? round((int) $row->failed_calls / $calls, 4) : 0.0,
+                    'open_rate' => $calls > 0 ? round((int) $row->open_calls / $calls, 4) : 0.0,
+                    'settled_cost_nok' => round((float) $row->settled_cost_nok, 4),
+                    'mean_actual_nok' => $round($row->mean_actual_nok),
+                    'median_actual_nok' => $round($row->median_actual_nok),
+                    'p75_actual_nok' => $round($row->p75_actual_nok),
+                    'p95_actual_nok' => $round($row->p95_actual_nok),
+                    'estimated_calls' => (int) $row->estimated_calls,
+                    'mean_estimate_nok' => $round($estimate),
+                    'estimated_mean_actual_nok' => $round($pairedActual),
+                    'estimated_median_actual_nok' => $round($row->estimated_median_actual_nok),
+                    'estimated_p95_actual_nok' => $round($pairedP95),
                     'estimate_actual_ratio' => $ratio === null ? null : round($ratio, 2),
-                    'assessment' => match (true) {
-                        $p95 > $estimate => self::ASSESSMENT_TOO_LOW,
-                        $ratio !== null && $ratio > self::TOO_HIGH_RATIO => self::ASSESSMENT_TOO_HIGH,
-                        default => self::ASSESSMENT_OK,
-                    },
+                    'assessment' => $estimate === null ? null : self::assess($estimate, $pairedP95 ?? 0.0, $ratio),
                 ];
             })
             ->all();
+    }
+
+    /** ok | too_low | too_high for an average estimate against the actual cost it stood in for. */
+    public static function assess(float $meanEstimate, float $p95Actual, ?float $ratio): string
+    {
+        return match (true) {
+            $p95Actual > $meanEstimate => self::ASSESSMENT_TOO_LOW,
+            $ratio !== null && $ratio > self::TOO_HIGH_RATIO => self::ASSESSMENT_TOO_HIGH,
+            default => self::ASSESSMENT_OK,
+        };
     }
 
     /**
@@ -238,16 +295,7 @@ class AiCapacityCalibrationService
             ->where('started_at', '>=', $filter->period->start)
             ->where('started_at', '<', $filter->period->end)
             ->when($filter->customerId !== null, fn (Builder $query) => $query->where('customer_id', $filter->customerId))
+            ->when($filter->feature !== null, fn (Builder $query) => $query->where('feature', $filter->feature))
             ->when($filter->operation !== null, fn (Builder $query) => $query->where('operation_key', $filter->operation));
-    }
-
-    /** @param list<float> $sorted */
-    private function percentile(array $sorted, float $fraction): float
-    {
-        $index = ($fraction * (count($sorted) - 1));
-        $lower = (int) floor($index);
-        $upper = (int) ceil($index);
-
-        return $sorted[$lower] + ($sorted[$upper] - $sorted[$lower]) * ($index - $lower);
     }
 }
