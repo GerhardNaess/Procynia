@@ -3093,6 +3093,7 @@ return [
             'heading' => 'Kravmaler',
             'intro' => 'Et startpunkt for kontrollkravene. En kravmal legger kravene sine til i Kontrollkrav. Hvilke leverandører hvert krav gjelder, avgjøres av leverandørprofilen og kritikaliteten.',
             'note' => 'Kravmalene beskriver typiske leverandørkrav, ikke juridisk fasit. Tekst, nivå og regel kan tilpasses etterpå.',
+            'unreviewed' => 'Kravmalene er ikke faglig eller juridisk kvalitetssikret ennå. Bruk dem som et utgangspunkt, og vurder tekst, nivå og intervall før kravene tas i bruk.',
             'suited_for' => 'Passer for',
             'item_count' => ':count krav',
             'mandatory_count' => ':count obligatoriske',
@@ -3114,7 +3115,6 @@ return [
                     'purpose' => 'Etikk, økonomi, kvalitet, lønns- og arbeidsvilkår og miljø.',
                     'suited_for' => 'Alle leverandører. Flere av kravene gjelder bare viktige og kritiske leverandører, og leverandører som omfattes av særlige offentlige kontraktskrav.',
                 ],
-            'unreviewed' => 'Kravmalene er ikke faglig eller juridisk kvalitetssikret ennå. Bruk dem som et utgangspunkt, og vurder tekst, nivå og intervall før kravene tas i bruk.',
                 'it_saas' => [
                     'name' => 'IT/SaaS-leverandør',
                     'purpose' => 'Informasjonssikkerhet, personvern og kontinuitet.',

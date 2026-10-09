@@ -3089,6 +3089,7 @@ return [
             'heading' => 'Requirement templates',
             'intro' => 'A starting point for your control requirements. A template adds its requirements to Control requirements. Which suppliers each requirement applies to is decided by the supplier profile and the criticality.',
             'note' => 'The templates describe typical supplier requirements, not a legal answer. Text, level and rule can be adapted afterwards.',
+            'unreviewed' => 'The templates have not yet been reviewed professionally or legally. Use them as a starting point, and check text, level and interval before you rely on the requirements.',
             'suited_for' => 'Suited for',
             'item_count' => ':count requirements',
             'mandatory_count' => ':count mandatory',
@@ -3110,7 +3111,6 @@ return [
                     'purpose' => 'Ethics, finances, quality, pay and working conditions, and environment.',
                     'suited_for' => 'All suppliers. Several of the requirements apply only to important and critical suppliers, and to suppliers covered by special public contract terms.',
                 ],
-            'unreviewed' => 'The templates have not yet been reviewed professionally or legally. Use them as a starting point, and check text, level and interval before you rely on the requirements.',
                 'it_saas' => [
                     'name' => 'IT/SaaS supplier',
                     'purpose' => 'Information security, privacy and continuity.',
