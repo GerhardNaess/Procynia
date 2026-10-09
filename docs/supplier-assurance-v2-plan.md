@@ -1,11 +1,13 @@
 # Plan: Leverandørkontroll — Leverandøroppfølging v2
 
-Status: **implementeringskontrakt for v2. Fase 1–9 er implementert på `feat/supplier-assurance`
-(2026-10-08), ikke merget.** Beslutningene i §19.1 er låst; endringer i dem krever en ny beslutning,
-ikke en tolkning under implementering. Faglig/juridisk review av kravmalene er fortsatt en åpen
-release-gate — se §19.2.
+Status: **v2 er implementert (fase 1–9), merget til `main` i `7f32a7b7` og pushet 2026-10-08.**
+Beslutningene i §19.1 er låst; endringer i dem krever en ny beslutning, ikke en tolkning under
+implementering. Faglig/juridisk review av kravmalene er fortsatt en **åpen release-gate for
+malinnholdet** — se §19.2. Gjeldende implementeringsstatus, avvik fra planen og gjenstående arbeid
+står i [§26](#26-gjeldende-implementeringsstatus).
+Sist statusgjennomgått mot koden: **2026-10-09** (`main` @ `170d9a84`).
 Utgangspunkt: `main` @ `b7e45e98` (2026-10-08). Bygger på [Leverandøroppfølging v1](supplier-management-v1-plan.md),
-som er ferdig og merget.
+som er ferdig og merget (`e74d4232`).
 
 Denne planen **utvider** v1. Alt v1 har låst (v1-plan §16.1), står ved lag med mindre det er nevnt
 eksplisitt i §2.2 nedenfor.
@@ -696,6 +698,16 @@ Uendret fra v1: leverandørens dokumenter legges aldri i Wiki. Wiki eier **veile
 kontrollerer vi lønns- og arbeidsvilkår», «Slik gjennomfører vi aktsomhetsvurdering». En lenke fra
 kontrollkrav til Wiki-side er utenfor v2 (§18).
 
+**Tillegg etter v2 (`a208e476`, 2026-10-08):** leverandørsiden har fått «Lag kunnskapsartikkel»
+gjennom den felles `WikiKnowledgeHandoffService` (samme mekanisme som Risiko, Etterlevelse, Avvik og
+Mål). Det er en eksplisitt, bearbeidet overføring av *læring* — profil, siste kontroll per
+kontrollkrav og kontrollbeslutning med begrunnelse — ikke av leverandørens dokumenter. Brukeren
+velger seksjoner selv (ingenting forhåndsvalgt); navn på personer og kontaktdata tilbys aldri.
+Krever `supplier.assure` **og** `wiki.source.manage` og kundens Wiki-modul. Wikis egen AI-behandling,
+gjennomgang og publisering gjelder; proveniens lagres i `enterprise_wiki_document_origins`
+(`source_module = supplier`). Dette endrer ikke prinsippet over: leverandørdokumenter legges aldri i
+Wiki, og Leverandørkontroll har fortsatt ingen AI (§2 pkt. 10).
+
 ### 10.6 Filopplasting
 
 Utenfor v2. Mulig v2.1: privat modul-eid lager (v1 §4.4). Datamodellen over er laget slik at en fil
@@ -973,6 +985,9 @@ Intervall i måneder; «utløp» = ved dokumentets utløp. **Fet** = obligatoris
 | 8 | **Bemanning** | `sector:staffing` | Lønn, likebehandling, seriøsitet | ST1, ST2, L1, L4, E2 | **ST1** | 8 |
 | 9 | **Helse** | `sector:health_care`, `personal_data`, `special_category_data`, `on_site_work` | Personvern, sikkerhet, taushetsplikt | HE1, HE2, HE3, P1, P2, P4, P5, S2, S4 | **HE1, HE2, P1** | 8 |
 
+I UI ligger kravmalene som en seksjon («Ta i bruk kravmal») på fanen **Kontrollkrav**, ikke som en
+egen fane.
+
 **Kravnivå og «Gates»-kolonnen — låst presisering (2026-10-08):**
 
 - Kravnivået tilhører bibliotekkravet (§16.3) og er likt uavhengig av hvilken kravmal som
@@ -1042,6 +1057,10 @@ endring. Intervall i måneder; «utløp» = ved dokumentets utløp.
 | HE2 | Taushetserklæring for personell | privacy | O | `sector:health_care` ∧ `on_site_work` | FK | — | confidentiality_agreement |
 | HE3 | Politiattest der regelverket krever det | ethics | V | `sector:health_care` ∧ `on_site_work` | FK | — | control_report |
 
+**Implementert (fase 8):** 39 av de 40 kravene over. **M3** (klima-/miljørapportering) brukes ikke av
+noen mal og er derfor ikke i `RequirementLibrary` (strukturtesten forbyr ubrukte krav). Kunden kan
+opprette et tilsvarende krav selv.
+
 Nivå for samme biblioteknøkkel er ett nivå. Når en mal trenger et strengere nivå (E2 i mal 6),
 viser malen det som anbefaling ved import; kunden velger. Biblioteket inneholder ingen
 lovhenvisninger som tekst i v2 utover `basis_text`-forslag som kvalitetssikres (§19.2).
@@ -1085,7 +1104,7 @@ krav og overstyringer (fase 2), kontroller (fase 3), beslutninger (fase 4) og ak
 | Sikkerhetsloven / skjermingsverdige leveranser | Eget regime med egne krav; kan bli egen kravmal senere |
 | Modellering av anskaffelsen (konkurranse, kravspesifikasjon, tildelingskriterier) | §5.4 |
 | Etterlevelse-visning av leverandørkontroll («3 av 5 databehandlere mangler DBA») | Eies av Etterlevelse; krever lekkasjeanalyse |
-| Lenke fra kontrollkrav til Wiki-veiledning | Senere; Wiki eier innholdet |
+| Lenke fra kontrollkrav til Wiki-veiledning | Senere; Wiki eier innholdet. (Den motsatte retningen — «Lag kunnskapsartikkel» fra leverandøren — er bygget etter v2, se §10.5) |
 | Leverandørrevisjon som planlagt revisjon (`ComplianceAudit`) | §6.4 |
 | Firøyneprinsipp på beslutning | Senere ved behov |
 | Automatisk oppdatering fra nyere kravmalversjon | Senere |
@@ -1170,7 +1189,15 @@ Gaten er oppfylt når:
 2. alle 39 kravene har status `Godkjent`, og endringene for krav med `Må endres` er gjort i koden,
 3. dato og godkjent versjon (commit) er fylt ut.
 
-Produksjonsmerge av `feat/supplier-assurance` bør vente til gaten er oppfylt.
+~~Produksjonsmerge av `feat/supplier-assurance` bør vente til gaten er oppfylt.~~ **Oppdatert
+2026-10-09:** Grenen ble etter eget valg merget til `main` (`7f32a7b7`, 2026-10-08) før gaten var
+oppfylt. Gaten gjelder fortsatt — nå for **malinnholdet**, ikke for koden: kravmalene skal ikke
+presenteres for kunder som kvalitetssikret innhold før review-dokumentet er signert. Per 2026-10-09
+står review-dokumentet fortsatt som «Ikke godkjent», uten navngitt reviewer, og alle 39 krav som
+`Ikke vurdert`. **Besluttet 2026-10-09 (`ceaf1c1a`):** malene forblir tilgjengelige, men Kontrollkrav
+og bekreftelsen «Ta i bruk kravmal» sier tydelig at de ikke er faglig eller juridisk kvalitetssikret.
+Merkingen styres av `RequirementTemplates::CONTENT_REVIEWED` (nå `false`), som settes til `true` bare
+i samme commit som registrerer det signerte reviewet.
 
 ---
 
@@ -1461,9 +1488,15 @@ dato ved Midlertidig akseptert; «Gjelder ikke denne leverandøren» vises ikke 
 Kontrollstatus-blokken viser alltid «Beslutning» og «Tilstand nå» som separate linjer og aldri prosent;
 kort rendres ikke når prop er `null`.
 
-### 24.3 E2E (Playwright) — **3 reiser** i `tests/e2e/supplier-assurance.spec.js`
+### 24.3 E2E (Playwright) — `tests/e2e/supplier-assurance.spec.js`
 
 Egen GRC-fixture-kunde, markørnavngitte data, `remaining()` = 0, triggere av ved opprydding.
+
+**Faktisk implementert (status 2026-10-09):** de tre reisene under ble delt opp i **8 mindre
+reiser** (profil og historikk · anvendelse og overstyring · kontroll med dokument og
+øyeblikksbilde · beslutning som står når tilstanden endres · kravmal fyller Kontrollkrav · forfalt
+kontroll fra registeret · aktsomhet og Trenger oppmerksomhet · overlappende kravmal legger bare til
+det som mangler). Dekningen av de tre opprinnelige reisene er beholdt.
 
 1. **Fra profil til godkjent IT-leverandør:** ta i bruk mal 2/3 → fyll ut profil (databehandler, data
    utenfor EØS) → kravprofil med «Gjelder fordi» → utelukk ett viktig krav med begrunnelse → Krever
@@ -1500,3 +1533,102 @@ Egen GRC-fixture-kunde, markørnavngitte data, `remaining()` = 0, triggere av ve
 15. Trenger oppmerksomhet leser bare Supplier-tabeller.
 16. En kunde uten kontrollkrav ser ingen forskjell fra v1, bortsett fra profilkortet.
 17. Ingen eksisterende v1-data endres av migrasjonene, og `supplier_assessments` endres ikke.
+
+---
+
+## 26. Gjeldende implementeringsstatus
+
+Statusgjennomgang **2026-10-09** mot `main` @ `170d9a84`. «Verifisert mot kode» betyr at tabeller,
+tjenester, ruter, rettigheter og tester er kontrollert i repoet. Testtallene fra merge-portene er
+hentet fra commit- og prosjektnotater, ikke kjørt på nytt i denne gjennomgangen.
+
+Statusverdier: **Fullført og verifisert** · **Delvis** · **Planlagt** · **Blokkert** · **Uavklart**.
+
+### 26.1 Faser — v1 og v2
+
+| Fase | Innhold | Commit | Status |
+|---|---|---|---|
+| v1-1 | Tilgang, entitlement-kontrakt, navigasjon | `63a90849` | Fullført og verifisert |
+| v1-2 | Register og livssyklus | `458e9bce` | Fullført og verifisert |
+| v1-3 | Kritikalitet | `26a2896d` | Fullført og verifisert |
+| v1-4 | Leverandørvurderinger | `af4946b4` | Fullført og verifisert |
+| v1-5 | Dokumentasjonsoversikt | `60f27ddf` | Fullført og verifisert |
+| v1-6 | Avvik og forbedringer (handoff) | `fc41a5f6` | Fullført og verifisert |
+| v1-7 | `RiskCreator` + Risiko | `75a52797`, `c0b5ba3f` | Fullført og verifisert |
+| v1-8 | Krav i Etterlevelse (kobling) | `51d84411` | Fullført og verifisert |
+| v1-9 | Trenger oppmerksomhet, lesbarhet, merge-port | `c18a4ea1`, `36cc86ad` | Fullført og verifisert — merget `e74d4232` |
+| v2-1 | `supplier.assure` + leverandørprofil | `ffe471c9` | Fullført og verifisert |
+| v2-2 | Kontrollkrav, anvendelse, overstyring | `68fa236b` | Fullført og verifisert |
+| v2-3 | Dokumentasjon som grunnlag, kontroller | `94e10e06` | Fullført og verifisert |
+| v2-4 | Kontrolltilstand og beslutning | `5eedd781` | Fullført og verifisert |
+| v2-5 | Kravmaler 1–3 | `1a5c028e` | Fullført teknisk — innhold ikke faglig godkjent (§19.2) |
+| v2-6 | Oppfølgingsplan, signal 6–9, handoff fra kontroll | `0efda835`, `342358c6` | Fullført og verifisert |
+| v2-7 | Aktsomhet, signal 10–11, mal 4 | `26edaa76` | Fullført og verifisert |
+| v2-8 | Kravmaler 5–9 | `982a7742` | Fullført teknisk — innhold ikke faglig godkjent (§19.2) |
+| v2-9 | Faner, Sikkerhet og personvern, UX, merge-port | `24b81fce`, `c26b6ffc` | Fullført og verifisert — merget `7f32a7b7` |
+| Etter v2 | «Lag kunnskapsartikkel» til Enterprise Wiki | `f06339e0`, `a208e476` | Fullført og verifisert (§10.5) |
+| Release-gate | Faglig/juridisk review av 9 maler og 39 krav | — | **Blokkert** — reviewer ikke utnevnt |
+
+### 26.2 Verifisert mot koden
+
+| Område | Faktisk i koden |
+|---|---|
+| Modul og pakke | Modul `supplier` (sort_order 50) er et eget, uavhengig **tilvalg** (`kind: option`) i `config/procynia_modules.php`. GRC finnes bare som en navngitt `bundle` (risk + objectives + compliance + supplier). Rute-gaten er `app.supplier-management.` → `supplier` |
+| Rettigheter | `supplier.view/edit/assess/assure/delete`; domenet `supplier` står i `explicitGrantDomains()` (System Owner fail-closed); ikke i `areaScopedDomains()` (ingen fagområde) |
+| Tabeller | 9 v1-tabeller/endringer (`2026_10_07_000001–000009`) og 11 v2-migrasjoner (`2026_10_08_000002–000012`), alle med `customer_id` og sammensatte tenant-FK-er |
+| Uforanderlighet | 9 historikktabeller med både modellvakt og PostgreSQL-trigger: statusendringer, kritikalitetsendringer, leverandørvurderinger, profilendringer, overstyringer, kontroller, kontrollgrunnlag, beslutninger, aktsomhetsvurderinger |
+| Tjenester | 10 i `App\Services\Suppliers` og 15 i `App\Services\Suppliers\Assurance` (§21 + `SupplierRequirementPayload`, `SupplierRequirementReasonText`, `SupplierRequirementRule`) |
+| Trenger oppmerksomhet | 11 signaler (5 fra v1, 6 fra v2), leser bare Supplier-tabeller |
+| Kravmaler | 9 maler (`RequirementTemplates.php`, alle `version = '1'`), 39 krav (`RequirementLibrary.php`) |
+| UI | Register og Kontrollkrav (to faner under Leverandører); leverandørside med Kontrollstatus over fanene Oversikt · Krav og kvalifikasjoner · Dokumentasjon · Vurderinger · Aktsomhet · Historikk; PageHelp på alle tre sider |
+| Koblinger | Risiko og Avvik: skriv fra Leverandører, omvendt visning «Gjelder leverandør» på risikoside og saksside (gated). Etterlevelse: kobling (v1) og forankring (v2), **ingen** omvendt visning. Wiki: kunnskapsartikkel med proveniens, ingen omvendt visning. Kvalitet, Mål og KPI: ingen kobling. Doffin-«Konkurrenter» (`/app/suppliers`, `doffin_suppliers`) er et separat Anbud-domene uten kobling |
+
+### 26.3 Tester og verifikasjon
+
+| Nivå | Leverandørrelaterte tester (2026-10-09) |
+|---|---|
+| PHP Feature | 17 filer, ca. 66 tester (tilgang, register, kritikalitet, vurdering, dokumentasjon, handoff, risiko, krav, attention, profil, kontrollkrav, kontroller, beslutning, aktsomhet, kravmaler, query count) + `WikiKnowledgeHandoffTest` |
+| PHP Unit | 8 filer, 25 tester (predikater, anvendelse, visningsstatus, resolver, oppfølgingsplan, vurderingsplan, malstruktur, oversettelser) |
+| JS (Vitest) | 9 filer, 72 tester |
+| E2E (Playwright) | `supplier-management.spec.js` (8 reiser), `supplier-assurance.spec.js` (8 reiser), egen GRC-fixture-kunde |
+| Merge-port v1 (2026-10-07) | PHP 6981 bestått / 3 hoppet over (Redis lokalt) · JS 1264/1264 · E2E 256/256 |
+| Merge-port v2 (2026-10-08) | PHP 7124 bestått / 3 hoppet over · JS 1319/1319 · E2E 265/265 · migrasjon rollback/reapply identisk |
+
+Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret).
+
+### 26.4 Avvik mellom plan og implementasjon
+
+| Planen sa | Faktisk | Vurdering |
+|---|---|---|
+| Kravbibliotek med 40 krav (§16.3) | 39 krav; M3 er ikke implementert | Bevisst: ingen mal bruker M3 |
+| Eget kort «Krav og kvalifikasjoner» på Oversikt (§22.1) | Kontrollstatus over fanene er sammendraget | Bevisst, dokumentert i §22.1 |
+| 3 E2E-reiser (§24.3) | 8 mindre reiser | Samme dekning, bedre isolasjon |
+| «Produksjonsmerge bør vente» på review (§19.2) | Merget 2026-10-08 før review | Eget valg; gaten gjelder nå malinnholdet |
+| Ingen Wiki-kobling i v2 (§18) | «Lag kunnskapsartikkel» bygget etter v2 | Felles Wiki-handoff; ikke dokumenter i Wiki |
+| Gjeldende kontroll = senest `evaluated_on`, så id (§8.2) | `SupplierKnowledgeSource` valgte «siste kontroll» etter `recorded_at` | **Rettet 2026-10-09 (`ceaf1c1a`):** bruker nå `SupplierRequirementStatus::current()`, samme regel som leverandørsiden; regresjonstest i `SupplierRequirementEvaluationTest` |
+
+### 26.5 Uavklart
+
+1. **Hvem er faglig og juridisk reviewer** for kravmalene (§19.2)? Uten navngitt eier kan gaten ikke lukkes.
+2. ~~Synlighet av maler før review~~ — **besluttet:** tilgjengelige, merket som ikke kvalitetssikret (§19.2).
+3. **Omvendt visning fra Etterlevelse** (krav → leverandører som peker på det): fortsatt ikke vedtatt;
+   krever lekkasjeanalyse eid av Etterlevelse (§18).
+4. ~~Rekkefølgen for «siste kontroll» i Wiki-utkastet~~ — **rettet** (§26.4).
+
+### 26.6 Gjenstående arbeid — anbefalt rekkefølge
+
+| # | Arbeid | Type | Avhengighet |
+|---|---|---|---|
+| 1 | Utnevn reviewer og gjennomfør faglig/juridisk review av 39 krav og 9 maler; fyll `basis_text`/`guidance` der review krever det | Release-gate | Produktbeslutning |
+| 2 | ~~Avklar synlighet av kravmaler til gaten er lukket~~ — **ferdig** (`ceaf1c1a`): merket som ikke kvalitetssikret | Produktbeslutning | — |
+| 3 | ~~Rett rekkefølgen for «siste kontroll» i `SupplierKnowledgeSource`~~ — **ferdig** (`ceaf1c1a`) | Liten retting | — |
+| 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) | Planlagt | Sikkerhetsdesign for filer |
+| 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) | Planlagt | Wiki |
+| 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) | Planlagt, felles | Felles oppgavemodell |
+| 7 | Excel-import av leverandører og profiler | Planlagt | — |
+| 8 | Visning av nyere kravmalversjon; firøyneprinsipp på beslutning | Ved behov | — |
+| 9 | Kobling til Kvalitet (prosess) og Mål og KPI (leverandør-KPI) | Ved behov, eid av målmodulen | v1-plan §7.5–7.6 |
+
+Utenfor scope og fortsatt bevisst ikke planlagt: leverandørportal og utsendte spørreskjema, AI-forslag,
+score/prosent, eksterne oppslag (Brønnøysund, kreditt, landrisiko), modellering av anskaffelsen,
+cross-module signaler i Trenger oppmerksomhet.

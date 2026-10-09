@@ -1,6 +1,9 @@
 # Plan: Leverandøroppfølging v1
 
-Status: **besluttet — implementeringskontrakt for v1.** Ikke implementert.
+Status: **v1 er implementert (fase 1–9) og merget til `main` i `e74d4232` (2026-10-07).** Planen
+står som implementeringskontrakt for v1. Videre utvikling styres av
+[Leverandørkontroll — v2-planen](supplier-assurance-v2-plan.md), som også har gjeldende
+implementeringsstatus for hele modulen (v2-plan §26). Sist statusgjennomgått: **2026-10-09**.
 Utgangspunkt: `main` @ `6caf7970` (2026-10-07).
 
 Beslutningene i §16 er låst. Endringer i dem krever en ny beslutning, ikke en tolkning under
@@ -37,6 +40,13 @@ Alt annet — risiko, krav, avvik, tiltak, KPI — eies av modulene som allerede
 | Anbud | Eget tillegg, utenfor stigen |
 
 **Leverandøroppfølging er den nye funksjonelle modulen som gjør GRC-pakken større enn ISO-pakken.**
+
+> **Oppdatert 2026-10-09:** Pakkestigen over er erstattet (`b7e45e98`, 2026-10-08) av **Basis +
+> uavhengige tilvalg**. `supplier` er nå et eget tilvalg (`kind: option`) som kan kjøpes uten Risiko,
+> Mål og KPI eller Etterlevelse. Styring, ISO og GRC finnes bare som navngitte utvalg (`bundles`);
+> GRC = risk + objectives + compliance + supplier. Rail-raden er `built: true`. Koblingspanelene mot
+> Risiko, Avvik og Etterlevelse var allerede gated på modul + rettighet, ikke på pakke, og påvirkes
+> ikke.
 
 Denne planen endrer verken `config/procynia_modules.php` eller entitlements. Modulen `supplier`
 finnes allerede i konfigurasjonen og ligger allerede i `grc`; rail-raden står som `built: false`, så
@@ -709,15 +719,15 @@ Tre spesifikasjoner, med egen fixture, markørnavngitte data og `remaining()` = 
 | Kontraktsforhandling, avtaleversjoner, e-signatur, kontraktsworkflow, full kontraktslivssyklus | Kontraktsstyring; egen planlagt modul (`contracts`) |
 | Dokumentopplasting og eget dokumentlager | Kan vurderes i v1.1 (§4.4) |
 | Leverandørspesifikke dokumenter i Enterprise Wiki | Wiki er kunnskapslag, ikke arkiv (§4.4) |
-| **Leverandørspesifikk vurdering av enkeltkrav** | Egen vurderingstype; kan bli egen modell senere hvis behovet blir reelt (§7.3) |
+| **Leverandørspesifikk vurdering av enkeltkrav** | Egen vurderingstype; kan bli egen modell senere hvis behovet blir reelt (§7.3). *Bygget i v2 som kontroller av kontrollkrav (ikke av Etterlevelse-krav), se v2-plan §8* |
 | Visning av kravets etterlevelsesstatus på leverandøren | Den gjelder virksomheten, ikke leverandøren (§7.3) |
 | Leverandørportal, self-service, egenvurdering fra leverandør | Eksterne brukere er en ny sikkerhetsmodell |
 | Spørreskjema/due diligence-utsending | Krever portal eller e-postflyt |
-| Avansert ESG, åpenhetslov-vurderinger | Senere, eget behov |
+| Avansert ESG, åpenhetslov-vurderinger | Senere, eget behov. *Delvis dekket i v2 av aktsomhetsvurderingen, v2-plan §11* |
 | Automatiske kredittsjekker, Brønnøysund-oppslag, tredjepartsfeeds | Eksterne integrasjoner, kostnad, personvern |
 | AI-scoring, AI-forslag til kritikalitet | Ikke behov i v1; AI skal støtte, ikke vurdere |
 | Poengscore, vekting, beregnet kritikalitet, kundedefinerte kriterier | Scoringsmotor |
-| Påkrevde dokumenttyper per kritikalitet | Regelmotor |
+| Påkrevde dokumenttyper per kritikalitet | Regelmotor. *Erstattet i v2 av en avgrenset anvendelsesregel over faste predikater, v2-plan §5.3* |
 | Avanserte dashboards, grafer, heatmap | Register + Trenger oppmerksomhet er nok |
 | Egen risikomotor, kravregister, etterlevelsesvurdering, avviks-/tiltaksmotor, KPI-motor | Eies av eksisterende moduler (§7.1) |
 | Trenger oppmerksomhet-signaler som leser andre moduler | §8 |
