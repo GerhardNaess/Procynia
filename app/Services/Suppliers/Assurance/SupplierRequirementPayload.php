@@ -43,6 +43,7 @@ class SupplierRequirementPayload
         private readonly SupplierRequirementApplicability $applicability,
         private readonly SupplierRequirementReasonText $text,
         private readonly SupplierAssuranceResolver $resolver,
+        private readonly SupplierRequirementWikiGuidance $wikiGuidance,
     ) {}
 
     /**
@@ -64,6 +65,8 @@ class SupplierRequirementPayload
 
         $decisions = collect($this->applicability->for($supplier));
         $anchors = $this->anchors($user, $decisions->map(fn (array $decision) => $decision['requirement']));
+        // Veiledning fra Enterprise Wiki — null without Wiki read access, so nothing is said about it.
+        $guidance = $this->wikiGuidance->forRequirements($user, $decisions->map(fn (array $decision) => $decision['requirement']));
         $today = now();
         $documents = $supplier->documents()->get()->keyBy('id');
         $evaluations = SupplierRequirementEvaluation::query()
@@ -79,7 +82,7 @@ class SupplierRequirementPayload
         $current = [];
 
         $applicable = $decisions->filter(fn (array $decision): bool => $decision['applies'])
-            ->map(function (array $decision) use ($anchors, $canOverride, $canEvaluate, $evaluations, $documents, $today, $entries, &$current): array {
+            ->map(function (array $decision) use ($anchors, $guidance, $canOverride, $canEvaluate, $evaluations, $documents, $today, $entries, &$current): array {
                 $requirement = $decision['requirement'];
                 $inForce = SupplierRequirementStatus::current($evaluations->get($requirement->id) ?? []);
                 $documentsNow = $inForce?->documents->map(fn (SupplierRequirementEvaluationDocument $used) => $documents->get($used->supplier_document_id))->filter() ?? collect();
@@ -88,7 +91,7 @@ class SupplierRequirementPayload
                     $current[(int) $requirement->id] = $inForce;
                 }
 
-                return $this->requirement($requirement, $anchors) + [
+                return $this->requirement($requirement, $anchors, $guidance) + [
                     'reason' => $this->text->because($decision),
                     'exclusion_ignored' => $decision['exclusion_ignored'],
                     'evaluated' => $inForce !== null,
@@ -115,7 +118,7 @@ class SupplierRequirementPayload
             });
 
         $excluded = $decisions->filter(fn (array $decision): bool => $decision['source'] === SupplierRequirementApplicability::SOURCE_MANUAL_EXCLUDE)
-            ->map(fn (array $decision): array => $this->requirement($decision['requirement'], $anchors) + [
+            ->map(fn (array $decision): array => $this->requirement($decision['requirement'], $anchors, $guidance) + [
                 'reason' => $this->text->notApplying($decision),
                 'rule_text' => $this->text->rule((array) $decision['requirement']->applies_when),
                 'can_clear' => $canOverride,
@@ -185,6 +188,8 @@ class SupplierRequirementPayload
                 'can_override' => $canOverride,
                 'can_evaluate' => $canEvaluate,
                 'can_add_for_supplier' => $canOverride,
+                // Guidance on this supplier's own requirements is managed here; the catalogue's on Kontrollkrav.
+                'can_manage_wiki_guidance' => $canOverride && $this->wikiGuidance->canManage($user),
                 // Says why nothing can be changed, for someone who otherwise could.
                 'ended' => $supplier->isEnded() && $this->access->canAssure($user),
             ],
@@ -291,8 +296,9 @@ class SupplierRequirementPayload
         }
 
         $anchors = $this->anchors($user, $requirements);
+        $guidance = $this->wikiGuidance->forRequirements($user, $requirements);
 
-        return $this->sorted($requirements->map(fn (SupplierControlRequirement $requirement): array => $this->requirement($requirement, $anchors) + [
+        return $this->sorted($requirements->map(fn (SupplierControlRequirement $requirement): array => $this->requirement($requirement, $anchors, $guidance) + [
             'rule_text' => $this->text->rule((array) $requirement->applies_when),
             'rule' => SupplierRequirementRule::toForm((array) $requirement->applies_when),
             'applies_to_count' => $counts[(int) $requirement->id] ?? 0,
@@ -387,9 +393,10 @@ class SupplierRequirementPayload
 
     /**
      * @param  array<int, array<string, mixed>>  $anchors
+     * @param  array<int, list<array<string, mixed>>>|null  $guidance  null without Wiki read access
      * @return array<string, mixed>
      */
-    private function requirement(SupplierControlRequirement $requirement, array $anchors): array
+    private function requirement(SupplierControlRequirement $requirement, array $anchors, ?array $guidance): array
     {
         return [
             'id' => (int) $requirement->id,
@@ -406,6 +413,8 @@ class SupplierRequirementPayload
             'supplier_specific' => $requirement->supplier_id !== null,
             // Absent, not null-with-a-reason, when the person may not see it.
             'anchor' => $requirement->compliance_requirement_id !== null ? ($anchors[(int) $requirement->compliance_requirement_id] ?? null) : null,
+            // Veiledning fra Enterprise Wiki: the pages the person can read; null when they cannot read the Wiki.
+            'wiki_guidance' => $guidance === null ? null : ($guidance[(int) $requirement->id] ?? []),
         ];
     }
 

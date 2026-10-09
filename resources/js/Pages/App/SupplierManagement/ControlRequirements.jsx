@@ -7,6 +7,7 @@ import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } 
 import ControlRequirementForm from './ControlRequirementForm';
 import RequirementTemplates from './RequirementTemplates';
 import SupplierTabs from './SupplierTabs';
+import WikiGuidance from './WikiGuidance';
 import { LEVEL_TONES, anchorLabel, appliesToText, controlPointLabel, groupByTheme, intervalLabel, levelLabel } from './controlRequirements';
 import { supplierHelp } from './supplierHelp';
 
@@ -26,6 +27,8 @@ export default function SupplierControlRequirementsIndex() {
     const c = tr.control ?? {};
     const k = c.catalogue ?? {};
     const canManage = permissions.can_manage ?? false;
+    // Veiledning fra Enterprise Wiki: supplier.assure and Wiki read access (plan §28).
+    const canManageGuidance = permissions.can_manage_wiki_guidance ?? false;
     // 'new', a requirement id being edited, or null.
     const [editing, setEditing] = useState(null);
     const close = () => setEditing(null);
@@ -110,6 +113,7 @@ export default function SupplierControlRequirementsIndex() {
                                             {row.anchor.retired && ` (${c.anchor_retired ?? 'utgått i Etterlevelse og revisjon'})`}
                                         </p>
                                     )}
+                                    <WikiGuidance requirementId={row.id} guidance={row.wiki_guidance} canManage={canManageGuidance} tr={tr} />
 
                                     {canManage && editing === null && (
                                         <div className="mt-3 flex flex-wrap gap-2">

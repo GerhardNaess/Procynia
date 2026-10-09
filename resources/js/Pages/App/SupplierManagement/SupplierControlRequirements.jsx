@@ -9,6 +9,7 @@ import { LEVEL_TONES, anchorLabel, groupByTheme, levelLabel, rowActions } from '
 import { DISPLAY_STATUS_TONES, displayStatusLabel, lastControlText } from './requirementEvaluations';
 import { nextControlText } from './assuranceFollowUp';
 import { EvaluationForm, EvaluationHistory } from './SupplierRequirementEvaluation';
+import WikiGuidance from './WikiGuidance';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const HINT = 'text-base text-slate-600';
@@ -189,6 +190,8 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                                     {row.exclusion_ignored && <p className="mt-1 text-base text-amber-800">{c.exclusion_ignored ?? 'Utelukkelse gjelder ikke obligatoriske krav.'}</p>}
                                     {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
                                     <Basis row={row} tr={tr} />
+                                    {/* Guidance for the work at hand; a catalogue requirement's is managed under Kontrollkrav. */}
+                                    <WikiGuidance requirementId={row.id} guidance={row.wiki_guidance} canManage={(data.permissions?.can_manage_wiki_guidance ?? false) && row.supplier_specific} tr={tr} />
 
                                     {panel === null && (row.can_evaluate || actions.exclude || actions.clear) && (
                                         <div className="mt-3 flex flex-wrap gap-2">

@@ -7,7 +7,9 @@ malinnholdet** — se §19.2. Gjeldende implementeringsstatus, avvik fra planen 
 står i [§26](#26-gjeldende-implementeringsstatus).
 Sist statusgjennomgått mot koden: **2026-10-09** (`main` @ `170d9a84`).
 **v2.1 — filopplasting og privat dokumentlager:** **Teknisk fullført – produksjonsavhengigheter
-gjenstår** (grenen `feat/supplier-document-files`, ikke merget; virusskanning blokkerer produksjon) — se §27.
+gjenstår** (merget til lokal `main` i `e9add9d8`; virusskanning blokkerer produksjon) — se §27.
+**Punkt 5 — veiledning fra Enterprise Wiki på kontrollkrav:** **teknisk fullført** på grenen
+`feat/supplier-requirement-wiki-guidance` (committet, ikke merget) — se §28.
 Utgangspunkt: `main` @ `b7e45e98` (2026-10-08). Bygger på [Leverandøroppfølging v1](supplier-management-v1-plan.md),
 som er ferdig og merget (`e74d4232`).
 
@@ -1107,7 +1109,7 @@ krav og overstyringer (fase 2), kontroller (fase 3), beslutninger (fase 4) og ak
 | Sikkerhetsloven / skjermingsverdige leveranser | Eget regime med egne krav; kan bli egen kravmal senere |
 | Modellering av anskaffelsen (konkurranse, kravspesifikasjon, tildelingskriterier) | §5.4 |
 | Etterlevelse-visning av leverandørkontroll («3 av 5 databehandlere mangler DBA») | Eies av Etterlevelse; krever lekkasjeanalyse |
-| Lenke fra kontrollkrav til Wiki-veiledning | Senere; Wiki eier innholdet. (Den motsatte retningen — «Lag kunnskapsartikkel» fra leverandøren — er bygget etter v2, se §10.5) |
+| Lenke fra kontrollkrav til Wiki-veiledning | Bygget som punkt 5, se §28. (Den motsatte retningen — «Lag kunnskapsartikkel» fra leverandøren — er bygget etter v2, se §10.5) |
 | Leverandørrevisjon som planlagt revisjon (`ComplianceAudit`) | §6.4 |
 | Firøyneprinsipp på beslutning | Senere ved behov |
 | Automatisk oppdatering fra nyere kravmalversjon | Senere |
@@ -1625,8 +1627,8 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 | 1 | Utnevn reviewer og gjennomfør faglig/juridisk review av 39 krav og 9 maler; fyll `basis_text`/`guidance` der review krever det | Release-gate | Produktbeslutning |
 | 2 | ~~Avklar synlighet av kravmaler til gaten er lukket~~ — **ferdig** (`ceaf1c1a`): merket som ikke kvalitetssikret | Produktbeslutning | — |
 | 3 | ~~Rett rekkefølgen for «siste kontroll» i `SupplierKnowledgeSource`~~ — **ferdig** (`ceaf1c1a`) | Liten retting | — |
-| 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); ikke merget | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
-| 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) | Planlagt | Wiki |
+| 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); merget til lokal `main` i `e9add9d8`, ikke pushet | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
+| 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) — **teknisk fullført** på `feat/supplier-requirement-wiki-guidance` (§28); committet, ikke merget | Utvikling | — |
 | 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) | Planlagt, felles | Felles oppgavemodell |
 | 7 | Excel-import av leverandører og profiler | Planlagt | — |
 | 8 | Visning av nyere kravmalversjon; firøyneprinsipp på beslutning | Ved behov | — |
@@ -1641,7 +1643,7 @@ cross-module signaler i Trenger oppmerksomhet.
 ## 27. v2.1 — Filopplasting og privat dokumentlager
 
 Status **2026-10-09:** **Teknisk fullført – produksjonsavhengigheter gjenstår.** Implementert, sluttkontrollert
-og testet på `feat/supplier-document-files` (fra `main` @ `a833a778`). Ikke merget. **Ikke produksjonsklar**
+og testet på `feat/supplier-document-files` (fra `main` @ `a833a778`). Merget til lokal `main` i `e9add9d8` (ikke pushet). **Ikke produksjonsklar**
 før manglende virusskanning er håndtert eller formelt risikovurdert og godkjent (§27.8).
 
 ### 27.1 Beslutninger
@@ -1759,3 +1761,78 @@ Skannestatus skiller tydelig mellom: **ikke skannet** (`not_scanned`, alle filer
 
 Word-utviklingsplanen for Leverandører finnes ikke i repository og er ikke oppdatert i denne oppgaven.
 Oppdatering av den med v2.1 er en separat dokumentasjonsoppgave.
+
+---
+
+## 28. Punkt 5 — Veiledning fra Enterprise Wiki på kontrollkrav
+
+Status **2026-10-09:** **teknisk fullført**, sluttkontrollert og committet på
+`feat/supplier-requirement-wiki-guidance` (fra `main` @ `e9add9d8`). Ikke merget. Ingen
+produksjonsavhengigheter utover ordinær merge og migrasjon.
+
+### 28.1 Hva det er
+
+Et kontrollkrav kan peke på én eller flere **eksisterende** Enterprise Wiki-sider som forklarer hvordan
+kravet kontrolleres. Koblingen er en referanse — tittel, tekst og status leses live fra Wiki med
+leserens egen Wiki-tilgang, og ingenting kopieres. Wiki eier og forvalter innholdet. Ingen artikler
+opprettes, ingen AI, ingen automatisk matching, ingen endring i Wikis dokumentlager eller
+godkjenningsflyt.
+
+### 28.2 Gjenbruk og datamodell
+
+| Del | Valg |
+|---|---|
+| Mønster | Kvalitets `quality_item_wiki_links` (koblingstabell til Wiki-side) for modellen; leverandørmodulens egen Etterlevelse-forankring (`anchors()`) for tilgang — fraværende i payload uten lesetilgang. Kvalitets lesesti sjekker ikke `wiki.view`; den svakheten er ikke kopiert |
+| Wiki-mekanismer | `EnterpriseWikiPage` (side, status, `published_version_id`), Wiki-ruten `app.wiki.show` (slug), `wiki.view`, `User::visibleEnterpriseWikiPageStatuses()` og modulsjekken `ModuleEntitlementService::hasModule(…, 'wiki')` |
+| Ny tabell | `supplier_control_requirement_wiki_pages`: `customer_id`, `requirement_id`, `enterprise_wiki_page_id`, `created_by_user_id`, tidsstempler. Sammensatte tenant-FK-er `(requirement_id, customer_id)` og `(enterprise_wiki_page_id, customer_id)`, begge `ON DELETE CASCADE`; unik `(requirement_id, enterprise_wiki_page_id)` |
+| Endring i Wiki | Bare en unik indeks `(id, customer_id)` på `enterprise_wiki_pages` for den sammensatte FK-en — samme grep som for `enterprise_wiki_documents` (`2026_10_08_000021`). Ingen Wiki-kode er endret |
+| Tjeneste | `SupplierRequirementWikiGuidance` (lese, søke, knytte, fjerne); `SupplierRequirementWikiGuidanceController` (søk som JSON, knytt, fjern) |
+| Migrasjon | `2026_10_09_000008_create_supplier_control_requirement_wiki_pages_table` — reversibel (verifisert rollback + migrate) |
+
+### 28.3 Tilgang
+
+| Handling | Krever |
+|---|---|
+| Se veiledningen (Kontrollkrav og leverandørsiden) | `supplier.view` **og** Wiki-lesetilgang: kundens `wiki`-modul + `wiki.view` + tilgang til kundeflaten |
+| Søke, knytte til, fjerne | `supplier.assure` **og** Wiki-lesetilgang. Ingen knytter eller fjerner en side de ikke selv kan åpne |
+| Krav for én leverandør | Som over, på leverandørsiden; avsluttet leverandør er skrivebeskyttet |
+
+Uten Wiki-lesetilgang er veiledningen **fraværende** i payload (`wiki_guidance: null`): ingen tittel,
+ingen telling, ingen «skjult side». En annen kundes side oppfattes som «finnes ikke»; en annen kundes
+krav gir 404; databasen avviser kobling på tvers av kunder. Ingen nye roller eller rettigheter.
+
+### 28.4 Upubliserte, arkiverte og slettede sider
+
+| Situasjon | Håndtering |
+|---|---|
+| Utkast / til vurdering (ikke publisert) | Kan knyttes; vises med «Ikke publisert ennå». Wiki viser i dag alle statuser til alle med `wiki.view`, og veiledningen følger samme regel |
+| Arkivert / erstattet | Tilbys ikke i søket og kan ikke knyttes. En side som arkiveres etter at den er knyttet, vises med «Arkivert i Wiki» |
+| Wikis egne oversiktssider (`index`, `backlinks`) | Tilbys ikke |
+| Slettet side | Koblingen slettes med siden (cascade); Wiki blokkeres aldri av en leverandørreferanse |
+| Slettet kontrollkrav | Koblingene slettes med kravet |
+| Wiki-modulen slås av for kunden | Koblingene vises ikke og kan ikke forvaltes, men **slettes ikke**. Slås modulen på igjen, virker de som før uten ny registrering |
+| Status endres etter kobling | Leses på nytt ved hver visning med Wikis egne regler; åpning går alltid gjennom Wikis egen rute og autorisasjon (uten `wiki.view`: 403 der) |
+| Kontrollhistorikk | Uendret — veiledning er ikke del av kontrollens øyeblikksbilde |
+
+### 28.5 Brukergrensesnitt
+
+Seksjonen **«Veiledning fra Enterprise Wiki»** i kravkortet under **Kontrollkrav** (administrasjon)
+og i kravraden under **Krav og kvalifikasjoner** på leverandørsiden (der kontrollen gjøres). Hver side
+åpnes i Enterprise Wiki i egen fane. «Knytt til artikkel» åpner et søkefelt i kortet (tittelsøk, maks
+20 treff, ett klikk per treff). Finnes flere enn 20 treff, bes brukeren skrive mer av tittelen (ingen
+paginering). Artikler som allerede er knyttet til kravet, vises i treffene som «Allerede knyttet til
+kravet». Feil i søket og ved kobling vises i kortet; to samtidige klikk på samme artikkel gir en vanlig
+melding, ikke en feilside. «Fjern» med bekreftelse. Seksjonen vises ikke uten Wiki-lesetilgang,
+og vises ikke tom for den som bare kan lese. Katalogkrav forvaltes under Kontrollkrav; krav for én
+leverandør på leverandørsiden. NO/EN, 16 px, 390 px uten sideveis scrolling.
+
+### 28.6 Tester (2026-10-09)
+
+| Nivå | Tester |
+|---|---|
+| PHP Feature | `SupplierRequirementWikiGuidanceTest` (9; inkl. Wiki-modul av/på, maks 20 treff + «flere treff», Wikis egen autorisasjon ved åpning): flere sider knyttet, vist på begge sider med Wiki-lenke, fjernet uten å endre siden; Wiki åpner fortsatt siden; duplikat (tjeneste + DB); annen kundes side/krav (melding, 404, DB-FK, søk); rettigheter (leser, assure uten Wiki, ingen titler i payload); kunde uten Wiki-modul; arkivert/indeks ikke tilbudt, utkast og senere arkivert merket, slettet side og krav; avsluttet leverandør; kontroll uendret |
+| JS | `wikiGuidanceRules.test.js` (4) |
+| E2E | `supplier-wiki-guidance.spec.js`: knytt til artikkel fra søk (arkivert vises ikke) → åpne i Enterprise Wiki → fjern; desktop og 390 px |
+| Regresjon (sluttkontroll) | Leverandør-/PrivateFile-/Wiki-handoff, `QualityItemTest`, tenant-isolasjon, roller og navigasjon 343/343; Wiki (sidesletting, publiseringssynlighet, visning, backlinks) + Security 129/129; leverandør-JS 81/81; E2E `supplier-wiki-guidance` + `supplier-assurance` 9/9. Migrasjon rollback + migrate i testdatabasen. Full suite ikke kjørt |
+| Migrasjon | Den unike indeksen `(id, customer_id)` kan ikke feile på eksisterende data (`id` er primærnøkkel) og har ikke navnekonflikt; rollback dropper bare koblingstabellen og indeksen |
+
