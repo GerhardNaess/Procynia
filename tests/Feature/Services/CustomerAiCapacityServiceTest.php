@@ -55,12 +55,16 @@ class CustomerAiCapacityServiceTest extends TestCase
         config()->set('services.openai.base_url', 'https://openai.test/v1');
         config()->set('ai_operations.context_enforcement', 'warn');
         config()->set('ai_customer_capacity.nok_per_unit', 0.10);
-        // The real tiers are placeholders; tests pin their own so they never depend on them.
+        // The real weights and tiers are placeholders; tests pin their own. Here the base is a flat
+        // 2000 units for Basis (users and options weigh nothing), so tier multipliers read as
+        // fixed amounts. AiBaseCapacityTest covers the base formula itself.
+        config()->set('ai_customer_capacity.base', ['basis' => 2000, 'per_user' => 0, 'options' => []]);
         config()->set('ai_customer_capacity.tiers', [
-            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
-            'tier_b' => ['name' => 'Tier B', 'included_units_per_month' => 8000, 'active' => true, 'sort_order' => 20],
-            'tier_retired' => ['name' => 'Retired', 'included_units_per_month' => 500, 'active' => false, 'sort_order' => 30],
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
+            'tier_b' => ['name' => 'Tier B', 'multiplier' => 4.0, 'active' => true, 'sort_order' => 20],
+            'tier_retired' => ['name' => 'Retired', 'multiplier' => 0.25, 'active' => false, 'sort_order' => 30],
         ]);
+        config()->set('ai_customer_capacity.default_tier', 'tier_a');
     }
 
     protected function tearDown(): void
@@ -69,35 +73,24 @@ class CustomerAiCapacityServiceTest extends TestCase
         parent::tearDown();
     }
 
-    // ── included capacity: override → tier → unconfigured; never Basis ────
+    // ── included capacity: override → base × tier (default tier when none chosen) ────
 
-    public function test_basis_alone_includes_no_ai_capacity(): void
+    public function test_a_customer_that_has_not_chosen_a_tier_gets_the_default_one(): void
     {
         $customer = $this->customer();
         $this->attempt($customer, ['cost_nok' => 10.0]);
 
         $capacity = $this->capacity($customer);
 
-        $this->assertFalse($capacity->isConfigured(), 'Basis is a product, not a source of AI capacity.');
-        $this->assertSame(CustomerAiCapacity::SOURCE_UNCONFIGURED, $capacity->includedSource);
-        $this->assertSame(CustomerAiCapacity::STATUS_NOT_CONFIGURED, $capacity->status);
-        $this->assertFalse($capacity->isProvisional);
-        $this->assertSame(100, $capacity->usedUnits, 'Usage is still recorded without a configured capacity.');
-        $this->assertNull($capacity->toArray()['remaining']);
-        $this->assertNull($capacity->toArray()['tier_name']);
-        $this->assertSame('unconfigured', $capacity->toArray()['source']);
-        $this->assertSame(CustomerAiCapacityService::VERDICT_UNMETERED, app(CustomerAiCapacityService::class)->evaluate($customer, 1000.0));
-    }
-
-    public function test_options_alone_include_no_ai_capacity(): void
-    {
-        $customer = $this->customer(basis: false);
-
-        foreach (['risk', 'objectives', 'compliance', 'supplier', 'tender'] as $option) {
-            app(ModuleEntitlementService::class)->activatePackage($customer, $option);
-        }
-
-        $this->assertSame(CustomerAiCapacity::SOURCE_UNCONFIGURED, $this->capacity($customer)->includedSource);
+        $this->assertNull($customer->ai_capacity_tier);
+        $this->assertTrue($capacity->isConfigured(), 'A customer is never left unconfigured in normal self-service.');
+        $this->assertSame(CustomerAiCapacity::SOURCE_TIER, $capacity->includedSource);
+        $this->assertSame('tier_a', $capacity->tierKey);
+        $this->assertSame(2000, $capacity->includedUnits);
+        $this->assertSame(100, $capacity->usedUnits);
+        $this->assertSame('tier_a', $capacity->toArray()['tier_key']);
+        $this->assertTrue($capacity->toArray()['level_changeable']);
+        $this->assertSame(CustomerAiCapacityService::VERDICT_ALLOW, app(CustomerAiCapacityService::class)->evaluate($customer, 1.0));
     }
 
     public function test_the_tier_includes_the_capacity_and_is_provisional(): void
@@ -115,14 +108,14 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertFalse($this->capacity($customer)->isProvisional);
     }
 
-    public function test_an_inactive_tier_still_applies_to_its_holder_and_an_unknown_one_is_unconfigured(): void
+    public function test_an_inactive_tier_still_applies_to_its_holder_and_an_unknown_one_falls_back_to_the_default(): void
     {
         $this->assertSame(500, $this->capacity($this->customer(['ai_capacity_tier' => 'tier_retired']))->includedUnits);
 
         $unknown = $this->capacity($this->customer(['ai_capacity_tier' => 'no_such_tier']));
-        $this->assertFalse($unknown->isConfigured());
-        $this->assertSame(CustomerAiCapacity::SOURCE_UNCONFIGURED, $unknown->includedSource);
-        $this->assertNull($unknown->tierKey);
+        $this->assertSame(CustomerAiCapacity::SOURCE_TIER, $unknown->includedSource);
+        $this->assertSame('tier_a', $unknown->tierKey);
+        $this->assertSame(2000, $unknown->includedUnits);
     }
 
     public function test_a_customer_override_wins_over_the_tier(): void
@@ -134,6 +127,8 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertSame(CustomerAiCapacity::SOURCE_OVERRIDE, $capacity->includedSource);
         $this->assertSame('tier_a', $capacity->tierKey, 'The tier stays selected underneath the override.');
         $this->assertNull($capacity->toArray()['tier_name'], 'The customer is not shown a tier that does not size the capacity.');
+        $this->assertNull($capacity->toArray()['tier_key']);
+        $this->assertFalse($capacity->toArray()['level_changeable'], 'The customer cannot choose a level an override would ignore.');
         $this->assertFalse($capacity->isProvisional, 'A customer-specific amount is an explicit agreement.');
 
         // An override works without any tier, and an explicit zero is a real value, not "not set".
@@ -148,15 +143,16 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertSame(8000, $this->capacity($customer)->includedUnits);
     }
 
-    public function test_basis_and_every_option_share_exactly_one_pool_that_options_never_resize(): void
+    public function test_basis_and_every_option_share_exactly_one_pool(): void
     {
         $customer = $this->customer(['ai_capacity_tier' => 'tier_a']);
         $modules = app(ModuleEntitlementService::class);
         $this->attempt($customer, ['feature' => 'wiki', 'operation_key' => 'wiki.generate_page', 'cost_nok' => 10.0]);
 
+        // Options weigh nothing in this file's base, so the pool stays put and the arithmetic below
+        // is about sharing, not sizing (AiBaseCapacityTest covers how options size the pool).
         foreach (['risk', 'objectives', 'compliance', 'supplier', 'tender'] as $option) {
             $modules->activatePackage($customer, $option);
-            $this->assertSame(2000, $this->capacity($customer)->includedUnits, "Ordering {$option} must not change the pool.");
         }
 
         foreach ([['tender', 'tender.requirement_answer'], ['quality', 'quality.interpret_process'], ['compliance', 'compliance.wiki_handoff'], ['quality', 'quality.clarify_process']] as [$feature, $operation]) {
@@ -173,7 +169,7 @@ class CustomerAiCapacityServiceTest extends TestCase
         }
 
         $after = $this->capacity($customer);
-        $this->assertSame(2000, $after->includedUnits, 'Cancelling options must not change the pool.');
+        $this->assertSame(2000, $after->includedUnits);
         $this->assertSame(500, $after->usedUnits, 'Usage already drawn stays in the one pool.');
     }
 
@@ -183,9 +179,9 @@ class CustomerAiCapacityServiceTest extends TestCase
         $ultra = $this->customer(['subscription_plan' => Customer::PLAN_ULTRA, 'ai_capacity_tier' => 'tier_a']);
         $this->assertSame($this->capacity($pro)->includedUnits, $this->capacity($ultra)->includedUnits);
 
-        // An Ultra or Enterprise plan without a tier includes nothing: the plan is not a capacity source.
+        // Without a chosen tier every plan gets the same default: the plan is not a capacity source.
         foreach ([Customer::PLAN_ULTRA, Customer::PLAN_ENTERPRISE] as $plan) {
-            $this->assertSame(CustomerAiCapacity::SOURCE_UNCONFIGURED, $this->capacity($this->customer(['subscription_plan' => $plan]))->includedSource);
+            $this->assertSame(2000, $this->capacity($this->customer(['subscription_plan' => $plan]))->includedUnits);
         }
     }
 
@@ -201,8 +197,9 @@ class CustomerAiCapacityServiceTest extends TestCase
         $this->assertSame('2027-02-28', $capacity->toArray()['period_end']);
     }
 
-    public function test_without_a_tier_or_an_override_nothing_is_metered_or_refused(): void
+    public function test_without_any_applying_tier_or_an_override_nothing_is_metered_or_refused(): void
     {
+        config()->set('ai_customer_capacity.default_tier', null);
         $customer = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
         $this->attempt($customer, ['cost_nok' => 999.0]);
 
@@ -622,7 +619,8 @@ class CustomerAiCapacityServiceTest extends TestCase
         ], $verdicts);
         Http::assertSentCount(3);
 
-        // A customer without a defined capacity is recorded as unmetered, never as blocked.
+        // A customer without any applying capacity is recorded as unmetered, never as blocked.
+        config()->set('ai_customer_capacity.default_tier', null);
         $unmetered = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE], basis: false);
         $this->callAi($unmetered);
         $this->assertSame(CustomerAiCapacityService::VERDICT_UNMETERED, AiUsageAttempt::query()->where('customer_id', $unmetered->id)->sole()->capacity_verdict);

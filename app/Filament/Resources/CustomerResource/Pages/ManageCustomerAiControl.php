@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\CustomerAiOperationalLimit;
 use App\Models\CustomerAiUsageReservation;
 use App\Models\User;
+use App\Services\Ai\Commercial\AiBaseCapacityCalculator;
 use App\Services\Ai\Commercial\AiCapacityTierCatalog;
 use App\Services\Ai\Commercial\AiCreditAdjustmentService;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
@@ -366,9 +367,9 @@ class ManageCustomerAiControl extends Page
     }
 
     /**
-     * The customer's AI capacity tier — its own commercial dimension, never derived from Basis or an
-     * option. Empty means no tier (unconfigured unless an override applies). Only a tier this
-     * customer may be given is accepted: an active one, or the inactive one it already holds.
+     * The customer's AI capacity tier: a multiplier on its base capacity. Empty means the default
+     * tier (Level 1). Only a tier this customer may be given is accepted: an active one, or the
+     * inactive one it already holds. The customer can make the same choice on Abonnement.
      *
      * @param  array<string, mixed>  $data
      */
@@ -462,12 +463,14 @@ class ManageCustomerAiControl extends Page
         $status = app(AiQuotaStatusService::class)->forCustomer($this->record);
         $this->quota = $status->toArray();
         $capacity = app(CustomerAiCapacityService::class)->forCustomer($this->record);
-        $this->capacity = $capacity->toArray()
-            + [
-                'override' => $this->record->included_ai_units,
-                'tier_key' => $capacity->tierKey,
-                'tier_name' => $capacity->tierName,
-            ];
+        // The admin sees the applying tier and the base even under an override, which hides them
+        // from the customer.
+        $this->capacity = array_merge($capacity->toArray(), [
+            'override' => $this->record->included_ai_units,
+            'tier_key' => $capacity->tierKey,
+            'tier_name' => $capacity->tierName,
+            'base_units_per_month' => app(AiBaseCapacityCalculator::class)->unitsPerMonth($this->record),
+        ]);
         $this->loadOperationalState();
         $this->globalStopActive = app(AiRuntimeControlService::class)->globalStopEnabled();
 

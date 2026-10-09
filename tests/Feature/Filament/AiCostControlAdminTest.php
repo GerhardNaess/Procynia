@@ -184,32 +184,36 @@ class AiCostControlAdminTest extends TestCase
 
     public function test_an_admin_picks_a_tier_and_an_override_wins_over_it(): void
     {
+        config()->set('ai_customer_capacity.base', ['basis' => 2000, 'per_user' => 0, 'options' => []]);
         config()->set('ai_customer_capacity.tiers', [
-            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
-            'tier_retired' => ['name' => 'Retired', 'included_units_per_month' => 500, 'active' => false, 'sort_order' => 20],
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
+            'tier_b' => ['name' => 'Tier B', 'multiplier' => 2.0, 'active' => true, 'sort_order' => 20],
+            'tier_retired' => ['name' => 'Retired', 'multiplier' => 0.25, 'active' => false, 'sort_order' => 30],
         ]);
+        config()->set('ai_customer_capacity.default_tier', 'tier_a');
         $admin = $this->internalAdmin();
         $customer = $this->customer(3);
-        // Basis is never a capacity source.
         app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
 
+        // Without a chosen tier, the default tier multiplies the base.
         $this->actingAs($admin);
         Livewire::test(ManageCustomerAiControl::class, ['record' => $customer])
-            ->assertSet('capacity.included', null)
-            ->assertSet('capacity.source', 'unconfigured')
-            ->assertSee(__('procynia.ai_admin.capacity.sources.unconfigured'))
-            ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => 'tier_a', 'reason' => 'Pilotnivå'])
             ->assertSet('capacity.included', 2000)
             ->assertSet('capacity.source', 'tier')
             ->assertSet('capacity.tier_key', 'tier_a')
+            ->assertSet('capacity.base_units_per_month', 2000)
+            ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => 'tier_b', 'reason' => 'Pilotnivå'])
+            ->assertSet('capacity.included', 4000)
+            ->assertSet('capacity.source', 'tier')
+            ->assertSet('capacity.tier_key', 'tier_b')
             ->assertSee(__('procynia.ai_admin.capacity.sources.tier'))
             ->callAction('set_ai_units', ['included_ai_units' => 250000, 'reason' => 'Enterprise-avtale'])
             ->assertSet('capacity.included', 250000)
             ->assertSet('capacity.override', 250000)
             ->assertSet('capacity.source', 'override')
-            ->assertSet('capacity.tier_key', 'tier_a');
+            ->assertSet('capacity.tier_key', 'tier_b');
 
-        $this->assertSame('tier_a', $customer->fresh()->ai_capacity_tier);
+        $this->assertSame('tier_b', $customer->fresh()->ai_capacity_tier);
         $this->assertSame(250000, $customer->fresh()->included_ai_units);
         $this->assertDatabaseHas('billing_events', [
             'customer_id' => $customer->id,
@@ -223,13 +227,14 @@ class AiCostControlAdminTest extends TestCase
             'description' => 'Enterprise-avtale',
         ]);
 
-        // Clearing the override returns to the tier, clearing the tier to unconfigured — never Basis.
+        // Clearing the override returns to the tier, clearing the tier to the default tier.
         Livewire::test(ManageCustomerAiControl::class, ['record' => $customer->fresh()])
             ->callAction('set_ai_units', ['included_ai_units' => null, 'reason' => 'Tilbake til nivå'])
-            ->assertSet('capacity.included', 2000)
+            ->assertSet('capacity.included', 4000)
             ->assertSet('capacity.source', 'tier')
             ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => null, 'reason' => 'Ikke avtalt'])
-            ->assertSet('capacity.source', 'unconfigured');
+            ->assertSet('capacity.included', 2000)
+            ->assertSet('capacity.tier_key', 'tier_a');
 
         $this->assertNull($customer->fresh()->ai_capacity_tier);
         $this->assertNull($customer->fresh()->included_ai_units);
@@ -237,11 +242,15 @@ class AiCostControlAdminTest extends TestCase
 
     public function test_an_inactive_or_unknown_tier_cannot_be_newly_assigned(): void
     {
+        config()->set('ai_customer_capacity.base', ['basis' => 2000, 'per_user' => 0, 'options' => []]);
         config()->set('ai_customer_capacity.tiers', [
-            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
-            'tier_retired' => ['name' => 'Retired', 'included_units_per_month' => 500, 'active' => false, 'sort_order' => 20],
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
+            'tier_b' => ['name' => 'Tier B', 'multiplier' => 2.0, 'active' => true, 'sort_order' => 20],
+            'tier_retired' => ['name' => 'Retired', 'multiplier' => 0.25, 'active' => false, 'sort_order' => 30],
         ]);
+        config()->set('ai_customer_capacity.default_tier', 'tier_a');
         $customer = $this->customer(3);
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
         $this->actingAs($this->internalAdmin());
 
         // Filament's select validation and the server-side check both refuse; nothing is written.

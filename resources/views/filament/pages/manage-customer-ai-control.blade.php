@@ -116,6 +116,12 @@
                 </dd>
             </div>
             <div>
+                <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.base_label') }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100" data-testid="admin-ai-capacity-base">
+                    {{ number_format((int) ($capacity['base_units_per_month'] ?? 0), 0, ',', ' ') }}
+                </dd>
+            </div>
+            <div>
                 <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.capacity.override_label') }}</dt>
                 <dd class="font-medium text-gray-900 dark:text-gray-100" data-testid="admin-ai-capacity-override">
                     {{ ($capacity['override'] ?? null) === null ? '–' : number_format((int) $capacity['override'], 0, ',', ' ') }}

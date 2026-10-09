@@ -89,15 +89,18 @@ class AiCapacityCalibrationTest extends TestCase
         $this->assertEqualsCanonicalizing(['wiki', 'tender', 'quality'], array_values(array_unique(array_column($report['breakdown'], 'feature'))));
     }
 
-    public function test_the_report_names_the_tier_and_the_source_and_never_basis(): void
+    public function test_the_report_names_the_tier_and_the_source(): void
     {
+        config()->set('ai_customer_capacity.base', ['basis' => 2000, 'per_user' => 0, 'options' => []]);
         config()->set('ai_customer_capacity.tiers', [
-            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
         ]);
+        config()->set('ai_customer_capacity.default_tier', null);
         $tiered = $this->customer(['ai_capacity_tier' => 'tier_a']);
+        app(ModuleEntitlementService::class)->activatePackage($tiered, 'basis');
         $overridden = $this->customer(['ai_capacity_tier' => 'tier_a', 'included_ai_units' => 9000]);
+        // No tier and no default: the only way to be unconfigured.
         $unconfigured = $this->customer();
-        // Holding Basis changes nothing: it is not a capacity source.
         app(ModuleEntitlementService::class)->activatePackage($unconfigured, 'basis');
 
         foreach ([$tiered, $overridden, $unconfigured] as $customer) {

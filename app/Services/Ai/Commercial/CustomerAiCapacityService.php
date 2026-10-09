@@ -29,10 +29,11 @@ use DateTimeInterface;
  * reservation turns into usage at the actual cost by itself.
  *
  * Included capacity (resolveIncluded()): customers.included_ai_units (an explicit override, per
- * billing period) wins; otherwise the customer's AI capacity tier (AiCapacityTierCatalog, per month
- * × the period length); otherwise unconfigured (unmetered). AI capacity is a commercial dimension
- * of its own: Basis, the options and the old Pro/Max/Ultra plans never add capacity — one
- * customer, one pool, however many modules it holds.
+ * billing period) wins; otherwise base capacity (AiBaseCapacityCalculator: Basis, users and options)
+ * × the multiplier of the customer's tier (its chosen one, else the default Level 1), per month ×
+ * the period length; unconfigured (unmetered) only when no tier applies at all. Basis, users and
+ * options only size the pool — one customer, one pool, however many modules it holds. The old
+ * Pro/Max/Ultra plans play no part.
  */
 class CustomerAiCapacityService
 {
@@ -55,6 +56,7 @@ class CustomerAiCapacityService
         private readonly CustomerBillingPeriodResolver $billingPeriods,
         private readonly AiUnitConverter $units,
         private readonly AiCapacityTierCatalog $tiers,
+        private readonly AiBaseCapacityCalculator $base,
     ) {}
 
     public function forCustomer(Customer|int $customer, ?DateTimeInterface $at = null): CustomerAiCapacity
@@ -62,7 +64,7 @@ class CustomerAiCapacityService
         $customer = $customer instanceof Customer ? $customer : Customer::query()->findOrFail($customer);
         $period = $this->billingPeriods->at($customer, $at ?? CarbonImmutable::now('UTC'));
         ['units' => $included, 'source' => $source] = $this->resolveIncluded($customer, $period);
-        $tier = $this->tiers->find($customer->ai_capacity_tier);
+        $tier = $this->tiers->effective($customer->ai_capacity_tier);
 
         $totals = $this->ledger->totals(new AiUsageFilter($period->toUsagePeriod(), customerId: (int) $customer->id));
         $usedExact = $this->units->unitsForCost((float) $totals['settled_cost_nok']);
@@ -161,16 +163,50 @@ class CustomerAiCapacityService
             return ['units' => max(0, (int) $customer->included_ai_units), 'source' => CustomerAiCapacity::SOURCE_OVERRIDE];
         }
 
-        $tier = $this->tiers->find($customer->ai_capacity_tier);
+        $tier = $this->tiers->effective($customer->ai_capacity_tier);
 
         if ($tier === null) {
             return ['units' => null, 'source' => CustomerAiCapacity::SOURCE_UNCONFIGURED];
         }
 
-        // Procynia bills monthly or yearly; a tier is sized per month.
+        return ['units' => $this->unitsForTier($tier, $this->base->unitsPerMonth($customer), $period), 'source' => CustomerAiCapacity::SOURCE_TIER];
+    }
+
+    /**
+     * What each tier the customer may choose would include in the current billing period, for this
+     * customer's base capacity right now. Units only — the multiplier stays internal.
+     *
+     * @return list<array{key: string, name: string, included: int, is_current: bool}>
+     */
+    public function levelOptions(Customer $customer, ?DateTimeInterface $at = null): array
+    {
+        $period = $this->billingPeriods->at($customer, $at ?? CarbonImmutable::now('UTC'));
+        $base = $this->base->unitsPerMonth($customer);
+        $current = $this->tiers->effective($customer->ai_capacity_tier)['key'] ?? null;
+        $options = [];
+
+        foreach ($this->tiers->choosable($current) as $key => $tier) {
+            $options[] = [
+                'key' => $key,
+                'name' => $this->tierName($tier),
+                'included' => $this->unitsForTier($tier, $base, $period),
+                'is_current' => $key === $current,
+            ];
+        }
+
+        return $options;
+    }
+
+    /**
+     * base per month × multiplier, rounded half up to whole units once per month, then × the period
+     * length — so a yearly period is exactly twelve monthly ones.
+     */
+    private function unitsForTier(array $tier, int $baseUnitsPerMonth, BillingPeriod $period): int
+    {
+        // Procynia bills monthly or yearly; capacity is sized per month.
         $months = in_array($period->interval, [BillingPeriod::INTERVAL_YEAR, Customer::BILLING_YEARLY], true) ? 12 : 1;
 
-        return ['units' => $tier['included_units_per_month'] * $months, 'source' => CustomerAiCapacity::SOURCE_TIER];
+        return (int) round($baseUnitsPerMonth * $tier['multiplier'], 0, PHP_ROUND_HALF_UP) * $months;
     }
 
     /** The customer-facing tier name, falling back to the catalog's internal name. */

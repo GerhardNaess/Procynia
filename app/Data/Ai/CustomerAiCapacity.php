@@ -22,12 +22,16 @@ final readonly class CustomerAiCapacity
 
     public const STATUS_EXHAUSTED = 'exhausted';
 
-    /** No override and no tier: no commercial limit. Usage is recorded and observed, never refused. */
+    /**
+     * No override and no tier applies (not even the default): no commercial limit. Usage is recorded
+     * and observed, never refused. Not reached in normal operation — every customer has Level 1
+     * until it chooses otherwise.
+     */
     public const STATUS_NOT_CONFIGURED = 'not_configured';
 
     /**
-     * Where the included units came from (CustomerAiCapacityService::resolveIncluded()). Basis and
-     * the options are never a source: AI capacity is its own commercial dimension.
+     * Where the included units came from (CustomerAiCapacityService::resolveIncluded()). Basis, users
+     * and options are not a source of their own: they size the base the tier multiplies.
      */
     public const SOURCE_OVERRIDE = 'override';
 
@@ -40,7 +44,8 @@ final readonly class CustomerAiCapacity
         public BillingPeriod $period,
         public ?int $includedUnits,
         public string $includedSource,
-        // The customer's selected AI capacity tier, whether or not an override wins over it.
+        // The tier that applies to the customer (its chosen one, else the default), whether or not an
+        // override wins over it.
         public ?string $tierKey,
         public ?string $tierName,
         // A placeholder tier, not a decided commercial level — the customer is told it may change.
@@ -108,7 +113,11 @@ final readonly class CustomerAiCapacity
             'source' => $this->includedSource,
             // Shown only when the tier is what sizes the capacity; an override is a negotiated
             // amount, not a tier level.
+            'tier_key' => $this->includedSource === self::SOURCE_TIER ? $this->tierKey : null,
             'tier_name' => $this->includedSource === self::SOURCE_TIER ? $this->tierName : null,
+            // The customer chooses its level only while the level is what sizes the capacity; an
+            // override is set by Procynia and would make a choice meaningless.
+            'level_changeable' => $this->includedSource === self::SOURCE_TIER,
             'included' => $this->includedUnits,
             'used' => $this->usedUnits,
             'reserved' => $this->reservedUnits,

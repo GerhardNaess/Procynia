@@ -72,7 +72,8 @@ class BillingAiCapacityTest extends TestCase
 
     public function test_a_customer_without_a_defined_capacity_is_told_so_rather_than_shown_zero(): void
     {
-        // No AI capacity tier and no customer-specific amount.
+        // No tier applies at all (not even a default) and no customer-specific amount.
+        config()->set('ai_customer_capacity.default_tier', null);
         $customer = $this->customer(['subscription_plan' => Customer::PLAN_ENTERPRISE]);
 
         $this->actingAs($this->owner($customer))->get('/app/billing')
@@ -83,11 +84,14 @@ class BillingAiCapacityTest extends TestCase
                 ->where('ai_capacity.included', null));
     }
 
-    public function test_basis_and_options_give_no_capacity_the_tier_does_and_an_override_wins(): void
+    public function test_the_default_tier_sizes_basis_and_options_a_chosen_tier_multiplies_and_an_override_wins(): void
     {
+        config()->set('ai_customer_capacity.base', ['basis' => 1000, 'per_user' => 0, 'options' => ['risk' => 100, 'objectives' => 100, 'compliance' => 100, 'supplier' => 100, 'tender' => 100]]);
         config()->set('ai_customer_capacity.tiers', [
-            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2000, 'active' => true, 'sort_order' => 10],
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
+            'tier_b' => ['name' => 'Tier B', 'multiplier' => 2.0, 'active' => true, 'sort_order' => 20],
         ]);
+        config()->set('ai_customer_capacity.default_tier', 'tier_a');
         $customer = $this->customer();
         app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
         foreach (['risk', 'objectives', 'compliance', 'supplier', 'tender'] as $option) {
@@ -95,24 +99,24 @@ class BillingAiCapacityTest extends TestCase
         }
         $this->attempt($customer, 12.0);
 
-        // Basis and every option, but no AI capacity tier: honestly unconfigured, usage still shown.
+        // No tier chosen: the default tier over Basis + every option.
         $this->actingAs($this->owner($customer))->get('/app/billing')
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->where('ai_capacity.is_configured', false)
-                ->where('ai_capacity.source', 'unconfigured')
-                ->where('ai_capacity.included', null)
-                ->where('ai_capacity.used', 120)
-                ->where('ai_capacity.tier_name', null));
-
-        $customer->update(['ai_capacity_tier' => 'tier_a']);
-
-        $this->actingAs($this->owner($customer))->get('/app/billing')
-            ->assertOk()
-            ->assertInertia(fn ($page) => $page
-                ->where('ai_capacity.included', 2000)
+                ->where('ai_capacity.is_configured', true)
                 ->where('ai_capacity.source', 'tier')
-                ->where('ai_capacity.tier_name', 'Tier A')
+                ->where('ai_capacity.included', 1500)
+                ->where('ai_capacity.used', 120)
+                ->where('ai_capacity.tier_name', 'Tier A'));
+
+        $customer->update(['ai_capacity_tier' => 'tier_b']);
+
+        $this->actingAs($this->owner($customer))->get('/app/billing')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('ai_capacity.included', 3000)
+                ->where('ai_capacity.source', 'tier')
+                ->where('ai_capacity.tier_name', 'Tier B')
                 ->where('ai_capacity.is_provisional', true));
 
         $customer->update(['included_ai_units' => 5000]);
@@ -123,6 +127,7 @@ class BillingAiCapacityTest extends TestCase
                 ->where('ai_capacity.included', 5000)
                 ->where('ai_capacity.source', 'override')
                 ->where('ai_capacity.tier_name', null)
+                ->where('ai_capacity.level_changeable', false)
                 ->where('ai_capacity.is_provisional', false));
     }
 
@@ -139,8 +144,9 @@ class BillingAiCapacityTest extends TestCase
 
     public function test_the_page_serves_basis_options_and_ai_capacity_as_separate_data(): void
     {
+        config()->set('ai_customer_capacity.base', ['basis' => 2500, 'per_user' => 0, 'options' => []]);
         config()->set('ai_customer_capacity.tiers', [
-            'tier_a' => ['name' => 'Tier A', 'included_units_per_month' => 2500, 'active' => true, 'sort_order' => 10],
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
         ]);
         $customer = $this->customer(['ai_capacity_tier' => 'tier_a', 'subscription_plan' => Customer::PLAN_ULTRA]);
         $modules = app(ModuleEntitlementService::class);
