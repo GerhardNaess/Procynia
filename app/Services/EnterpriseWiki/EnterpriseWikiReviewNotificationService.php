@@ -8,7 +8,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\User;
 use App\Models\UserNotification;
-use Illuminate\Support\Facades\DB;
+use App\Services\Notifications\UserNotificationWriter;
 
 /**
  * Tells the right person that Wiki work is waiting for them.
@@ -37,6 +37,7 @@ class EnterpriseWikiReviewNotificationService
 
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovals,
+        private readonly UserNotificationWriter $writer,
     ) {}
 
     /**
@@ -182,14 +183,10 @@ class EnterpriseWikiReviewNotificationService
     /**
      * Write one notification, once, after the surrounding transaction commits.
      *
-     * Three things are enforced here so no caller has to remember them:
-     *
-     * - The recipient must be an active user of the page's own customer. A notification is a
-     *   disclosure, so this is the isolation boundary, not a convenience check.
-     * - `$actor` is never notified about their own action. Being handed a new responsibility is worth
-     *   a notification; being told what you just did is noise.
-     * - dedupe_key makes the insert idempotent, and afterCommit means a decision that rolls back is
-     *   never announced.
+     * UserNotificationWriter enforces what no caller here should have to remember: the recipient is
+     * an active user of the page's own customer (a notification is a disclosure, so this is the
+     * isolation boundary), `$actor` is never notified about their own action, dedupe_key makes the
+     * insert idempotent, and afterCommit means a decision that rolls back is never announced.
      *
      * @param  array<string, mixed>  $metadata
      */
@@ -204,33 +201,17 @@ class EnterpriseWikiReviewNotificationService
         ?User $actor = null,
         string $severity = UserNotification::SEVERITY_INFO,
     ): void {
-        if (! $recipient->is_active || (int) $recipient->customer_id !== (int) $page->customer_id) {
-            return;
-        }
-
-        if ($actor !== null && (int) $actor->id === (int) $recipient->id) {
-            return;
-        }
-
-        $attributes = [
-            'customer_id' => $page->customer_id,
-            'user_id' => $recipient->id,
-            'event_type' => $eventType,
-            'severity' => $severity,
-            'title' => $title,
-            'message' => $message,
-            'target_url' => route('app.wiki.show', $page->slug),
-            'metadata' => array_merge($metadata, ['page_id' => (int) $page->id, 'page_slug' => $page->slug]),
-        ];
-
-        DB::afterCommit(function () use ($dedupeKey, $attributes): void {
-            // rescue(): a notification that cannot be written must never break the decision the
-            // user just made. The workflow does not depend on it.
-            rescue(
-                fn () => UserNotification::query()->firstOrCreate(['dedupe_key' => $dedupeKey], $attributes),
-                null,
-                false,
-            );
-        });
+        $this->writer->notify(
+            (int) $page->customer_id,
+            $recipient,
+            $eventType,
+            $dedupeKey,
+            $title,
+            $message,
+            route('app.wiki.show', $page->slug),
+            array_merge($metadata, ['page_id' => (int) $page->id, 'page_slug' => $page->slug]),
+            $severity,
+            $actor,
+        );
     }
 }

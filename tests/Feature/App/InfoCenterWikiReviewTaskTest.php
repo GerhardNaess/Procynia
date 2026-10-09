@@ -15,6 +15,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use Tests\Concerns\GrantsWikiPermissions;
+use Tests\Concerns\ReadsMyTasks;
 use Tests\TestCase;
 
 /**
@@ -33,6 +34,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
 {
     use DatabaseTransactions;
     use GrantsWikiPermissions;
+    use ReadsMyTasks;
 
     protected function setUp(): void
     {
@@ -100,7 +102,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
         [, $owner, $reviewer, $page] = $this->draftPage();
         $this->submit($owner, $page, $reviewer);
 
-        $task = collect($this->infoCenterFor($reviewer)['wiki_tasks'])->sole();
+        $task = collect($this->wikiTasksIn($this->infoCenterFor($reviewer)))->sole();
 
         $this->assertSame('wiki_review', $task['type']);
         $this->assertSame('Gjennomgå Wiki-side', $task['subject_label']);
@@ -124,7 +126,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
     {
         [, , $reviewer] = $this->draftPage();
 
-        $this->assertSame([], $this->infoCenterFor($reviewer)['wiki_tasks']);
+        $this->assertSame([], $this->wikiTasksIn($this->infoCenterFor($reviewer)));
     }
 
     // ── Bell versus task ────────────────────────────────────────────────────
@@ -149,7 +151,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
             ->assertJsonPath('notifications.unread_count', 0);
 
         $this->assertTrue((bool) $notification->fresh()->is_read);
-        $this->assertCount(1, $this->infoCenterFor($reviewer)['wiki_tasks'], 'the decision is still theirs');
+        $this->assertCount(1, $this->wikiTasksIn($this->infoCenterFor($reviewer)), 'the decision is still theirs');
     }
 
     /** Marking everything read clears the bell and nothing else. */
@@ -163,7 +165,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
             ->assertOk()
             ->assertJsonPath('notifications.unread_count', 0);
 
-        $this->assertCount(1, $this->infoCenterFor($reviewer)['wiki_tasks']);
+        $this->assertCount(1, $this->wikiTasksIn($this->infoCenterFor($reviewer)));
     }
 
     /** And when the decision is actually made, the task goes without anybody closing it. */
@@ -171,12 +173,12 @@ class InfoCenterWikiReviewTaskTest extends TestCase
     {
         [, $owner, $reviewer, $page] = $this->draftPage();
         $this->submit($owner, $page, $reviewer);
-        $this->assertCount(1, $this->infoCenterFor($reviewer)['wiki_tasks']);
+        $this->assertCount(1, $this->wikiTasksIn($this->infoCenterFor($reviewer)));
 
         $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/approve")->assertRedirect();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
-        $this->assertSame([], $this->infoCenterFor($reviewer)['wiki_tasks']);
+        $this->assertSame([], $this->wikiTasksIn($this->infoCenterFor($reviewer)));
     }
 
     /** Sending it back is a decision too — the work moves to the owner, so it leaves this list. */
@@ -190,7 +192,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
             ->assertRedirect();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
-        $this->assertSame([], $this->infoCenterFor($reviewer)['wiki_tasks']);
+        $this->assertSame([], $this->wikiTasksIn($this->infoCenterFor($reviewer)));
     }
 
     // ── Scope ───────────────────────────────────────────────────────────────
@@ -202,8 +204,8 @@ class InfoCenterWikiReviewTaskTest extends TestCase
 
         $bystander = $this->user($customer, User::BID_ROLE_CONTRIBUTOR);
 
-        $this->assertSame([], $this->infoCenterFor($bystander)['wiki_tasks']);
-        $this->assertSame([], $this->infoCenterFor($owner)['wiki_tasks'], 'not even the person who sent it');
+        $this->assertSame([], $this->wikiTasksIn($this->infoCenterFor($bystander)));
+        $this->assertSame([], $this->wikiTasksIn($this->infoCenterFor($owner)), 'not even the person who sent it');
     }
 
     public function test_a_review_never_crosses_a_customer_boundary(): void
@@ -213,7 +215,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
 
         $outsider = $this->user($this->customer('Annen Kunde AS'), User::BID_ROLE_SYSTEM_OWNER);
 
-        $this->assertSame([], $this->infoCenterFor($outsider)['wiki_tasks']);
+        $this->assertSame([], $this->wikiTasksIn($this->infoCenterFor($outsider)));
         $this->assertSame(0, UserNotification::query()->where('user_id', $outsider->id)->count());
     }
 
@@ -246,7 +248,7 @@ class InfoCenterWikiReviewTaskTest extends TestCase
             'qa_assigned_by_user_id' => $owner->id,
         ])->save();
 
-        $tasks = collect($this->infoCenterFor($reviewer->fresh())['wiki_tasks']);
+        $tasks = collect($this->wikiTasksIn($this->infoCenterFor($reviewer->fresh())));
 
         $this->assertEqualsCanonicalizing(['wiki_review', 'wiki_qa'], $tasks->pluck('type')->all());
         $this->assertSame(

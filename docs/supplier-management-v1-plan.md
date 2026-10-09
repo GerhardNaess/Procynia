@@ -480,7 +480,7 @@ koblingstabeller mot andre moduler.
 - Svak vurdering uten oppfølging (måtte lese koblinger til saker brukeren kanskje ikke ser; et skjult
   sak-objekt ville da skrudd av signalet og røpet at det finnes)
 - Lenge under vurdering
-- Signaler i bjella / Mine oppgaver
+- Signaler i bjella / Mine oppgaver — punkt 6, se [notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)
 
 ---
 
@@ -734,7 +734,7 @@ Tre spesifikasjoner, med egen fixture, markørnavngitte data og `remaining()` = 
 | Fagområde på leverandøren | §9.1 |
 | Flere kontaktpersoner, konsernstruktur, underleverandørkjeder | Senere |
 | KPI- og Kvalitet-kobling | §7.5, §7.6 |
-| Varsler i bjella / Mine oppgaver | Senere, felles for styringsmodulene |
+| Varsler i bjella / Mine oppgaver | Punkt 6, felles for styringsmodulene — Leverandører først ([notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)) |
 | Import fra Excel | Eget steg etter v1 |
 
 ---

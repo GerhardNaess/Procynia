@@ -2030,13 +2030,17 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame('commercial_owner', $defaultPage['props']['infoCenter']['role_context']['persona']);
             $this->assertSame(2, $defaultPage['props']['infoCenter']['role_context']['operational_activity_score']);
             $this->assertFalse($defaultPage['props']['infoCenter']['role_context']['is_case_operational']);
-            $this->assertSame('awaiting_response', $defaultPage['props']['infoCenter']['default_view']);
-            $this->assertSame('awaiting_response', $defaultPage['props']['infoCenter']['active_view']);
-            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($defaultPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame('my_tasks', $defaultPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $defaultPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($defaultPage['props']['infoCenter']['view_options'], 'value'));
             $this->assertSame('Opprettet av meg', collect($defaultPage['props']['infoCenter']['view_options'])->firstWhere('value', 'outbound')['label']);
-            $this->assertSame(['decision', 'clarification', 'awaiting_response'], array_column($defaultPage['props']['infoCenter']['summary']['items'], 'key'));
-            $this->assertCount(0, $defaultPage['props']['infoCenter']['items']);
-            $this->assertSame(0, $defaultPage['props']['infoCenter']['pagination']['total']);
+            $this->assertSame(['my_tasks', 'decision', 'clarification', 'awaiting_response'], array_column($defaultPage['props']['infoCenter']['summary']['items'], 'key'));
+            // Nothing this viewer sent out is waiting for an answer.
+            $awaitingPage = $this->inertiaPage(
+                $this->actingAs($viewer)->get('/app/info-center?view=awaiting_response'),
+            );
+            $this->assertCount(0, $awaitingPage['props']['infoCenter']['items']);
+            $this->assertSame(0, $awaitingPage['props']['infoCenter']['pagination']['total']);
 
             $myTasksPage = $this->inertiaPage(
                 $this->actingAs($viewer)->get('/app/info-center?view=my_tasks'),
@@ -2121,10 +2125,10 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
             $this->assertSame('commercial_owner', $commercialPage['props']['infoCenter']['role_context']['persona']);
             $this->assertSame('commercial_owner', $commercialPage['props']['infoCenter']['role_context']['base_persona']);
-            $this->assertSame('awaiting_response', $commercialPage['props']['infoCenter']['default_view']);
-            $this->assertSame('awaiting_response', $commercialPage['props']['infoCenter']['active_view']);
-            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($commercialPage['props']['infoCenter']['view_options'], 'value'));
-            $this->assertSame(['decision', 'clarification', 'awaiting_response'], array_column($commercialPage['props']['infoCenter']['summary']['items'], 'key'));
+            $this->assertSame('my_tasks', $commercialPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $commercialPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($commercialPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['my_tasks', 'decision', 'clarification', 'awaiting_response'], array_column($commercialPage['props']['infoCenter']['summary']['items'], 'key'));
         } finally {
             Carbon::setTestNow();
         }
@@ -2526,17 +2530,17 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame('Du kan fortsatt opprette, tildele og følge opp aksjoner når saken krever det.', $strategicPage['props']['infoCenter']['role_context']['subheadline']);
             $this->assertSame(0, $strategicPage['props']['infoCenter']['role_context']['operational_activity_score']);
             $this->assertFalse($strategicPage['props']['infoCenter']['role_context']['is_case_operational']);
-            $this->assertSame('awaiting_response', $strategicPage['props']['infoCenter']['default_view']);
-            $this->assertSame('awaiting_response', $strategicPage['props']['infoCenter']['active_view']);
-            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($strategicPage['props']['infoCenter']['view_options'], 'value'));
-            $this->assertSame(['decision', 'clarification', 'awaiting_response'], array_column($strategicPage['props']['infoCenter']['summary']['items'], 'key'));
+            $this->assertSame('my_tasks', $strategicPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $strategicPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($strategicPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['my_tasks', 'decision', 'clarification', 'awaiting_response'], array_column($strategicPage['props']['infoCenter']['summary']['items'], 'key'));
             $this->assertSame(0, $strategicPage['props']['infoCenter']['pagination']['total']);
 
             $strategicFallbackPage = $this->inertiaPage(
                 $this->actingAs($strategicOwner)->get('/app/info-center?view=bogus'),
             );
 
-            $this->assertSame('awaiting_response', $strategicFallbackPage['props']['infoCenter']['active_view']);
+            $this->assertSame('my_tasks', $strategicFallbackPage['props']['infoCenter']['active_view']);
 
             $trivialOwner = User::factory()->create([
                 'name' => 'Trivial Owner',
@@ -2582,9 +2586,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame('commercial_owner', $trivialPage['props']['infoCenter']['role_context']['persona']);
             $this->assertSame(2, $trivialPage['props']['infoCenter']['role_context']['operational_activity_score']);
             $this->assertFalse($trivialPage['props']['infoCenter']['role_context']['is_case_operational']);
-            $this->assertSame('awaiting_response', $trivialPage['props']['infoCenter']['default_view']);
-            $this->assertSame('awaiting_response', $trivialPage['props']['infoCenter']['active_view']);
-            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($trivialPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame('my_tasks', $trivialPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $trivialPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($trivialPage['props']['infoCenter']['view_options'], 'value'));
 
             $activePage = $this->inertiaPage(
                 $this->actingAs($activeOwner)->get('/app/info-center'),

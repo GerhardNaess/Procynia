@@ -26,6 +26,7 @@ use App\Services\Suppliers\SupplierComplianceRequirementService;
 use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Services\Suppliers\SupplierLifecycleService;
+use App\Services\Suppliers\SupplierNotificationService;
 use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Services\Suppliers\SupplierRiskService;
 use App\Support\CustomerContext;
@@ -38,6 +39,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -108,6 +110,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierAssuranceResolver $assurance,
         private readonly SupplierDueDiligenceService $dueDiligence,
         private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
+        private readonly SupplierNotificationService $notifications,
     ) {}
 
     public function index(Request $request): Response
@@ -407,7 +410,9 @@ class SupplierManagementController extends Controller
         $initialStatus = $validated['initial_status'];
         $classification = SupplierCriticalityService::classification($validated);
 
-        $supplier = $this->guardOrganizationNumberRace(function () use ($fields, $user, $initialStatus, $classification): Supplier {
+        // One transaction with the notification: it is written after commit, so a registration that
+        // fails tells nobody they own it.
+        $supplier = $this->guardOrganizationNumberRace(fn (): Supplier => DB::transaction(function () use ($fields, $user, $initialStatus, $classification): Supplier {
             $supplier = new Supplier($fields + [
                 'customer_id' => (int) $user->customer_id,
                 'created_by' => $user->id,
@@ -419,8 +424,10 @@ class SupplierManagementController extends Controller
             $supplier->forceFill($classification);
             $supplier->save();
 
+            $this->notifications->ownerAssigned($supplier, null, $user);
+
             return $supplier;
-        });
+        }));
 
         return redirect()
             ->route('app.supplier-management.show', ['supplierId' => $supplier->id])
@@ -439,7 +446,14 @@ class SupplierManagementController extends Controller
 
         [$fields] = $this->validatedFields($request, $user, $supplier);
 
-        $this->guardOrganizationNumberRace(fn () => $supplier->fill($fields + ['updated_by' => $user->id])->save());
+        // The owner as it was, read before the write: afterwards the row no longer remembers it, and
+        // only a real change of intern ansvarlig is news.
+        $previousOwnerId = $supplier->owner_user_id !== null ? (int) $supplier->owner_user_id : null;
+
+        $this->guardOrganizationNumberRace(fn () => DB::transaction(function () use ($supplier, $fields, $user, $previousOwnerId): void {
+            $supplier->fill($fields + ['updated_by' => $user->id])->save();
+            $this->notifications->ownerAssigned($supplier, $previousOwnerId, $user);
+        }));
 
         return back()->with('success', __('procynia.supplier_management.flash.updated'));
     }

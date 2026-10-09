@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\SavedNotice;
 use App\Models\User;
 use App\Models\UserNotification;
+use App\Services\Notifications\UserNotificationAccessScope;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +16,7 @@ class UserNotificationService
 
     public function __construct(
         private readonly CustomerContext $customerContext,
+        private readonly UserNotificationAccessScope $accessScope,
     ) {}
 
     public function panelPayload(?User $user, int $limit = self::DEFAULT_LIMIT): array
@@ -35,6 +37,9 @@ class UserNotificationService
 
         $query = $this->visibleQuery($user, $customerId);
         $notifications = (clone $query)
+            // Loaded with the page rather than once per row: the panel is built on every Inertia
+            // visit and every poll.
+            ->with('savedNotice:id,customer_id,title,reference_number')
             ->orderByRaw('CASE WHEN is_read THEN 1 ELSE 0 END')
             ->orderByDesc('created_at')
             ->orderByDesc('id')
@@ -42,7 +47,8 @@ class UserNotificationService
             ->get();
 
         return [
-            'unread_count' => $this->unreadCount($user, $customerId),
+            // The same scoped query as the list, so the access rules are worked out once per panel.
+            'unread_count' => (clone $query)->where('is_read', false)->count(),
             'limit' => $limit,
             // Where the bell re-reads itself from while the person stays on one page.
             'refresh_url' => route('app.notifications.index'),
@@ -149,21 +155,23 @@ class UserNotificationService
             ->delete();
     }
 
+    /**
+     * This person's own notifications in this customer that they may still read: the list, the
+     * unread count, «mark all read» and «delete unread» all start here, so none of them can reach a
+     * row the bell does not show (UserNotificationAccessScope).
+     */
     private function visibleQuery(User $user, int $customerId): Builder
     {
-        return UserNotification::query()
-            ->where('customer_id', $customerId)
-            ->where('user_id', $user->id);
+        return $this->accessScope->apply(
+            UserNotification::query()
+                ->where('customer_id', $customerId)
+                ->where('user_id', $user->id),
+            $user,
+        );
     }
 
     private function notificationPayload(UserNotification $notification, int $customerId): array
     {
-        if ($notification->saved_notice_id !== null) {
-            $notification->loadMissing([
-                'savedNotice:id,customer_id,title,reference_number',
-            ]);
-        }
-
         $savedNotice = $notification->savedNotice;
 
         return [

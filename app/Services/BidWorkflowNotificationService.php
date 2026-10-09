@@ -9,7 +9,7 @@ use App\Models\UserNotification;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\Doffin\DoffinSourceAdapter;
-use Illuminate\Support\Facades\DB;
+use App\Services\Notifications\UserNotificationWriter;
 
 /**
  * The bid workflow's own notifications, written into the panel Procynia already has.
@@ -44,6 +44,7 @@ class BidWorkflowNotificationService
 
     public function __construct(
         private readonly SavedNoticeWorkflowSignals $signals,
+        private readonly UserNotificationWriter $writer,
     ) {}
 
     /**
@@ -312,9 +313,9 @@ class BidWorkflowNotificationService
     }
 
     /**
-     * The single write, with the two checks that keep a notification honest: the recipient is an
-     * active user, and they belong to the customer the notification is about. A row that fails
-     * either is not written, so no target_url can ever point across a customer boundary.
+     * The single write. UserNotificationWriter holds the checks that keep a notification honest —
+     * the recipient is an active user of the customer it is about, idempotent on dedupe_key, after
+     * commit, rescued — so no target_url can ever point across a customer boundary.
      *
      * @param  array<string, mixed>  $metadata
      */
@@ -330,36 +331,17 @@ class BidWorkflowNotificationService
         string $targetUrl,
         array $metadata = [],
     ): bool {
-        $recipient = User::query()->find($recipientId);
-
-        if (! $recipient instanceof User
-            || ! $recipient->is_active
-            || (int) $recipient->customer_id !== $customerId) {
-            return false;
-        }
-
-        $attributes = [
-            'customer_id' => $customerId,
-            'user_id' => $recipientId,
-            'saved_notice_id' => $savedNoticeId,
-            'event_type' => $eventType,
-            'severity' => $severity,
-            'title' => $title,
-            'message' => $message,
-            'target_url' => $targetUrl,
-            'metadata' => $metadata,
-        ];
-
-        DB::afterCommit(function () use ($dedupeKey, $attributes): void {
-            // rescue(): the work that triggered this must not fail because a notification could not
-            // be written. The user's case is what matters; the alert about it is not.
-            rescue(
-                fn () => UserNotification::query()->firstOrCreate(['dedupe_key' => $dedupeKey], $attributes),
-                null,
-                false,
-            );
-        });
-
-        return true;
+        return $this->writer->notify(
+            $customerId,
+            $recipientId,
+            $eventType,
+            $dedupeKey,
+            $title,
+            $message,
+            $targetUrl,
+            $metadata,
+            $severity,
+            savedNoticeId: $savedNoticeId,
+        );
     }
 }

@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, 'Index.jsx'), 'utf8');
+const helpSource = readFileSync(join(here, 'infoCenterHelp.js'), 'utf8');
 
 const region = (name) => {
     const start = source.indexOf(name);
@@ -117,7 +118,8 @@ describe('the info button explains the panel without selecting it', () => {
 
         // due_soon has no tab to inherit from; it reuses the sentence the page help gives it.
         assert.ok(source.includes("due_soon: 'Viser åpne punkter med nær frist.'"));
-        assert.ok(source.includes("page_help_item_deadline_text ?? 'Viser åpne punkter med nær frist.'"));
+        // The page help itself lives in infoCenterHelp.js since punkt 6.
+        assert.ok(helpSource.includes("page_help_item_deadline_text ?? 'Viser åpne punkter med nær frist.'"));
     });
 
     test('every panel the page can show has one', () => {
@@ -196,7 +198,8 @@ describe('nothing about the data behind the page changed', () => {
             'const viewOptions = infoCenter?.view_options ?? [];',
             'const summaryItems = infoCenter?.summary?.items ?? [];',
             'const items = infoCenter?.items ?? [];',
-            'const wikiTasks = infoCenter?.wiki_tasks ?? [];',
+            // Since punkt 6, «Mine oppgaver» from every module replaces the Wiki-only list.
+            'const myTasks = infoCenter?.my_tasks ?? { count: 0, groups: [] };',
             'const pagination = infoCenter?.pagination ?? {};',
         ]) {
             assert.ok(source.includes(line), line);

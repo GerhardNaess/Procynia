@@ -815,6 +815,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     onMarkAllRead={markAllNotificationsAsRead}
                                     onDeleteNotification={deleteNotification}
                                     onDeleteAllUnread={() => setIsDeleteUnreadOpen(true)}
+                                    domainLabels={{
+                                        supplier: translations.info_center_page?.my_tasks?.modules?.supplier,
+                                    }}
                                 />
 
                                 <div ref={userMenuRef} className="relative">
