@@ -44,6 +44,7 @@ use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\SupplierProfileController;
 use App\Http\Controllers\App\SupplierRequirementEvaluationController;
 use App\Http\Controllers\App\SupplierRequirementOverrideController;
+use App\Http\Controllers\App\SupplierRequirementWikiGuidanceController;
 use App\Http\Controllers\App\SupplierRiskController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
@@ -479,6 +480,9 @@ Route::prefix('app')
             Route::post('/control-requirements/{requirementId}/retire', [SupplierControlRequirementController::class, 'retire'])->whereNumber('requirementId')->name('control-requirements.retire');
             Route::post('/control-requirements/{requirementId}/reactivate', [SupplierControlRequirementController::class, 'reactivate'])->whereNumber('requirementId')->name('control-requirements.reactivate');
             Route::delete('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'destroy'])->whereNumber('requirementId')->name('control-requirements.destroy');
+            Route::get('/control-requirements/wiki-pages', [SupplierRequirementWikiGuidanceController::class, 'search'])->name('control-requirements.wiki-pages.search');
+            Route::post('/control-requirements/{requirementId}/wiki-pages', [SupplierRequirementWikiGuidanceController::class, 'store'])->whereNumber('requirementId')->name('control-requirements.wiki-pages.store');
+            Route::delete('/control-requirements/{requirementId}/wiki-pages/{pageId}', [SupplierRequirementWikiGuidanceController::class, 'destroy'])->whereNumber(['requirementId', 'pageId'])->name('control-requirements.wiki-pages.destroy');
             Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
             Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'supplier')->name('knowledge-handoff.store');
             Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');

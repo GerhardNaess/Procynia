@@ -8,6 +8,7 @@ use App\Models\ComplianceSource;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
+use App\Models\EnterpriseWikiPage;
 use App\Models\ImprovementCase;
 use App\Models\Risk;
 use App\Models\Supplier;
@@ -35,6 +36,7 @@ use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Test-only setup and cleanup for the Leverandøroppfølging E2E spec
@@ -314,6 +316,38 @@ class SupplierE2EFixture
     }
 
     /**
+     * Veiledning fra Enterprise Wiki (supplier-assurance-v2-plan §28): wiki.view for the run's
+     * Leverandøransvarlig (who already holds supplier.assure after seedAssurance), and two existing
+     * Wiki pages of the run's customer to find and link — one article, one archived that is never
+     * offered. Pages are removed by cleanup().
+     *
+     * @return array{page_title: string, page_slug: string, archived_title: string}
+     */
+    public static function seedWikiGuidance(string $suffix): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $manager, $name, $suffix): array {
+            self::role($customer, $name('Wiki-leser'), [CustomerPermissionCatalog::WIKI_VIEW], $manager);
+            $page = fn (string $title, string $status): EnterpriseWikiPage => EnterpriseWikiPage::query()->create([
+                'customer_id' => $customer->id,
+                'slug' => 'e2e-lev-'.strtolower($suffix).'-'.Str::slug($title),
+                'title' => $title,
+                'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+                'status' => $status,
+                'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+                'last_source_hash' => str_pad('e2e', 64, '0'),
+            ]);
+            $article = $page($name('Slik kontrollerer vi databehandleravtaler'), EnterpriseWikiPage::STATUS_DRAFT);
+            $archived = $page($name('Gammel veiledning om databehandlere'), EnterpriseWikiPage::STATUS_ARCHIVED);
+
+            return ['page_title' => $article->title, 'page_slug' => $article->slug, 'archived_title' => $archived->title];
+        });
+    }
+
+    /**
      * Kontroll forfalt with explicit historical dates, instead of moving the clock: a Viktig
      * requirement for every supplier, controlled every 6 months, and a Dokumentert control of it on
      * the supplier dated 7 months ago, resting on a report without expiry. Its control date passed a
@@ -494,6 +528,8 @@ class SupplierE2EFixture
                 CustomerPackageEntitlement::query()->where('customer_id', $customer->id)->delete();
                 // Before the fagområder they hold with RESTRICT; their links to suppliers cascade.
                 Risk::query()->where('customer_id', $customer->id)->delete();
+                // Wiki pages hold the customer without cascade; their links to requirements cascade.
+                EnterpriseWikiPage::query()->where('customer_id', $customer->id)->delete();
                 // Suppliers, their history, assessments, documentation, the fagområde, the cases and the
                 // kravkilde with its requirements go with the customer.
                 $customer->delete();

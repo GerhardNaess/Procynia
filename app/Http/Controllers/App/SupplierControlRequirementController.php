@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\Suppliers\Assurance\SupplierControlRequirementService;
 use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
+use App\Services\Suppliers\Assurance\SupplierRequirementWikiGuidance;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerContext;
 use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
@@ -32,6 +33,7 @@ class SupplierControlRequirementController extends Controller
         private readonly SupplierControlRequirementService $requirements,
         private readonly SupplierRequirementPayload $payload,
         private readonly SupplierRequirementTemplateLibrary $templates,
+        private readonly SupplierRequirementWikiGuidance $wikiGuidance,
     ) {}
 
     public function index(): Response
@@ -44,7 +46,7 @@ class SupplierControlRequirementController extends Controller
             'form' => $canManage ? $this->payload->formOptions($user) : null,
             'templates' => $this->templates->overview($user),
             'templates_reviewed' => RequirementTemplates::CONTENT_REVIEWED,
-            'permissions' => ['can_manage' => $canManage],
+            'permissions' => ['can_manage' => $canManage, 'can_manage_wiki_guidance' => $this->wikiGuidance->canManage($user)],
         ]);
     }
 
