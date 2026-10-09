@@ -27,6 +27,7 @@ use App\Services\Suppliers\SupplierCriticalityService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Services\Suppliers\SupplierLifecycleService;
 use App\Services\Suppliers\SupplierNotificationService;
+use App\Services\Suppliers\SupplierRegistration;
 use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Services\Suppliers\SupplierRiskService;
 use App\Support\CustomerContext;
@@ -111,6 +112,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierDueDiligenceService $dueDiligence,
         private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
         private readonly SupplierNotificationService $notifications,
+        private readonly SupplierRegistration $registration,
     ) {}
 
     public function index(Request $request): Response
@@ -413,16 +415,7 @@ class SupplierManagementController extends Controller
         // One transaction with the notification: it is written after commit, so a registration that
         // fails tells nobody they own it.
         $supplier = $this->guardOrganizationNumberRace(fn (): Supplier => DB::transaction(function () use ($fields, $user, $initialStatus, $classification): Supplier {
-            $supplier = new Supplier($fields + [
-                'customer_id' => (int) $user->customer_id,
-                'created_by' => $user->id,
-                'updated_by' => $user->id,
-            ]);
-            // The status and classification it is registered with are the supplier's own; neither is
-            // a change.
-            $supplier->status = $initialStatus;
-            $supplier->forceFill($classification);
-            $supplier->save();
+            $supplier = $this->registration->register($user, $fields, $initialStatus, $classification);
 
             $this->notifications->ownerAssigned($supplier, null, $user);
 
@@ -559,15 +552,7 @@ class SupplierManagementController extends Controller
     private function validatedFields(Request $request, User $user, ?Supplier $current, array $extraRules = []): array
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'organization_number' => ['nullable', 'string', 'max:50'],
-            'category' => ['required', 'string', Rule::in(Supplier::CATEGORIES)],
-            'deliverable_description' => ['required', 'string', 'max:5000'],
-            'owner_user_id' => ['required', 'integer'],
-            'contact_name' => ['nullable', 'string', 'max:255'],
-            'contact_email' => ['nullable', 'string', 'email', 'max:255'],
-            'contact_phone' => ['nullable', 'string', 'max:50'],
-            'note' => ['nullable', 'string', 'max:10000'],
+            ...SupplierRegistration::masterDataRules(),
             ...$extraRules,
         ], SupplierCriticalityService::messages(), SupplierValidationMessages::attributes());
 
@@ -579,11 +564,9 @@ class SupplierManagementController extends Controller
             throw ValidationException::withMessages(['owner_user_id' => __('procynia.supplier_management.validation.owner_not_allowed')]);
         }
 
-        // «987 654 321» and «987654321» are the same number.
-        $organizationNumber = preg_replace('/\s+/u', '', (string) ($validated['organization_number'] ?? ''));
-        $organizationNumber = $organizationNumber !== '' ? $organizationNumber : null;
+        $organizationNumber = SupplierRegistration::normalizeOrganizationNumber($validated['organization_number'] ?? null);
 
-        if ($organizationNumber !== null && $this->organizationNumberTaken((int) $user->customer_id, $organizationNumber, $current?->id)) {
+        if ($organizationNumber !== null && $this->registration->organizationNumberTaken((int) $user->customer_id, $organizationNumber, $current?->id)) {
             throw ValidationException::withMessages(['organization_number' => __('procynia.supplier_management.validation.organization_number_taken')]);
         }
 
@@ -605,16 +588,6 @@ class SupplierManagementController extends Controller
         $value = trim((string) $value);
 
         return $value !== '' ? $value : null;
-    }
-
-    /** Within the customer — the same rule as the database's partial unique index. */
-    private function organizationNumberTaken(int $customerId, string $organizationNumber, ?int $exceptId): bool
-    {
-        return Supplier::query()
-            ->where('customer_id', $customerId)
-            ->where('organization_number', $organizationNumber)
-            ->when($exceptId !== null, fn (Builder $query) => $query->whereKeyNot($exceptId))
-            ->exists();
     }
 
     /**

@@ -549,6 +549,15 @@ FK + tjenestesjekk.
 | Constraints | `unique(id, customer_id)`; partiell unik `(customer_id, organization_number) WHERE organization_number IS NOT NULL`; CHECK på `category`, `criticality`, `status`; CHECK `review_interval_months IN (6, 12, 24, 36)`; CHECK `criticality = 'standard' OR review_interval_months IS NOT NULL` |
 | Sletting | Bare når `isDeletable()` (§6.4) |
 
+### `supplier_imports` — importens logg (punkt 7)
+
+| | |
+|---|---|
+| Formål | Én rad per opplastet Excel-fil i «Importer leverandører» — aldri filen, bare de gjenkjente celleverdiene og deretter utfallet ([v2-plan §29](supplier-assurance-v2-plan.md#29-punkt-7--excel-import-av-leverandører)) |
+| Felt | `customer_id`, `created_by_user_id`, `file_name`, `status` (`pending`/`completed`), `row_count`, `rows` (jsonb, bare når `pending`), `ignored_columns`, `update_existing`, `result` (jsonb, bare når `completed`), `completed_by_user_id`, `completed_at`, timestamps |
+| Constraints | CHECK på `status` og på at tilstanden stemmer (pending ⇔ rows, completed ⇔ result + completed_at) |
+| Sletting | `pending` eldre enn 24 t slettes av `suppliers:prune-imports`; `completed` beholdes |
+
 ### `supplier_status_changes` — immutable
 
 | | |
@@ -735,7 +744,7 @@ Tre spesifikasjoner, med egen fixture, markørnavngitte data og `remaining()` = 
 | Flere kontaktpersoner, konsernstruktur, underleverandørkjeder | Senere |
 | KPI- og Kvalitet-kobling | §7.5, §7.6 |
 | Varsler i bjella / Mine oppgaver | Punkt 6, felles for styringsmodulene — Leverandører først ([notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)) |
-| Import fra Excel | Eget steg etter v1 |
+| Import fra Excel | Eget steg etter v1 — bygget som punkt 7, [v2-plan §29](supplier-assurance-v2-plan.md#29-punkt-7--excel-import-av-leverandører) |
 
 ---
 
