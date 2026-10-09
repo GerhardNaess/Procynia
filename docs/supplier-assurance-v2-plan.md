@@ -1631,7 +1631,7 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 | 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); merget til lokal `main` i `e9add9d8`, ikke pushet | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
 | 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) — **teknisk fullført** på `feat/supplier-requirement-wiki-guidance` (§28); merget til lokal `main` i `2e4f72b4`, ikke pushet | Utvikling | — |
 | 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) — **teknisk fullført**: 6A–6C merget til lokal `main` i `6c8a9641`; 6D (Risiko, Avvik, Etterlevelse, Kvalitet, Mål og KPI), tildelingsvarsler og fristpåminnelser (inkl. Leverandørers 60 dager) merget til lokal `main` i `c1ee14df`, ikke pushet ([notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)) | Ferdig, felles | — |
-| 7 | Excel-import av leverandører og profiler | Planlagt | — |
+| 7 | Excel-import av leverandører og profiler — **teknisk fullført** på `feat/supplier-excel-import` (§29), ikke committet/merget | Utvikling | — |
 | 8 | Visning av nyere kravmalversjon; firøyneprinsipp på beslutning | Ved behov | — |
 | 9 | Kobling til Kvalitet (prosess) og Mål og KPI (leverandør-KPI) | Ved behov, eid av målmodulen | v1-plan §7.5–7.6 |
 
@@ -1838,3 +1838,153 @@ leverandør på leverandørsiden. NO/EN, 16 px, 390 px uten sideveis scrolling.
 | Regresjon (sluttkontroll) | Leverandør-/PrivateFile-/Wiki-handoff, `QualityItemTest`, tenant-isolasjon, roller og navigasjon 343/343; Wiki (sidesletting, publiseringssynlighet, visning, backlinks) + Security 129/129; leverandør-JS 81/81; E2E `supplier-wiki-guidance` + `supplier-assurance` 9/9. Migrasjon rollback + migrate i testdatabasen. Full suite ikke kjørt |
 | Migrasjon | Den unike indeksen `(id, customer_id)` kan ikke feile på eksisterende data (`id` er primærnøkkel) og har ikke navnekonflikt; rollback dropper bare koblingstabellen og indeksen |
 
+
+## 29. Punkt 7 — Excel-import av leverandører
+
+Status: **teknisk fullført** på `feat/supplier-excel-import` (worktree `.wt-import`, fra `main` `d516c26c`).
+Ikke committet, ikke merget, ikke pushet.
+
+### 29.1 Flyt
+
+Leverandører → **Importer leverandører** (knapp i registeret, bare med `supplier.edit`) →
+`/app/supplier-management/import`. En veiviser i tre steg, med PageHelp (`help.import`):
+
+1. **Last opp.** Last ned Excel-malen (arket «Leverandører» med bare overskriftsraden, og arket
+   «Veiledning» med påkrevd/forklaring/gyldige verdier per kolonne, i brukerens språk) eller bruk eget
+   register. Velg `.xlsx`, maks 5 MB og 1 000 leverandører.
+2. **Kontroller.** Hver rad vises med radnummer, navn, organisasjonsnummer, kategori/kritikalitet/
+   status/profilsvar, intern ansvarlig, kontakt, status (Ny leverandør · Eksisterende leverandør ·
+   Feil i raden · Duplikat i filen · Mulig duplikat) og hva som skjer (Opprettes · Oppdateres ·
+   Hoppes over). Feil og merknader står i klartekst per rad. Filter per status. Valget **«Oppdater
+   eksisterende leverandører med verdiene fra filen»** (av som standard) vises bare når filen har
+   eksisterende leverandører, og hver oppdaterbar rad viser endringene felt for felt (fra → til).
+3. **Bekreft.** Oppsummering: nye, eksisterende, oppdateres/ikke valgt, rader med feil, rader som
+   hoppes over. Importen starter bare på «Bekreft og importer». Ingenting kan bekreftes når ingen rad
+   kan importeres.
+
+Etterpå vises **resultatet**: opprettet/oppdatert/hoppet over/avvist, rad for rad med årsak, og lenke
+til hver leverandør personen fortsatt kan åpne. Å åpne en fullført import igjen viser resultatet; den
+kan ikke kjøres på nytt.
+
+### 29.2 Kolonner
+
+Kolonner gjenkjennes på overskriften — malens norske eller engelske, eller vanlige alternativer
+(«Orgnr», «Leverandør», «E-post», «Ansvarlig» …) — uansett rekkefølge, store/små bokstaver, «*» og
+tegnsetting. Ukjente kolonner listes og ignoreres. Påkrevde kolonner i filen: Leverandørnavn, Kategori,
+Hva leverer de til oss?. Samme kolonne to ganger avvises.
+
+| Kolonne | Felt | Regel |
+|---|---|---|
+| Leverandørnavn * | `name` | Påkrevd, maks 255 |
+| Organisasjonsnummer | `organization_number` | Mellomrom fjernes (som ved registrering). 9 siffer = norsk, kontrolleres med modulus 11; ellers bokstaver/tall/`.-/`, maks 50 |
+| Kategori * | `category` | Én av de faste kategoriene, som kode eller navn på norsk/engelsk |
+| Hva leverer de til oss? * | `deliverable_description` | Påkrevd, maks 5 000 |
+| Status | (registreringsstatus) | Aktiv (standard når tom) eller Under vurdering. Avsluttet avvises |
+| Intern ansvarlig (e-post) | `owner_user_id` | E-post (eller entydig fullt navn) til en aktiv bruker hos kunden med `supplier.view` (`isValidOwner()`). Tom = den som importerer, når hen kan være ansvarlig; ellers feil |
+| Kontaktperson / E-post kontaktperson / Telefon kontaktperson / Notat | `contact_*`, `note` | Samme regler som skjemaet |
+| Kritikalitet, Vurderingsintervall (måneder), de fire ja/nei-spørsmålene | kritikalitetsfeltene | Alt eller ingenting. Tomt = «Ikke vurdert», vurderes senere på leverandørsiden (tilstanden finnes fra før). Utfylt = nivå + alle fire svar, intervall påkrevd for Viktig/Kritisk — `SupplierCriticalityService::rules()` |
+| De 13 profilspørsmålene (§4) | `supplier_profiles` | Bare profilens faste verdier (Ja/Nei/Ikke avklart, rolle, lokasjon; lister skilt med komma, «Ingen av disse»). Spørsmål profilen ikke stiller for leverandøren (`visibleFields()`) importeres ikke, og det sies. Skrives gjennom `SupplierProfileService::save()` med historikkrad |
+
+Ingen nye felt på `suppliers`. Vurderinger, kontroller, beslutninger, dokumentasjon, aktsomhet og
+historikk importeres aldri.
+
+### 29.3 Identitet og duplikater
+
+Identitet er organisasjonsnummeret **innenfor kunden**, lest gjennom `SupplierAccessService::visibleSuppliers()`.
+Navn sammenlignes uten store/små bokstaver og ekstra mellomrom.
+
+| Situasjon | Status | Hva skjer |
+|---|---|---|
+| Org.nr. finnes hos kunden | Eksisterende | Hoppes over, med mindre «Oppdater eksisterende» er valgt |
+| Samme org.nr. (eller samme navn der én rad mangler org.nr.) tidligere i filen | Duplikat i filen | Bare første rad brukes |
+| Uten org.nr., og kunden har leverandør med samme navn | Mulig duplikat | Hoppes over — aldri slått sammen, aldri oppdatert |
+| Med org.nr., og kunden har leverandør med samme navn **uten** org.nr. | Mulig duplikat | Hoppes over: kan være samme selskap |
+| Med org.nr., og navnebror har **annet** org.nr. | Ny | Opprettes, med merknad |
+| Leverandør med samme org.nr./navn hos **en annen kunde** | — | Leses aldri; raden behandles som om den ikke fantes |
+
+### 29.4 Eksisterende leverandører
+
+Oppdatering er et eksplisitt valg med forhåndsvisning. Bare stamdata (`name`, `category`,
+`deliverable_description`, intern ansvarlig, `contact_*`, `note`) og bare celler som er fylt ut og
+ulike fra registeret. Tomme celler endrer ingenting. Org.nr. endres aldri (det er nøkkelen). Status,
+kritikalitet og profil har egen historikk med begrunnelse og endres ikke fra import (merknad i raden).
+Avsluttede leverandører endres aldri. `updated_by` settes til den som importerer.
+
+### 29.5 Importmotor
+
+| Del | Ansvar |
+|---|---|
+| `SupplierImportReader` | Leser filen. Type fra innholdet (`PrivateFileType::detect()` — ekte `.xlsx`, ikke makroaktivert); pakken måles før åpning (maks 1 000 deler, 50 MB ukomprimert); formler evalueres aldri (Excels hurtigbufrede verdi brukes, og tekst som ville vært en formel lagres ikke); maks 1 000 rader, 80 kolonner, 10 001 tegn per celle; bibliotekfeil logges og vises som «filen kunne ikke leses» |
+| `SupplierImportAnalyzer` | Status, meldinger, endringer og hva som ville blitt skrevet — skriver ingenting. Bruker `SupplierRegistration::masterDataRules()`, `SupplierCriticalityService::rules()`, `SupplierProfileService::rules()` og `isValidOwner()` |
+| `SupplierImportService` | Opplasting, forhåndsvisning, gjennomføring, forkasting, opprydding |
+| `SupplierRegistration` | Ny: registreringsreglene og skrivingen trukket ut av `SupplierManagementController::store()`, brukt av både «Registrer leverandør» og importen |
+| `supplier_imports` | Ny tabell: én rad per opplasting. `pending` holder de gjenkjente celleverdiene (`rows`), `completed` holder `result`, hvem og når. CHECK på status og tilstand |
+
+**Gjennomføring** er synkron (maks 1 000 rader) i én transaksjon: importraden låses (`FOR UPDATE`) —
+en fullført import returneres uendret, så dobbeltklikk og retry importerer ingenting to ganger;
+`pg_advisory_xact_lock` per kunde serialiserer samtidige importer; `supplier.edit` sjekkes på nytt;
+radene analyseres på nytt inne i låsen og sammenlignes med hashen av forhåndsvisningen personen så —
+er registeret endret, skrives ingenting og personen bes kontrollere på nytt. Hver leverandør skrives i
+eget savepoint (leverandør + profil), så en leverandør er enten komplett eller borte. Avviser databasen
+et org.nr. i øyeblikket (registrert for hånd samtidig), avvises den raden; enhver annen feil ruller
+**hele** importen tilbake, importen står fortsatt som `pending` og kan prøves igjen, og brukeren får en
+generell melding (feilen logges, vises aldri).
+
+**Varsler:** importen sender ingen bjellevarsler, heller ikke for intern ansvarlig — en import er ikke
+en overlevering, og hundrevis av varsler ville drukne de ekte. Oppfølging vises som for alle
+leverandører i «Trenger oppmerksomhet» og «Mine oppgaver». Dette sies i bekreftelsessteget.
+
+**Sporbarhet:** nye leverandører får `created_by`/`updated_by` = den som importerer (vises som
+«Registrert av» på leverandørsiden), profilen får historikkrad. Importraden er importens egen logg:
+fil, hvem, når, valget om oppdatering og utfall per rad (inkl. feilmeldingene personen så).
+
+### 29.6 Tilgang og kundeisolasjon
+
+- Alle steg krever `supplier.edit` (som «Registrer leverandør»); ingen ny rettighet. `supplier.view`,
+  `assess`, `assure` og `delete` alene gir 403. Kunde uten modulen sendes til Hjem av modulvakten.
+- En import er personens egen: andres import — samme kunde eller ikke — er 404.
+- Eksisterende leverandører og intern ansvarlig slås bare opp innenfor egen kunde; en e-post til en
+  bruker hos en annen kunde gir «fant ingen bruker».
+- Bare faste felter skrives (`SupplierRegistration::register()` og `UPDATABLE_FIELDS`); status og
+  klassifisering settes slik registrering gjør, aldri via mass assignment.
+
+### 29.7 Lagring, opprydding og skanning
+
+Excel-filen **lagres aldri**. Den leses i opplastingsforespørselen fra PHPs midlertidige fil, som PHP
+sletter når forespørselen avsluttes. Bare de gjenkjente celleverdiene lagres i `supplier_imports.rows`
+(JSON i databasen). Én ventende import per person (ny opplasting erstatter forrige); «Avbryt import»
+sletter den; en ventende import eldre enn 24 timer avvises når den åpnes og slettes av
+`suppliers:prune-imports` (daglig 03:50 UTC). Ved fullføring tømmes `rows`; resultatet beholdes.
+
+**Skanning:** siden ingen fil lagres eller kan lastes ned igjen, gjelder ikke skannekravet for v2.1-
+filer (§27.8) — det finnes ingen blob å skanne, og Defender for Storage vil ikke se importfilen.
+Beskyttelsen er at filen behandles som upålitelig input: innholdsbasert typekontroll, makroer avvist,
+zip-bombevern, ingen formelevaluering, grenser for størrelse, rader, kolonner og celler. Ingen ny
+produksjonsavhengighet. Krever en sikkerhetspolicy skanning av *alle* opplastinger ved inngangen
+(f.eks. WAF/gateway), må det løses der, felles for appen.
+
+### 29.8 Bevisste avgrensninger
+
+- Bare `.xlsx` (ikke `.xls`/`.csv`); bare ett ark leses (arket «Leverandører»/«Suppliers», ellers det
+  første); overskriften må stå blant de 10 første radene.
+- Maks 1 000 leverandører og 5 MB per fil; synkron behandling (ingen kø).
+- Eksisterende leverandører får bare stamdata oppdatert; kritikalitet, status og profil endres på
+  leverandørsiden.
+- Ingen sammenslåing på navn; mulig duplikat må avklares i registeret (legg inn org.nr.).
+- Ingen varsler fra import.
+- Mal og veiledning er ikke Excel-nedtrekkslister (OpenSpout støtter ikke datavalidering); gyldige
+  verdier står i «Veiledning», og verdiene leses uavhengig av store/små bokstaver og språk.
+
+### 29.9 Tester (2026-10-09)
+
+| Nivå | Tester |
+|---|---|
+| PHP Feature | `SupplierImportTest` (14 tester, 247 assertions): mal på norsk/engelsk leses tilbake; forhåndsvisning skriver ingenting, bekreft registrerer med klassifisering, profil + historikk, uten varsler, resultat og tømte rader; ugyldig fil (PDF/CSV med .xlsx/.csv, makro, for stor, manglende/doble kolonner, tom, for mange rader); radfeil (manglende felt, ugyldig org.nr., ukjent kategori/profilsvar, e-post, halv kritikalitet, manglende intervall, inaktiv/uten tilgang/annen kundes ansvarlig, Avsluttet, manglende navn) og utenlandsk org.nr.; duplikater i fil og register, navnebrødre; oppdatering av eksisterende bare når valgt og bare listede felter, avsluttet/uendret urørt, ingen varsel ved omfordeling; kundeisolasjon (annen kundes leverandør/import/bruker); rettigheter på alle steg, rettighet mistet før bekreft, kunde uten modul; dobbel bekreft og gjentatt import; foreldet forhåndsvisning og samtidige importer; databasen avviser org.nr. under skriving; feil under gjennomføring ruller alt tilbake uten intern feiltekst; ingen fil lagret, opprydding (erstatning, avbryt, utløpt, kommando); formel leses som hurtigbufret verdi; meldinger på engelsk |
+| Regresjon | Alle `tests/Feature/App/Supplier*Test.php` (inkl. import), `InfoCenterSupplierTaskTest`, `PackageChangeTest`, `NavigationEntitlementMatrixTest`, `CustomerModuleEntitlementTest`, `SupplierManagementTranslationsTest`, `MyTasksTranslationsTest`: 195/195 (27 filer). Full PHP-suite ikke kjørt |
+| JS | `supplierImport.test.js` (steg, handling per rad, oppsummering, filter, etiketter, endringslinjer, at Bekreft sender hashen); `supplierManagement.test.js` krever PageHelp også på importsiden; hele JS-suiten 1415/1415 |
+| E2E | `supplier-import.spec.js`: last ned mal → fyll inn (fixture skriver under malens egne overskrifter) → last opp → kontroller (status, feil, duplikat, mulig duplikat, filter) → ingenting i registeret før bekreft → bekreft → resultat → leverandørsiden og registeret; lesbarhet desktop og 390 px. `supplier-management.spec.js` 8/8 som regresjon |
+| Migrasjon | Ny tabell, ingen endring av eksisterende; `down()` dropper tabellen |
+
+E2E mot en worktree: `tests/e2e/helpers/risk.js` → `tinker()` tar valgfri `E2E_TINKER_WORKDIR` (f.eks.
+`/var/www/html/.wt-import`) så fixturene kjøres med worktreens kode; uten variabelen er oppførselen
+uendret.

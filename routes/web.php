@@ -39,6 +39,7 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierControlRequirementController;
 use App\Http\Controllers\App\SupplierDocumentController;
 use App\Http\Controllers\App\SupplierDueDiligenceController;
+use App\Http\Controllers\App\SupplierImportController;
 use App\Http\Controllers\App\SupplierImprovementController;
 use App\Http\Controllers\App\SupplierManagementController;
 use App\Http\Controllers\App\SupplierProfileController;
@@ -472,6 +473,13 @@ Route::prefix('app')
         Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
             Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
             Route::post('/', [SupplierManagementController::class, 'store'])->name('store');
+            // Importer leverandører: Last opp → Kontroller → Bekreft (supplier.edit). Nothing is written before Bekreft.
+            Route::get('/import', [SupplierImportController::class, 'create'])->name('import.create');
+            Route::get('/import/template', [SupplierImportController::class, 'template'])->name('import.template');
+            Route::post('/import', [SupplierImportController::class, 'store'])->name('import.store');
+            Route::get('/import/{importId}', [SupplierImportController::class, 'show'])->whereNumber('importId')->name('import.show');
+            Route::post('/import/{importId}/execute', [SupplierImportController::class, 'execute'])->whereNumber('importId')->name('import.execute');
+            Route::delete('/import/{importId}', [SupplierImportController::class, 'destroy'])->whereNumber('importId')->name('import.destroy');
             // Kontrollkrav: supplier.view reads, supplier.assure writes (supplier-assurance-v2-plan §13.2).
             Route::get('/control-requirements', [SupplierControlRequirementController::class, 'index'])->name('control-requirements.index');
             Route::post('/control-requirements', [SupplierControlRequirementController::class, 'store'])->name('control-requirements.store');

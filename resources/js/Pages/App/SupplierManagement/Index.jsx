@@ -148,6 +148,11 @@ export default function SupplierManagementIndex() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...supplierHelp(tr, 'index')} />
                         {canEdit && ! creating && (
+                            <Link href={`${REGISTER_URL}/import`} className={SECONDARY_ACTION} data-testid="supplier-import-link">
+                                {tr.import?.button ?? 'Importer leverandører'}
+                            </Link>
+                        )}
+                        {canEdit && ! creating && (
                             <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                                 {tr.create ?? 'Registrer leverandør'}
                             </button>

@@ -7,9 +7,13 @@ const cwd = new URL('../../..', import.meta.url).pathname;
 
 /**
  * Runs PHP in the app container through tinker, as the E2E fixtures in tests/Support are invoked.
+ * E2E_TINKER_WORKDIR (e.g. /var/www/html/.wt-feature) runs it in a git worktree's checkout instead of
+ * the main one, for a run against that worktree's app.
  */
 export function tinker(php) {
-    return execAsync(`docker compose exec -T app php artisan tinker --execute="${php}"`, { cwd });
+    const workdir = process.env.E2E_TINKER_WORKDIR ? `-w ${process.env.E2E_TINKER_WORKDIR} ` : '';
+
+    return execAsync(`docker compose exec -T ${workdir}app php artisan tinker --execute="${php}"`, { cwd });
 }
 
 /**

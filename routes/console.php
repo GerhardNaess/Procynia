@@ -38,6 +38,11 @@ Schedule::command('private-files:prune-orphans')
     ->dailyAt('03:40')
     ->withoutOverlapping();
 
+// «Importer leverandører» uploads nobody confirmed within a day.
+Schedule::command('suppliers:prune-imports')
+    ->dailyAt('03:50')
+    ->withoutOverlapping();
+
 Schedule::command('ops:scheduler-heartbeat')->everyMinute();
 // Legacy Compose backup. Only scheduled where the runtime can actually execute it: the command ends
 // in scripts/backup-production.sh, which needs a Docker CLI and a Compose project. Azure Container

@@ -19,6 +19,7 @@ use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierDueDiligenceAssessment;
+use App\Models\SupplierImport;
 use App\Models\SupplierImprovementCase;
 use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
@@ -30,6 +31,7 @@ use App\Models\SupplierStatusChange;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
+use App\Services\Suppliers\Import\SupplierImportColumns;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\PrivateFiles\PrivateFileStore;
 use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
@@ -37,6 +39,11 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use OpenSpout\Common\Entity\Cell;
+use OpenSpout\Common\Entity\Cell\StringCell;
+use OpenSpout\Common\Entity\Row;
+use OpenSpout\Reader\XLSX\Reader;
+use OpenSpout\Writer\XLSX\Writer;
 
 /**
  * Test-only setup and cleanup for the Leverandøroppfølging E2E spec
@@ -472,6 +479,53 @@ class SupplierE2EFixture
         return ['sector' => 'ict'];
     }
 
+    /**
+     * «Fyll inn leverandører» in the template the spec downloaded, as a person would in Excel: the
+     * template's own header row is kept and each row's values are written under the header they name
+     * (the template's Norwegian headers, «*» left out). Paths are relative to the app's base path, so
+     * the spec and the container agree on them; the rows arrive base64-encoded JSON.
+     *
+     * @return array{path: string, rows: int}
+     */
+    public static function fillImportTemplate(string $templatePath, string $filledPath, string $rowsBase64): array
+    {
+        $rows = json_decode((string) base64_decode($rowsBase64), true, 512, JSON_THROW_ON_ERROR);
+        $reader = new Reader;
+        $reader->open(base_path($templatePath));
+        $sheets = [];
+
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $row) {
+                $sheets[$sheet->getName()][] = array_map(fn (Cell $cell): string => (string) $cell->getValue(), $row->getCells());
+            }
+        }
+
+        $reader->close();
+        $dataSheet = array_key_first($sheets);
+        $headers = $sheets[$dataSheet][0];
+        $byHeader = array_flip(array_map(fn (string $header): string => SupplierImportColumns::normalize($header), $headers));
+
+        $writer = new Writer;
+        $writer->openToFile(base_path($filledPath));
+        $writer->getCurrentSheet()->setName($dataSheet);
+        $text = fn (array $values): Row => new Row(array_map(fn (string $value): Cell => new StringCell($value, null), $values));
+        $writer->addRow($text($headers));
+
+        foreach ($rows as $row) {
+            $values = array_fill(0, count($headers), '');
+
+            foreach ($row as $header => $value) {
+                $values[$byHeader[SupplierImportColumns::normalize($header)] ?? throw new \InvalidArgumentException("No column {$header} in the template.")] = (string) $value;
+            }
+
+            $writer->addRow($text($values));
+        }
+
+        $writer->close();
+
+        return ['path' => $filledPath, 'rows' => count($rows)];
+    }
+
     /** @return array{customers: int, suppliers: int, status_changes: int, criticality_changes: int, profiles: int, profile_changes: int, control_requirements: int, requirement_overrides: int, requirement_evaluations: int, evaluation_documents: int, assurance_decisions: int, due_diligence_assessments: int, assessments: int, documents: int, improvement_cases: int, case_links: int, risks: int, risk_links: int, requirements: int, requirement_links: int, business_areas: int, roles: int, users: int} */
     public static function remaining(string $suffix): array
     {
@@ -492,6 +546,7 @@ class SupplierE2EFixture
             'due_diligence_assessments' => SupplierDueDiligenceAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'assessments' => SupplierAssessment::query()->whereIn('customer_id', $customerIds)->count(),
             'documents' => SupplierDocument::query()->whereIn('customer_id', $customerIds)->count(),
+            'imports' => SupplierImport::query()->whereIn('customer_id', $customerIds)->count(),
             // Also by the run's suffix in the title, wherever it might have landed.
             'improvement_cases' => ImprovementCase::query()->where(fn (Builder $query) => $query
                 ->whereIn('customer_id', $customerIds)
