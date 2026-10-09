@@ -2,10 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Data\Ai\Experience\AiExperienceFilter;
 use App\Data\Ai\Usage\AiUsageFilter;
 use App\Data\Ai\Usage\AiUsagePeriod;
 use App\Models\Customer;
 use App\Services\Ai\Commercial\AiCapacityCalibrationService;
+use App\Services\Ai\Experience\AiExperienceAnalysisService;
 use App\Services\Billing\CustomerBillingPeriodResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Attribute\AsCommand;
@@ -20,6 +22,8 @@ use Illuminate\Console\Command;
  *   ai:capacity-analysis --customer=12           one customer, its current billing period
  *   ai:capacity-analysis --customer=12 --days=14 one customer, last 14 days
  *   ai:capacity-analysis --operation=wiki.generate_page
+ *   ai:capacity-analysis --experience            the experience model (AiExperienceAnalysisService),
+ *                                                the same analysis Admin → AI-erfaring shows
  */
 #[AsCommand(name: 'ai:capacity-analysis')]
 class AiCapacityAnalysis extends Command
@@ -30,12 +34,18 @@ class AiCapacityAnalysis extends Command
     protected $signature = 'ai:capacity-analysis
                             {--customer= : Customer id; without --days its current billing period is used}
                             {--days= : Window in days back from now (default 30 without --customer)}
-                            {--operation= : Limit to one operation key}';
+                            {--operation= : Limit to one operation key}
+                            {--experience : Report the experience snapshots (per customer and billing period) instead}
+                            {--include-incomplete : With --experience: also open and partly covered periods}';
 
     protected $description = 'Internal AI capacity calibration: usage, cost, units, would-have-blocked and estimate accuracy.';
 
-    public function handle(AiCapacityCalibrationService $calibration, CustomerBillingPeriodResolver $billingPeriods): int
+    public function handle(AiCapacityCalibrationService $calibration, CustomerBillingPeriodResolver $billingPeriods, AiExperienceAnalysisService $experience): int
     {
+        if ($this->option('experience')) {
+            return $this->experience($experience);
+        }
+
         $operation = $this->option('operation') ?: null;
         $customer = null;
 
@@ -80,6 +90,50 @@ class AiCapacityAnalysis extends Command
                 $row['mean_estimate_nok'] ?? '–', $row['estimate_actual_ratio'] ?? '–', $row['assessment'] ?? '–',
             ], $calibration->operationStatistics(new AiUsageFilter($period, customerId: $customer?->id, operation: $operation))),
         );
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * The experience model, read through the same service as the Admin page. Descriptive only: it
+     * prints distributions and neutral signals, never a proposed value.
+     */
+    private function experience(AiExperienceAnalysisService $experience): int
+    {
+        $customerId = $this->option('customer') !== null ? (int) $this->option('customer') : null;
+        $report = $experience->report(new AiExperienceFilter(customerId: $customerId, includeIncomplete: (bool) $this->option('include-incomplete')));
+        $basis = $report['basis'];
+        $describe = fn (array $stats): string => $stats['n'] === 0 ? '–' : sprintf('median %s · p75 %s · p95 %s · mean %s', $stats['median'], $stats['p75'], $stats['p95'], $stats['mean']);
+
+        $this->line(sprintf('Data basis: %d customers · %d periods · %d AI calls%s', $basis['customers'], $basis['periods'], $basis['calls'],
+            $report['excluded_incomplete'] > 0 ? " · {$report['excluded_incomplete']} open/partial periods left out" : ''));
+
+        if (! $basis['sufficient']) {
+            $this->warn('Too little data for a reliable assessment. The figures are shown, but decide nothing on them yet.');
+        }
+
+        $this->table(['Measure (per month)', 'Distribution'], [
+            ['Settled cost NOK per customer/period', $describe($report['overview']['cost'])],
+            ['AI units used', $describe($report['overview']['units'])],
+            ['Utilisation %', $describe($report['overview']['utilization'])],
+            ['Cost NOK per active user', $describe($report['per_user']['cost'])],
+            ['AI units per active user', $describe($report['per_user']['units'])],
+        ]);
+
+        $this->table(['Factor', 'Current value', 'Observed', 'Periods', 'Signals'], array_map(fn (array $factor): array => [
+            $factor['factor'] === 'option' || $factor['factor'] === 'tier' ? "{$factor['factor']}:{$factor['key']}" : $factor['factor'],
+            $factor['current'] ?? '–',
+            $describe($factor['observed']),
+            $factor['basis']['periods'],
+            implode(', ', $factor['signals']) ?: '–',
+        ], $report['formula']['factors']));
+
+        $this->table(['Module mix', 'Periods', 'Customers', 'Median users', 'Units/month', 'Cost NOK/month'], array_map(fn (array $mix): array => [
+            $mix['module_mix'], $mix['basis']['periods'], $mix['basis']['customers'], $mix['users']['median'] ?? '–',
+            $describe($mix['units']), $describe($mix['cost']),
+        ], $report['module_mixes']));
+
+        $this->line('Read-only: nothing here changes a weight, multiplier, price or customer capacity.');
 
         return self::SUCCESS;
     }

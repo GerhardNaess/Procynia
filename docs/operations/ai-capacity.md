@@ -93,3 +93,16 @@ Strict (`AI_CONTEXT_ENFORCEMENT`) er en annen mekanisme: korrekt attribusjon. Ca
 `php artisan ai:capacity-analysis` (se kommandoens `--help`). Rapporten gir forbruk, kostnad, enheter, «would have blocked», estimatpresisjon per operasjon og samtidighetstopp.
 
 Anbefaling (ikke en runtime-regel): samle minst **14 dager**, helst **én full faktureringsperiode** for representative kunder, før inkludert kapasitet og `nok_per_unit` låses. Rapporten viser valgt nivå, inkluderte enheter og kilde (`override` / `tier` / `unconfigured`) per kunde. Systemet justerer aldri `nok_per_unit`, vektene, multiplikatorene eller operasjonsestimater selv. Rapporten er bare beslutningsgrunnlag; endringer gjøres manuelt i config.
+
+## Erfaringsmodell (Admin → AI-erfaring)
+
+Faktabasert grunnlag for senere, manuell justering av brukerfaktor, modulvekter, nivåmultiplikatorer og inkludert kapasitet. **Kun analyse: ingenting her endrer vekter, multiplikatorer, priser eller kundens kapasitet automatisk.**
+
+- **Snapshot:** `ai_customer_experience_periods`, én rad per kunde og faktureringsperiode (fra `CustomerBillingPeriodResolver`), med bruk per attribusjonsnøkkel i `ai_customer_experience_period_features` (`tender`, `wiki`, `wiki.<modul>` for Wiki-arbeid på kilder en modul har overlevert, …). Bygges fra pålitelige ledger-rader; avregnet kostnad er faktisk kostnad, ventende/uavklart holdes separat.
+- **Historisk kontekst:** aktive brukere, pakker, nivå, grunn-/totalkapasitet og overstyring registreres mens perioden løper og fryses når den er slutt. Et oppsett registrert etter periodeslutt (backfill) vises med merknad.
+- **Status:** `open` → `final` `ai_experience.finalize_after_days` (3) dager etter periodeslutt. En avsluttet periode endres bare ved `--recheck-final`, og hver endring skrives som revisjon (`ai_customer_experience_period_revisions`).
+- **Dekning:** `partial` når perioden startet før første pålitelige ledger-rad eller har legacy-rader; holdes utenfor standardanalysen.
+- **Oppdatering:** `ai:experience-refresh` (alle / `--customer` / `--period` / `--recheck-final`), daglig 04:15. Første kjøring er backfill.
+- **Analyse:** `AiExperienceAnalysisService` – delt av Admin-siden og `ai:capacity-analysis --experience`. Per-operasjon-statistikk kommer fra `AiCapacityCalibrationService::operationStatistics()`, som CLI-en også skriver ut.
+- **Datagrunnlag:** under `ai_experience.minimum_sample` (5 kunder, 10 perioder, 200 kall) vises «For lite datagrunnlag for sikker vurdering»; tallene vises fortsatt.
+- **Inntekt/margin:** ikke implementert. En inntekt per (kunde, faktureringsperiode) kan kobles på samme nøkkel senere.
