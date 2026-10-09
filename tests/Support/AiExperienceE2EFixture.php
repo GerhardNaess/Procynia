@@ -67,7 +67,7 @@ final class AiExperienceE2EFixture
     /** Removes this run's data, or every run's leftovers when no suffix is given. */
     public static function cleanup(?string $suffix = null): void
     {
-        $customers = Customer::query()->where('name', 'like', self::NAME.($suffix ?? '').'%')->pluck('id');
+        $customers = Customer::query()->where('name', 'like', self::NAME.'%'.($suffix ?? ''))->pluck('id');
 
         AiUsageAttempt::query()->where('request_correlation_id', 'like', self::TAG.($suffix ?? '').'%')->delete();
         AiCustomerExperiencePeriod::query()->whereIn('customer_id', $customers)->delete();
@@ -78,7 +78,7 @@ final class AiExperienceE2EFixture
     /** @return array{customers: int, attempts: int, snapshots: int} */
     public static function remaining(string $suffix): array
     {
-        $customers = Customer::query()->where('name', 'like', self::NAME.$suffix.'%')->pluck('id');
+        $customers = Customer::query()->where('name', 'like', self::NAME.'%'.$suffix)->pluck('id');
 
         return [
             'customers' => $customers->count(),
