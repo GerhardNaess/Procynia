@@ -68,6 +68,7 @@ class WikiTaskSource implements MyTaskSource
                 assigneeUserId: (int) $user->id,
                 actionUrl: $payload['action_url'] ?? null,
                 details: $payload,
+                subject: ['prefix' => 'wiki'],
             ))
             ->values();
     }

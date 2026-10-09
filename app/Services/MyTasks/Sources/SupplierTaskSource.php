@@ -3,6 +3,7 @@
 namespace App\Services\MyTasks\Sources;
 
 use App\Models\Supplier;
+use App\Models\SupplierDocument;
 use App\Models\User;
 use App\Services\MyTasks\MyTask;
 use App\Services\MyTasks\MyTaskSource;
@@ -116,6 +117,9 @@ class SupplierTaskSource implements MyTaskSource
                     'criticality' => $supplier->criticality,
                 ],
             ],
+            // Leverandøroppfølging warns about documentation 60 days ahead; that is its window.
+            dueSoonDays: SupplierDocument::EXPIRING_SOON_DAYS,
+            subject: ['prefix' => 'supplier', 'metadata' => ['supplier_id' => (int) $supplier->id]],
         );
     }
 

@@ -3,6 +3,11 @@
 namespace App\Services\MyTasks;
 
 use App\Models\User;
+use App\Services\MyTasks\Sources\ComplianceTaskSource;
+use App\Services\MyTasks\Sources\ImprovementTaskSource;
+use App\Services\MyTasks\Sources\ObjectiveTaskSource;
+use App\Services\MyTasks\Sources\QualityTaskSource;
+use App\Services\MyTasks\Sources\RiskTaskSource;
 use App\Services\MyTasks\Sources\SupplierTaskSource;
 use App\Services\MyTasks\Sources\TenderTaskSource;
 use App\Services\MyTasks\Sources\WikiTaskSource;
@@ -27,8 +32,27 @@ class MyTasksService
         TenderTaskSource $tender,
         WikiTaskSource $wiki,
         SupplierTaskSource $suppliers,
+        RiskTaskSource $risk,
+        ImprovementTaskSource $improvements,
+        ComplianceTaskSource $compliance,
+        QualityTaskSource $quality,
+        ObjectiveTaskSource $objectives,
     ) {
-        $this->sources = [$tender, $wiki, $suppliers];
+        // Module order for equal dates: the rail's order (config/procynia_modules.php).
+        $this->sources = [$tender, $wiki, $quality, $improvements, $risk, $objectives, $compliance, $suppliers];
+    }
+
+    /**
+     * The modules that can contribute tasks to this person at all — for the page's module filter.
+     *
+     * @return list<string>
+     */
+    public function availableModules(User $user): array
+    {
+        return array_values(array_map(
+            fn (MyTaskSource $source): string => $source->module(),
+            array_filter($this->sources, fn (MyTaskSource $source): bool => $source->isAvailableFor($user)),
+        ));
     }
 
     /**
@@ -72,16 +96,23 @@ class MyTasksService
      * The page's payload: the count, and the tasks in the four groups, each always present so the
      * page can name an empty group or skip it as it likes.
      *
+     * `modules` is every module that can give this person tasks, with how many it has now — the
+     * page's filter, which therefore never offers a module the person cannot see.
+     *
      * @param  Collection<int, MyTask>  $tasks  from tasksFor()
-     * @return array{count: int, groups: list<array{key: string, tasks: list<array<string, mixed>>}>}
+     * @param  list<string>  $modules  from availableModules()
+     * @return array{count: int, modules: list<array{key: string, count: int}>, groups: list<array{key: string, tasks: list<array<string, mixed>>}>}
      */
-    public function payload(Collection $tasks, ?CarbonInterface $today = null): array
+    public function payload(Collection $tasks, ?CarbonInterface $today = null, array $modules = []): array
     {
         $today = CarbonImmutable::parse(($today ?? now())->toDateString());
         $rows = $tasks->map(fn (MyTask $task): array => $task->toArray($today));
 
+        $perModule = $tasks->countBy(fn (MyTask $task): string => $task->module);
+
         return [
             'count' => $tasks->count(),
+            'modules' => array_map(fn (string $module): array => ['key' => $module, 'count' => (int) ($perModule[$module] ?? 0)], $modules),
             'groups' => array_map(fn (string $group): array => [
                 'key' => $group,
                 'tasks' => $rows->where('group', $group)->values()->all(),

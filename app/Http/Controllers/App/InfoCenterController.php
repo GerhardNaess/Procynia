@@ -104,8 +104,8 @@ class InfoCenterController extends Controller
                 // `items` below still carries the Anbud aksjoner under this view as before, for the
                 // other views' list and anything that reads it; the page shows the grouped tasks.
                 'my_tasks' => $activeView === 'my_tasks'
-                    ? $this->myTasks->payload($myTasks)
-                    : ['count' => $myTasks->count(), 'groups' => []],
+                    ? $this->myTasks->payload($myTasks, null, $this->myTasks->availableModules($user))
+                    : ['count' => $myTasks->count(), 'modules' => [], 'groups' => []],
                 'items' => $items->getCollection()->all(),
                 'pagination' => [
                     'from' => $items->firstItem(),

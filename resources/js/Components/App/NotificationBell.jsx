@@ -48,6 +48,11 @@ const EVENT_DOMAIN_LABELS = {
     bid: 'Sak',
     watch_profile: 'Watch list',
     supplier: 'Leverandører',
+    risk: 'Risiko',
+    improvement: 'Avvik og forbedringer',
+    compliance: 'Etterlevelse og revisjon',
+    quality: 'Kvalitet',
+    objective: 'Mål og KPI',
 };
 
 /**

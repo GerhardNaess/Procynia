@@ -23,6 +23,13 @@ use Carbon\CarbonInterface;
  *
  * `details` is what the module's own card needs beyond the common fields. It is merged under the
  * common keys, so a source can never override the id, module, group or due date.
+ *
+ * For fristpåminnelser (TaskDeadlineReminderService):
+ *  - `dueSoonDays` is the module's own «nærmer seg frist» window — Leverandører's 60 days for
+ *    documentation, Anbud's «Frister innen 7 dager». Null means the module has none of its own and
+ *    the shared default (DEFAULT_DUE_SOON_DAYS, the same 7 days Oppfølging has always counted) applies.
+ *  - `subject` names the object the task is about — the notification prefix of its module, and the
+ *    ids UserNotificationAccessScope checks again every time the reminder is shown.
  */
 final class MyTask
 {
@@ -33,6 +40,9 @@ final class MyTask
     public const GROUP_LATER = 'later';
 
     public const GROUP_NO_DUE = 'no_due';
+
+    /** «Frister innen 7 dager», the window Oppfølging has always counted as close. */
+    public const DEFAULT_DUE_SOON_DAYS = 7;
 
     /** Display order. */
     public const GROUPS = [
@@ -45,6 +55,7 @@ final class MyTask
     /**
      * @param  list<array<string, mixed>>  $reasons  each at least {key: string}, optionally due_on, overdue, can_act
      * @param  array<string, mixed>  $details
+     * @param  array{prefix?: string, metadata?: array<string, int>, saved_notice_id?: int|null}  $subject
      */
     public function __construct(
         public readonly string $id,
@@ -59,7 +70,15 @@ final class MyTask
         public readonly array $reasons = [],
         public readonly bool $canAct = true,
         public readonly array $details = [],
+        public readonly ?int $dueSoonDays = null,
+        public readonly array $subject = [],
     ) {}
+
+    /** The window before the due date in which a «nærmer seg frist» reminder is due. */
+    public function dueSoonWindow(): int
+    {
+        return $this->dueSoonDays ?? self::DEFAULT_DUE_SOON_DAYS;
+    }
 
     /**
      * Forfalt, Denne uken, Senere or Uten frist. Overdue is the source's word or a due date before

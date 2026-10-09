@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Http\Middleware\SetCustomerLocale;
 use App\Models\Customer;
 use App\Models\QualityProcessBlueprint;
+use App\Observers\AssignmentObserver;
 use App\Services\Doffin\DoffinSourceAdapter;
 use App\Services\EnterpriseWiki\GraphProjection\GraphProjectionService;
 use App\Services\EnterpriseWiki\GraphProjection\Neo4jGraphProjectionService;
@@ -12,12 +14,15 @@ use App\Services\EnterpriseWiki\GraphQuery\GraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\Neo4jGraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\NullGraphQueryService;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSourceRegistry;
+use App\Services\Notifications\AssignmentNotifier;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\Quality\QualityActivityLinkCleanup;
 use App\Services\Ted\TedSourceAdapter;
 use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Foundation\Http\Kernel as FoundationHttpKernel;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobPopped;
@@ -26,6 +31,7 @@ use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Inertia\Middleware;
 use Laravel\Cashier\Cashier;
 
 class AppServiceProvider extends ServiceProvider
@@ -85,6 +91,23 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Cashier::useCustomerModel(Customer::class);
+
+        // The person's language before Inertia's shared props. Inertia moves its middleware up the
+        // priority list to just after the session, but only when the HTTP kernel is resolved after
+        // the providers have booted — as in tests and console contexts, never in public/index.php,
+        // which resolves the kernel first. Where that happened, the shared translations were built
+        // before SetCustomerLocale ran. Pinning the locale ahead of Inertia gives the same order in
+        // both cases; where Inertia is not in the priority list the order is already right.
+        // «Du er tildelt ansvar» in the bell for the styringsmoduler, whichever path saves the owner.
+        foreach (AssignmentNotifier::MODELS as $model) {
+            $model::observe(AssignmentObserver::class);
+        }
+
+        $this->callAfterResolving(HttpKernel::class, static function (HttpKernel $kernel): void {
+            if ($kernel instanceof FoundationHttpKernel) {
+                $kernel->addToMiddlewarePriorityBefore(Middleware::class, SetCustomerLocale::class);
+            }
+        });
 
         // Scoped queue observability for the enterprise-wiki Redis queue only.
         $events = $this->app['events'];

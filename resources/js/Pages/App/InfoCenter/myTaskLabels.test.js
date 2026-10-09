@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { moduleLabel, supplierReasonText, taskCountLabel, visibleTaskGroups } from './myTaskLabels.js';
+import { filterTaskGroups, moduleFilterOptions, moduleLabel, supplierReasonText, taskCountLabel, taskReasonText, visibleTaskGroups } from './myTaskLabels.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const index = readFileSync(join(here, 'Index.jsx'), 'utf8');
@@ -85,5 +85,56 @@ describe('the page', () => {
 
     test('the supplier signal names are the supplier module\'s translations', () => {
         assert.match(index, /translations\?\.supplier_management\?\.attention\?\.categories/);
+    });
+});
+
+describe('the module filter (punkt 6D)', () => {
+    const payload = {
+        count: 3,
+        modules: [{ key: 'tender', count: 0 }, { key: 'risk', count: 2 }, { key: 'quality', count: 1 }],
+        groups: [
+            { key: 'overdue', tasks: [{ id: 'risk-1', module: 'risk' }, { id: 'quality-item-4', module: 'quality' }] },
+            { key: 'no_due', tasks: [{ id: 'risk-2', module: 'risk' }] },
+        ],
+    };
+
+    test('it offers every module the person can see, with its count, labelled', () => {
+        assert.deepEqual(moduleFilterOptions(payload), [
+            { key: 'tender', count: 0, label: 'Anbud' },
+            { key: 'risk', count: 2, label: 'Risiko' },
+            { key: 'quality', count: 1, label: 'Kvalitet' },
+        ]);
+    });
+
+    test('one module is no choice, so no filter', () => {
+        assert.deepEqual(moduleFilterOptions({ modules: [{ key: 'risk', count: 1 }] }), []);
+    });
+
+    test('choosing a module narrows the same groups; an emptied group disappears', () => {
+        assert.deepEqual(visibleTaskGroups(filterTaskGroups(payload, 'quality')).map((group) => [group.key, group.tasks.map((task) => task.id)]), [['overdue', ['quality-item-4']]]);
+        assert.deepEqual(filterTaskGroups(payload, null), payload);
+    });
+});
+
+describe('a styringsmodul reason in words', () => {
+    const t = { reasons: { risk: { review_overdue: 'Vurdering forfalt' }, compliance: { review_overdue: 'Revurdering forfalt' } }, count: ':count stk.' };
+
+    test('the same key reads in each module\'s own words', () => {
+        assert.equal(taskReasonText({ module: 'risk' }, { key: 'review_overdue' }, t), 'Vurdering forfalt');
+        assert.equal(taskReasonText({ module: 'compliance' }, { key: 'review_overdue' }, t), 'Revurdering forfalt');
+    });
+
+    test('a counted reason says how many, and an unknown one falls back to its key', () => {
+        assert.equal(taskReasonText({ module: 'risk' }, { key: 'review_overdue', count: 3 }, t), 'Vurdering forfalt (3 stk.)');
+        assert.equal(taskReasonText({ module: 'risk' }, { key: 'new_rule' }, t), 'new_rule');
+    });
+});
+
+describe('the five styringsmoduler share one card', () => {
+    test('anything that is not Anbud, Wiki or Leverandører is drawn by GovernanceTaskCard', () => {
+        assert.match(index, /case 'tender':\s*\n\s*return task\.item \? <InfoItemCard/);
+        assert.match(index, /default:\s*\n\s*return <GovernanceTaskCard task=\{task\} locale=\{locale\} t=\{mt\} \/>;/);
+        assert.match(myTasksView, /data-testid="info-center-task-missing-permission"/);
+        assert.match(myTasksView, /aria-pressed=\{module === option\.key\}/);
     });
 });

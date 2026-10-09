@@ -155,6 +155,25 @@ class ObjectiveAttentionService
     }
 
     /**
+     * The same findings over objectives the caller already holds — for «Mine oppgaver»
+     * (ObjectiveTaskSource). The objectives must be of one customer and already reached through
+     * ObjectiveAccessService; only active ones take part, as on the panel.
+     *
+     * @param  EloquentCollection<int, Objective>  $objectives
+     * @return array{
+     *     objectives: list<array{objective: Objective, reasons: array<string, string>}>,
+     *     kpis: list<array{kpi: Kpi, reasons: array<string, string>}>
+     * }
+     */
+    public function findingsForObjectives(EloquentCollection $objectives, ?CarbonInterface $today = null): array
+    {
+        $active = $objectives->filter(fn (Objective $objective): bool => $objective->isActive())->values();
+        $active->loadMissing(['businessArea:id,name', 'statusChanges']);
+
+        return $this->findings($active, $this->day($today));
+    }
+
+    /**
      * The flagged objectives and KPIs among the given active objectives, each with its reasons keyed
      * by category, in the objectives' order. Objectives and KPIs without a finding are left out.
      *

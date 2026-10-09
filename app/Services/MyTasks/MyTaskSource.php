@@ -25,6 +25,12 @@ interface MyTaskSource
     public function module(): string;
 
     /**
+     * Whether this person can have tasks from the module at all: the customer holds the module and
+     * the person may read it — the module's own access answer. Also decides the page's module filter.
+     */
+    public function isAvailableFor(User $user): bool;
+
+    /**
      * The work still on this person, already narrowed to what they may read. The caller has checked
      * that the user is active and belongs to $customerId.
      *
