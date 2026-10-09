@@ -18,14 +18,21 @@ test.afterAll(async () => {
 
 const grouped = (value) => new Intl.NumberFormat('nb-NO').format(value).replace(/\s/g, ' ');
 const plain = (text) => text.replace(/\s/g, ' ');
+const unitsPattern = (value) => new RegExp(grouped(value).replace(/ /g, '\\s'));
+const current = async () => {
+    const { stdout } = await tinker('echo json_encode(\\Tests\\Support\\AiCapacityE2EFixture::capacity());');
+
+    return JSON.parse(stdout.match(/\{.*\}/)[0]);
+};
 
 /**
- * A customer with Basis, several options and its own AI capacity tier opens Abonnement and reads
- * three separate blocks: Basis, the options, and the AI capacity — one shared pool, sized by the
- * tier alone. Cancelling an option leaves the pool untouched. Checked at desktop and at 390 px
+ * A customer with Basis, several options, several users and Level 1 opens Abonnement and reads
+ * three separate blocks: Basis, the options, and the AI capacity — one shared pool. It opens «Endre
+ * nivå», sees Nivå 1/2/3 with what each would include for it, chooses Nivå 2, and the card follows.
+ * Cancelling an option then shrinks the pool while Nivå 2 stays. Checked at desktop and at 390 px
  * without sideways scrolling. No provider call is made; usage is seeded.
  */
-test('Basis, options and a separate AI capacity tier share one pool', async ({ page }) => {
+test('the customer chooses its AI capacity level and the pool follows users and options', async ({ page }) => {
     const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\AiCapacityE2EFixture::seed('${suffix}'));`);
     const capacity = JSON.parse(stdout.match(/\{.*\}/)[0]);
 
@@ -60,24 +67,51 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
     await expect(basis).not.toContainText(/AI-enheter/);
     await expect(options).not.toContainText(/AI-enheter/);
 
-    // The capacity comes from the tier, not from Basis or the options.
+    // Level 1 over the customer's base (users + Basis + options).
     expect(capacity.source).toBe('tier');
+    expect(capacity.tier_key).toBe('level_1');
     expect(capacity.packages).toContain('basis');
     expect(capacity.packages.filter((key) => key !== 'basis').length).toBeGreaterThanOrEqual(2);
+    expect(capacity.included).toBe(capacity.level_units.level_1);
     // Tinker resolves the name in the app locale; the page shows the user's Norwegian label.
-    expect(capacity.tier_name).toBeTruthy();
-    await expect(card.getByTestId('ai-capacity-tier')).toHaveText('Nivå 2');
+    await expect(card.getByTestId('ai-capacity-tier')).toHaveText('Nivå 1');
     await expect(card.getByTestId('ai-capacity-headline')).toHaveText(
         new RegExp(`${grouped(capacity.used)} av ${grouped(capacity.included)} AI-enheter brukt`.replace(/ /g, '\\s')),
     );
     expect(capacity.is_provisional).toBe(true);
-    await expect(card.getByTestId('ai-capacity-provisional')).toContainText('under innfasing');
+    await expect(card.getByTestId('ai-capacity-provisional')).toHaveText('AI-kapasiteten er under innfasing, og nivåene kan bli justert.');
     expect(capacity.used).toBeGreaterThanOrEqual(1200);
 
+    // Endre nivå: three levels, each with what it would include for this customer — no formula.
+    await card.getByTestId('ai-capacity-change-level').click();
+    const levels = page.getByRole('dialog', { name: 'Velg nivå for AI-kapasitet' });
+    await expect(levels).toBeVisible();
+    for (const [key, name] of [['level_1', 'Nivå 1'], ['level_2', 'Nivå 2'], ['level_3', 'Nivå 3']]) {
+        const row = levels.getByTestId(`ai-capacity-level-${key}`);
+        await expect(row).toContainText(name);
+        await expect(row.getByTestId(`ai-capacity-level-${key}-units`)).toHaveText(unitsPattern(capacity.level_units[key]));
+    }
+    expect(capacity.level_units.level_2).toBeGreaterThan(capacity.level_units.level_1);
+    expect(capacity.level_units.level_3).toBeGreaterThan(capacity.level_units.level_2);
+    await expect(levels.getByTestId('ai-capacity-level-level_1')).toContainText('Gjeldende nivå');
+    const dialogText = await levels.innerText();
+    expect(dialogText).not.toMatch(/multipli|vekt|×|%|token|NOK|kr\b|pris|1 000 AI|2 500 AI|5 000 AI/i);
+
+    await levels.getByRole('button', { name: 'Velg Nivå 2' }).click();
+    await expect(levels).toBeHidden();
+    await expect(page.getByText('Nivå 2 er valgt. AI-kapasiteten er oppdatert.').first()).toBeVisible();
+    await expect(card.getByTestId('ai-capacity-tier')).toHaveText('Nivå 2');
+    await expect(card.getByTestId('ai-capacity-included')).toHaveText(unitsPattern(capacity.level_units.level_2));
+    await expect(card.getByTestId('ai-capacity-used')).toHaveText(unitsPattern(capacity.used));
+    const chosen = await current();
+    expect(chosen.stored_tier).toBe('level_2');
+    expect(chosen.included).toBe(capacity.level_units.level_2);
+    expect(chosen.tier_events).toBe(1);
+
     const bar = card.getByRole('progressbar');
-    await expect(bar).toHaveAttribute('aria-valuenow', String(capacity.percentage_used));
-    expect(plain(await card.getByTestId('ai-capacity-used').innerText())).toBe(grouped(capacity.used));
-    expect(plain(await card.getByTestId('ai-capacity-remaining').innerText())).toBe(grouped(capacity.remaining));
+    await expect(bar).toHaveAttribute('aria-valuenow', String(chosen.percentage_used));
+    expect(plain(await card.getByTestId('ai-capacity-used').innerText())).toBe(grouped(chosen.used));
+    expect(plain(await card.getByTestId('ai-capacity-remaining').innerText())).toBe(grouped(chosen.remaining));
     await expect(card.getByTestId('ai-capacity-period')).not.toBeEmpty();
     await expect(card.getByTestId('ai-capacity-status')).toHaveText(/God kapasitet|Nærmer seg grensen|Brukt opp/);
 
@@ -124,15 +158,32 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
 
     await page.screenshot({ path: 'test-results/ai-capacity-phone.png', fullPage: true });
 
-    // Cancelling an option changes the options block, never the pool.
-    const cancelled = capacity.packages.find((key) => key !== 'basis');
-    const { stdout: after } = await tinker(`echo json_encode(\\Tests\\Support\\AiCapacityE2EFixture::cancelOption('${cancelled}'));`);
-    const afterCancel = JSON.parse(after.match(/\{.*\}/)[0]);
+    // Cancelling an option through the page shrinks the pool; the chosen level stays Nivå 2.
+    await page.setViewportSize(DESKTOP);
+    const cancelled = capacity.packages.find((key) => key !== 'basis' && key !== 'tender') ?? capacity.packages.find((key) => key !== 'basis');
+    await tinker(`\\Tests\\Support\\AiCapacityE2EFixture::willCancel('${cancelled}');`);
+    await page.getByTestId(`package-row-${cancelled}`).getByRole('button', { name: 'Avbestill' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Avbestill' }).click();
+    await expect(page.getByTestId(`package-status-${cancelled}`)).not.toHaveText('Aktiv');
+    const afterCancel = await current();
     expect(afterCancel.packages).not.toContain(cancelled);
-    expect(afterCancel.included).toBe(capacity.included);
-    await page.reload();
-    await expect(page.getByTestId('ai-capacity-included')).toHaveText(new RegExp(grouped(capacity.included).replace(/ /g, '\\s')));
-    await expect(page.getByTestId('ai-capacity-used')).toHaveText(new RegExp(grouped(capacity.used).replace(/ /g, '\\s')));
+    expect(afterCancel.stored_tier).toBe('level_2');
+    expect(afterCancel.included).toBeLessThan(chosen.included);
+    expect(afterCancel.included).toBe(afterCancel.level_units.level_2);
+    await expect(card.getByTestId('ai-capacity-tier')).toHaveText('Nivå 2');
+    await expect(card.getByTestId('ai-capacity-included')).toHaveText(unitsPattern(afterCancel.included));
+    await expect(card.getByTestId('ai-capacity-used')).toHaveText(unitsPattern(capacity.used));
+
+    await page.setViewportSize(PHONE);
+    expect(await sidewaysOverflow(page), 'the page scrolls sideways at 390 px after the changes').toEqual([]);
+    await card.getByTestId('ai-capacity-change-level').click();
+    expect(await sidewaysOverflow(page), 'the level dialog scrolls sideways at 390 px').toEqual([]);
+    for (const button of await page.getByRole('dialog').getByRole('button').all()) {
+        const box = await button.boundingBox();
+        expect(box.x + box.width).toBeLessThanOrEqual(390);
+    }
+    await page.screenshot({ path: 'test-results/ai-capacity-levels-phone.png', fullPage: true });
+    await page.getByRole('dialog').getByRole('button', { name: 'Avbryt' }).click();
 
     // The help explains the separate, shared capacity without internals.
     await page.setViewportSize(DESKTOP);
@@ -140,5 +191,6 @@ test('Basis, options and a separate AI capacity tier share one pool', async ({ p
     const help = page.getByRole('dialog');
     await expect(help).toContainText('Abonnementet består av Basis, valgfrie opsjoner og separat AI-kapasitet.');
     await expect(help).toContainText('AI-kapasiteten deles av alle funksjoner som bruker AI.');
-    await expect(help).not.toContainText(/token/i);
+    await expect(help).toContainText('AI-kapasiteten beregnes ut fra virksomhetens brukere og aktive moduler. Valgt nivå bestemmer hvor mye ekstra kapasitet virksomheten har. Alle AI-funksjoner bruker den samme kapasiteten.');
+    await expect(help).not.toContainText(/token|multipli|vekt/i);
 });
