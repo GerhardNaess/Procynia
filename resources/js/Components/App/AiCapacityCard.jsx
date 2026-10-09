@@ -1,6 +1,11 @@
+import { router } from '@inertiajs/react';
+import { useState } from 'react';
+import AiCapacityLevelDialog from './AiCapacityLevelDialog';
 import StatusBadge from './StatusBadge';
+import { SECONDARY_COLOURS } from '../../Support/actionStyles';
 import {
     barClass,
+    canChangeLevel,
     exhaustedNotice,
     formatUnits,
     headline,
@@ -17,13 +22,30 @@ import {
  * The shared AI capacity on the subscription page: one pool for every Procynia module, in AI units.
  * A block of its own — AI capacity is separate from Basis and the options, and never sized by them.
  *
- * Meant to be understood in a few seconds — the tier, a headline, one bar, four facts. Every state is carried
+ * Meant to be understood in a few seconds — the level, a headline, one bar, four facts. Every state is carried
  * by text first; the badge and the bar colour only repeat what the words already say.
+ *
+ * The customer changes its level here (`levels` carries what each would include for it). Under a
+ * Procynia-set override the level does not size the capacity, so the choice is shown disabled.
  */
-export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' }) {
+export default function AiCapacityCard({ capacity, levels = [], texts = {}, locale = 'nb-NO' }) {
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const [processing, setProcessing] = useState(false);
+
     if (!capacity) {
         return null;
     }
+
+    const selectLevel = (level) => {
+        router.post('/app/billing/ai-capacity/level', { level }, {
+            preserveScroll: true,
+            onStart: () => setProcessing(true),
+            onFinish: () => {
+                setProcessing(false);
+                setDialogOpen(false);
+            },
+        });
+    };
 
     const heading = <h2 className="text-base font-semibold text-slate-900">{texts.heading ?? 'AI-kapasitet'}</h2>;
 
@@ -55,6 +77,7 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
     const reserved = reservationNotice(capacity, texts, locale);
     const exhausted = exhaustedNotice(capacity, texts, locale);
     const percent = percentage(capacity);
+    const levelChangeable = canChangeLevel(capacity, levels);
 
     return (
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="ai-capacity-card">
@@ -65,8 +88,31 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
                 </StatusBadge>
             </div>
 
-            {capacity.tier_name && (
-                <p className="mt-1 text-base font-medium text-slate-700" data-testid="ai-capacity-tier">{capacity.tier_name}</p>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                {capacity.tier_name ? (
+                    <p className="text-lg font-semibold text-slate-900" data-testid="ai-capacity-tier">{capacity.tier_name}</p>
+                ) : (
+                    <p className="text-base leading-6 text-slate-700" data-testid="ai-capacity-override">
+                        {texts.override_note ?? 'AI-kapasiteten er særskilt konfigurert for virksomheten.'}
+                    </p>
+                )}
+                {levels.length > 1 && (
+                    <button
+                        type="button"
+                        disabled={!levelChangeable}
+                        aria-describedby={levelChangeable ? undefined : 'ai-capacity-override-hint'}
+                        onClick={() => setDialogOpen(true)}
+                        className={`rounded-lg px-4 py-2 text-base font-medium disabled:cursor-not-allowed disabled:opacity-60 ${SECONDARY_COLOURS}`}
+                        data-testid="ai-capacity-change-level"
+                    >
+                        {texts.change_level ?? 'Endre nivå'}
+                    </button>
+                )}
+            </div>
+            {!levelChangeable && levels.length > 1 && (
+                <span id="ai-capacity-override-hint" className="sr-only">
+                    {texts.override_note ?? 'AI-kapasiteten er særskilt konfigurert for virksomheten.'}
+                </span>
             )}
 
             <p className="mt-3 text-lg font-semibold text-slate-900" data-testid="ai-capacity-headline">
@@ -102,7 +148,7 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
 
             {capacity.is_provisional && (
                 <p className="mt-4 text-base leading-6 text-slate-600" data-testid="ai-capacity-provisional">
-                    {texts.provisional_note ?? 'AI-kapasiteten er under innfasing, og nivået kan bli justert.'}
+                    {texts.provisional_note ?? 'AI-kapasiteten er under innfasing, og nivåene kan bli justert.'}
                 </p>
             )}
 
@@ -125,6 +171,15 @@ export default function AiCapacityCard({ capacity, texts = {}, locale = 'nb-NO' 
                 </div>
             </dl>
 
+            <AiCapacityLevelDialog
+                isOpen={dialogOpen && levelChangeable}
+                levels={levels}
+                texts={texts}
+                locale={locale}
+                processing={processing}
+                onSelect={selectLevel}
+                onClose={() => setDialogOpen(false)}
+            />
         </section>
     );
 }

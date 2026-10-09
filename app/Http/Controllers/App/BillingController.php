@@ -5,6 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\BillingProduct;
 use App\Models\Customer;
+use App\Services\Ai\Commercial\AiCapacityLevelService;
 use App\Services\Ai\Commercial\CustomerAiCapacityService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\Billing\BillingService;
@@ -102,6 +103,9 @@ class BillingController extends Controller
             // The shared AI capacity, in AI units — the same figures the capacity gate reads. The
             // Anbud AI-case quota is Tender's own and is shown in the AI workspace, not here.
             'ai_capacity' => app(CustomerAiCapacityService::class)->forCustomer($customer)->toArray(),
+            // What each level would include for this customer right now — units only, never the
+            // multiplier or the weights behind them.
+            'ai_capacity_levels' => app(CustomerAiCapacityService::class)->levelOptions($customer),
             // Resolved server-side: the page renders this verdict rather than deciding for itself
             // which packages are active.
             'module_packages' => app(ModuleEntitlementService::class)->overviewFor($customer),
@@ -179,6 +183,36 @@ class BillingController extends Controller
             ->route('app.billing.index')
             ->with('success', __('procynia.billing.modules.cancel_success', [
                 'package' => __("procynia.billing.modules.package_labels.{$package}"),
+            ]));
+    }
+
+    /**
+     * Choose the AI capacity level (Nivå 1/2/3). Same permission as ordering and cancelling options.
+     * The key is validated against the catalog here, never trusted from the page; the customer is
+     * always the signed-in user's own. Applies at once; usage and the billing period are untouched.
+     */
+    public function changeAiCapacityLevel(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user->canManageCustomerBilling(), 403);
+
+        $customer = $user->customer;
+        abort_unless($customer instanceof Customer, 404);
+
+        $level = (string) $request->validate(['level' => ['required', 'string', 'max:64']])['level'];
+        $refused = app(AiCapacityLevelService::class)->change($customer, $level, $user);
+
+        if ($refused !== null) {
+            return redirect()
+                ->route('app.billing.index')
+                ->with('error', __("procynia.billing.ai_capacity.level_refused.{$refused}"));
+        }
+
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', __('procynia.billing.ai_capacity.level_changed', [
+                'level' => app(CustomerAiCapacityService::class)->forCustomer($customer->fresh())->tierName,
             ]));
     }
 

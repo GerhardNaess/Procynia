@@ -146,3 +146,21 @@ export function exhaustedNotice(capacity, texts = {}, locale = 'nb-NO') {
         date: nextPeriodLabel(capacity, locale),
     });
 }
+
+/**
+ * Whether the customer may choose its level: only while the level is what sizes the capacity (not
+ * under a Procynia-set override) and there is more than one level to choose between.
+ */
+export function canChangeLevel(capacity, levels = []) {
+    return isConfigured(capacity) && Boolean(capacity?.level_changeable) && Array.isArray(levels) && levels.length > 1;
+}
+
+/** "3 600 AI-enheter" — what one level would include for this customer, units only. */
+export function levelUnitsLabel(level, texts = {}, locale = 'nb-NO') {
+    return interpolate(texts.level_units ?? ':units AI-enheter', { units: formatUnits(level?.included, locale) });
+}
+
+/** The short customer-facing text for a level ("Standard", "Mer kapasitet"), or null. */
+export function levelDescription(level, texts = {}) {
+    return texts.level_descriptions?.[level?.key] ?? null;
+}

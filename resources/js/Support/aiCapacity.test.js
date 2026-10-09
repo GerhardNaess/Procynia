@@ -5,10 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
     barClass,
+    canChangeLevel,
     exhaustedNotice,
     formatUnits,
     headline,
     isConfigured,
+    levelDescription,
+    levelUnitsLabel,
     percentage,
     periodLabel,
     reservationNotice,
@@ -18,6 +21,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const card = readFileSync(join(here, '..', 'Components', 'App', 'AiCapacityCard.jsx'), 'utf8');
+const levelDialog = readFileSync(join(here, '..', 'Components', 'App', 'AiCapacityLevelDialog.jsx'), 'utf8');
 const billing = readFileSync(join(here, '..', 'Pages', 'App', 'Billing', 'Index.jsx'), 'utf8');
 
 const capacity = (overrides = {}) => ({
@@ -154,13 +158,56 @@ describe('the card stays simple and customer-safe', () => {
     });
 
     test('the selected tier is named only when it sizes the capacity, and never with a price', () => {
-        assert.match(card, /capacity\.tier_name && \(/);
+        assert.match(card, /capacity\.tier_name \?/);
         assert.ok(!/kr\/mnd|per AI-enhet|price|pris/i.test(card));
+    });
+
+    test('an override says the capacity is specially configured and disables the level choice', () => {
+        assert.match(card, /særskilt konfigurert for virksomheten/);
+        assert.match(card, /disabled=\{!levelChangeable\}/);
+        assert.match(card, /isOpen=\{dialogOpen && levelChangeable\}/);
+    });
+
+    test('the level dialog shows names and customer-specific units, never the formula or a price', () => {
+        assert.match(levelDialog, /levelUnitsLabel\(level/);
+        assert.match(levelDialog, /level\.name/);
+        assert.ok(!/multiplier|weight|per_user|nok_per_unit|token|modell|kr\b|pris|price|×|%/i.test(levelDialog.replace(/\/\*\*[\s\S]*?\*\//g, '')));
+        // No fixed amounts: every figure comes from the payload.
+        assert.ok(!/1[ .]?000|2[ .]?500|5[ .]?000/.test(levelDialog));
     });
 
     test('a provisional level is said to be phasing in, and never explains the conversion', () => {
         assert.match(card, /capacity\.is_provisional && \(/);
         assert.match(card, /under innfasing/);
         assert.ok(!/nok_per_unit|0[.,]10|øre/i.test(card));
+    });
+});
+
+describe('AI capacity levels', () => {
+    const capacity = { is_configured: true, level_changeable: true };
+    const levels = [
+        { key: 'level_1', name: 'Nivå 1', included: 2400, is_current: true },
+        { key: 'level_2', name: 'Nivå 2', included: 3600, is_current: false },
+        { key: 'level_3', name: 'Nivå 3', included: 4800, is_current: false },
+    ];
+
+    test('the level can be changed only while the level sizes the capacity', () => {
+        assert.equal(canChangeLevel(capacity, levels), true);
+        assert.equal(canChangeLevel({ ...capacity, level_changeable: false }, levels), false, 'override');
+        assert.equal(canChangeLevel({ is_configured: false, level_changeable: true }, levels), false);
+        assert.equal(canChangeLevel(capacity, levels.slice(0, 1)), false, 'nothing to choose between');
+        assert.equal(canChangeLevel(capacity, undefined), false);
+    });
+
+    test('each level reads as the units it would include for this customer', () => {
+        assert.equal(levelUnitsLabel(levels[1], { level_units: ':units AI-enheter' }, 'nb-NO').replace(/\s/g, ' '), '3 600 AI-enheter');
+        assert.equal(levelUnitsLabel(levels[2], {}, 'en-GB'), '4,800 AI-enheter');
+    });
+
+    test('a level has a short description only when one is configured', () => {
+        const texts = { level_descriptions: { level_1: 'Standard', level_2: 'Mer kapasitet' } };
+        assert.equal(levelDescription(levels[0], texts), 'Standard');
+        assert.equal(levelDescription(levels[2], texts), null);
+        assert.equal(levelDescription(levels[0], {}), null);
     });
 });

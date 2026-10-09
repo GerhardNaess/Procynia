@@ -83,6 +83,8 @@ export default function BillingIndex() {
         billing_lines: billingLines = [],
         // The shared AI capacity, in AI units (CustomerAiCapacityService). No tokens, no money.
         ai_capacity: aiCapacity = null,
+        // What each AI capacity level would include for this customer, in AI units.
+        ai_capacity_levels: aiCapacityLevels = [],
         // Resolved by ModuleEntitlementService. The page renders this verdict; it never decides
         // on its own which packages or modules are active.
         module_packages: modulePackages = [],
@@ -292,7 +294,7 @@ export default function BillingIndex() {
                                         },
                                         {
                                             title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
-                                            text: tb.page_help_item_ai_capacity_text ?? 'Én felles AI-kapasitet for hele Procynia. Den endres ikke når opsjoner bestilles eller avbestilles.',
+                                            text: tb.page_help_item_ai_capacity_text ?? 'AI-kapasiteten beregnes ut fra virksomhetens brukere og aktive moduler. Valgt nivå bestemmer hvor mye ekstra kapasitet virksomheten har. Alle AI-funksjoner bruker den samme kapasiteten.',
                                         },
                                         {
                                             title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
@@ -425,7 +427,7 @@ export default function BillingIndex() {
                 </section>
 
                 {/* 3. AI-kapasitet: one pool for every module, not sized by Basis or the options. */}
-                <AiCapacityCard capacity={aiCapacity} texts={aiCapacityText} locale={locale} />
+                <AiCapacityCard capacity={aiCapacity} levels={aiCapacityLevels} texts={aiCapacityText} locale={locale} />
 
                 {/* Invoiced services outside Basis and the options (seats, one-off services). Only when there are any. */}
                 {hasProcyniaServices && (
