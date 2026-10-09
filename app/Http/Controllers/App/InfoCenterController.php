@@ -5,13 +5,13 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\SavedNoticeInfoItem;
 use App\Models\User;
-use App\Services\EnterpriseWiki\EnterpriseWikiQaTaskService;
-use App\Services\EnterpriseWiki\EnterpriseWikiReviewTaskService;
+use App\Services\InfoCenter\InfoItemPayload;
+use App\Services\MyTasks\MyTasksService;
+use App\Services\MyTasks\Sources\TenderTaskSource;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -37,16 +37,25 @@ class InfoCenterController extends Controller
 
     private const OPERATIONAL_SCORE_CASE_BONUS = 1;
 
+    /**
+     * Whether the customer holds Anbud. Every view except «Mine oppgaver», and every panel except its
+     * counter, is a list of Anbud aksjoner; without the module they could only ever be empty, so the
+     * page is «Mine oppgaver» alone and does not talk about aksjoner. Set per request in index().
+     */
+    private bool $tenderAvailable = true;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
-        private readonly EnterpriseWikiQaTaskService $wikiQaTasks,
-        private readonly EnterpriseWikiReviewTaskService $wikiReviewTasks,
+        private readonly MyTasksService $myTasks,
+        private readonly TenderTaskSource $tenderTasks,
+        private readonly InfoItemPayload $infoItemPayload,
     ) {}
 
     public function index(Request $request): Response
     {
         [$user, $customerId] = $this->frontendContext($request);
+        $this->tenderAvailable = $this->tenderTasks->isAvailableFor($user);
         $visibleItemsQuery = $this->baseInfoItemsQuery($user);
         $roleContext = $this->resolveRoleContext($user, clone $visibleItemsQuery);
         $activeView = $this->normalizeView(
@@ -67,33 +76,36 @@ class InfoCenterController extends Controller
             ->withQueryString();
 
         $items->setCollection(
-            $items->getCollection()->map(fn (SavedNoticeInfoItem $infoItem): array => $this->infoItemPayload($infoItem, $customerId)),
+            $items->getCollection()->map(fn (SavedNoticeInfoItem $infoItem): array => $this->infoItemPayload->for($infoItem, $customerId)),
         );
 
         // Read once: the same list answers the "Mine oppgaver" counter and the list itself, so the
-        // two can never disagree about how much work is outstanding.
-        //
-        // Two kinds, kept apart in the domain and merged only here, for display. Reviewing an
-        // article and quality assuring its claims carry different authority, and the card says
-        // which is which — but to the person they are both simply work with their name on it.
-        $wikiTasks = $this->wikiReviewTasks->openTasksFor($user, $customerId)
-            ->merge($this->wikiQaTasks->openTasksFor($user, $customerId));
+        // two can never disagree about how much work is outstanding. Every module's work — Anbud
+        // aksjoner, Wiki review and QA, Leverandører — comes through MyTasksService, each source
+        // applying its own module's access rules before anything reaches this page.
+        $myTasks = $this->myTasks->tasksFor($user, $customerId);
 
         return Inertia::render('App/InfoCenter/Index', [
             'infoCenter' => [
                 'active_view' => $activeView,
+                // Whether the customer holds Anbud, so the page can explain only what it shows: the
+                // same module status the views and panels are built from.
+                'tender_available' => $this->tenderAvailable,
                 'default_view' => $roleContext['default_view'],
                 'role_context' => $roleContext,
                 'view_options' => $this->viewOptions($roleContext['persona'], $activeView),
                 'summary' => [
-                    'items' => $this->summaryItems($user, $roleContext, clone $visibleItemsQuery, $wikiTasks->count()),
+                    'items' => $this->summaryItems($user, $roleContext, clone $visibleItemsQuery, $myTasks->count()),
                 ],
-                // Work from the Wiki domain, which has no saved notice to hang on and therefore no
-                // SavedNoticeInfoItem row. Shown alongside the ordinary tasks and outside the
-                // paginator: there is one per assigned version, and they are the most actionable
-                // thing on the page. Only under "Mine oppgaver" — the person has work to do, they
-                // are not waiting on anybody.
-                'wiki_tasks' => $activeView === 'my_tasks' ? $wikiTasks->all() : [],
+                // «Mine oppgaver», grouped Forfalt / Denne uken / Senere / Uten frist. Only under
+                // that view — the person has work to do, they are not waiting on anybody. Outside the
+                // paginator: every open task, because the groups are what the person reads.
+                //
+                // `items` below still carries the Anbud aksjoner under this view as before, for the
+                // other views' list and anything that reads it; the page shows the grouped tasks.
+                'my_tasks' => $activeView === 'my_tasks'
+                    ? $this->myTasks->payload($myTasks)
+                    : ['count' => $myTasks->count(), 'groups' => []],
                 'items' => $items->getCollection()->all(),
                 'pagination' => [
                     'from' => $items->firstItem(),
@@ -126,6 +138,9 @@ class InfoCenterController extends Controller
     {
         $query = SavedNoticeInfoItem::query()
             ->whereIn('saved_notice_id', $this->savedNoticeAccess->visibleQueryFor($user)->select('id'))
+            // Aksjoner are Anbud's: a customer without the module reaches none of them, here as on
+            // the cases they belong to.
+            ->when(! $this->tenderAvailable, fn (Builder $query) => $query->whereRaw('1 = 0'))
             ->with([
                 'savedNotice:id,title,external_id,reference_number',
                 'owner:id,name,customer_id',
@@ -212,11 +227,15 @@ class InfoCenterController extends Controller
             : $defaultView;
     }
 
+    /**
+     * «Mine oppgaver» comes first for everyone: what is still on you is the page's first answer,
+     * whichever way you use the case surface. The persona still decides the panels and wording.
+     */
     private function viewKeysForPersona(string $persona): array
     {
-        return $persona === 'operational'
+        return $this->tenderAvailable
             ? ['my_tasks', 'awaiting_response', 'outbound', 'inbound']
-            : ['awaiting_response', 'my_tasks', 'outbound', 'inbound'];
+            : ['my_tasks'];
     }
 
     private function resolveRoleContext(User $user, Builder $visibleItemsQuery): array
@@ -224,6 +243,19 @@ class InfoCenterController extends Controller
         $basePersona = $this->resolveBasePersona($user);
         $activityContext = $this->resolveOperationalActivityContext($user, $visibleItemsQuery);
         $persona = $this->resolveFinalPersona($basePersona, $activityContext);
+
+        if (! $this->tenderAvailable) {
+            return [
+                'persona' => $persona,
+                'base_persona' => $basePersona,
+                'label' => __('procynia.info_center_page.my_tasks.neutral_label'),
+                'headline' => __('procynia.info_center_page.my_tasks.neutral_headline'),
+                'subheadline' => __('procynia.info_center_page.my_tasks.neutral_subheadline'),
+                'default_view' => 'my_tasks',
+                'operational_activity_score' => $activityContext['operational_activity_score'],
+                'is_case_operational' => false,
+            ];
+        }
 
         return $persona === 'operational'
             ? [
@@ -244,7 +276,7 @@ class InfoCenterController extends Controller
                 'label' => 'Styrings- og oppfølgingsflate',
                 'headline' => 'Se beslutninger, avklaringer og eierskap som påvirker retning og risiko.',
                 'subheadline' => 'Du kan fortsatt opprette, tildele og følge opp aksjoner når saken krever det.',
-                'default_view' => 'awaiting_response',
+                'default_view' => 'my_tasks',
                 'operational_activity_score' => $activityContext['operational_activity_score'],
                 'is_case_operational' => false,
             ];
@@ -378,8 +410,18 @@ class InfoCenterController extends Controller
             ->exists();
     }
 
-    private function summaryItems(User $user, array $roleContext, Builder $baseQuery, int $wikiTaskCount = 0): array
+    private function summaryItems(User $user, array $roleContext, Builder $baseQuery, int $myTasksCount): array
     {
+        if (! $this->tenderAvailable) {
+            return [[
+                'key' => 'my_tasks',
+                'label' => 'Mine oppgaver',
+                'count' => $myTasksCount,
+                'description' => __('procynia.info_center_page.my_tasks.neutral_panel_description'),
+                'tone' => 'danger',
+            ]];
+        }
+
         $responseDueSoonCount = $this->countMatching($baseQuery, function (Builder $query): void {
             $query
                 ->where('requires_response', true)
@@ -411,12 +453,6 @@ class InfoCenterController extends Controller
                         ->orWhere('owner_user_id', '!=', $user->id);
                 });
         });
-
-        $myTasksCount = $this->countMatching($baseQuery, function (Builder $query) use ($user): void {
-            $query
-                ->where('owner_user_id', $user->id)
-                ->where('status', '!=', SavedNoticeInfoItem::STATUS_CLOSED);
-        }) + $wikiTaskCount;
 
         if ($roleContext['persona'] === 'operational') {
             return [
@@ -454,22 +490,18 @@ class InfoCenterController extends Controller
             ];
         }
 
-        // A commercial owner normally watches decisions and clarifications rather than a task list,
-        // so this persona has no standing "Mine oppgaver" counter. Wiki work is the one thing that
-        // can be handed directly to them regardless of how they use the case surface — a
-        // Contributor who reviews or quality assures pages is the ordinary case — and work assigned
-        // by name has to be countable somewhere, or the card below the fold is the only place it
-        // exists.
-        return array_values(array_filter([
-            $wikiTaskCount > 0
-                ? [
-                    'key' => 'my_tasks',
-                    'label' => 'Mine oppgaver',
-                    'count' => $myTasksCount,
-                    'description' => 'Aksjoner og oppgaver som er tildelt deg og fortsatt er åpne.',
-                    'tone' => 'danger',
-                ]
-                : null,
+        // A commercial owner mostly watches decisions and clarifications, but «Mine oppgaver» is
+        // the default view for everyone, so its counter leads here too: work assigned by name —
+        // a Wiki review, a supplier they are intern ansvarlig for — has to be countable where the
+        // page opens.
+        return [
+            [
+                'key' => 'my_tasks',
+                'label' => 'Mine oppgaver',
+                'count' => $myTasksCount,
+                'description' => 'Aksjoner og oppgaver som er tildelt deg og fortsatt er åpne.',
+                'tone' => 'danger',
+            ],
             [
                 'key' => 'decision',
                 'label' => 'Beslutninger',
@@ -491,7 +523,7 @@ class InfoCenterController extends Controller
                 'description' => 'Aksjoner du har sendt ut og fortsatt venter svar på.',
                 'tone' => 'amber',
             ],
-        ]));
+        ];
     }
 
     private function countMatching(Builder $baseQuery, callable $callback): int
@@ -500,64 +532,5 @@ class InfoCenterController extends Controller
         $callback($query);
 
         return (int) $query->count();
-    }
-
-    private function infoItemPayload(SavedNoticeInfoItem $infoItem, int $customerId): array
-    {
-        $savedNotice = $infoItem->savedNotice;
-        $subject = trim((string) ($infoItem->subject ?? ''));
-        $actionUrl = $savedNotice ? route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]) : null;
-
-        if (
-            $savedNotice !== null
-            && $infoItem->source_type === SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT
-            && $infoItem->source_id !== null
-        ) {
-            $actionUrl = route('app.ai.show', [
-                'savedNotice' => $savedNotice->id,
-                'requirement_id' => $infoItem->source_id,
-            ]);
-        }
-
-        return [
-            'id' => $infoItem->id,
-            'type' => $infoItem->type,
-            'type_label' => $infoItem->type_label,
-            'direction' => $infoItem->direction,
-            'direction_label' => $infoItem->direction_label,
-            'channel' => $infoItem->channel,
-            'channel_label' => $infoItem->channel_label,
-            'subject' => $infoItem->subject,
-            'subject_label' => $subject !== '' ? $subject : $infoItem->type_label,
-            'body_preview' => Str::limit(Str::squish((string) $infoItem->body), 220),
-            'status' => $infoItem->status,
-            'status_label' => $infoItem->status_label,
-            'requires_response' => (bool) $infoItem->requires_response,
-            'response_due_at' => optional($infoItem->response_due_at)?->toDateString(),
-            'closure_comment' => $infoItem->closure_comment,
-            'owner' => $this->safeUserPayload($infoItem->owner, $customerId),
-            'created_by' => $this->safeUserPayload($infoItem->createdBy, $customerId),
-            'created_at' => optional($infoItem->created_at)?->toIso8601String(),
-            'action_url' => $actionUrl,
-            'saved_notice' => $savedNotice ? [
-                'id' => $savedNotice->id,
-                'title' => $savedNotice->title,
-                'notice_id' => $savedNotice->external_id,
-                'reference_number' => $savedNotice->reference_number,
-                'show_url' => route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]),
-            ] : null,
-        ];
-    }
-
-    private function safeUserPayload(?User $user, int $customerId): ?array
-    {
-        if (! $user instanceof User || (int) $user->customer_id !== $customerId) {
-            return null;
-        }
-
-        return [
-            'id' => $user->id,
-            'name' => $user->name,
-        ];
     }
 }

@@ -62,8 +62,10 @@ test('help tooltip opens and closes via keyboard focus without errors', async ({
     await expect(page.getByRole('tooltip')).toBeVisible();
     await expect(helpButton).toHaveAttribute('aria-expanded', 'true');
 
+    // Focus moves on — for this user onto the next panel's own help button, since «Mine oppgaver»
+    // became everyone's first panel (punkt 6) — and this tooltip closes.
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    await expect(page.getByRole('tooltip').filter({ hasText: 'Åpne aksjoner og oppfølginger som er tildelt deg.' })).toHaveCount(0);
     await expect(helpButton).toHaveAttribute('aria-expanded', 'false');
 
     expect(consoleErrors).toEqual([]);
@@ -83,4 +85,17 @@ test('help tooltip is usable on a mobile viewport', async ({ page }) => {
     const box = await tooltip.boundingBox();
     const viewportWidth = page.viewportSize().width;
     expect(box.x + box.width).toBeLessThanOrEqual(viewportWidth + 1);
+});
+
+test('with Anbud the page help still explains the aksjon views, and «Mine oppgaver» too', async ({ page }) => {
+    await page.goto('/app/info-center');
+    await page.getByRole('button', { name: 'Hjelp', exact: true }).click();
+    const help = page.getByRole('dialog', { name: 'Oppfølging' });
+    await expect(help).toBeVisible();
+
+    for (const title of ['Mine oppgaver', 'Oppgaver fra flere moduler', 'Venter på svar', 'Opprettet av meg', 'Innkommende', 'Frister innen 7 dager']) {
+        await expect(help.getByText(title, { exact: true })).toBeVisible();
+    }
+
+    await page.keyboard.press('Escape');
 });

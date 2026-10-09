@@ -47,9 +47,14 @@ const EVENT_DOMAIN_LABELS = {
     wiki: 'Wiki',
     bid: 'Sak',
     watch_profile: 'Watch list',
+    supplier: 'Leverandører',
 };
 
-function notificationContextLabel(notification) {
+/**
+ * `domainLabels` are translated area names keyed by event prefix; they win over the fallbacks above.
+ * Leverandører is the first area to arrive with its name translated rather than written here.
+ */
+function notificationContextLabel(notification, domainLabels = {}) {
     if (notification?.saved_notice?.title) {
         return `Sak: ${notification.saved_notice.title}`;
     }
@@ -65,7 +70,9 @@ function notificationContextLabel(notification) {
     }
 
     // Never the raw type: an unnamed event says which area it is from, or nothing at all.
-    return EVENT_DOMAIN_LABELS[eventType.split('.')[0]] ?? 'Varsel';
+    const domain = eventType.split('.')[0];
+
+    return domainLabels?.[domain] ?? EVENT_DOMAIN_LABELS[domain] ?? 'Varsel';
 }
 
 /**
@@ -122,6 +129,8 @@ export default function NotificationBell({
     onMarkAllRead,
     onDeleteNotification,
     onDeleteAllUnread,
+    /** Translated area names by event prefix, e.g. { supplier: 'Suppliers' }. */
+    domainLabels = {},
 }) {
     const panelRef = useRef(null);
     const panelMaxHeight = useAvailableHeight(panelRef, isOpen);
@@ -280,7 +289,7 @@ export default function NotificationBell({
 
                                         <div className="mt-3 flex items-center justify-between gap-3 text-sm text-slate-600">
                                             <div className="min-w-0 truncate">
-                                                {notificationContextLabel(notification)}
+                                                {notificationContextLabel(notification, domainLabels)}
                                             </div>
                                             <time dateTime={notification.created_at ?? undefined} className="shrink-0">
                                                 {formatNotificationTime(notification.created_at, locale)}

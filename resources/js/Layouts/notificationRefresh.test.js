@@ -136,7 +136,9 @@ describe('the bell can be tidied', () => {
 describe('internal event names stay internal', () => {
     test('an unnamed event falls back to its area, never to its own identifier', () => {
         assert.match(bell, /const EVENT_DOMAIN_LABELS = \{/);
-        assert.match(bell, /return EVENT_DOMAIN_LABELS\[eventType\.split\('\.'\)\[0\]\] \?\? 'Varsel';/);
+        // A translated area name first, then the fallback map, and never the identifier itself.
+        assert.match(bell, /const domain = eventType\.split\('\.'\)\[0\];/);
+        assert.match(bell, /return domainLabels\?\.\[domain\] \?\? EVENT_DOMAIN_LABELS\[domain\] \?\? 'Varsel';/);
     });
 
     test('the old prettifier is gone', () => {
@@ -145,7 +147,7 @@ describe('internal event names stay internal', () => {
     });
 
     test('the domains that exist are named', () => {
-        for (const domain of ['wiki', 'bid', 'watch_profile']) {
+        for (const domain of ['wiki', 'bid', 'watch_profile', 'supplier']) {
             assert.match(bell, new RegExp(`${domain}: '`), `${domain} has a human name`);
         }
     });

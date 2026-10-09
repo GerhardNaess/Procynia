@@ -16,6 +16,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use Tests\Concerns\GrantsWikiPermissions;
+use Tests\Concerns\ReadsMyTasks;
 use Tests\TestCase;
 
 /**
@@ -37,6 +38,7 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
 {
     use DatabaseTransactions;
     use GrantsWikiPermissions;
+    use ReadsMyTasks;
 
     protected function setUp(): void
     {
@@ -447,7 +449,7 @@ class EnterpriseWikiSystemOwnerApprovalTest extends TestCase
         $response = $this->actingAs($user)->get(route('app.info-center.index', ['view' => 'my_tasks']));
         $response->assertOk();
 
-        return $response->viewData('page')['props']['infoCenter']['wiki_tasks'];
+        return $this->wikiTasksIn($response->viewData('page')['props']['infoCenter']);
     }
 
     private function approvalFor(EnterpriseWikiPageVersion $version, User $owner): EnterpriseWikiPageVersionDocumentOwnerApproval

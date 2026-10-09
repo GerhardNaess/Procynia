@@ -2,6 +2,9 @@ import { Link, router, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import InfoHint from '../../../Components/App/InfoHint';
+import MyTaskGroups, { SupplierTaskCard } from './MyTasks';
+import { taskCountLabel } from './myTaskLabels';
+import { infoCenterPageHelp, myTasksPanelHelp } from './infoCenterHelp';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -133,8 +136,8 @@ const INFO_CENTER_HELP_TEXTS = {
  * element inside another is invalid markup, and it is also what keeps a click on the "i" from
  * selecting the panel underneath it.
  */
-function SummaryPanel({ item, href, isActive }) {
-    const helpText = INFO_CENTER_HELP_TEXTS[item.key];
+function SummaryPanel({ item, href, isActive, helpTextOverride = null }) {
+    const helpText = helpTextOverride ?? INFO_CENTER_HELP_TEXTS[item.key];
     const toneClassName = summaryToneClassName(item.tone);
 
     const body = (
@@ -312,6 +315,111 @@ function WikiTaskCard({ task, locale }) {
     );
 }
 
+/**
+ * One Anbud aksjon. The same card under every view — the paginated list and «Mine oppgaver» — so an
+ * aksjon reads the same wherever it is met.
+ */
+function InfoItemCard({ item, locale }) {
+    const detailUrl = item.action_url ?? item.saved_notice?.show_url ?? '#';
+    const isAiRequirementTask = item.type === 'ai_requirement_responsibility';
+
+    return (
+        <article
+            className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 shadow-[0_6px_16px_rgba(15,23,42,0.03)]"
+        >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span
+                            className={classNames(
+                                'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+                                statusBadgeClassName(item.status),
+                            )}
+                        >
+                            {item.status_label}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                            {item.type_label}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                            {item.direction_label}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                            {item.channel_label}
+                        </span>
+                        {item.status !== 'closed' && item.requires_response ? (
+                            <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                                Venter på svar
+                            </span>
+                        ) : null}
+                    </div>
+
+                    <Link
+                        href={detailUrl}
+                        className="block text-lg font-semibold tracking-tight text-slate-950 transition hover:text-violet-700"
+                    >
+                        {item.subject_label}
+                    </Link>
+
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                        <span>
+                            Sak:{' '}
+                            <Link
+                                href={detailUrl}
+                                className="font-medium text-slate-700 transition hover:text-violet-700"
+                            >
+                                {item.saved_notice?.title ?? 'Ukjent sak'}
+                            </Link>
+                        </span>
+                        {item.saved_notice?.reference_number ? (
+                            <span>· Referanse: {item.saved_notice.reference_number}</span>
+                        ) : null}
+                    </div>
+
+                    <p className="max-w-4xl text-sm leading-6 text-slate-700">
+                        {item.body_preview}
+                    </p>
+
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Ansvarlig</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">{formatUser(item.owner)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Opprettet av</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">{formatUser(item.created_by)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Oppfølgingsfrist</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">
+                                {item.response_due_at ? formatDate(item.response_due_at, locale) : '—'}
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Opprettet</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">
+                                {formatDate(item.created_at, locale, {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                    <Link
+                        href={detailUrl}
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                        {isAiRequirementTask ? 'Åpne krav i AI' : 'Åpne sak'}
+                    </Link>
+                </div>
+            </div>
+        </article>
+    );
+}
+
 export default function InfoCenterIndex({ infoCenter = null }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const ic = translations?.info_center_page ?? {};
@@ -320,7 +428,26 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     const viewOptions = infoCenter?.view_options ?? [];
     const summaryItems = infoCenter?.summary?.items ?? [];
     const items = infoCenter?.items ?? [];
-    const wikiTasks = infoCenter?.wiki_tasks ?? [];
+    // «Mine oppgaver» from every module, grouped by the backend. Under that view it replaces the
+    // aksjon list: an aksjon is one of the tasks there, with the same card.
+    const myTasks = infoCenter?.my_tasks ?? { count: 0, groups: [] };
+    const isMyTasksView = activeView === 'my_tasks';
+    const mt = ic.my_tasks ?? {};
+    // Without Anbud the page is «Mine oppgaver» alone; the help says only what the page shows.
+    const tenderAvailable = infoCenter?.tender_available ?? true;
+    const pageHelp = infoCenterPageHelp(ic, tenderAvailable);
+    const myTasksHelp = myTasksPanelHelp(ic, tenderAvailable);
+    const supplierCategories = translations?.supplier_management?.attention?.categories ?? {};
+    const renderTask = (task) => {
+        switch (task.module) {
+            case 'supplier':
+                return <SupplierTaskCard task={task} locale={locale} t={mt} categories={supplierCategories} moduleLabels={mt.modules} />;
+            case 'wiki':
+                return <WikiTaskCard task={task} locale={locale} />;
+            default:
+                return task.item ? <InfoItemCard item={task.item} locale={locale} /> : null;
+        }
+    };
     const pagination = infoCenter?.pagination ?? {};
     const activeOption = viewOptions.find((option) => option.value === activeView) ?? viewOptions[0] ?? null;
     // A panel becomes that view's control when the backend counts something it also filters by.
@@ -361,25 +488,8 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                     <PageHelpButton
                                         buttonLabel={ic.page_help_button ?? 'Hjelp'}
                                         title={ic.page_help_title ?? 'Oppfølging'}
-                                        intro={ic.page_help_intro}
-                                        sections={[
-                                            {
-                                                title: ic.page_help_section_views ?? 'Panelene øverst på siden',
-                                                items: [
-                                                    { title: ic.page_help_item_my_tasks_title ?? 'Mine oppgaver', text: ic.page_help_item_my_tasks_text ?? 'Viser åpne oppgaver og oppfølginger som er tildelt deg.' },
-                                                    { title: ic.page_help_item_awaiting_title ?? 'Venter på svar', text: ic.page_help_item_awaiting_text ?? 'Viser oppfølginger du har sendt ut, men som fortsatt venter på respons.' },
-                                                    { title: ic.page_help_item_outbound_title ?? 'Opprettet av meg', text: ic.page_help_item_outbound_text ?? 'Viser oppgaver og oppfølginger du selv har opprettet.' },
-                                                    { title: ic.page_help_item_inbound_title ?? 'Innkommende', text: ic.page_help_item_inbound_text ?? 'Viser oppfølginger eller forespørsler som kommer inn til deg.' },
-                                                    { title: ic.page_help_item_deadline_title ?? 'Frister innen 7 dager', text: ic.page_help_item_deadline_text ?? 'Viser åpne punkter med nær frist.' },
-                                                ],
-                                            },
-                                            {
-                                                title: ic.page_help_section_practical ?? 'Praktisk bruk',
-                                                items: [
-                                                    { title: ic.page_help_item_practical_title ?? 'Daglig oppfølging', text: ic.page_help_item_practical_text ?? 'Bruk Oppfølging som din daglige personlige oppfølgingsliste. Bruk Arbeidsliste og sakssider til selve anbudssakene.' },
-                                                ],
-                                            },
-                                        ]}
+                                        intro={pageHelp.intro}
+                                        sections={pageHelp.sections}
                                     />
                                 </div>
                                 <p className="max-w-3xl text-[15px] leading-7 text-slate-600">
@@ -406,6 +516,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                     item={item}
                                     href={viewByKey.get(item.key)?.href ?? null}
                                     isActive={item.key === activeView}
+                                    helpTextOverride={item.key === 'my_tasks' ? myTasksHelp : null}
                                 />
                             ))}
                         </div>
@@ -419,8 +530,16 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                 {activeOption?.label ?? 'Oppfølging'}
                             </h2>
                             <div className="mt-1 text-[1.7rem] font-semibold tracking-tight text-slate-950">
-                                {pagination.total ?? items.length}{' '}
-                                {Number(pagination.total ?? items.length) === 1 ? countLabelSingular : countLabelPlural}
+                                {isMyTasksView ? (
+                                    <>
+                                        {myTasks.count} {taskCountLabel(myTasks.count, mt)}
+                                    </>
+                                ) : (
+                                    <>
+                                        {pagination.total ?? items.length}{' '}
+                                        {Number(pagination.total ?? items.length) === 1 ? countLabelSingular : countLabelPlural}
+                                    </>
+                                )}
                             </div>
                         </div>
 
@@ -441,7 +560,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                 </div>
                             ) : null}
 
-                            {pagination.from && pagination.to ? (
+                            {! isMyTasksView && pagination.from && pagination.to ? (
                                 <div className="text-sm text-slate-500">
                                     Viser {pagination.from}–{pagination.to}
                                 </div>
@@ -449,125 +568,22 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                         </div>
                     </div>
 
-                    {wikiTasks.length > 0 ? (
-                        <div className="mb-3.5 space-y-3.5">
-                            {wikiTasks.map((task) => (
-                                <WikiTaskCard key={task.id} task={task} locale={locale} />
-                            ))}
-                        </div>
-                    ) : null}
-
-                    {items.length === 0 && wikiTasks.length === 0 ? (
+                    {isMyTasksView ? (
+                        <MyTaskGroups myTasks={myTasks} t={mt} renderTask={renderTask} />
+                    ) : items.length === 0 ? (
                         <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
                             <div className="text-lg font-semibold text-slate-900">{emptyState.title}</div>
                             <p className="mt-2 text-sm text-slate-500">{emptyState.description}</p>
                         </div>
                     ) : (
                         <div className="space-y-3.5">
-                            {items.map((item) => {
-                                const detailUrl = item.action_url ?? item.saved_notice?.show_url ?? '#';
-                                const isAiRequirementTask = item.type === 'ai_requirement_responsibility';
-
-                                return (
-                                <article
-                                    key={item.id}
-                                    className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 shadow-[0_6px_16px_rgba(15,23,42,0.03)]"
-                                >
-                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                                        <div className="min-w-0 space-y-3">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span
-                                                    className={classNames(
-                                                        'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
-                                                        statusBadgeClassName(item.status),
-                                                    )}
-                                                >
-                                                    {item.status_label}
-                                                </span>
-                                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                    {item.type_label}
-                                                </span>
-                                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                    {item.direction_label}
-                                                </span>
-                                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                    {item.channel_label}
-                                                </span>
-                                                {item.status !== 'closed' && item.requires_response ? (
-                                                    <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
-                                                        Venter på svar
-                                                    </span>
-                                                ) : null}
-                                            </div>
-
-                                            <Link
-                                                href={detailUrl}
-                                                className="block text-lg font-semibold tracking-tight text-slate-950 transition hover:text-violet-700"
-                                            >
-                                                {item.subject_label}
-                                            </Link>
-
-                                            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                                                <span>
-                                                    Sak:{' '}
-                                                    <Link
-                                                        href={detailUrl}
-                                                        className="font-medium text-slate-700 transition hover:text-violet-700"
-                                                    >
-                                                        {item.saved_notice?.title ?? 'Ukjent sak'}
-                                                    </Link>
-                                                </span>
-                                                {item.saved_notice?.reference_number ? (
-                                                    <span>· Referanse: {item.saved_notice.reference_number}</span>
-                                                ) : null}
-                                            </div>
-
-                                            <p className="max-w-4xl text-sm leading-6 text-slate-700">
-                                                {item.body_preview}
-                                            </p>
-
-                                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Ansvarlig</div>
-                                                    <div className="mt-1 text-sm font-medium text-slate-900">{formatUser(item.owner)}</div>
-                                                </div>
-                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Opprettet av</div>
-                                                    <div className="mt-1 text-sm font-medium text-slate-900">{formatUser(item.created_by)}</div>
-                                                </div>
-                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Oppfølgingsfrist</div>
-                                                    <div className="mt-1 text-sm font-medium text-slate-900">
-                                                        {item.response_due_at ? formatDate(item.response_due_at, locale) : '—'}
-                                                    </div>
-                                                </div>
-                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Opprettet</div>
-                                                    <div className="mt-1 text-sm font-medium text-slate-900">
-                                                        {formatDate(item.created_at, locale, {
-                                                            hour: '2-digit',
-                                                            minute: '2-digit',
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-                                            <Link
-                                                href={detailUrl}
-                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                            >
-                                                {isAiRequirementTask ? 'Åpne krav i AI' : 'Åpne sak'}
-                                            </Link>
-                                        </div>
-                                    </div>
-                                </article>
-                                );
-                            })}
+                            {items.map((item) => (
+                                <InfoItemCard key={item.id} item={item} locale={locale} />
+                            ))}
                         </div>
                     )}
 
+                    {isMyTasksView ? null : (
                     <div className="mt-5 flex flex-col gap-3 rounded-[20px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             {pagination.from && pagination.to && pagination.total
@@ -594,6 +610,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                             </button>
                         </div>
                     </div>
+                    )}
                 </section>
             </div>
         </CustomerAppLayout>
