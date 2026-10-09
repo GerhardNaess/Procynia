@@ -442,6 +442,8 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     await expect(templates.getByTestId('requirement-template')).toHaveCount(9);
     const itSaas = templates.getByTestId('requirement-template').filter({ has: page.getByRole('heading', { name: 'IT/SaaS-leverandør', exact: true }) });
     await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
+    // Until the content review is signed (plan §19.2), the templates say they are not quality-assured.
+    await expect(templates.getByTestId('requirement-templates-unreviewed')).toContainText('ikke faglig eller juridisk kvalitetssikret');
     await expectReadable(page, '13-templates');
 
     // The preview: eleven to add, none «already there» — the customer's own Databehandleravtale is not matched on title.
@@ -451,6 +453,7 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     await expect(dialog.getByTestId('template-item-new')).toHaveCount(11);
     await expect(dialog.getByTestId('template-item-existing')).toHaveCount(0);
     await expect(dialog).toContainText('Eksisterende kontrollkrav endres ikke, og ingen krav slettes.');
+    await expect(dialog.getByTestId('requirement-templates-unreviewed')).toBeVisible();
     await expectReadable(page, '14-template-preview');
     await dialog.getByRole('button', { name: 'Legg til 11 kontrollkrav' }).click();
     await expect(page.getByText('11 kontrollkrav ble lagt til.', { exact: true })).toBeVisible();

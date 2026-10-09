@@ -64,4 +64,12 @@ describe('Kravmaler (supplier-assurance-v2-plan §16, §22.2)', () => {
         // The person reads names and titles — never a template or item key, a rule or a score.
         assert.doesNotMatch(page, />\s*\{(item|row|template)\.(key|version)\}|applies_when|predicate|score|%/);
     });
+
+    test('until the content review is signed, the section and the confirmation say the templates are not quality-assured', () => {
+        const component = source('./RequirementTemplates.jsx');
+        assert.match(component, /reviewed = false/);
+        assert.equal((component.match(/\{!reviewed && <Unreviewed t=\{t\} \/>\}/g) ?? []).length, 2);
+        assert.match(source('./ControlRequirements.jsx'), /templates_reviewed: templatesReviewed = false/);
+        assert.match(source('./ControlRequirements.jsx'), /reviewed=\{templatesReviewed\}/);
+    });
 });

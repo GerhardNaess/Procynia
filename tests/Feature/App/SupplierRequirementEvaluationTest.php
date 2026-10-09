@@ -9,6 +9,7 @@ use App\Models\SupplierDocument;
 use App\Models\SupplierRequirementEvaluation;
 use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\Sources\SupplierKnowledgeSource;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -262,6 +263,29 @@ class SupplierRequirementEvaluationTest extends TestCase
         $this->assertSame(['documented', [$renewal->id]], [$latest->status, $latest->documents()->pluck('supplier_document_id')->all()]);
         $this->assertSame('documented', $this->actingAs($assurer)->get($show)->viewData('page')['props']['control_requirements']['applicable'][0]['display_status']);
         $this->assertSame(1, $control->documents()->count());
+    }
+
+    public function test_the_wiki_knowledge_draft_reads_the_control_in_force_not_the_latest_recorded(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $supplier = $this->supplier($customer, $assurer, 'Drift AS');
+        $requirement = $this->requirement($customer, 'Databehandleravtale');
+        $url = "/app/supplier-management/{$supplier->id}/requirement-evaluations";
+
+        // In force: Mangler today. Recorded after it, but backdated: Delvis dokumentert last week.
+        $this->actingAs($assurer)->post($url, $this->control($requirement, [], ['status' => 'missing', 'rationale' => 'Ikke signert.']))->assertSessionHasNoErrors();
+        $this->travel(1)->minutes();
+        $this->actingAs($assurer)->post($url, $this->control($requirement, [], [
+            'status' => 'partially_documented', 'rationale' => 'Utkast mottatt.', 'evaluated_on' => now()->subWeek()->toDateString(),
+        ]))->assertSessionHasNoErrors();
+
+        $show = $this->actingAs($assurer)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props']['control_requirements'];
+        $this->assertSame('missing', $show['applicable'][0]['current']['status']);
+
+        $draft = app(SupplierKnowledgeSource::class)->draft($assurer, $supplier->fresh());
+        $requirements = collect($draft->sections)->firstWhere('key', 'requirements');
+        $this->assertSame(['Databehandleravtale: Mangler — Ikke signert.'], $requirements->lines);
     }
 
     /**

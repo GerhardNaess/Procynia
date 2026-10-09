@@ -9,6 +9,7 @@ use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierRequirementEvaluation;
 use App\Models\User;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSource;
+use App\Services\Suppliers\Assurance\SupplierRequirementStatus;
 use App\Services\Suppliers\SupplierAccessService;
 use Illuminate\Database\Eloquent\Model;
 
@@ -65,14 +66,16 @@ class SupplierKnowledgeSource implements WikiKnowledgeSource
             $source->criticality !== null ? __("{$t}.criticality").': '.__("{$t}.criticalities.{$source->criticality}") : null,
         ]));
 
-        // The latest evaluation of each requirement, read from its own snapshot of the requirement.
+        // The control in force for each requirement — the same rule as the supplier page (latest
+        // evaluated_on, then id), never the latest recorded — read from its own snapshot of the
+        // requirement, so a backdated control does not replace the one in force.
         $requirements = $source->requirementEvaluations()
             ->reorder()
             ->orderBy('requirement_id')
-            ->orderByDesc('recorded_at')
-            ->orderByDesc('id')
             ->get()
-            ->unique('requirement_id')
+            ->groupBy('requirement_id')
+            ->map(fn ($evaluations): ?SupplierRequirementEvaluation => SupplierRequirementStatus::current($evaluations))
+            ->filter()
             ->map(fn (SupplierRequirementEvaluation $evaluation): string => $evaluation->requirement_title
                 .': '.__("{$t}.evaluation_statuses.{$evaluation->status}")
                 .(filled($evaluation->rationale) ? ' — '.$evaluation->rationale : ''))

@@ -21,7 +21,7 @@ const HINT = 'text-base text-slate-600';
  * Kravmaler add requirements here; once added they are ordinary requirements, edited like any other.
  */
 export default function SupplierControlRequirementsIndex() {
-    const { translations = {}, requirements = [], templates = [], form: formOptions = null, permissions = {}, errors = {} } = usePage().props;
+    const { translations = {}, requirements = [], templates = [], templates_reviewed: templatesReviewed = false, form: formOptions = null, permissions = {}, errors = {} } = usePage().props;
     const tr = translations?.supplier_management ?? {};
     const c = tr.control ?? {};
     const k = c.catalogue ?? {};
@@ -73,7 +73,7 @@ export default function SupplierControlRequirementsIndex() {
                     </section>
                 )}
 
-                <RequirementTemplates templates={templates} canManage={canManage} tr={tr} />
+                <RequirementTemplates templates={templates} reviewed={templatesReviewed} canManage={canManage} tr={tr} />
 
                 {groups.length === 0 ? (
                     <section className={CARD} data-testid="control-catalogue-empty">

@@ -39,9 +39,18 @@ function ItemList({ items, tr, existing = false }) {
  * bruk kravmal» behind a confirmation that says what is added and what is already there. What
  * exists is the server's answer, matched on the template item. Applying fills the catalogue only —
  * no supplier is controlled or approved by it. Only supplier.assure is offered the action; the server
- * refuses it otherwise.
+ * refuses it otherwise. Until the templates' content is reviewed (plan §19.2), the section and the
+ * dialog say so; `reviewed` comes from the server (RequirementTemplates::CONTENT_REVIEWED).
  */
-export default function RequirementTemplates({ templates = [], canManage = false, tr }) {
+function Unreviewed({ t }) {
+    return (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900" role="note" data-testid="requirement-templates-unreviewed">
+            {t.unreviewed ?? 'Kravmalene er ikke faglig eller juridisk kvalitetssikret ennå. Bruk dem som et utgangspunkt, og vurder tekst, nivå og intervall før kravene tas i bruk.'}
+        </p>
+    );
+}
+
+export default function RequirementTemplates({ templates = [], reviewed = false, canManage = false, tr }) {
     const t = tr.templates ?? {};
     const [open, setOpen] = useState(null);
     const [processing, setProcessing] = useState(false);
@@ -68,6 +77,7 @@ export default function RequirementTemplates({ templates = [], canManage = false
             <h2 id="requirement-templates-heading" className="text-xl font-semibold text-slate-950">{t.heading ?? 'Kravmaler'}</h2>
             <p className={`mt-1 ${HINT}`}>{t.intro}</p>
             <p className={`mt-1 ${HINT}`}>{t.note}</p>
+            {!reviewed && <Unreviewed t={t} />}
 
             <ul className="mt-4 grid gap-3 lg:grid-cols-3">
                 {templates.map((row) => (
@@ -93,6 +103,7 @@ export default function RequirementTemplates({ templates = [], canManage = false
                     <div data-testid="requirement-template-dialog">
                         <h2 id="requirement-template-dialog-heading" className="break-words text-xl font-semibold text-slate-950">{fill(t.dialog_heading ?? 'Ta i bruk kravmal: :name', { name: template.name })}</h2>
                         <p className={`mt-2 ${HINT}`}>{t.dialog_keeps}</p>
+                        {!reviewed && <Unreviewed t={t} />}
 
                         {preview.toCreate.length > 0 ? (
                             <>

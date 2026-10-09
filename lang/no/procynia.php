@@ -3114,6 +3114,7 @@ return [
                     'purpose' => 'Etikk, økonomi, kvalitet, lønns- og arbeidsvilkår og miljø.',
                     'suited_for' => 'Alle leverandører. Flere av kravene gjelder bare viktige og kritiske leverandører, og leverandører som omfattes av særlige offentlige kontraktskrav.',
                 ],
+            'unreviewed' => 'Kravmalene er ikke faglig eller juridisk kvalitetssikret ennå. Bruk dem som et utgangspunkt, og vurder tekst, nivå og intervall før kravene tas i bruk.',
                 'it_saas' => [
                     'name' => 'IT/SaaS-leverandør',
                     'purpose' => 'Informasjonssikkerhet, personvern og kontinuitet.',

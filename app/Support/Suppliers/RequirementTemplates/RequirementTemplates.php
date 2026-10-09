@@ -28,6 +28,14 @@ namespace App\Support\Suppliers\RequirementTemplates;
  */
 final class RequirementTemplates
 {
+    /**
+     * Whether the templates' content has passed the professional and legal review (plan §19.2,
+     * docs/supplier-assurance-template-review.md). Until it has, the templates stay available but
+     * Kontrollkrav says plainly that they are not quality-assured. Set to true only in the commit
+     * that records the signed review.
+     */
+    public const CONTENT_REVIEWED = false;
+
     public const PUBLIC_SECTOR_GENERAL = 'public_sector_general';
 
     public const IT_SAAS = 'it_saas';

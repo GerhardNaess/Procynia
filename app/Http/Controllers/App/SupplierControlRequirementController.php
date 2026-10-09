@@ -10,6 +10,7 @@ use App\Services\Suppliers\Assurance\SupplierRequirementPayload;
 use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\CustomerContext;
+use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -42,6 +43,7 @@ class SupplierControlRequirementController extends Controller
             'requirements' => $this->payload->catalogue($user),
             'form' => $canManage ? $this->payload->formOptions($user) : null,
             'templates' => $this->templates->overview($user),
+            'templates_reviewed' => RequirementTemplates::CONTENT_REVIEWED,
             'permissions' => ['can_manage' => $canManage],
         ]);
     }

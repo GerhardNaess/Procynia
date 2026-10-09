@@ -76,6 +76,8 @@ class SupplierRequirementTemplateTest extends TestCase
         // supplier.view reads the templates; edit, assess, delete and System Owner apply nothing.
         $this->assertSame(['public_sector_general', 'it_saas', 'data_processor', 'human_rights_risk', 'critical_ict', 'construction', 'cleaning', 'staffing', 'health_care'], array_keys($templates($reader)));
         $this->assertSame([11, 5, 11], [count($templates($reader)['it_saas']['items']), $templates($reader)['it_saas']['mandatory_count'], $templates($reader)['it_saas']['to_create_count']]);
+        // Until the content review is signed (plan §19.2), the page is told the templates are not reviewed.
+        $this->assertFalse($this->actingAs($reader)->get(self::CATALOGUE)->viewData('page')['props']['templates_reviewed']);
         foreach ([CustomerPermissionCatalog::SUPPLIER_EDIT, CustomerPermissionCatalog::SUPPLIER_ASSESS, CustomerPermissionCatalog::SUPPLIER_DELETE] as $key) {
             $apply($this->supplierUser($customer, [$key]), 'it_saas')->assertForbidden();
         }
