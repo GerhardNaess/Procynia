@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Notifications\AiQuotaNotification;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
+use App\Services\Modules\ModuleEntitlementService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -179,6 +180,94 @@ class AiCostControlAdminTest extends TestCase
             'user_id' => $admin->id,
             'event_type' => 'ai_credits_adjusted',
         ]);
+    }
+
+    public function test_an_admin_picks_a_tier_and_an_override_wins_over_it(): void
+    {
+        config()->set('ai_customer_capacity.base', ['basis' => 2000, 'per_user' => 0, 'options' => []]);
+        config()->set('ai_customer_capacity.tiers', [
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
+            'tier_b' => ['name' => 'Tier B', 'multiplier' => 2.0, 'active' => true, 'sort_order' => 20],
+            'tier_retired' => ['name' => 'Retired', 'multiplier' => 0.25, 'active' => false, 'sort_order' => 30],
+        ]);
+        config()->set('ai_customer_capacity.default_tier', 'tier_a');
+        $admin = $this->internalAdmin();
+        $customer = $this->customer(3);
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
+
+        // Without a chosen tier, the default tier multiplies the base.
+        $this->actingAs($admin);
+        Livewire::test(ManageCustomerAiControl::class, ['record' => $customer])
+            ->assertSet('capacity.included', 2000)
+            ->assertSet('capacity.source', 'tier')
+            ->assertSet('capacity.tier_key', 'tier_a')
+            ->assertSet('capacity.base_units_per_month', 2000)
+            ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => 'tier_b', 'reason' => 'Pilotnivå'])
+            ->assertSet('capacity.included', 4000)
+            ->assertSet('capacity.source', 'tier')
+            ->assertSet('capacity.tier_key', 'tier_b')
+            ->assertSee(__('procynia.ai_admin.capacity.sources.tier'))
+            ->callAction('set_ai_units', ['included_ai_units' => 250000, 'reason' => 'Enterprise-avtale'])
+            ->assertSet('capacity.included', 250000)
+            ->assertSet('capacity.override', 250000)
+            ->assertSet('capacity.source', 'override')
+            ->assertSet('capacity.tier_key', 'tier_b');
+
+        $this->assertSame('tier_b', $customer->fresh()->ai_capacity_tier);
+        $this->assertSame(250000, $customer->fresh()->included_ai_units);
+        $this->assertDatabaseHas('billing_events', [
+            'customer_id' => $customer->id,
+            'user_id' => $admin->id,
+            'event_type' => 'ai_capacity_tier_changed',
+            'description' => 'Pilotnivå',
+        ]);
+        $this->assertDatabaseHas('billing_events', [
+            'customer_id' => $customer->id,
+            'event_type' => 'ai_capacity_units_changed',
+            'description' => 'Enterprise-avtale',
+        ]);
+
+        // Clearing the override returns to the tier, clearing the tier to the default tier.
+        Livewire::test(ManageCustomerAiControl::class, ['record' => $customer->fresh()])
+            ->callAction('set_ai_units', ['included_ai_units' => null, 'reason' => 'Tilbake til nivå'])
+            ->assertSet('capacity.included', 4000)
+            ->assertSet('capacity.source', 'tier')
+            ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => null, 'reason' => 'Ikke avtalt'])
+            ->assertSet('capacity.included', 2000)
+            ->assertSet('capacity.tier_key', 'tier_a');
+
+        $this->assertNull($customer->fresh()->ai_capacity_tier);
+        $this->assertNull($customer->fresh()->included_ai_units);
+    }
+
+    public function test_an_inactive_or_unknown_tier_cannot_be_newly_assigned(): void
+    {
+        config()->set('ai_customer_capacity.base', ['basis' => 2000, 'per_user' => 0, 'options' => []]);
+        config()->set('ai_customer_capacity.tiers', [
+            'tier_a' => ['name' => 'Tier A', 'multiplier' => 1.0, 'active' => true, 'sort_order' => 10],
+            'tier_b' => ['name' => 'Tier B', 'multiplier' => 2.0, 'active' => true, 'sort_order' => 20],
+            'tier_retired' => ['name' => 'Retired', 'multiplier' => 0.25, 'active' => false, 'sort_order' => 30],
+        ]);
+        config()->set('ai_customer_capacity.default_tier', 'tier_a');
+        $customer = $this->customer(3);
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
+        $this->actingAs($this->internalAdmin());
+
+        // Filament's select validation and the server-side check both refuse; nothing is written.
+        foreach (['tier_retired', 'no_such_tier'] as $tier) {
+            Livewire::test(ManageCustomerAiControl::class, ['record' => $customer->fresh()])
+                ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => $tier, 'reason' => 'Forsøk']);
+
+            $this->assertNull($customer->fresh()->ai_capacity_tier, "{$tier} must not be assignable.");
+        }
+
+        // A customer that already holds a retired tier keeps it selectable and keeps its capacity.
+        $customer->forceFill(['ai_capacity_tier' => 'tier_retired'])->save();
+        Livewire::test(ManageCustomerAiControl::class, ['record' => $customer->fresh()])
+            ->assertSet('capacity.included', 500)
+            ->callAction('set_ai_capacity_tier', ['ai_capacity_tier' => 'tier_retired', 'reason' => 'Uendret'])
+            ->assertHasNoActionErrors();
+        $this->assertSame('tier_retired', $customer->fresh()->ai_capacity_tier);
     }
 
     public function test_the_page_shows_the_canonical_quota_and_the_audit_history(): void

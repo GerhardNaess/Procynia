@@ -65,7 +65,7 @@ class QualityProcessFlowChangeProposer
             new AiCallContext(
                 customerId: (int) $item->customer_id,
                 feature: 'quality',
-                operation: 'process_flow_change',
+                operation: 'quality.propose_process_change',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),

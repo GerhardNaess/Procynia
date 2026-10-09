@@ -75,13 +75,9 @@
                 <select id="function-select" wire:model.live="functionFilter"
                     class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
                     <option value="">Alle funksjoner</option>
-                    <option value="saved_notice_requirement_answer_draft">Svarutkast</option>
-                    <option value="saved_notice_documents_upload">Krav-ekstraksjon</option>
-                    <option value="saved_notice_evidence_refresh">Bevisgrunnlag</option>
-                    <option value="saved_notice_assessment_refresh">Vurdering</option>
-                    <option value="knowledge_document_upload">Kunnskapsbase-opplasting</option>
-                    <option value="knowledge_chunk_metadata_update">Chunk-metadata</option>
-                    <option value="knowledge_vocabulary_analysis_batch">Standardvokabular</option>
+                    @foreach (\App\Filament\Pages\AiForbruk::FEATURE_LABELS as $featureKey => $featureLabel)
+                        <option value="{{ $featureKey }}">{{ $featureLabel }}</option>
+                    @endforeach
                 </select>
 
                 <label class="block text-base font-bold text-gray-800" for="trend-select">Trendvisning</label>
@@ -96,10 +92,10 @@
             {{-- Datakildemark --}}
             <div class="border-t border-amber-100 bg-amber-50 px-5 py-3">
                 <p class="text-base leading-relaxed text-amber-800">
-                    <strong>Delvis datagrunnlag:</strong>
-                    AI-operasjoner hentes fra <code class="font-mono">ai_usage_events</code>.
-                    Tokenforbruk hentes fra <code class="font-mono">ai_token_events</code> og dekker foreløpig bare instrumenterte AI-kall.
-                    Kravekstraksjon er ikke fullt samlet i tokenstatistikken ennå.
+                    <strong>Datagrunnlag:</strong>
+                    kall, tokens og kostnad hentes fra hvert leverandørkall i <code class="font-mono">ai_usage_attempts</code>, kun pålitelige rader etter bruksintegritetsgrensen.
+                    Kostnad er faktisk kostnad fra leverandørens forbruk; kall med ukjent kostnad telles, men summeres aldri som null.
+                    Blokkerte forsøk kommer fra Anbud-bruksgrensen, kapasitet fra AI-saker.
                 </p>
             </div>
 
@@ -202,18 +198,18 @@
 
                 {{-- Kort 6: Estimert kostnad --}}
                 <article class="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                    <div class="min-h-[2.5rem] text-base font-bold uppercase leading-6 tracking-wider text-gray-600">Est. kostnad</div>
+                    <div class="min-h-[2.5rem] text-base font-bold uppercase leading-6 tracking-wider text-gray-600">Kostnad</div>
                     @if ($totalCostStatus === 'ok' || $totalCostStatus === 'partial')
                         <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-950">
                             ≈ {{ number_format($totalCostNok ?? 0, 0, ',', ' ') }} kr
                         </div>
                         <div class="mt-auto text-base font-medium text-gray-600">
-                            {{ $totalCostStatus === 'partial' ? 'Delvis dekning' : 'Intern kostnad' }}
+                            {{ $totalCostStatus === 'partial' ? $unpricedCalls.' kall uten kjent kostnad' : 'Faktisk kostnad, oppgjort' }}
                         </div>
                     @else
                         <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-600">–</div>
                         <div class="mt-auto text-base font-medium text-gray-600">
-                            @if ($totalCostStatus === 'price_missing') Pris mangler
+                            @if ($totalCostStatus === 'price_missing') Kostnad ukjent
                             @elseif ($totalCostStatus === 'exchange_rate_missing') Valutakurs mangler
                             @else Ingen tokens
                             @endif
@@ -222,6 +218,27 @@
                 </article>
 
             </div>
+
+            {{-- Kostnadsoppgjør: oppgjort, åpent og legacy holdes adskilt --}}
+            <section aria-label="Kostnadsoppgjør" class="grid gap-3 sm:grid-cols-3">
+                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                    <div class="text-base font-bold text-gray-900">Oppgjort</div>
+                    <div class="text-base text-gray-700">{{ number_format($totalCostNok ?? 0, 2, ',', ' ') }} kr faktisk kostnad</div>
+                </div>
+                <div class="rounded-2xl border p-4 shadow-sm {{ ($pendingCalls + $unresolvedCalls) > 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white' }}">
+                    <div class="text-base font-bold text-gray-900">Venter / uavklart</div>
+                    <div class="text-base text-gray-700">
+                        {{ $pendingCalls }} venter ({{ number_format($pendingReservedNok, 2, ',', ' ') }} kr reservert),
+                        {{ $unresolvedCalls }} uavklart ({{ number_format($unresolvedReservedNok, 2, ',', ' ') }} kr reservert)
+                    </div>
+                    <div class="text-base text-gray-600">Reservert, ikke belastet. Inngår ikke i oppgjort kostnad.</div>
+                </div>
+                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                    <div class="text-base font-bold text-gray-900">Legacy</div>
+                    <div class="text-base text-gray-700">{{ $legacyCalls }} kall før usage-grensen</div>
+                    <div class="text-base text-gray-600">Gamle estimater vises ikke som kostnad.</div>
+                </div>
+            </section>
 
             {{-- Merknad under KPI-raden --}}
             <p class="text-base leading-6 text-gray-600">
@@ -232,7 +249,7 @@
             <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4">
                         <h3 class="font-bold text-gray-900">Trend: AI-operasjoner og blokkerte forsøk</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Utvikling basert på ai_usage_events i valgt periode.</p>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600">Leverandørkall fra ai_usage_attempts; blokkerte forsøk fra Anbud-bruksgrensen.</p>
                     </div>
                     @if ($operationsChartPoints !== '')
                         @php
@@ -308,7 +325,7 @@
             <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4">
                     <h3 class="font-bold text-gray-900">Trend: tokenforbruk</h3>
-                    <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_token_events</code> — foreløpig kun svarutkast-generering.</p>
+                    <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_usage_attempts</code>.</p>
                 </div>
                 @if ($tokensChartPoints !== '')
                     @php
@@ -362,12 +379,12 @@
                         </svg>
                     </div>
                     <div class="px-5 pb-4 text-base font-semibold text-gray-600">
-                        <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Total tokens · Kun instrumenterte AI-kall</span>
+                        <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Total tokens</span>
                     </div>
                 @else
                     <div class="px-5 py-6 text-center text-base leading-6 text-gray-600 space-y-1">
                         <p>Det finnes ingen registrerte tokenhendelser i valgt periode.</p>
-                        <p class="text-base leading-6">Tokenforbruk vises bare for instrumenterte AI-kall. AI-operasjoner kan finnes uten tilhørende tokenverdi.</p>
+                        <p class="text-base leading-6">Ingen tokens registrert i valgt periode.</p>
                     </div>
                 @endif
             </article>
@@ -378,7 +395,7 @@
                 <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4">
                         <h3 class="font-bold text-gray-900">Bruk per AI-funksjon</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">AI-operasjoner fra <code class="font-mono text-xs">ai_usage_events</code>. Tokens fra <code class="font-mono text-xs">ai_token_events</code> (delvis).</p>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600">Per funksjon og operasjon, fra <code class="font-mono text-xs">ai_usage_attempts</code>.</p>
                     </div>
                     @forelse ($functionRows as $row)
                         <div class="border-b border-gray-50 px-5 py-3">
@@ -400,10 +417,10 @@
                                 @if ($row['blocked'] > 0)
                                     <span class="text-base text-red-700">{{ $row['blocked'] }} blokkert</span>
                                 @endif
-                                @if (($row['cost_status'] ?? '') === 'ok' && $row['cost_usd'] !== null)
-                                    <span class="text-violet-600 font-semibold">≈ {{ number_format($row['cost_usd'], 2, ',', ' ') }} kr</span>
-                                @elseif (in_array($row['cost_status'] ?? '', ['price_missing', 'exchange_rate_missing']))
-                                    <span class="text-base italic text-amber-800">{{ ($row['cost_status'] ?? '') === 'exchange_rate_missing' ? 'Valutakurs mangler' : 'Pris ikke registrert' }}</span>
+                                @if (in_array($row['cost_status'] ?? '', ['ok', 'partial']) && $row['cost_nok'] !== null)
+                                    <span class="text-violet-600 font-semibold">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</span>
+                                @elseif (($row['cost_status'] ?? '') === 'price_missing')
+                                    <span class="text-base italic text-amber-800">Kostnad ukjent</span>
                                 @endif
                             </div>
                             <div class="mt-2 h-1.5 w-full rounded-full bg-gray-100">
@@ -470,7 +487,7 @@
                     <div class="border-b border-gray-100 px-5 py-4">
                         <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Tokenforbruk</div>
                         <h3 class="mt-0.5 font-bold text-gray-900">Tokenforbruk per kunde</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_token_events</code> for valgt periode.</p>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_usage_attempts</code> for valgt periode.</p>
                     </div>
                     @if (count($customerTokenRows) > 0)
                         <div class="overflow-x-auto">
@@ -481,7 +498,8 @@
                                         <th class="pb-2 px-4 text-right font-medium">Kall</th>
                                         <th class="pb-2 px-4 text-right font-medium">Input</th>
                                         <th class="pb-2 px-4 text-right font-medium">Output</th>
-                                        <th class="pb-2 px-5 text-right font-medium">Total</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Total</th>
+                                        <th class="pb-2 px-5 text-right font-medium">Kostnad</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100 text-gray-900">
@@ -491,7 +509,8 @@
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['event_count'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_input_tokens'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_output_tokens'], 0, ',', ' ') }}</td>
-                                            <td class="py-2 px-5 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-4 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-5 text-right tabular-nums text-violet-700">{{ $row['cost_status'] === 'price_missing' ? 'Ukjent' : number_format($row['cost_nok'], 2, ',', ' ').' kr' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
@@ -501,13 +520,14 @@
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'event_count')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_input_tokens')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_output_tokens')), 0, ',', ' ') }}</td>
-                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold text-violet-700">{{ number_format(array_sum(array_column($customerTokenRows, 'cost_nok')), 2, ',', ' ') }} kr</td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
                     @else
-                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen token-events registrert for {{ $periodLabel }}.</p>
+                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
                     @endif
                 </article>
 
@@ -515,7 +535,7 @@
                     <div class="border-b border-gray-100 px-5 py-4">
                         <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Tokenforbruk</div>
                         <h3 class="mt-0.5 font-bold text-gray-900">Tokenforbruk per modell</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_token_events</code> for valgt periode.</p>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_usage_attempts</code> for valgt periode.</p>
                     </div>
                     @if (count($modelTokenRows) > 0)
                         <div class="overflow-x-auto">
@@ -526,7 +546,8 @@
                                         <th class="pb-2 px-4 text-right font-medium">Kall</th>
                                         <th class="pb-2 px-4 text-right font-medium">Input</th>
                                         <th class="pb-2 px-4 text-right font-medium">Output</th>
-                                        <th class="pb-2 px-5 text-right font-medium">Total</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Total</th>
+                                        <th class="pb-2 px-5 text-right font-medium">Kostnad</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100 text-gray-900">
@@ -536,7 +557,8 @@
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['event_count'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_input_tokens'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_output_tokens'], 0, ',', ' ') }}</td>
-                                            <td class="py-2 px-5 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-4 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-5 text-right tabular-nums text-violet-700">{{ $row['cost_status'] === 'price_missing' ? 'Ukjent' : number_format($row['cost_nok'], 2, ',', ' ').' kr' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
@@ -546,13 +568,14 @@
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'event_count')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_input_tokens')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_output_tokens')), 0, ',', ' ') }}</td>
-                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold text-violet-700">{{ number_format(array_sum(array_column($modelTokenRows, 'cost_nok')), 2, ',', ' ') }} kr</td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
                     @else
-                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen token-events registrert for {{ $periodLabel }}.</p>
+                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
                     @endif
                 </article>
             </div>
@@ -575,7 +598,7 @@
                                     <th class="px-4 py-3 text-right">Tokens</th>
                                     <th class="px-4 py-3 text-right">Tok / op</th>
                                     <th class="px-4 py-3 text-right">Blokkert</th>
-                                    <th class="px-4 py-3 text-right text-violet-600">Est. kostnad</th>
+                                    <th class="px-4 py-3 text-right text-violet-600">Kostnad</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-50">
@@ -593,10 +616,10 @@
                                             <td class="px-4 py-3 text-right text-base text-gray-600 italic">Ikke registrert</td>
                                         @endif
                                         <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-700' : 'text-gray-600' }}">{{ $row['blocked'] }}</td>
-                                        @if (($row['cost_status'] ?? '') === 'ok' && $row['cost_usd'] !== null)
-                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700">≈ {{ number_format($row['cost_usd'], 2, ',', ' ') }} kr</td>
-                                        @elseif (in_array($row['cost_status'] ?? '', ['price_missing', 'exchange_rate_missing']))
-                                            <td class="px-4 py-3 text-right text-base italic text-amber-800">{{ ($row['cost_status'] ?? '') === 'exchange_rate_missing' ? 'Valutakurs mangler' : 'Pris ikke registrert' }}</td>
+                                        @if (in_array($row['cost_status'] ?? '', ['ok', 'partial']) && $row['cost_nok'] !== null)
+                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</td>
+                                        @elseif (($row['cost_status'] ?? '') === 'price_missing')
+                                            <td class="px-4 py-3 text-right text-base italic text-amber-800">Kostnad ukjent</td>
                                         @else
                                             <td class="px-4 py-3 text-right text-base text-gray-600">—</td>
                                         @endif
@@ -626,7 +649,7 @@
                                     <th class="px-4 py-3 text-right">Tokens</th>
                                     <th class="px-4 py-3 text-right">Tok / op</th>
                                     <th class="px-4 py-3 text-right">Blokkert</th>
-                                    <th class="px-4 py-3 text-right text-violet-600">Est. kostnad</th>
+                                    <th class="px-4 py-3 text-right text-violet-600">Kostnad</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-50">
@@ -637,10 +660,10 @@
                                         <td class="px-4 py-3 text-right tabular-nums text-gray-700">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums text-gray-600">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-700' : 'text-gray-600' }}">{{ $row['blocked'] }}</td>
-                                        @if (($row['cost_status'] ?? '') === 'ok' && $row['cost_usd'] !== null)
-                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700">≈ {{ number_format($row['cost_usd'], 2, ',', ' ') }} kr</td>
-                                        @elseif (in_array($row['cost_status'] ?? '', ['price_missing', 'exchange_rate_missing']))
-                                            <td class="px-4 py-3 text-right text-base italic text-amber-800">{{ ($row['cost_status'] ?? '') === 'exchange_rate_missing' ? 'Valutakurs mangler' : 'Pris ikke registrert' }}</td>
+                                        @if (in_array($row['cost_status'] ?? '', ['ok', 'partial']) && $row['cost_nok'] !== null)
+                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</td>
+                                        @elseif (($row['cost_status'] ?? '') === 'price_missing')
+                                            <td class="px-4 py-3 text-right text-base italic text-amber-800">Kostnad ukjent</td>
                                         @else
                                             <td class="px-4 py-3 text-right text-base text-gray-600">—</td>
                                         @endif
@@ -658,7 +681,7 @@
             <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4">
                     <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Hendelseslogg</div>
-                    <h3 class="mt-0.5 font-bold text-gray-900">Siste token-events (maks 30)</h3>
+                    <h3 class="mt-0.5 font-bold text-gray-900">Siste AI-kall (maks 30)</h3>
                     <p class="mt-0.5 text-base leading-6 text-gray-600">Nyeste registrerte AI-kall i valgt periode, med kunde, bruker, operasjon og tokenfordeling.</p>
                 </div>
                 @if (count($recentEvents) > 0)
@@ -674,6 +697,8 @@
                                     <th class="px-4 py-3 text-right">Input</th>
                                     <th class="px-4 py-3 text-right">Output</th>
                                     <th class="px-4 py-3 text-right">Total</th>
+                                    <th class="px-4 py-3 text-left">Status</th>
+                                    <th class="px-4 py-3 text-right">Kostnad</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-50">
@@ -684,16 +709,18 @@
                                         <td class="px-4 py-3 text-xs text-gray-600">{{ $event['user_name'] }}</td>
                                         <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ $event['operation_key'] }}</td>
                                         <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ $event['model'] }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['input_tokens'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['output_tokens'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold">{{ number_format($event['total_tokens'], 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['input_tokens'] ?? 0, 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['output_tokens'] ?? 0, 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold">{{ number_format($event['total_tokens'] ?? 0, 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-xs text-gray-600">{{ $event['status'] }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ $event['cost_nok'] === null ? '–' : number_format($event['cost_nok'], 4, ',', ' ').' kr' }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
                         </table>
                     </div>
                 @else
-                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen token-events registrert for {{ $periodLabel }}.</p>
+                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
                 @endif
             </article>
 

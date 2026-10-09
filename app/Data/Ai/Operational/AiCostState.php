@@ -12,8 +12,11 @@ namespace App\Data\Ai\Operational;
 final readonly class AiCostState
 {
     public const KNOWN = 'known';
+
     public const ESTIMATED = 'estimated';
+
     public const UNKNOWN = 'unknown';
+
     public const UNCERTAIN = 'uncertain';
 
     public function __construct(
@@ -28,6 +31,7 @@ final readonly class AiCostState
         public ?string $fxRateDate,
         public string $priceState,
         public string $fxState,
+        public ?float $cachedInputPricePer1m = null,
     ) {}
 
     /** The figure a safety budget must charge — never null, never silently zero. */
@@ -46,6 +50,7 @@ final readonly class AiCostState
             'ai_model_price_id' => $this->priceId,
             'price_currency' => $this->priceCurrency,
             'price_input_per_1m' => $this->inputPricePer1m,
+            'price_cached_input_per_1m' => $this->cachedInputPricePer1m,
             'price_output_per_1m' => $this->outputPricePer1m,
             'fx_rate' => $this->fxRate,
             'fx_rate_date' => $this->fxRateDate,

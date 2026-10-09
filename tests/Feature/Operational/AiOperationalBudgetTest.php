@@ -16,7 +16,6 @@ use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\User;
 use App\Services\Ai\Commercial\AiCostControlService;
-use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Services\OpenAi\OpenAiClient;
 use App\Support\Ai\AiCallContextScope;
 use Carbon\Carbon;
@@ -169,7 +168,7 @@ class AiOperationalBudgetTest extends TestCase
 
         $this->expectExceptionObject(new AiCostControlException(AiCostControlException::GLOBAL_DAILY_BUDGET_EXHAUSTED));
         app(AiCostControlService::class)->authorize(new AiCallContext(
-            feature: 'enterprise_wiki', operation: 'enterprise_wiki.ingest', model: 'gpt-5',
+            feature: 'wiki', operation: 'wiki.ingest', model: 'gpt-5',
         ));
     }
 
@@ -219,8 +218,8 @@ class AiOperationalBudgetTest extends TestCase
         try {
             app(AiCostControlService::class)->authorize(new AiCallContext(
                 customerId: $customer->id,
-                feature: 'enterprise_wiki',
-                operation: 'operator.wiki.recover_document_flow',
+                feature: 'wiki',
+                operation: 'wiki.operator.recover_document_flow',
                 model: 'gpt-5',
                 operatorOverride: true,
                 operatorActorUserId: $admin->id,

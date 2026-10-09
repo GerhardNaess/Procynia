@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiQaRegression;
 use App\Models\EnterpriseWikiQaSnapshot;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiQaRegressionService
 {
+    use RunsInAiCallContext;
+
     /** @var array<int, array{signature: string, types: array<int, string>}> */
     private array $pageTypeCache = [];
 
@@ -86,6 +89,18 @@ class EnterpriseWikiQaRegressionService
         if ($run === null) {
             throw new \RuntimeException("QA snapshot [{$snapshot->id}] has no ingest run.");
         }
+
+        // A semantic or deep repair started here is the run's customer's AI work, and the scheduled
+        // maintenance cycle that calls this has no customer of its own.
+        return $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($run->id, 'wiki.maintenance'),
+            fn (): array => $this->processSnapshotInAiContext($snapshot, $run),
+        );
+    }
+
+    /** @return array{outcome: string, record: EnterpriseWikiQaRegression, repaired: bool, repair_result: array<string, mixed>|null} */
+    private function processSnapshotInAiContext(EnterpriseWikiQaSnapshot $snapshot, EnterpriseWikiIngestRun $run): array
+    {
 
         $currentPageTypes = $this->pageTypesForRun($run->id);
         $currentSignature = $this->pageTypeSignature($currentPageTypes);
@@ -253,7 +268,7 @@ class EnterpriseWikiQaRegressionService
             $run->update([
                 'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
                 'qa_completed_at' => now(),
-                'qa_last_error' => '[REGRESSION] ' . $e->getMessage(),
+                'qa_last_error' => '[REGRESSION] '.$e->getMessage(),
             ]);
 
             $record->update([
@@ -483,7 +498,7 @@ class EnterpriseWikiQaRegressionService
         if ($currentStatus === EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
             $run->update([
                 'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-                'qa_last_error' => '[REGRESSION] ' . $summaryMessage,
+                'qa_last_error' => '[REGRESSION] '.$summaryMessage,
             ]);
 
             return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
@@ -554,7 +569,7 @@ class EnterpriseWikiQaRegressionService
         }
 
         if (! empty($evaluation['signals'])) {
-            $parts[] = 'signals=' . collect($evaluation['signals'])->pluck('metric')->implode(',');
+            $parts[] = 'signals='.collect($evaluation['signals'])->pluck('metric')->implode(',');
         }
 
         return implode(' ', $parts);

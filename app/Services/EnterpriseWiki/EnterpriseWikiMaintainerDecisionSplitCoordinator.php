@@ -7,6 +7,7 @@ use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionBatchFailedException;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionPhaseFailedException;
+use App\Support\Ai\AiOperationCatalog;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -40,7 +41,13 @@ use Throwable;
  */
 class EnterpriseWikiMaintainerDecisionSplitCoordinator
 {
-    private const MODEL = 'gpt-5';
+    public const OPERATION = 'wiki.maintainer_decision';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const REASONING_EFFORT = 'low';
 
@@ -87,7 +94,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         string $languageCode,
         ?AiCallContext $context = null,
     ): array {
-        $context ??= AiCallContext::none();
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION);
 
         $prepared = $this->preparePersistedCandidateBatches($planning, $languageCode, $context);
         $globalPlan = $prepared['global_plan'];
@@ -148,7 +155,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         string $languageCode,
         ?AiCallContext $context = null,
     ): array {
-        $context ??= AiCallContext::none();
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION);
         // Identical phase-1 call to the in-process split flow above: same context object, same
         // view. Passing fewer facts here is exactly the divergence this consolidation removes.
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan(
@@ -160,7 +167,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         // input_payload, the log line below and the batches describing the same candidate list.
         $mentions = self::consolidateMentionsByIdentity($globalPlan['concept_candidate_mentions']);
         $globalPlan['concept_candidate_mentions'] = $mentions;
-        $sizes = $this->capacityPlanner->planBatchCount(self::CAPACITY_OPERATION_TYPE, self::MODEL, count($mentions));
+        $sizes = $this->capacityPlanner->planBatchCount(self::CAPACITY_OPERATION_TYPE, self::model(), count($mentions));
         $offset = 0;
         $batches = [];
         $total = count($sizes);
@@ -319,7 +326,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         string $languageName,
         ?AiCallContext $context = null,
     ): array {
-        $context ??= AiCallContext::none();
+        $context = ($context ?? AiCallContext::none())->withOperation(self::OPERATION);
         $startedAt = microtime(true);
 
         try {
@@ -367,7 +374,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planGlobalPlanCall(
                 self::CAPACITY_OPERATION_TYPE,
-                self::MODEL,
+                self::model(),
                 self::DOCUMENT_PLAN_EXPECTED_RESULT_OBJECTS,
                 $inputSizeChars,
                 $retryAttempt,
@@ -415,7 +422,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planGlobalPlanCall(
                 self::CAPACITY_OPERATION_TYPE,
-                self::MODEL,
+                self::model(),
                 self::CANDIDATE_PLAN_EXPECTED_RESULT_OBJECTS,
                 $capacityInputSizeChars,
                 $retryAttempt,
@@ -479,7 +486,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planBatchCall(
                 self::CAPACITY_OPERATION_TYPE,
-                self::MODEL,
+                self::model(),
                 $candidateCount,
                 $capacityInputSizeChars,
                 $retryAttempt,
@@ -524,7 +531,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     private function buildPhasePayload(array $schemaBlock, string $developerPrompt, string $userPromptText, int $maxOutputTokens): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',
@@ -549,7 +556,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema();
 
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

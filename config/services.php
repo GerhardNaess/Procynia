@@ -42,23 +42,10 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         'model' => env('OPENAI_MODEL', 'gpt-4.1-mini'),
-        'requirement_relevance_model' => env(
-            'OPENAI_REQUIREMENT_RELEVANCE_MODEL',
-            env('OPENAI_REQUIREMENT_EXTRACTION_MODEL', env('OPENAI_MODEL', 'gpt-4.1-mini')),
-        ),
-        'requirement_extraction_model' => env(
-            'OPENAI_REQUIREMENT_EXTRACTION_MODEL',
-            env('OPENAI_MODEL', 'gpt-4.1-mini'),
-        ),
-        'requirement_grounding_judge_model' => env(
-            'OPENAI_REQUIREMENT_GROUNDING_JUDGE_MODEL',
-            env('OPENAI_REQUIREMENT_EXTRACTION_MODEL', env('OPENAI_MODEL', 'gpt-4.1-mini')),
-        ),
-        'requirement_answer_model' => env(
-            'OPENAI_REQUIREMENT_ANSWER_MODEL',
-            'gpt-5',
-        ),
-        'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
+        // Per-operation model choice lives in config/ai_operations.php (which still reads
+        // OPENAI_MODEL and OPENAI_REQUIREMENT_*_MODEL). `requirement_grounding_judge_model` and
+        // `requirement_answer_model` were removed: nothing read them — the answer path has always
+        // run on gpt-4.1-mini, whatever OPENAI_REQUIREMENT_ANSWER_MODEL said.
         'provider_key' => env('OPENAI_PROVIDER_KEY', 'openai'),
         'deployment_name' => env('OPENAI_DEPLOYMENT_NAME'),
         'provider_region' => env('OPENAI_PROVIDER_REGION'),
@@ -96,9 +83,7 @@ return [
     'quality' => [
         'flow_ai_enabled' => (bool) env('QUALITY_FLOW_AI_ENABLED', true),
 
-        // Reading a description into a structure is extraction, not authoring — the same work the
-        // requirement pipeline uses the small model for.
-        'flow_model' => env('QUALITY_FLOW_MODEL', env('OPENAI_MODEL', 'gpt-4.1-mini')),
+        // The model (QUALITY_FLOW_MODEL) is chosen per operation in config/ai_operations.php.
     ],
 
     'enterprise_wiki' => [

@@ -93,18 +93,16 @@ describe('the header block matches the reference', () => {
 });
 
 describe('nothing but the framing moved', () => {
-    test('the cards and their grids are untouched', () => {
-        for (const card of ['SummaryCard', 'AiQuotaCard', 'ConfirmDialog']) {
+    test('the AI capacity card and the dialogs are still rendered', () => {
+        for (const card of ['AiCapacityCard', 'ConfirmDialog']) {
             assert.ok(billing.includes(`<${card}`), `${card} should still be rendered`);
         }
-
-        assert.match(billing, /<section className="grid gap-4 md:grid-cols-2">/);
     });
 
     test('the overlays keep their own widths, which the page container never set', () => {
-        // The dialog and the plan-change modal are fixed overlays, unaffected by the page wrapper.
+        // The confirm dialog is a fixed overlay, unaffected by the page wrapper. (The plan-change
+        // modal is gone: customers no longer pick a legacy plan.)
         assert.match(billing, /w-full max-w-md/);
-        assert.match(billing, /w-full max-w-4xl/);
     });
 
     test('flash messages still render above the content', () => {

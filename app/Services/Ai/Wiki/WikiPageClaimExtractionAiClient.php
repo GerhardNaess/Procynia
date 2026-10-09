@@ -5,6 +5,7 @@ namespace App\Services\Ai\Wiki;
 use App\Models\EnterpriseWikiClaim;
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -23,7 +24,13 @@ class WikiPageClaimExtractionAiClient
 {
     public const MAX_CLAIMS = 20;
 
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'wiki.extract_page_claims';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -72,7 +79,7 @@ class WikiPageClaimExtractionAiClient
 
         $trimmed = mb_substr(trim($contentMarkdown), 0, self::MAX_INPUT_CHARS);
         $payload = $this->buildPayload($pageTitle, $pageType, $trimmed, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiPageClaimExtractionAiClient');
 
         if (! array_key_exists('claims', $decoded) || ! is_array($decoded['claims'])) {
@@ -134,7 +141,7 @@ class WikiPageClaimExtractionAiClient
             sourceElements: $normalizedSourceElements,
             languageName: $this->languageName($languageCode),
         );
-        $response = $this->openAiClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiPageClaimExtractionAiClient');
 
         if (! array_key_exists('claims', $decoded) || ! is_array($decoded['claims'])) {
@@ -154,7 +161,7 @@ class WikiPageClaimExtractionAiClient
     private function buildPayload(string $pageTitle, string $pageType, string $content, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',
@@ -201,7 +208,7 @@ class WikiPageClaimExtractionAiClient
         string $languageName,
     ): array {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

@@ -76,3 +76,10 @@ Schedule::command('wiki:maintenance-cycle')
 Schedule::command('ai:cost-control-health')
     ->hourly()
     ->withoutOverlapping();
+
+// Internal AI experience snapshots (Admin → AI-erfaring): open periods follow the ledger daily, and
+// a period becomes final on the first run after its settle grace. Analysis only — never a commercial
+// change.
+Schedule::command('ai:experience-refresh')
+    ->dailyAt('04:15')
+    ->withoutOverlapping();

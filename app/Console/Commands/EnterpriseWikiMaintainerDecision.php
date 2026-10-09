@@ -48,7 +48,7 @@ class EnterpriseWikiMaintainerDecision extends Command
 
         $context = $this->operatorAiCallContext([
             'customerId' => $customerId,
-            'operation' => 'operator.wiki.maintainer_decision',
+            'operation' => 'wiki.operator.maintainer_decision',
             'resourceType' => 'enterprise_wiki_document',
             'resourceId' => $documentId,
         ]);

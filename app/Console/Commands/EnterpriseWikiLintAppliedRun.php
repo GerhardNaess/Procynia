@@ -4,11 +4,15 @@ namespace App\Console\Commands;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Support\Ai\RunsInAiCallContext;
+use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
 
-#[\Illuminate\Console\Attribute\AsCommand(name: 'wiki:lint-applied-run')]
+#[AsCommand(name: 'wiki:lint-applied-run')]
 class EnterpriseWikiLintAppliedRun extends Command
 {
+    use RunsInAiCallContext;
+
     protected $signature = 'wiki:lint-applied-run {--run-id=}';
 
     protected $description = 'Lint an applied enterprise wiki ingest run for structural quality issues.';
@@ -32,7 +36,11 @@ class EnterpriseWikiLintAppliedRun extends Command
         }
 
         try {
-            $result = $service->lint($run);
+            // Any AI call the run's services make belongs to the run's customer.
+            $result = $this->withinAiCallContext(
+                $this->enterpriseWikiRunAiCallContext((int) $run->id, 'wiki.operator.lint_applied_run'),
+                fn (): array => $service->lint($run),
+            );
         } catch (\InvalidArgumentException $e) {
             $this->error("[WIKI_LINT] {$e->getMessage()}");
 

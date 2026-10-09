@@ -145,7 +145,7 @@ class EnterpriseWikiSemanticRepairService
             'page_id' => $articleVersion->enterprise_wiki_page_id,
             'page_version_id' => $newVersion->id,
             'previous_version_id' => $articleVersion->id,
-            'model' => WikiSemanticReviserAiClient::MODEL.'/'.WikiSemanticReviserAiClient::PROMPT_VERSION,
+            'model' => WikiSemanticReviserAiClient::model().'/'.WikiSemanticReviserAiClient::PROMPT_VERSION,
             'reason' => null,
         ];
     }
@@ -158,7 +158,7 @@ class EnterpriseWikiSemanticRepairService
             $pageId,
             [
                 'content_markdown' => $content,
-                'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/semantic-repair',
+                'generated_by_model' => WikiSemanticReviserAiClient::model().'/semantic-repair',
             ],
             fn (EnterpriseWikiPageVersion $written) => $this->restoreBlockProvenance($pageId, $written),
         );

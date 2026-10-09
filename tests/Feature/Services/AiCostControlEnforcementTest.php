@@ -461,7 +461,7 @@ class AiCostControlEnforcementTest extends TestCase
     {
         try {
             app(AiCallContextScope::class)->within(
-                new AiCallContext(customerId: $customer->id, feature: 'enterprise_wiki', operation: 'test.block'),
+                new AiCallContext(customerId: $customer->id, feature: 'wiki', operation: 'wiki.test_block'),
                 fn (): array => app(OpenAiClient::class)->createResponse(['model' => 'gpt-5', 'input' => []]),
             );
             $this->fail('The provider boundary must refuse this call.');
@@ -475,7 +475,7 @@ class AiCostControlEnforcementTest extends TestCase
     private function assertProviderReached(Customer $customer): void
     {
         app(AiCallContextScope::class)->within(
-            new AiCallContext(customerId: $customer->id, feature: 'enterprise_wiki', operation: 'test.allow'),
+            new AiCallContext(customerId: $customer->id, feature: 'wiki', operation: 'wiki.test_allow'),
             fn (): array => app(OpenAiClient::class)->createResponse(['model' => 'gpt-5', 'input' => []]),
         );
 
@@ -577,8 +577,8 @@ class AiCostControlEnforcementTest extends TestCase
     {
         return new AiCallContext(
             customerId: $customer->id,
-            feature: 'saved_notice',
-            operation: 'saved_notice.test',
+            feature: 'tender',
+            operation: 'tender.test',
             savedNoticeId: $notice->id,
             commercialCredit: true,
         );

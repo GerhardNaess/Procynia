@@ -19,8 +19,7 @@ class RequirementSegmentRelevanceClassifier
     public function __construct(
         private readonly OpenAiClient $openAiClient,
         private readonly RequirementSegmentRelevancePromptBuilder $promptBuilder,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Classify whether one source-preserving segment is relevant for requirement extraction.
@@ -49,7 +48,7 @@ class RequirementSegmentRelevanceClassifier
         ));
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 90);
+            $response = $this->openAiClient->post('responses', $payload, 90, operation: 'tender.requirement_relevance');
         } catch (ConnectionException $exception) {
             Log::warning('[PROCYNIA][AI_COST][RELEVANCE][POST_OPENAI] Segment relevance OpenAI call failed before a response was returned.', $this->logContext(
                 $document,

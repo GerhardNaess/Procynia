@@ -12,6 +12,7 @@ use App\Models\ExchangeRate;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Operational\AiOperationalPricingService;
+use App\Support\Ai\AiOperationCatalog;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -207,14 +208,47 @@ class AiOperationalPricingServiceTest extends TestCase
         $this->assertGreaterThan($raw, $estimate, 'A reservation must be conservative, not exact.');
     }
 
-    public function test_an_unknown_operation_falls_back_to_the_conservative_default(): void
+    public function test_an_unknown_operation_falls_back_to_the_explicit_emergency_estimate(): void
     {
-        $service = app(AiOperationalPricingService::class);
+        $estimate = app(AiOperationalPricingService::class)->operationEstimate('some.operation.nobody.registered');
 
-        $this->assertSame(
-            $service->operationEstimate('default'),
-            $service->operationEstimate('some.operation.nobody.registered'),
-        );
+        $this->assertSame('fallback', $estimate['source']);
+        $this->assertSame(config('ai_operations.reservation.fallback_estimate.input_tokens'), $estimate['input_tokens']);
+        $this->assertSame(config('ai_operations.reservation.fallback_estimate.output_tokens'), $estimate['output_tokens']);
+    }
+
+    public function test_every_registered_operation_reserves_against_its_own_estimate_not_the_fallback(): void
+    {
+        foreach (AiOperationCatalog::registeredOperations() as $operation) {
+            $estimate = AiOperationCatalog::estimate($operation);
+
+            $this->assertSame('operation', $estimate['source'], "[{$operation}] has no estimate of its own.");
+            $this->assertGreaterThan(0, $estimate['input_tokens'], "[{$operation}] reserves no input.");
+            $this->assertGreaterThan(0, $estimate['output_tokens'], "[{$operation}] reserves no output.");
+        }
+    }
+
+    public function test_a_variant_inherits_its_parent_estimate_unless_it_states_its_own(): void
+    {
+        $parent = AiOperationCatalog::estimate('tender.requirement_extraction');
+
+        $this->assertSame($parent, AiOperationCatalog::estimate('tender.requirement_extraction.some_new_variant'));
+        $this->assertNotSame($parent, AiOperationCatalog::estimate('tender.requirement_extraction.segment'));
+    }
+
+    public function test_a_reservation_prices_the_operation_estimate_at_the_operation_model_price(): void
+    {
+        // Reservation is a separate figure from actual cost: it uses the full input rate (no cache
+        // discount assumed) and the registry ceilings, padded by the reservation margin.
+        $this->price('gpt-4.1-mini', input: 0.40, output: 1.60, verifiedAt: '2026-09-14 00:00:00');
+        $this->rate('2026-09-15', 10.0);
+        config()->set('procynia.ai.operational_budget.reservation_safety_margin_percent', 25);
+
+        $estimate = app(AiOperationalPricingService::class)->estimateMaxCostNok('openai', 'gpt-4.1-mini', null, null, 'wiki.verify_claim');
+        $tokens = AiOperationCatalog::estimate('wiki.verify_claim');
+        $expected = ($tokens['input_tokens'] / 1_000_000 * 0.40 + $tokens['output_tokens'] / 1_000_000 * 1.60) * 10.0 * 1.25;
+
+        $this->assertEqualsWithDelta($expected, $estimate, 0.0001);
     }
 
     public function test_an_unpriceable_model_cannot_be_estimated(): void

@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -19,7 +20,13 @@ use RuntimeException;
  */
 class WikiSemanticReviserAiClient
 {
-    public const MODEL = 'gpt-5';
+    public const OPERATION = 'wiki.revise_semantics';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     public const PROMPT_VERSION = '1.0';
 
@@ -78,7 +85,7 @@ class WikiSemanticReviserAiClient
             $this->languageName($languageCode),
         );
 
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiSemanticReviserAiClient');
 
         $markdown = data_get($decoded, 'page.markdown', '');
@@ -115,7 +122,7 @@ class WikiSemanticReviserAiClient
         string $languageName,
     ): array {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

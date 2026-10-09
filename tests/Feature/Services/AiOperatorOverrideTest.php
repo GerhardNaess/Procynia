@@ -184,8 +184,8 @@ class AiOperatorOverrideTest extends TestCase
     ): AiCallContext {
         return new AiCallContext(
             customerId: $customer->id,
-            feature: 'enterprise_wiki',
-            operation: 'operator.wiki.recover_document_flow',
+            feature: 'wiki',
+            operation: 'wiki.operator.recover_document_flow',
             savedNoticeId: $savedNoticeId,
             commercialCredit: $commercialCredit,
             operatorOverride: $override,

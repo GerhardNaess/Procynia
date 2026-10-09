@@ -73,40 +73,40 @@ class RequirementWikiAssessmentService
         return $this->contextScope->within(new AiCallContext(
             customerId: $customerId,
             userId: $userId,
-            feature: 'saved_notice',
-            operation: 'saved_notice.requirement_assessment',
+            feature: 'tender',
+            operation: 'tender.requirement_assessment',
             resourceType: 'saved_notice_ai_requirement',
             resourceId: $requirement->id,
             savedNoticeId: $requirement->saved_notice_id,
             commercialCredit: true,
         ), function () use ($requirement, $customerId, $languageCode, $userId, $caseInstructions, $requirementUserPrompt): SavedNoticeAiRequirementAssessment {
-        $context = $this->researchService->research($requirement, $customerId, $languageCode);
+            $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
-        $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
-        $pagesForAi = $this->pagesForAi($context['pages'], $claimTextsByPageId);
+            $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
+            $pagesForAi = $this->pagesForAi($context['pages'], $claimTextsByPageId);
 
-        $result = $this->assessmentAiClient->assessRequirement(
-            (string) ($requirement->requirement_identifier ?? ''),
-            (string) $requirement->requirement_text,
-            $pagesForAi,
-            $languageCode,
-            $caseInstructions,
-            $requirementUserPrompt,
-        );
+            $result = $this->assessmentAiClient->assessRequirement(
+                (string) ($requirement->requirement_identifier ?? ''),
+                (string) $requirement->requirement_text,
+                $pagesForAi,
+                $languageCode,
+                $caseInstructions,
+                $requirementUserPrompt,
+            );
 
-        $this->recordAiCaseUsageAfterSuccessfulAssessment($requirement, $userId);
+            $this->recordAiCaseUsageAfterSuccessfulAssessment($requirement, $userId);
 
-        return $this->persist($requirement, [
-            'coverage_status' => $result['coverage_status'],
-            'has_possible_conflict' => $result['has_possible_conflict'],
-            'risk_level' => $result['risk_level'],
-            'requirement_summary' => $result['requirement_summary'],
-            'coverage_rationale' => $result['coverage_rationale'],
-            'missing_information' => $result['missing_information'],
-            'recommended_next_step' => $result['recommended_next_step'],
-            'wiki_sources_snapshot' => $this->sourcesPayload($context['pages']),
-            'engine_version' => self::ENGINE_VERSION,
-        ], $userId);
+            return $this->persist($requirement, [
+                'coverage_status' => $result['coverage_status'],
+                'has_possible_conflict' => $result['has_possible_conflict'],
+                'risk_level' => $result['risk_level'],
+                'requirement_summary' => $result['requirement_summary'],
+                'coverage_rationale' => $result['coverage_rationale'],
+                'missing_information' => $result['missing_information'],
+                'recommended_next_step' => $result['recommended_next_step'],
+                'wiki_sources_snapshot' => $this->sourcesPayload($context['pages']),
+                'engine_version' => self::ENGINE_VERSION,
+            ], $userId);
         });
     }
 

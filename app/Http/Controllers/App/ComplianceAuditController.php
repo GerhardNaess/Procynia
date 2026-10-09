@@ -13,6 +13,7 @@ use App\Services\Compliance\ComplianceAuditFindingHandoffService;
 use App\Services\Compliance\ComplianceAuditFindingService;
 use App\Services\Compliance\ComplianceAuditLifecycleService;
 use App\Services\Compliance\ComplianceAuditScopeService;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Support\Compliance\ComplianceValidationMessages;
 use App\Support\CustomerContext;
@@ -57,6 +58,7 @@ class ComplianceAuditController extends Controller
         private readonly ComplianceAuditFindingService $findings,
         private readonly ComplianceAuditFindingHandoffService $handoff,
         private readonly ComplianceAuditAttentionService $attention,
+        private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
     ) {}
 
     public function index(Request $request): Response
@@ -161,6 +163,8 @@ class ComplianceAuditController extends Controller
         $awaitingHandoff = $canHandOff && collect($findings)->contains(fn (array $finding): bool => ! $finding['handed_off']);
 
         return Inertia::render('App/Compliance/Audits/Show', [
+            // «Lag kunnskapsartikkel»: the shared Wiki handoff (WikiKnowledgeHandoffService).
+            'knowledge_handoff' => $this->knowledgeHandoff->panel($user, 'compliance_audit', $audit),
             'audit' => $this->row($audit) + [
                 'scope_description' => $audit->scope_description,
                 'conclusion' => $audit->conclusion,

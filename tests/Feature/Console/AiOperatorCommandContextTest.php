@@ -169,8 +169,8 @@ class AiOperatorCommandContextTest extends TestCase
         $context = $this->contextFromCommand($run);
 
         $this->assertSame($customer->id, $context->customerId);
-        $this->assertSame('operator.wiki.verify_page_claims', $context->operation);
-        $this->assertSame('enterprise_wiki', $context->feature);
+        $this->assertSame('wiki.operator.verify_page_claims', $context->operation);
+        $this->assertSame('wiki', $context->feature);
         $this->assertSame('enterprise_wiki_document', $context->resourceType);
         $this->assertNotNull($context->requestCorrelationId);
     }
@@ -202,7 +202,7 @@ class AiOperatorCommandContextTest extends TestCase
 
         return $method->invoke($command, [
             'customerId' => (int) $run->customer_id,
-            'operation' => 'operator.wiki.verify_page_claims',
+            'operation' => 'wiki.operator.verify_page_claims',
             'resourceType' => 'enterprise_wiki_document',
             'resourceId' => (int) $run->source_id,
         ]);

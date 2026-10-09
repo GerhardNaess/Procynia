@@ -13,6 +13,7 @@ use App\Jobs\EnterpriseWiki\RunEnterpriseWikiMaintainerDecisionBatch;
 use App\Jobs\EnterpriseWiki\VerifyEnterpriseWikiClaim;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiDocumentOrigin;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
@@ -778,16 +779,18 @@ class EnterpriseWikiDocumentFlowService
         $remainingJobBudgetSeconds = $run->started_at !== null
             ? max(0, RunEnterpriseWikiDocumentFlow::TIMEOUT_SECONDS - now()->diffInSeconds($run->started_at))
             : null;
+        // A source handed over from a module attributes its cost to that module record.
+        $resource = EnterpriseWikiDocumentOrigin::usageResourceFor((int) $run->source_id);
 
         return new AiCallContext(
             runId: $run->id,
             documentId: $run->source_id,
             remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             customerId: (int) $run->customer_id,
-            feature: 'enterprise_wiki',
-            operation: 'enterprise_wiki.ingest',
-            resourceType: 'enterprise_wiki_document',
-            resourceId: (int) $run->source_id,
+            feature: 'wiki',
+            operation: 'wiki.ingest',
+            resourceType: $resource['type'],
+            resourceId: $resource['id'],
             jobId: $run->uuid,
         );
     }

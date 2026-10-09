@@ -15,6 +15,7 @@ use App\Models\SupplierProfileChange;
 use App\Models\SupplierRequirementEvaluationDocument;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Suppliers\Assurance\SupplierAssuranceResolver;
 use App\Services\Suppliers\Assurance\SupplierDueDiligenceService;
 use App\Services\Suppliers\Assurance\SupplierFollowUpPlan;
@@ -104,6 +105,7 @@ class SupplierManagementController extends Controller
         private readonly SupplierRequirementPayload $controlRequirements,
         private readonly SupplierAssuranceResolver $assurance,
         private readonly SupplierDueDiligenceService $dueDiligence,
+        private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
     ) {}
 
     public function index(Request $request): Response
@@ -239,6 +241,8 @@ class SupplierManagementController extends Controller
         $dueDiligence = $this->dueDiligence->payload($user, $supplier, $today);
 
         return Inertia::render('App/SupplierManagement/Show', [
+            // «Lag kunnskapsartikkel»: the shared Wiki handoff (WikiKnowledgeHandoffService).
+            'knowledge_handoff' => $this->knowledgeHandoff->panel($user, 'supplier', $supplier),
             'supplier' => $row + [
                 'contact_name' => $supplier->contact_name,
                 'contact_email' => $supplier->contact_email,

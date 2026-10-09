@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services;
 
 use App\Services\OpenAi\OpenAiClient;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -11,6 +12,10 @@ use Tests\TestCase;
 
 class OpenAiClientTest extends TestCase
 {
+    // The provider boundary records every call in ai_usage_attempts; without a transaction those
+    // rows outlive the test and leak into whichever DB-backed test runs next in the process.
+    use DatabaseTransactions;
+
     public function test_it_posts_to_the_responses_endpoint_with_the_configured_base_url(): void
     {
         config([
@@ -40,7 +45,7 @@ class OpenAiClientTest extends TestCase
                     ],
                 ],
             ],
-        ]);
+        ], operation: 'system.transport_test');
 
         $this->assertSame('resp_123', $response['id']);
         $this->assertSame(200, $response['_meta']['http_status']);
@@ -66,7 +71,7 @@ class OpenAiClientTest extends TestCase
         app(OpenAiClient::class)->createResponse([
             'model' => 'gpt-4.1-mini',
             'input' => [],
-        ]);
+        ], operation: 'system.transport_test');
     }
 
     public function test_it_logs_only_safe_error_metadata_for_non_success_responses(): void
@@ -107,7 +112,7 @@ class OpenAiClientTest extends TestCase
                     ],
                 ],
             ],
-        ]);
+        ], operation: 'system.transport_test');
 
         $this->assertTrue($response->failed());
 
@@ -161,7 +166,7 @@ class OpenAiClientTest extends TestCase
                         ],
                     ],
                 ],
-            ]);
+            ], operation: 'system.transport_test');
 
             $this->fail('Expected the OpenAI client to throw a runtime exception.');
         } catch (RuntimeException $exception) {

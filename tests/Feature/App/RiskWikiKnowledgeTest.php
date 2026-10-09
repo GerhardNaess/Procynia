@@ -7,13 +7,13 @@ use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiDocumentOrigin;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Risk;
-use App\Models\RiskWikiSource;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\Modules\ModuleEntitlementService;
@@ -34,9 +34,10 @@ use Tests\TestCase;
  *
  * What these tests defend:
  *
- *  - The handoff is Kvalitet's: an ordinary Wiki source (storeAuthoredText) and the ordinary
- *    document run (startForDocument). Nothing is published by it.
- *  - Only what the person typed reaches the Wiki; the risk keeps ids only.
+ *  - The handoff is the shared one (WikiKnowledgeHandoffService): an ordinary Wiki source and the
+ *    ordinary document run. Nothing is published by it.
+ *  - Nothing of the risk reaches the Wiki unless the person opts that section in; the provenance
+ *    row (enterprise_wiki_document_origins) keeps ids only.
  *  - risk.edit in the area AND wiki.source.manage; neither alone is enough, and no Wiki permission
  *    ever makes a hidden or foreign risk reachable.
  *  - The Wiki never reveals which risk a page came out of.
@@ -91,15 +92,16 @@ class RiskWikiKnowledgeTest extends TestCase
         $this->grant($customer, $user, [...self::RISK_EDITOR, ...self::WIKI_HANDOFF], [$hr]);
 
         $props = $this->showProps($user, $risk);
-        $this->assertTrue($props['permissions']['can_create_wiki_knowledge']);
-        $this->assertSame([], $props['wiki_knowledge']);
+        $this->assertTrue($props['knowledge_handoff']['can_create']);
+        $this->assertSame([], $props['knowledge_handoff']['entries']);
 
         $this->actingAs($user)->post($this->url($risk), [
             'title' => 'Avstemming av lønnsfiler',
-            'markdown' => 'Lønnsfiler bør avstemmes mot hovedbok før utbetaling.',
+            'learning' => 'Lønnsfiler bør avstemmes mot hovedbok før utbetaling.',
+            'sections' => [],
         ])->assertRedirect()->assertSessionHasNoErrors()->assertSessionHas('success');
 
-        // An ordinary Wiki source with the person's text — and nothing of the risk.
+        // An ordinary Wiki source with the person's text — and, with no section chosen, nothing of the risk.
         $document = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->sole();
         $text = (string) $document->extracted_text;
         $this->assertSame('Avstemming av lønnsfiler.md', $document->original_filename);
@@ -119,19 +121,21 @@ class RiskWikiKnowledgeTest extends TestCase
         $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
 
         // Provenance is ids only.
-        $this->assertDatabaseHas('risk_wiki_sources', [
+        $this->assertDatabaseHas('enterprise_wiki_document_origins', [
             'customer_id' => $customer->id,
-            'risk_id' => $risk->id,
+            'source_module' => 'risk',
+            'source_type' => 'risk',
+            'source_id' => $risk->id,
             'enterprise_wiki_document_id' => $document->id,
             'created_by_user_id' => $user->id,
         ]);
         $this->assertEqualsCanonicalizing(
-            ['id', 'customer_id', 'risk_id', 'enterprise_wiki_document_id', 'created_by_user_id', 'created_at', 'updated_at'],
-            Schema::getColumnListing('risk_wiki_sources'),
+            ['id', 'customer_id', 'enterprise_wiki_document_id', 'source_module', 'source_type', 'source_id', 'created_by_user_id', 'created_at', 'updated_at'],
+            Schema::getColumnListing('enterprise_wiki_document_origins'),
         );
 
         // While the run works, the risk shows the source, linked to Kildedokumenter.
-        $entries = $this->showProps($user, $risk)['wiki_knowledge'];
+        $entries = $this->showProps($user, $risk)['knowledge_handoff']['entries'];
         $this->assertCount(1, $entries);
         $this->assertSame('source', $entries[0]['kind']);
         $this->assertSame('Avstemming av lønnsfiler', $entries[0]['title']);
@@ -152,12 +156,55 @@ class RiskWikiKnowledgeTest extends TestCase
             'action' => EnterpriseWikiIngestRunPage::ACTION_UPDATED,
         ]);
 
-        $entries = $this->showProps($user, $risk)['wiki_knowledge'];
+        $entries = $this->showProps($user, $risk)['knowledge_handoff']['entries'];
         $this->assertCount(1, $entries);
         $this->assertSame('page', $entries[0]['kind']);
         $this->assertSame(route('app.wiki.show', ['slug' => $page->slug]), $entries[0]['url']);
         $this->assertNotSame('', $entries[0]['state_label']);
         $this->assertNull($page->fresh()->published_version_id);
+    }
+
+    public function test_only_the_sections_the_person_opts_in_reach_the_wiki(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr);
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [...self::RISK_EDITOR, ...self::WIKI_HANDOFF], [$hr]);
+
+        // The draft is built from the risk on the server, and nothing in it is preselected.
+        $draft = $this->showProps($user, $risk)['knowledge_handoff']['draft'];
+        $this->assertSame('', $draft['title']);
+        $this->assertSame(['description'], array_column($draft['sections'], 'key'));
+
+        $this->actingAs($user)->post($this->url($risk), [
+            'title' => 'Lønnsrisiko',
+            'learning' => 'Avstem lønnsfiler før utbetaling.',
+            'sections' => ['description'],
+        ])->assertSessionHasNoErrors();
+
+        $text = (string) EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->sole()->extracted_text;
+        $this->assertStringContainsString('## Læringspunkter', $text);
+        $this->assertStringContainsString('Avstem lønnsfiler før utbetaling.', $text);
+        $this->assertStringContainsString('Årsak: Hemmelig årsak', $text);
+        $this->assertStringContainsString('Konsekvens: Hemmelig konsekvens', $text);
+        // «Utfyllende informasjon» is never offered, and the risk title is only what the person typed.
+        $this->assertStringNotContainsString('Hemmelig utfyllende', $text);
+        $this->assertStringNotContainsString(self::SECRET_TITLE, $text);
+    }
+
+    public function test_a_section_the_record_does_not_offer_is_refused(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $risk = $this->risk($customer, $hr);
+        $user = $this->member($customer);
+        $this->grant($customer, $user, [...self::RISK_EDITOR, ...self::WIKI_HANDOFF], [$hr]);
+
+        // Controls belong to Kvalitet; without a linked control (or Kvalitet access) nothing is offered.
+        $this->actingAs($user)->post($this->url($risk), [...$this->payload(), 'sections' => ['controls']])
+            ->assertSessionHasErrors(['sections.0']);
+        $this->assertNothingHandedOver($customer);
     }
 
     public function test_without_wiki_view_the_risk_page_lists_the_knowledge_without_links(): void
@@ -171,10 +218,12 @@ class RiskWikiKnowledgeTest extends TestCase
         $this->grant($customer, $reader, [CustomerPermissionCatalog::RISK_VIEW], [$hr]);
 
         $props = $this->showProps($reader, $risk);
-        $this->assertFalse($props['permissions']['can_create_wiki_knowledge']);
-        $this->assertCount(1, $props['wiki_knowledge']);
-        $this->assertNull($props['wiki_knowledge'][0]['url']);
-        $this->assertSame((int) $document->id, (int) RiskWikiSource::query()->where('risk_id', $risk->id)->value('enterprise_wiki_document_id'));
+        $this->assertFalse($props['knowledge_handoff']['can_create']);
+        // Nothing of the risk is offered to someone who may not hand it over.
+        $this->assertNull($props['knowledge_handoff']['draft']);
+        $this->assertCount(1, $props['knowledge_handoff']['entries']);
+        $this->assertNull($props['knowledge_handoff']['entries'][0]['url']);
+        $this->assertSame((int) $document->id, (int) $this->origins($risk)->value('enterprise_wiki_document_id'));
     }
 
     public function test_risk_view_without_risk_edit_cannot_hand_over(): void
@@ -185,7 +234,7 @@ class RiskWikiKnowledgeTest extends TestCase
         $user = $this->member($customer);
         $this->grant($customer, $user, [CustomerPermissionCatalog::RISK_VIEW, ...self::WIKI_HANDOFF], [$hr]);
 
-        $this->assertFalse($this->showProps($user, $risk)['permissions']['can_create_wiki_knowledge']);
+        $this->assertFalse($this->showProps($user, $risk)['knowledge_handoff']['can_create']);
         $this->actingAs($user)->post($this->url($risk), $this->payload())->assertForbidden();
         $this->assertNothingHandedOver($customer);
     }
@@ -205,7 +254,7 @@ class RiskWikiKnowledgeTest extends TestCase
             CustomerPermissionCatalog::WIKI_APPROVE,
         ], [$hr]);
 
-        $this->assertFalse($this->showProps($user, $risk)['permissions']['can_create_wiki_knowledge']);
+        $this->assertFalse($this->showProps($user, $risk)['knowledge_handoff']['can_create']);
         $this->actingAs($user)->post($this->url($risk), $this->payload())->assertForbidden();
         $this->assertNothingHandedOver($customer);
     }
@@ -278,7 +327,7 @@ class RiskWikiKnowledgeTest extends TestCase
                 $content = $this->actingAs($viewer)->get($url)->assertOk()->getContent();
                 $this->assertStringNotContainsString(self::SECRET_TITLE, $content, $url);
                 $this->assertStringNotContainsString("/app/risk/risks/{$risk->id}", $content, $url);
-                $this->assertStringNotContainsString('risk_wiki_sources', $content, $url);
+                $this->assertStringNotContainsString('enterprise_wiki_document_origins', $content, $url);
                 $this->assertStringNotContainsString('Hemmelig', $content, $url);
             }
         }
@@ -296,7 +345,7 @@ class RiskWikiKnowledgeTest extends TestCase
         app(EnterpriseWikiDocumentDeletionService::class)->delete($document->fresh(), $owner);
 
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
-        $this->assertDatabaseMissing('risk_wiki_sources', ['risk_id' => $risk->id]);
+        $this->assertSame(0, $this->origins($risk)->count());
         $this->assertDatabaseHas('risks', ['id' => $risk->id, 'title' => self::SECRET_TITLE, 'cause' => 'Hemmelig årsak']);
     }
 
@@ -316,12 +365,12 @@ class RiskWikiKnowledgeTest extends TestCase
 
         $user = $this->member($customer);
         $this->grant($customer, $user, [CustomerPermissionCatalog::RISK_VIEW, CustomerPermissionCatalog::WIKI_VIEW], [$hr]);
-        $this->assertSame('page', $this->showProps($user, $risk)['wiki_knowledge'][0]['kind']);
+        $this->assertSame('page', $this->showProps($user, $risk)['knowledge_handoff']['entries'][0]['kind']);
 
         $page->delete();
 
         $this->assertDatabaseHas('risks', ['id' => $risk->id]);
-        $entries = $this->showProps($user, $risk)['wiki_knowledge'];
+        $entries = $this->showProps($user, $risk)['knowledge_handoff']['entries'];
         $this->assertNotContains('Generell læring', array_column(array_filter($entries, fn ($e) => $e['kind'] === 'page'), 'title'));
     }
 
@@ -345,7 +394,7 @@ class RiskWikiKnowledgeTest extends TestCase
         $this->actingAs($user)->delete("/app/risk/risks/{$risk->id}")->assertRedirect();
 
         $this->assertDatabaseMissing('risks', ['id' => $risk->id]);
-        $this->assertDatabaseMissing('risk_wiki_sources', ['enterprise_wiki_document_id' => $document->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_document_origins', ['enterprise_wiki_document_id' => $document->id]);
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $page->id]);
     }
@@ -358,17 +407,17 @@ class RiskWikiKnowledgeTest extends TestCase
         $user = $this->member($customer);
         $this->grant($customer, $user, [...self::RISK_EDITOR, ...self::WIKI_HANDOFF], [$hr]);
 
-        $this->actingAs($user)->post($this->url($risk), ['title' => '', 'markdown' => ''])
-            ->assertSessionHasErrors(['title', 'markdown']);
+        $this->actingAs($user)->post($this->url($risk), ['title' => '', 'learning' => '', 'sections' => []])
+            ->assertSessionHasErrors(['title', 'learning']);
         $this->assertNothingHandedOver($customer);
     }
 
     // ---------------------------------------------------------------------
 
-    /** @return array{title: string, markdown: string} */
+    /** @return array{title: string, learning: string, sections: list<string>} */
     private function payload(): array
     {
-        return ['title' => 'Generell læring', 'markdown' => 'Avstem filer før utbetaling.'];
+        return ['title' => 'Generell læring', 'learning' => 'Avstem filer før utbetaling.', 'sections' => []];
     }
 
     private function sourceFrom(Customer $customer, Risk $risk): EnterpriseWikiDocument
@@ -383,7 +432,7 @@ class RiskWikiKnowledgeTest extends TestCase
     private function assertNothingHandedOver(Customer $customer): void
     {
         $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
-        $this->assertSame(0, RiskWikiSource::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(0, EnterpriseWikiDocumentOrigin::query()->where('customer_id', $customer->id)->count());
         Queue::assertNotPushed(RunEnterpriseWikiDocumentFlow::class);
     }
 
@@ -405,7 +454,12 @@ class RiskWikiKnowledgeTest extends TestCase
 
     private function url(Risk $risk): string
     {
-        return "/app/risk/risks/{$risk->id}/wiki-knowledge";
+        return "/app/risk/risks/{$risk->id}/knowledge-handoff";
+    }
+
+    private function origins(Risk $risk)
+    {
+        return EnterpriseWikiDocumentOrigin::query()->where('source_type', 'risk')->where('source_id', $risk->id);
     }
 
     private function area(Customer $customer, string $name): BusinessArea
@@ -463,6 +517,8 @@ class RiskWikiKnowledgeTest extends TestCase
             'is_active' => true,
         ]);
 
+        // Basis carries the Wiki module the handoff requires; every real customer holds it.
+        app(ModuleEntitlementService::class)->activatePackage($customer, 'basis');
         app(ModuleEntitlementService::class)->activatePackage($customer, 'governance');
 
         $owner = User::query()->create([

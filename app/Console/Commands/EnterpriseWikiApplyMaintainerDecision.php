@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionApplyService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -14,6 +15,8 @@ use Throwable;
 #[Description('Apply a persisted maintainer decision to create stub wiki pages. No content is generated.')]
 class EnterpriseWikiApplyMaintainerDecision extends Command
 {
+    use RunsInAiCallContext;
+
     public function handle(EnterpriseWikiMaintainerDecisionApplyService $service): int
     {
         $runId = (int) $this->option('run-id');
@@ -33,13 +36,17 @@ class EnterpriseWikiApplyMaintainerDecision extends Command
         }
 
         try {
-            $result = $service->apply($run);
+            // Any AI call the run's services make belongs to the run's customer.
+            $result = $this->withinAiCallContext(
+                $this->enterpriseWikiRunAiCallContext((int) $run->id, 'wiki.operator.apply_maintainer_decision'),
+                fn (): array => $service->apply($run),
+            );
         } catch (\InvalidArgumentException $e) {
-            $this->error('[WIKI_APPLY] ' . $e->getMessage());
+            $this->error('[WIKI_APPLY] '.$e->getMessage());
 
             return self::FAILURE;
         } catch (Throwable $e) {
-            $this->error('[WIKI_APPLY] Unexpected error: ' . $e->getMessage());
+            $this->error('[WIKI_APPLY] Unexpected error: '.$e->getMessage());
 
             return self::FAILURE;
         }

@@ -2,9 +2,14 @@
 
 namespace App\Services\Operations;
 
+use App\Models\CustomerBillingPeriod;
 use App\Models\IdentityProvider;
+use App\Services\Ai\Pricing\AiModelPriceReadiness;
+use App\Services\Ai\Usage\AiUsageLedger;
 use App\Services\Auth\EntraConfig;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -82,7 +87,47 @@ class RuntimePreflightService
                 $withOpenAi ? $this->checkOpenAi() : $this->skip('OpenAI connectivity', 'not requested (pass --with-openai)'),
             ],
             $this->checkAiCostControl(),
+            [$this->checkBillingPeriods()],
         );
+    }
+
+    /**
+     * Every customer Stripe still bills must have its current billing period recorded locally, or
+     * AI usage for that customer falls back to a derived period. A warning, not a deploy blocker:
+     * `billing:sync-subscriptions` fixes it without downtime.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkBillingPeriods(): array
+    {
+        try {
+            if (! Schema::hasTable('customer_billing_periods') || ! Schema::hasTable('subscriptions')) {
+                return $this->skip('Billing periods', 'billing period schema not migrated yet');
+            }
+
+            $now = now('UTC');
+            $missing = DB::table('subscriptions')
+                ->where('type', 'default')
+                ->whereIn('stripe_status', CustomerBillingPeriod::BILLING_SUBSCRIPTION_STATUSES)
+                ->whereNotExists(fn ($query) => $query->selectRaw('1')
+                    ->from('customer_billing_periods')
+                    ->whereColumn('customer_billing_periods.customer_id', 'subscriptions.customer_id')
+                    ->where('customer_billing_periods.period_start', '<=', $now)
+                    ->where('customer_billing_periods.period_end', '>', $now))
+                ->distinct()
+                ->count('customer_id');
+
+            if ($missing > 0) {
+                return $this->warn('Billing periods', sprintf(
+                    '%d customer(s) with a billing Stripe subscription have no current billing period recorded; AI usage falls back to a derived period. Run billing:sync-subscriptions.',
+                    $missing,
+                ));
+            }
+
+            return $this->pass('Billing periods', 'every billing Stripe subscription has its current period recorded locally');
+        } catch (Throwable $e) {
+            return $this->warn('Billing periods', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -105,6 +150,9 @@ class RuntimePreflightService
             $this->checkAiCostControlSchema(),
             $this->checkAiCostControlRuntimeSingleton(),
             $this->checkAiPricingReadiness(),
+            $this->checkAiActiveModelPrices(),
+            $this->checkAiContextEnforcement(),
+            $this->checkAiOpenSettlements(),
             $this->checkAiExchangeRateReadiness(),
             $this->checkAiCostControlConfiguration(),
         ];
@@ -211,6 +259,92 @@ class RuntimePreflightService
             return $this->pass('AI model pricing', sprintf('%d model price(s) registered', $priceCount));
         } catch (Throwable $e) {
             return $this->fail('AI model pricing', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * Every model the operation registry routes work to must have a price in force that matches the
+     * reviewed source price. A missing price makes the first customer call fail on the unknown-price
+     * stop; an unsynced one (a corrected price the database has not picked up) writes wrong costs
+     * into the usage ledger. Both are deploy blockers: run `ai:sync-model-prices` before serving AI.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiActiveModelPrices(): array
+    {
+        try {
+            if (! Schema::hasTable('ai_model_prices')) {
+                return $this->skip('AI active model prices', 'cost-control schema not migrated yet');
+            }
+
+            $problems = app(AiModelPriceReadiness::class)->problems();
+
+            if ($problems !== []) {
+                return $this->fail('AI active model prices', sprintf(
+                    'not AI-ready: %s. Run ai:sync-model-prices.',
+                    implode(', ', array_map(static fn (array $row): string => $row['model'].' '.$row['state'], $problems)),
+                ));
+            }
+
+            return $this->pass('AI active model prices', sprintf(
+                'every active model has a synced price (%s)',
+                implode(', ', AiOperationCatalog::activeModels()),
+            ));
+        } catch (Throwable $e) {
+            return $this->fail('AI active model prices', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * AI_CONTEXT_ENFORCEMENT is `warn` or `strict`. Anything else would silently behave as warn — a
+     * typo meant to switch strict on must not pass as if it had. The mode itself is reported, not
+     * judged: moving to strict is a rollout decision (see docs/operations/ai-usage.md).
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiContextEnforcement(): array
+    {
+        $mode = (string) config('ai_operations.context_enforcement', 'warn');
+
+        if (! in_array($mode, ['warn', 'strict'], true)) {
+            return $this->fail('AI context enforcement', sprintf('AI_CONTEXT_ENFORCEMENT must be "warn" or "strict", got "%s"', $mode));
+        }
+
+        return $this->pass('AI context enforcement', $mode === 'strict'
+            ? 'strict: a customer-driven AI call without a customer is refused'
+            : 'warn: a customer-driven AI call without a customer is recorded as unattributed and alerted (check with ai:usage-integrity)');
+    }
+
+    /**
+     * AI calls whose cost is still open (pending/unresolved) after the configured age. Never fatal
+     * — the reservation already holds the money; it only means an operator has something to look
+     * at (ai:cost-control-health lists them).
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiOpenSettlements(): array
+    {
+        try {
+            if (! Schema::hasColumn('ai_usage_attempts', 'settlement_status')) {
+                return $this->skip('AI open settlements', 'settlement column not migrated yet');
+            }
+
+            $hours = max(1, (int) config('ai_operations.settlement.open_alert_after_hours', 24));
+            $open = app(AiUsageLedger::class)->openSettlements(CarbonImmutable::now('UTC')->subHours($hours));
+
+            if ($open['count'] > 0) {
+                return $this->warn('AI open settlements', sprintf(
+                    '%d AI call(s) older than %dh still have no final cost (oldest %s), holding %.2f NOK reserved. See ai:cost-control-health.',
+                    $open['count'],
+                    $hours,
+                    $open['oldest_started_at'],
+                    $open['reserved_cost_nok'],
+                ));
+            }
+
+            return $this->pass('AI open settlements', sprintf('no AI call older than %dh is waiting for a final cost', $hours));
+        } catch (Throwable $e) {
+            return $this->warn('AI open settlements', 'could not be determined: '.$this->redact($e->getMessage()));
         }
     }
 

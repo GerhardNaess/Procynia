@@ -86,8 +86,11 @@ class Customer extends Model
         'trial_ends_at',
         'subscription_plan',
         'billing_interval',
+        'billing_anchor_at',
         'included_users',
         'included_ai_credits',
+        'included_ai_units',
+        'ai_capacity_tier',
         'billing_discount_percent',
         'ai_access_status',
     ];
@@ -98,8 +101,10 @@ class Customer extends Model
             'is_active' => 'boolean',
             'permission_settings' => 'array',
             'trial_ends_at' => 'datetime',
+            'billing_anchor_at' => 'immutable_datetime',
             'included_users' => 'integer',
             'included_ai_credits' => 'integer',
+            'included_ai_units' => 'integer',
             'billing_discount_percent' => 'decimal:2',
         ];
     }

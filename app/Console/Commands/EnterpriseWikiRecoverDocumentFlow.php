@@ -95,7 +95,7 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
         // The global emergency stop is not part of that decision and still stops every call.
         $aiCallContext = $this->operatorAiCallContext([
             'customerId' => (int) $run->customer_id,
-            'operation' => 'operator.wiki.recover_document_flow',
+            'operation' => 'wiki.operator.recover_document_flow',
             'resourceType' => 'enterprise_wiki_document',
             'resourceId' => (int) $run->source_id,
         ]);

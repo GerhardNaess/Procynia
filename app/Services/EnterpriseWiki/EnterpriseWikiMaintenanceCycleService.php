@@ -2,10 +2,9 @@
 
 namespace App\Services\EnterpriseWiki;
 
-use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
-use App\Support\Ai\AiCallContextScope;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -34,13 +33,14 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiMaintenanceCycleService
 {
+    use RunsInAiCallContext;
+
     public function __construct(
         private readonly EnterpriseWikiPostIngestQaService $qaService,
         private readonly EnterpriseWikiDeepRepairService $deepRepairService,
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiQaRegressionService $regressionService,
         private readonly EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
-        private readonly AiCallContextScope $contextScope,
     ) {}
 
     /**
@@ -135,7 +135,10 @@ class EnterpriseWikiMaintenanceCycleService
 
         foreach ($candidates as $run) {
             try {
-                $result = $this->recoveryService->attempt($run->id, caller: 'maintenance_cycle');
+                $result = $this->withinAiCallContext(
+                    $this->enterpriseWikiRunAiCallContext($run->id, 'wiki.maintenance'),
+                    fn () => $this->recoveryService->attempt($run->id, caller: 'maintenance_cycle'),
+                );
 
                 if ($result->isResumed()) {
                     $resumed++;
@@ -201,7 +204,11 @@ class EnterpriseWikiMaintenanceCycleService
 
         foreach ($runs as $run) {
             try {
-                $this->claimContentRepairService->attempt($run);
+                // The scheduler has no customer; each repair is the run's customer's AI work.
+                $this->withinAiCallContext(
+                    $this->enterpriseWikiRunAiCallContext($run->id, 'wiki.maintenance'),
+                    fn () => $this->claimContentRepairService->attempt($run),
+                );
                 $attempted++;
             } catch (\Throwable $e) {
                 Log::error('[WIKI_MAINTENANCE] Claim-content repair attempt failed', [
@@ -231,15 +238,12 @@ class EnterpriseWikiMaintenanceCycleService
 
     private function processRun(EnterpriseWikiIngestRun $run): string
     {
-        return $this->contextScope->within(new AiCallContext(
-            runId: $run->id,
-            documentId: $run->source_id,
-            customerId: $run->customer_id,
-            feature: 'enterprise_wiki',
-            operation: 'enterprise_wiki.maintenance',
-            resourceType: 'enterprise_wiki_document',
-            resourceId: $run->source_id,
-        ), fn (): string => $this->processRunInAiContext($run));
+        // Through the shared run context so a source handed over from a module keeps attributing
+        // its maintenance cost to that module record, as the original ingest did.
+        return $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($run->id, 'wiki.maintenance'),
+            fn (): string => $this->processRunInAiContext($run),
+        );
     }
 
     private function processRunInAiContext(EnterpriseWikiIngestRun $run): string

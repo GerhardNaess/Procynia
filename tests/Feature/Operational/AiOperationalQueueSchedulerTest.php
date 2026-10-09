@@ -223,7 +223,6 @@ class AiOperationalQueueSchedulerTest extends TestCase
         foreach ([
             'gpt-5',
             (string) config('services.openai.model', 'gpt-4.1-mini'),
-            (string) config('services.openai.embedding_model', 'text-embedding-3-small'),
         ] as $model) {
             AiModelPrice::query()->firstOrCreate(
                 ['provider' => 'openai', 'model' => $model],

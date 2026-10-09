@@ -1104,11 +1104,12 @@ class UserController extends Controller
 
         return [
             'plan' => $subscriptionPlan,
-            'plan_label' => $customer->planName(),
+            // Customers see Basis, never the legacy plan tier that still sets the user limit.
+            'plan_label' => $hasActiveSubscription ? __('procynia.billing.subscription_card.product') : null,
             'billing_interval' => $billingInterval,
             'billing_interval_label' => $billingInterval === Customer::BILLING_YEARLY
-                ? __('procynia.billing.plan_change.yearly')
-                : __('procynia.billing.plan_change.monthly'),
+                ? __('procynia.billing.interval_labels.yearly')
+                : __('procynia.billing.interval_labels.monthly'),
             'has_active_subscription' => $hasActiveSubscription,
             'included_users' => $includedUsers,
             'current_billable_users' => $currentBillableUsers,

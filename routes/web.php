@@ -32,7 +32,6 @@ use App\Http\Controllers\App\RiskContextController;
 use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
-use App\Http\Controllers\App\RiskWikiKnowledgeController;
 use App\Http\Controllers\App\SupplierAssessmentController;
 use App\Http\Controllers\App\SupplierAssuranceDecisionController;
 use App\Http\Controllers\App\SupplierComplianceRequirementController;
@@ -56,6 +55,7 @@ use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
 use App\Http\Controllers\App\WikiGraphFocusController;
+use App\Http\Controllers\App\WikiKnowledgeHandoffController;
 use App\Http\Controllers\App\WikiSourceController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EntraAuthController;
@@ -355,8 +355,8 @@ Route::prefix('app')
             // Acceptance of residual risk. Never edited; a mistake is revoked and accepted anew. risk.accept in the area.
             Route::post('/risks/{riskId}/acceptances', [RiskAcceptanceController::class, 'store'])->whereNumber('riskId')->name('acceptances.store');
             Route::post('/risks/{riskId}/acceptances/{acceptanceId}/revoke', [RiskAcceptanceController::class, 'revoke'])->whereNumber(['riskId', 'acceptanceId'])->name('acceptances.revoke');
-            // Risiko → Enterprise Wiki: what the person wrote becomes an ordinary Wiki source. risk.edit + wiki.source.manage.
-            Route::post('/risks/{riskId}/wiki-knowledge', [RiskWikiKnowledgeController::class, 'store'])->whereNumber('riskId')->name('wiki-knowledge.store');
+            // «Lag kunnskapsartikkel» — the shared Wiki handoff (risk.edit + wiki.source.manage), gated by this module's route prefix.
+            Route::post('/risks/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'risk')->name('knowledge-handoff.store');
         });
         // Mål og KPI. Named under `app.objectives.`, mapped to the `objectives` module. Objectives are
         // addressed by a plain id and resolved through ObjectiveAccessService, never by implicit
@@ -365,6 +365,7 @@ Route::prefix('app')
             Route::get('/', [ObjectiveController::class, 'index'])->name('index');
             Route::post('/', [ObjectiveController::class, 'store'])->name('store');
             Route::get('/{objectiveId}', [ObjectiveController::class, 'show'])->whereNumber('objectiveId')->name('show');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'objective')->name('knowledge-handoff.store');
             Route::patch('/{objectiveId}', [ObjectiveController::class, 'update'])->whereNumber('objectiveId')->name('update');
             Route::delete('/{objectiveId}', [ObjectiveController::class, 'destroy'])->whereNumber('objectiveId')->name('destroy');
             // Lukk mål / Gjenåpne: the only ways status changes. Each writes an immutable history row.
@@ -391,6 +392,7 @@ Route::prefix('app')
             Route::get('/', [ImprovementCaseController::class, 'index'])->name('index');
             Route::post('/', [ImprovementCaseController::class, 'store'])->name('store');
             Route::get('/{caseId}', [ImprovementCaseController::class, 'show'])->whereNumber('caseId')->name('show');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'improvement_case')->name('knowledge-handoff.store');
             Route::patch('/{caseId}', [ImprovementCaseController::class, 'update'])->whereNumber('caseId')->name('update');
             Route::delete('/{caseId}', [ImprovementCaseController::class, 'destroy'])->whereNumber('caseId')->name('destroy');
             // Start behandling / Lukk / Avbryt / Gjenåpne: the only ways status changes. Each writes an
@@ -440,6 +442,7 @@ Route::prefix('app')
             Route::get('/audits', [ComplianceAuditController::class, 'index'])->name('audits.index');
             Route::post('/audits', [ComplianceAuditController::class, 'store'])->name('audits.store');
             Route::get('/audits/{auditId}', [ComplianceAuditController::class, 'show'])->whereNumber('auditId')->name('audits.show');
+            Route::post('/audits/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'compliance_audit')->name('audits.knowledge-handoff.store');
             Route::patch('/audits/{auditId}', [ComplianceAuditController::class, 'update'])->whereNumber('auditId')->name('audits.update');
             Route::delete('/audits/{auditId}', [ComplianceAuditController::class, 'destroy'])->whereNumber('auditId')->name('audits.destroy');
             Route::post('/audits/{auditId}/start', [ComplianceAuditController::class, 'start'])->whereNumber('auditId')->name('audits.start');
@@ -477,6 +480,7 @@ Route::prefix('app')
             Route::post('/control-requirements/{requirementId}/reactivate', [SupplierControlRequirementController::class, 'reactivate'])->whereNumber('requirementId')->name('control-requirements.reactivate');
             Route::delete('/control-requirements/{requirementId}', [SupplierControlRequirementController::class, 'destroy'])->whereNumber('requirementId')->name('control-requirements.destroy');
             Route::get('/{supplierId}', [SupplierManagementController::class, 'show'])->whereNumber('supplierId')->name('show');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'supplier')->name('knowledge-handoff.store');
             Route::patch('/{supplierId}', [SupplierManagementController::class, 'update'])->whereNumber('supplierId')->name('update');
             Route::delete('/{supplierId}', [SupplierManagementController::class, 'destroy'])->whereNumber('supplierId')->name('destroy');
             // Ta i bruk / Avslutt leverandør / Gjenåpne leverandør: the only ways status changes. Each
@@ -649,11 +653,12 @@ Route::prefix('app')
         Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
         Route::post('/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
         Route::post('/billing/resume', [BillingController::class, 'resume'])->name('billing.resume');
-        Route::post('/billing/change-plan', [BillingController::class, 'changePlan'])->name('billing.change-plan');
         Route::post('/billing/packages/{package}/request', [BillingController::class, 'requestPackage'])
             ->name('billing.packages.request');
         Route::post('/billing/packages/{package}/cancel', [BillingController::class, 'cancelPackage'])
             ->name('billing.packages.cancel');
+        Route::post('/billing/ai-capacity/level', [BillingController::class, 'changeAiCapacityLevel'])
+            ->name('billing.ai-capacity.level');
 
         // Go/No-go template admin (System Owner only)
         Route::prefix('/go-no-go-templates')->name('go-no-go-templates.')->group(function (): void {

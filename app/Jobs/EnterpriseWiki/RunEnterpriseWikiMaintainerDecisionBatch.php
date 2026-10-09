@@ -36,7 +36,7 @@ class RunEnterpriseWikiMaintainerDecisionBatch implements ShouldQueue
     public function handle(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionBatchEvaluator $evaluator): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.maintainer_batch'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.maintainer_batch'),
             function () use ($state, $evaluator): void {
                 $this->handleInAiCallContext($state, $evaluator);
             },

@@ -404,7 +404,7 @@ Fra Key Vault: `APP_KEY`, `DB_PASSWORD`, `REDIS_URL`, `OPENAI_API_KEY`,
 `DOFFIN_API_KEY`, `PROCYNIA_HEALTH_TOKEN`.
 
 Bevisst *ikke* satt, fordi Laravel-configen allerede har riktig default:
-`APP_LOCALE` (`no`), `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_EMBEDDING_MODEL`,
+`APP_LOCALE` (`no`), `OPENAI_BASE_URL`, `OPENAI_MODEL`,
 `BCRYPT_ROUNDS`, `DOFFIN_*`-endepunkter.
 Satt fordi configen *ikke* har default: `PDF*_BINARY` og `DOFFIN_BASE_URL`
 (`config/services.php` og `config/doffin.php` leser `env()` uten fallback).

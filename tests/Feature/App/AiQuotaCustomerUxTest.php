@@ -16,7 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-/** What the customer sees: the subscription page, and each of the four hard-stop reasons. */
+/** What the customer sees of the Anbud AI-case quota: the AI workspace, and each hard-stop reason. */
 class AiQuotaCustomerUxTest extends TestCase
 {
     use RefreshDatabase;
@@ -34,16 +34,16 @@ class AiQuotaCustomerUxTest extends TestCase
     }
 
     // =========================================================================
-    // /app/billing
+    // The Anbud AI workspace — the AI-case quota is Tender's own and lives here, not on Abonnement
     // =========================================================================
 
-    public function test_the_billing_page_shows_used_included_remaining_and_the_period(): void
+    public function test_the_ai_workspace_shows_used_included_remaining_and_the_period(): void
     {
         $customer = $this->customer(10);
         $owner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
         $this->consume($customer, 2);
 
-        $this->actingAs($owner)->get('/app/billing')
+        $this->actingAs($owner)->get("/app/ai/{$this->notice($customer)->id}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->where('ai_quota.used', 2)
@@ -58,7 +58,7 @@ class AiQuotaCustomerUxTest extends TestCase
                 ->where('ai_quota.is_suspended', false));
     }
 
-    public function test_the_billing_page_reports_each_quota_status(): void
+    public function test_the_ai_workspace_reports_each_quota_status(): void
     {
         foreach ([
             [10, 8, AiQuotaStatus::STATUS_WARNING],
@@ -69,7 +69,7 @@ class AiQuotaCustomerUxTest extends TestCase
             $owner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
             $this->consume($customer, $used);
 
-            $this->actingAs($owner)->get('/app/billing')
+            $this->actingAs($owner)->get("/app/ai/{$this->notice($customer)->id}")
                 ->assertOk()
                 ->assertInertia(fn ($page) => $page->where('ai_quota.status', $expected));
         }
@@ -81,7 +81,7 @@ class AiQuotaCustomerUxTest extends TestCase
         $owner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
         $this->consume($customer, 5);
 
-        $this->actingAs($owner)->get('/app/billing')
+        $this->actingAs($owner)->get("/app/ai/{$this->notice($customer)->id}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->where('ai_quota.is_unlimited', true)
@@ -97,7 +97,7 @@ class AiQuotaCustomerUxTest extends TestCase
         $this->consume($customer, 1);
         $customer->update(['ai_access_status' => Customer::AI_ACCESS_SUSPENDED]);
 
-        $this->actingAs($owner)->get('/app/billing')
+        $this->actingAs($owner)->get("/app/ai/{$this->notice($customer)->id}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->where('ai_quota.status', AiQuotaStatus::STATUS_SUSPENDED)
@@ -105,7 +105,7 @@ class AiQuotaCustomerUxTest extends TestCase
                 ->where('ai_quota.remaining', 9));
     }
 
-    public function test_the_billing_page_never_shows_another_customers_usage(): void
+    public function test_the_ai_workspace_never_shows_another_customers_usage(): void
     {
         $customer = $this->customer(10);
         $owner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -114,7 +114,7 @@ class AiQuotaCustomerUxTest extends TestCase
         $otherCustomer = $this->customer(10);
         $this->consume($otherCustomer, 7);
 
-        $this->actingAs($owner)->get('/app/billing')
+        $this->actingAs($owner)->get("/app/ai/{$this->notice($customer)->id}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->where('ai_quota.customer_id', $customer->id)
@@ -129,11 +129,12 @@ class AiQuotaCustomerUxTest extends TestCase
         $this->actingAs($owner)->get('/app/billing')
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->has('customer_plan')
-                ->has('available_plans')
+                ->has('subscription')
                 ->has('invoices')
                 ->has('billing_lines')
-                ->has('ai_quota'));
+                // Abonnement shows the shared AI capacity; AI cases are no longer its AI picture.
+                ->has('ai_capacity')
+                ->missing('ai_quota'));
     }
 
     public function test_billing_authorisation_is_unchanged_by_the_new_quota_section(): void
@@ -161,6 +162,8 @@ class AiQuotaCustomerUxTest extends TestCase
             AiCostControlException::NOT_INCLUDED,
             AiCostControlException::CUSTOMER_SUSPENDED,
             AiCostControlException::GLOBAL_STOP,
+            AiCostControlException::CAPACITY_EXHAUSTED,
+            AiCostControlException::CAPACITY_INSUFFICIENT,
         ] as $reason) {
             $message = $presenter->message(new AiCostControlException($reason), $customer);
             $messages[$reason] = $message;
@@ -176,7 +179,7 @@ class AiQuotaCustomerUxTest extends TestCase
         $this->assertSame(
             count($messages),
             count(array_unique($messages)),
-            'Four different reasons must not collapse into one generic message.',
+            'Different reasons must not collapse into one generic message.',
         );
     }
 
@@ -263,7 +266,7 @@ class AiQuotaCustomerUxTest extends TestCase
     // AI workspace
     // =========================================================================
 
-    public function test_the_ai_workspace_carries_the_same_quota_state_as_billing(): void
+    public function test_the_ai_workspace_carries_the_quota_state_the_guard_enforces(): void
     {
         $customer = $this->customer(3);
         $owner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);

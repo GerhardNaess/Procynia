@@ -191,6 +191,35 @@ budsjett. Hver bypass skriver `ai_operator_override_used` med aktør og begrunne
 
 ---
 
+## 9b. Kontekst og attribusjon (`AI_CONTEXT_ENFORCEMENT`)
+
+Hvert providerkall må navngi en registrert `<feature>.<operation>` (`config/ai_operations.php`) og
+ha en kunde, med mindre det er eksplisitt systemarbeid (`system.*`). Regelen håndheves i
+`AiCallContextPolicy`, rett før kostnadskontrollen i `OpenAiClient`.
+
+| | `warn` (standard) | `strict` |
+| --- | --- | --- |
+| Mangler operasjon / ukjent feature | avvises alltid (`AiCallContextException`) | avvises alltid |
+| Mangler kunde, ikke `system.*` | kjøres, lagres med `attribution = unattributed`, varsel `ai_call_unattributed` | avvises før kallet |
+
+Slik leses status:
+
+```sql
+SELECT attribution, feature, operation_key, count(*)
+FROM ai_usage_attempts
+WHERE started_at >= now() - interval '7 days'
+GROUP BY 1, 2, 3 ORDER BY 4 DESC;
+```
+
+Bytt til `strict` når `unattributed` har vært null over en hel driftsperiode. Varselet
+`ai_call_unattributed` navngir operasjonen — det er en feil i kodestien, ikke en kundetilstand.
+
+Historiske rader (før standarden) har `feature = saved_notice | enterprise_wiki` og operasjoner
+med gamle prefikser. De skrives aldri om; `AiOperationCatalog::canonicalFeature()` /
+`canonicalOperation()` oversetter ved lesing.
+
+---
+
 ## 10. Rollback
 
 | Situasjon | Rollback |

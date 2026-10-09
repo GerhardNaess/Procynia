@@ -244,19 +244,21 @@ test('a risk goes from registered to assessed, treated, accepted and reassessed'
     await decision.getByText('Tidligere aksepter (1)').click();
     await expect(decision.getByText('Gjaldt en tidligere vurdering')).toBeVisible();
 
-    // 18–19. Kunnskap til Wiki: the dialog starts empty and warns about what not to share.
+    // 18–19. Kunnskap til Wiki: the dialog starts empty — no title, no section of the risk chosen —
+    // and warns about what not to share.
     const wiki = page.locator('section', { has: page.getByRole('heading', { name: 'Kunnskap delt til Wiki', exact: true }) });
     await wiki.getByRole('button', { name: 'Lag kunnskapsartikkel' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator('#risk-wiki-knowledge-title')).toHaveValue('');
-    await expect(dialog.locator('#risk-wiki-knowledge-markdown')).toHaveValue('');
+    await expect(dialog.getByLabel('Tittel')).toHaveValue('');
+    await expect(dialog.getByLabel('Læringspunkter')).toHaveValue('');
+    await expect(dialog.getByRole('checkbox', { name: /Risikobeskrivelse/ })).not.toBeChecked();
     await expect(dialog).toContainText('ikke sensitive detaljer');
-    await expect(dialog).toContainText('Ingenting fra risikoen kopieres automatisk.');
+    await expect(dialog).toContainText('Ingenting er valgt på forhånd');
     await expect(dialog).not.toContainText('Markdown');
     await expect(dialog.getByRole('button', { name: 'Send til Wiki' })).toBeDisabled();
     await page.screenshot({ path: 'test-results/risk-journey-19-wiki-dialog.png', fullPage: true });
     await dialog.getByRole('button', { name: 'Avbryt' }).click();
     await expect(dialog).toHaveCount(0);
-    await expect(wiki).toContainText('Ingen kunnskap er delt fra denne risikoen ennå.');
+    await expect(wiki).toContainText('Ingen kunnskap er delt herfra ennå.');
 });

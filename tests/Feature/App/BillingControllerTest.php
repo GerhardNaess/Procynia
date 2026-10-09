@@ -6,6 +6,7 @@ use App\Models\BillingPrice;
 use App\Models\BillingProduct;
 use App\Models\Customer;
 use App\Models\CustomerBillingLine;
+use App\Models\CustomerBillingPeriod;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -142,11 +143,11 @@ class BillingControllerTest extends TestCase
             $billingLines = collect(data_get($page, 'props.billing_lines', []));
 
             return data_get($page, 'component') === 'App/Billing/Index'
-                && data_get($page, 'props.subscription.plan_label') === 'Ultra'
-                && data_get($page, 'props.subscription.plan') === 'ultra'
+                && ! array_key_exists('plan', (array) data_get($page, 'props.subscription'))
+                && ! array_key_exists('plan_label', (array) data_get($page, 'props.subscription'))
                 && data_get($page, 'props.subscription.billing_interval') === BillingPrice::INTERVAL_YEARLY
                 && data_get($page, 'props.subscription.included_users') === 15
-                && data_get($page, 'props.subscription.included_ai_credits') === 60
+                && ! array_key_exists('included_ai_credits', (array) data_get($page, 'props.subscription'))
                 && data_get($page, 'props.subscription.cancel_at_period_end') === false
                 && $billingLines->contains(fn (array $line): bool => $line['billing_price_key'] === $price->key && $line['quantity'] === 2)
                 && $billingLines->doesntContain(fn (array $line): bool => $line['billing_price_key'] === 'base_plan_ultra_yearly');
@@ -170,11 +171,11 @@ class BillingControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/Billing/Index'
-                && data_get($page, 'props.subscription.plan') === 'ultra'
-                && data_get($page, 'props.subscription.plan_label') === 'Ultra'
+                && ! array_key_exists('plan', (array) data_get($page, 'props.subscription'))
+                && ! array_key_exists('plan_label', (array) data_get($page, 'props.subscription'))
                 && data_get($page, 'props.subscription.billing_interval') === BillingPrice::INTERVAL_YEARLY
                 && data_get($page, 'props.subscription.included_users') === 15
-                && data_get($page, 'props.subscription.included_ai_credits') === 60
+                && ! array_key_exists('included_ai_credits', (array) data_get($page, 'props.subscription'))
                 && data_get($page, 'props.subscription.cancel_at_period_end') === false;
         });
     }
@@ -190,11 +191,6 @@ class BillingControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->post('/app/billing/cancel');
         $response->assertForbidden();
 
-        $response = $this->actingAs($context['user'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'monthly',
-        ]);
-        $response->assertForbidden();
     }
 
     public function test_viewer_is_forbidden_from_billing_page(): void
@@ -424,179 +420,74 @@ class BillingControllerTest extends TestCase
         ]);
     }
 
-    public function test_system_owner_receives_plan_change_data_on_billing_page(): void
+    public function test_billing_page_offers_no_legacy_plan_tiers(): void
     {
         $context = $this->systemOwnerContext();
+        $context['customer']->update(['subscription_plan' => Customer::PLAN_PRO, 'billing_interval' => Customer::BILLING_MONTHLY]);
 
         $response = $this->actingAs($context['owner'])->get('/app/billing');
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page): bool {
-            $availablePlans = collect(data_get($page, 'props.available_plans', []));
+        $response->assertInertia(fn ($page) => $page
+            ->missing('available_plans')
+            ->missing('customer_plan')
+            ->missing('subscription.plan')
+            ->missing('subscription.plan_label')
+            ->where('subscription.billing_interval', Customer::BILLING_MONTHLY)
+            ->where('translations.billing.subscription_card.product', 'Basis')
+            // Basis/options and the shared AI capacity are delivered exactly as before.
+            ->has('module_packages')
+            ->has('ai_capacity'));
 
-            return data_get($page, 'component') === 'App/Billing/Index'
-                && data_get($page, 'props.customer_plan.plan') === 'free'
-                && $availablePlans->contains(fn (array $plan): bool => $plan['key'] === 'pro')
-                && $availablePlans->contains(fn (array $plan): bool => $plan['key'] === 'max')
-                && $availablePlans->contains(fn (array $plan): bool => $plan['key'] === 'ultra');
-        });
+        $this->assertStringNotContainsString('"Pro"', json_encode($response->viewData('page')['props']));
     }
 
-    public function test_non_system_owner_cannot_change_plan(): void
-    {
-        $context = $this->customerAdminContext();
-
-        $response = $this->actingAs($context['user'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'monthly',
-        ]);
-
-        $response->assertForbidden();
-    }
-
-    public function test_plan_change_validates_selected_plan_and_interval(): void
+    public function test_customer_can_no_longer_switch_to_a_legacy_plan(): void
     {
         $context = $this->systemOwnerContext();
+        $context['customer']->update(['subscription_plan' => Customer::PLAN_PRO]);
 
-        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
-            'plan' => 'invalid_plan',
+        $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
+            'plan' => 'ultra',
             'interval' => 'monthly',
-        ]);
+        ])->assertNotFound();
 
-        $response->assertSessionHasErrors(['plan']);
-
-        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'invalid_interval',
-        ]);
-
-        $response->assertSessionHasErrors(['interval']);
+        $this->assertSame(Customer::PLAN_PRO, $context['customer']->fresh()->subscription_plan);
     }
 
-    public function test_plan_change_uses_existing_subscription_service_logic(): void
+    public function test_included_users_is_the_enforced_user_limit(): void
+    {
+        $context = $this->systemOwnerContext();
+        $context['customer']->update(['subscription_plan' => Customer::PLAN_MAX, 'included_users' => 7]);
+
+        $this->actingAs($context['owner'])->get('/app/billing')
+            ->assertInertia(fn ($page) => $page->where('subscription.included_users', 7));
+
+        // Zero is what canAddUser() reads as "no limit", so no number is shown.
+        $context['customer']->update(['included_users' => 0]);
+
+        $this->actingAs($context['owner']->fresh())->get('/app/billing')
+            ->assertInertia(fn ($page) => $page->where('subscription.included_users', null));
+    }
+
+    public function test_next_invoice_date_is_shown_only_for_a_provider_period(): void
     {
         $context = $this->systemOwnerContext();
         $customer = $context['customer'];
+        $customer->update(['subscription_plan' => Customer::PLAN_PRO]);
 
-        $this->partialMock(SubscriptionService::class, function ($mock) use ($customer): void {
-            $mock->shouldReceive('changePlan')
-                ->once()
-                ->withArgs(function (Customer $passedCustomer, string $plan, string $interval) use ($customer): bool {
-                    return $passedCustomer->is($customer)
-                        && $plan === 'pro'
-                        && $interval === 'monthly';
-                })
-                ->andReturnNull();
-        });
+        // A derived period is not a reliable invoice date.
+        $this->actingAs($context['owner'])->get('/app/billing')
+            ->assertInertia(fn ($page) => $page->where('subscription.period_end', null));
 
-        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'monthly',
+        CustomerBillingPeriod::query()->create([
+            'customer_id' => $customer->id, 'provider' => 'stripe', 'provider_subscription_id' => 'sub_basis',
+            'period_start' => now()->subDays(5), 'period_end' => now()->addDays(25)->startOfDay(),
+            'interval' => 'month', 'subscription_status' => 'active', 'synced_at' => now(),
         ]);
 
-        $response->assertRedirect('/app/billing');
-        $response->assertSessionHas('success', __('procynia.billing.plan_change.success'));
-    }
-
-    public function test_bid_manager_can_change_plan_locally_without_stripe_connection(): void
-    {
-        $context = $this->bidManagerContext();
-        $customer = $context['customer'];
-
-        $product = BillingProduct::query()->updateOrCreate(
-            ['key' => 'plan_pro'],
-            [
-                'name' => 'Pro',
-                'description' => 'Pro base plan used for local plan changes.',
-                'category' => BillingProduct::CATEGORY_BASE_PLAN,
-                'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
-                'is_active' => true,
-                'sort_order' => 3,
-                'metadata' => ['plan_key' => 'pro'],
-            ]
-        );
-
-        $price = BillingPrice::query()->updateOrCreate(
-            ['key' => 'pro_monthly'],
-            [
-                'billing_product_id' => $product->id,
-                'name' => 'Pro — Månedlig',
-                'interval' => BillingPrice::INTERVAL_MONTHLY,
-                'currency' => 'nok',
-                'unit_amount' => 199000,
-                'stripe_price_id' => null,
-                'tier_key' => 'pro',
-                'is_recurring' => true,
-                'is_active' => true,
-                'included_quantity' => 1,
-                'metadata' => ['plan_key' => 'pro'],
-            ]
-        );
-
-        $response = $this->actingAs($context['user'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'monthly',
-        ]);
-
-        $response->assertRedirect('/app/billing');
-        $response->assertSessionHas('success', __('procynia.billing.plan_change.success'));
-
-        $customer->refresh();
-
-        $this->assertSame(Customer::PLAN_PRO, $customer->subscription_plan);
-        $this->assertSame(Customer::BILLING_MONTHLY, $customer->billing_interval);
-        $this->assertNull($customer->stripe_id);
-        $this->assertDatabaseHas('customer_billing_lines', [
-            'customer_id' => $customer->id,
-            'billing_price_id' => $price->id,
-            'status' => 'active',
-            'source' => 'system',
-            'stripe_subscription_item_id' => null,
-        ]);
-    }
-
-    public function test_plan_change_service_errors_are_handled_controlled(): void
-    {
-        $context = $this->systemOwnerContext();
-
-        $this->partialMock(SubscriptionService::class, function ($mock): void {
-            $mock->shouldReceive('changePlan')
-                ->once()
-                ->andThrow(new \RuntimeException('Boom'));
-        });
-
-        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'monthly',
-        ]);
-
-        $response->assertSessionHasErrors(['plan']);
-        $this->assertSame(
-            __('procynia.billing.plan_change.error'),
-            session('errors')->getBag('default')->first('plan')
-        );
-    }
-
-    public function test_plan_change_shows_clear_message_when_payment_setup_is_missing(): void
-    {
-        $context = $this->systemOwnerContext();
-
-        $this->partialMock(SubscriptionService::class, function ($mock): void {
-            $mock->shouldReceive('changePlan')
-                ->once()
-                ->andThrow(new \RuntimeException(__('procynia.billing.plan_change.payment_setup_missing')));
-        });
-
-        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
-            'plan' => 'pro',
-            'interval' => 'monthly',
-        ]);
-
-        $response->assertSessionHasErrors(['plan']);
-        $this->assertSame(
-            __('procynia.billing.plan_change.payment_setup_missing'),
-            session('errors')->getBag('default')->first('plan')
-        );
+        $this->actingAs($context['owner'])->get('/app/billing')
+            ->assertInertia(fn ($page) => $page->where('subscription.period_end', now()->addDays(25)->utc()->toDateString()));
     }
 
     private function systemOwnerContext(string $customerName = 'Procynia AS'): array

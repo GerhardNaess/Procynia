@@ -6,6 +6,8 @@ use App\Models\AiUsageAttempt;
 use App\Models\CustomerAiUsageReservation;
 use App\Services\Admin\AdminNotificationService;
 use App\Services\Ai\Operational\AiOperationalPricingService;
+use App\Services\Ai\Pricing\AiModelPriceReadiness;
+use App\Services\Ai\Usage\AiUsageLedger;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
@@ -26,11 +28,11 @@ use Illuminate\Support\Facades\Schema;
 class AiCostControlHealthCheck extends Command
 {
     protected $signature = 'ai:cost-control-health
-                            {--hours=24 : How old an uncertain hold must be before it is reported}';
+                            {--hours= : How old an uncertain hold or open settlement must be before it is reported (default: ai_operations.settlement.open_alert_after_hours)}';
 
     protected $description = 'Report ageing uncertain AI reservations and unpriced provider attempts to internal admins.';
 
-    public function handle(AdminNotificationService $adminNotifications, AiOperationalPricingService $pricing): int
+    public function handle(AdminNotificationService $adminNotifications, AiOperationalPricingService $pricing, AiModelPriceReadiness $priceReadiness, AiUsageLedger $ledger): int
     {
         if (! Schema::hasTable('customer_ai_usage_reservations') || ! Schema::hasTable('ai_usage_attempts')) {
             $this->warn('[AI_COST_HEALTH] Cost-control schema is not migrated; nothing to check.');
@@ -38,7 +40,7 @@ class AiCostControlHealthCheck extends Command
             return self::SUCCESS;
         }
 
-        $hours = max(1, (int) $this->option('hours'));
+        $hours = max(1, (int) ($this->option('hours') ?? config('ai_operations.settlement.open_alert_after_hours', 24)));
         $cutoff = CarbonImmutable::now(config('app.timezone') ?: 'UTC')->subHours($hours);
         $today = $cutoff->toDateString();
 
@@ -69,8 +71,12 @@ class AiCostControlHealthCheck extends Command
             );
         }
 
+        // A missing model price, not a failed call the provider reported no usage for: both are
+        // `unknown`, only the first is a catalogue problem.
         $unpriced = AiUsageAttempt::query()
             ->where('cost_status', 'unknown')
+            ->where(fn ($query) => $query->where('price_state', 'missing')
+                ->orWhere(fn ($inner) => $inner->whereNull('price_state')->whereNotNull('input_tokens')))
             ->where('started_at', '>=', $cutoff)
             ->count();
 
@@ -100,12 +106,79 @@ class AiCostControlHealthCheck extends Command
             );
         }
 
+        // A model the operation registry uses must be priced at its reviewed price before a
+        // customer reaches it — not discovered when the first call is refused or mispriced.
+        $priceProblems = $pricing->catalogueIsConfigured() ? $priceReadiness->problems() : [];
+
+        if ($priceProblems !== []) {
+            $summary = implode(', ', array_map(static fn (array $row): string => $row['model'].' ('.$row['state'].')', $priceProblems));
+
+            $adminNotifications->create(
+                type: 'ai_active_model_price_not_ready',
+                severity: 'critical',
+                title: 'Aktiv AI-modell mangler synket pris',
+                message: sprintf('Modeller i bruk uten gyldig, synket pris: %s. Kjør ai:sync-model-prices.', $summary),
+                data: ['models' => $priceProblems],
+                dedupeKey: 'ai_active_model_price_not_ready:'.$today,
+            );
+        }
+
+        // Customer work that reached the provider without an owner. Zero is the precondition for
+        // AI_CONTEXT_ENFORCEMENT=strict; anything else names the operation that still leaks.
+        $unattributed = $ledger->unattributed($cutoff);
+
+        if ($unattributed['count'] > 0) {
+            $adminNotifications->create(
+                type: 'ai_unattributed_attempts',
+                severity: 'warning',
+                title: 'AI-kall uten kunde',
+                message: sprintf(
+                    '%d AI-kall de siste %d timene nådde leverandøren uten kunde og uten å være merket som systemarbeid (sist %s): %s.',
+                    $unattributed['count'],
+                    $hours,
+                    $unattributed['last_at'],
+                    implode(', ', array_map(static fn (array $row): string => $row['operation_key'].' ×'.$row['count'], $unattributed['operations'])),
+                ),
+                data: $unattributed,
+                dedupeKey: 'ai_unattributed_attempts:'.$today,
+            );
+        }
+
+        // Attempts whose cost is still open after any normal retry would have finished: pending
+        // (the provider may have worked) or unresolved (it did, cost unknown). Their reservation is
+        // held, not charged; deciding what they cost is an operator's call (runbook).
+        $openSettlements = $ledger->openSettlements($cutoff);
+
+        if ($openSettlements['count'] > 0) {
+            $adminNotifications->create(
+                type: 'ai_open_settlements_ageing',
+                severity: 'warning',
+                title: 'AI-kostnader uten endelig oppgjør',
+                message: sprintf(
+                    '%d AI-kall har stått uten endelig kostnad i mer enn %d timer (eldste %s). De holder %s kr reservert og er ikke belastet som oppgjort: %s.',
+                    $openSettlements['count'],
+                    $hours,
+                    $openSettlements['oldest_started_at'],
+                    number_format($openSettlements['reserved_cost_nok'], 2, ',', ' '),
+                    implode(', ', array_map(static fn (array $row): string => sprintf('%s %s ×%d', $row['operation_key'], $row['settlement_status'], $row['count']), $openSettlements['operations'])),
+                ),
+                data: $openSettlements,
+                dedupeKey: 'ai_open_settlements_ageing:'.$today,
+            );
+        }
+
         $this->line(sprintf(
-            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Unpriced attempts (%dh): %d. Price catalogue: %s.',
+            '[AI_COST_HEALTH] Ageing uncertain holds: %d. Open settlements (>%dh): %d holding %.2f NOK. Unpriced attempts (%dh): %d. Unattributed attempts (%dh): %d. Price catalogue: %s. Active models not price-ready: %d.',
             $ageingHolds,
             $hours,
+            $openSettlements['count'],
+            $openSettlements['reserved_cost_nok'],
+            $hours,
             $unpriced,
+            $hours,
+            $unattributed['count'],
             $pricing->catalogueIsConfigured() ? 'configured' : 'EMPTY',
+            count($priceProblems),
         ));
 
         return self::SUCCESS;

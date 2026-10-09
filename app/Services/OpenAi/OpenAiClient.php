@@ -2,9 +2,13 @@
 
 namespace App\Services\OpenAi;
 
+use App\Data\Ai\AiCallContext;
+use App\Exceptions\Ai\AiProviderHttpException;
 use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Commercial\AiCostControlService;
+use App\Support\Ai\AiCallContextPolicy;
 use App\Support\Ai\AiCallContextScope;
+use Closure;
 use GuzzleHttp\TransferStats;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -18,6 +22,7 @@ class OpenAiClient
         private readonly AiUsageMeter $usageMeter,
         private readonly AiCostControlService $costControl,
         private readonly AiCallContextScope $contextScope,
+        private readonly AiCallContextPolicy $contextPolicy,
     ) {}
 
     /**
@@ -29,8 +34,8 @@ class OpenAiClient
      * Deliberately outside cost control. This is only used for `GET /models` by the health check
      * and the runtime preflight: it consumes no tokens and costs nothing, and an operator has to be
      * able to verify provider connectivity during an incident — including while a global stop is
-     * active. Every call that can actually spend money goes through createResponse(), post() or
-     * createEmbedding(), all of which authorise first.
+     * active. Every call that can actually spend money goes through createResponse() or post(),
+     * both of which authorise first.
      */
     public function get(string $endpoint, int $timeoutSeconds = 180): Response
     {
@@ -49,16 +54,27 @@ class OpenAiClient
      *                                                   and a failed transfer, so a caller can capture connect/transfer timing even when this
      *                                                   method ends up throwing (e.g. EnterpriseWikiAiCapacityRetryExecutor's structured
      *                                                   per-attempt logging, built for the Wiki run-592 incident).
+     * @param  ?string  $operation  The registered AI operation this call performs (config/ai_operations.php).
+     *                              It narrows the ambient context; the customer still comes from the entry point.
      */
-    public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
+    public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null, ?string $operation = null): array
+    {
+        return $this->withinOperation($operation, fn (): array => $this->createResponseInContext($payload, $timeoutSeconds, $onStats));
+    }
+
+    private function createResponseInContext(array $payload, int $timeoutSeconds, ?callable $onStats): array
     {
         $model = trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown';
-        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($model, 'responses'));
+        // admit() opens this call's attempt (and its reservation) under the customer lock; the
+        // meter finishes that attempt rather than opening another.
+        $decision = $this->costControl->admit($this->providerCallContext($model, 'responses'), 'responses');
 
         try {
             $result = $this->usageMeter->measureResponse(
                 $model,
                 fn (): array => $this->send('responses', $payload, $timeoutSeconds, $onStats),
+                $decision->estimatedCostNok,
+                $decision->attempt,
             );
             $this->costControl->finalize($decision);
 
@@ -70,39 +86,27 @@ class OpenAiClient
         }
     }
 
-    public function createEmbedding(string $input): array
+    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null, ?string $operation = null): Response
     {
-        $model = $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($model, 'embeddings'));
-
-        try {
-            $result = $this->usageMeter->measureResponse(
-                $model,
-                fn (): array => $this->send('embeddings', ['model' => $model, 'input' => $input]),
-            );
-            $this->costControl->finalize($decision);
-
-            return $result;
-        } catch (\Throwable $exception) {
-            $this->costControl->fail($decision, $exception);
-
-            throw $exception;
-        }
+        return $this->withinOperation($operation, fn (): Response => $this->postInContext($endpoint, $payload, $timeoutSeconds, $onStats));
     }
 
-    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null): Response
+    private function postInContext(string $endpoint, array $payload, int $timeoutSeconds, ?callable $onStats): Response
     {
         $endpoint = ltrim($endpoint, '/');
-        $postModel = trim((string) ($payload['model'] ?? '')) ?: $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($postModel, $endpoint));
+        $model = trim((string) ($payload['model'] ?? '')) ?: 'unknown';
+        $decision = $this->costControl->admit($this->providerCallContext($model, $endpoint), $endpoint);
 
         try {
-            $response = $endpoint === 'responses'
-                ? $this->usageMeter->measureHttpResponse(
-                    trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown',
-                    fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
-                )
-                : $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats);
+            // Every endpoint is measured: a provider call that reaches no ledger row would spend
+            // money invisibly.
+            $response = $this->usageMeter->measureHttpResponse(
+                $model,
+                fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
+                $decision->estimatedCostNok,
+                $endpoint,
+                $decision->attempt,
+            );
 
             if ($response->successful()) {
                 $this->costControl->finalize($decision);
@@ -122,6 +126,22 @@ class OpenAiClient
         return $response;
     }
 
+    /**
+     * The operation a client names is pushed as a nested scope, so the usage meter — which reads the
+     * scope, not this call's arguments — records exactly the context that was authorised.
+     */
+    private function withinOperation(?string $operation, Closure $call): mixed
+    {
+        return $operation === null
+            ? $call()
+            : $this->contextScope->within(AiCallContext::none()->withOperation($operation), $call);
+    }
+
+    private function providerCallContext(string $model, string $endpoint): AiCallContext
+    {
+        return $this->contextPolicy->enforce($this->contextScope->current()->forProviderCall($model, $endpoint));
+    }
+
     private function send(string $endpoint, array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
     {
         // createResponse() has already created its own lifecycle attempt; using the raw transport
@@ -132,7 +152,9 @@ class OpenAiClient
         if ($response->failed()) {
             $this->logFailure($endpoint, $response->status(), $requestId, $response->body());
 
-            throw new RuntimeException($this->failureMessageFromResponse($endpoint, $response));
+            $usage = $response->json('usage');
+
+            throw new AiProviderHttpException($this->failureMessageFromResponse($endpoint, $response), $response->status(), is_array($usage) ? $usage : null);
         }
 
         $decoded = $response->json();
@@ -251,17 +273,6 @@ class OpenAiClient
             ->asJson()
             ->timeout($timeoutSeconds)
             ->withOptions($options);
-    }
-
-    private function embeddingModel(): string
-    {
-        $model = trim((string) config('services.openai.embedding_model', 'text-embedding-3-small'));
-
-        if ($model === '') {
-            throw new RuntimeException('OpenAI embedding model is not configured.');
-        }
-
-        return $model;
     }
 
     private function requestIdFrom(Response $response): ?string

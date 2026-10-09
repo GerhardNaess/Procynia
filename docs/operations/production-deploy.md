@@ -248,7 +248,6 @@ Bruk `pk_live_` og `sk_live_`, ikke testkeys, i produksjon.
 OPENAI_API_KEY=<api-nøkkel>
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4.1-mini
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 ```
 
 #### Doffin (kun dersom anbudshøsting er aktivert)

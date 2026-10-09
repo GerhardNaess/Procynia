@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunBestPracticeReevaluationService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -12,6 +13,8 @@ use Illuminate\Console\Command;
 #[Description('Re-evaluate one Enterprise Wiki run\'s unsupported_generated_content claims for legitimate best-practice suggestions, using stored block metadata only.')]
 class EnterpriseWikiReevaluateRunBestPracticeClaims extends Command
 {
+    use RunsInAiCallContext;
+
     public function handle(EnterpriseWikiRunBestPracticeReevaluationService $service): int
     {
         $runId = $this->option('run-id');
@@ -31,7 +34,11 @@ class EnterpriseWikiReevaluateRunBestPracticeClaims extends Command
         }
 
         $apply = (bool) $this->option('apply');
-        $result = $service->reevaluate($run, $apply);
+        // Any AI call the run's services make belongs to the run's customer.
+        $result = $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext((int) $run->id, 'wiki.operator.reevaluate_best_practice_claims'),
+            fn (): array => $service->reevaluate($run, $apply),
+        );
 
         $this->info($apply
             ? "[WIKI_BEST_PRACTICE_REEVAL] Applied reclassifications for run [{$run->id}]."

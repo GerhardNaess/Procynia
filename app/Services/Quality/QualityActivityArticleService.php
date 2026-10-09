@@ -12,9 +12,8 @@ use App\Models\QualityItem;
 use App\Models\QualityProcessBlueprint;
 use App\Models\User;
 use App\Services\Ai\Quality\ProcessActivityArticleAiClient;
-use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
-use App\Services\EnterpriseWiki\EnterpriseWikiDocumentUploadService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPublicationStatusService;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\Quality\Exceptions\ProcessFlowInterpretationException;
 use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Facades\DB;
@@ -76,8 +75,7 @@ class QualityActivityArticleService
     public function __construct(
         private readonly ProcessActivityArticleAiClient $client,
         private readonly QualityActivityArticleContextBuilder $contextBuilder,
-        private readonly EnterpriseWikiDocumentUploadService $documentUploads,
-        private readonly EnterpriseWikiDocumentFlowService $documentFlow,
+        private readonly WikiKnowledgeHandoffService $handoff,
         private readonly QualityActivityKnowledgeResolver $knowledge,
         private readonly EnterpriseWikiPublicationStatusService $publicationStatus,
         private readonly AiCallContextScope $contextScope,
@@ -111,7 +109,7 @@ class QualityActivityArticleService
             new AiCallContext(
                 customerId: (int) $item->customer_id,
                 feature: 'quality',
-                operation: 'process_activity_article_draft',
+                operation: 'quality.draft_activity_article',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),
@@ -166,35 +164,36 @@ class QualityActivityArticleService
         $title = trim($title);
         $markdown = trim($markdown);
 
-        // The same store, the same identity, the same reconciliation every uploaded source gets.
-        // `reused` is the honest answer when the identical text is already a source: the activity
-        // is recorded as one of its origins rather than a second copy being written.
-        $stored = $this->documentUploads->storeAuthoredText(
+        // The shared Wiki handoff: the same store, identity and reconciliation every uploaded source
+        // gets, a `quality_item` origin, and the ordinary run. When the identical text already is a
+        // source, the activity is recorded as one of its origins rather than a second copy written.
+        $provenance = null;
+        $deposited = $this->handoff->deposit(
             customerId: $customerId,
-            filename: $this->sourceFilename($title),
-            text: $this->sourceText($title, $markdown),
-            // Owner where the person qualifies for it, null where they do not. The document-owner
-            // sign-off is Wiki's, and Wiki already handles an unowned source; naming an owner who
-            // may not hold that responsibility would be worse than naming none.
-            ownerUserId: $actor->canBeEnterpriseWikiDocumentOwner() ? (int) $actor->id : null,
-            uploadedByUserId: (int) $actor->id,
+            actor: $actor,
+            sourceModule: 'quality',
+            sourceType: 'quality_item',
+            sourceId: (int) $item->id,
+            title: $title,
+            markdown: $this->sourceText($title, $markdown),
+            // Kvalitet's own activity link is written before the run starts, as before.
+            beforeStart: function (EnterpriseWikiDocument $document) use ($item, $activityKey, $customerId, $actor, &$provenance): void {
+                $provenance = DB::transaction(fn (): QualityActivityWikiPage => QualityActivityWikiPage::query()->firstOrCreate(
+                    [
+                        'quality_item_id' => (int) $item->id,
+                        'activity_key' => $activityKey,
+                        'enterprise_wiki_document_id' => (int) $document->id,
+                    ],
+                    [
+                        'customer_id' => $customerId,
+                        'created_by_user_id' => (int) $actor->id,
+                    ],
+                ));
+            },
         );
 
-        $document = $stored['document'];
-
-        $provenance = DB::transaction(fn (): QualityActivityWikiPage => QualityActivityWikiPage::query()->firstOrCreate(
-            [
-                'quality_item_id' => (int) $item->id,
-                'activity_key' => $activityKey,
-                'enterprise_wiki_document_id' => (int) $document->id,
-            ],
-            [
-                'customer_id' => $customerId,
-                'created_by_user_id' => (int) $actor->id,
-            ],
-        ));
-
-        $prepared = $this->documentFlow->startForDocument($customerId, (int) $document->id);
+        $document = $deposited['document'];
+        $prepared = ['run' => $deposited['run'], 'created' => $deposited['run_started']];
 
         return [
             'document' => $document,
@@ -344,23 +343,5 @@ class QualityActivityArticleService
     private function sourceText(string $title, string $markdown): string
     {
         return Str::startsWith($markdown, '# ') ? $markdown : "# {$title}\n\n{$markdown}";
-    }
-
-    /**
-     * What the source is called in Wiki → Kildedokumenter.
-     *
-     * The article's own title, so somebody looking at the customer's sources recognises what it is
-     * without having to open it. `.md` because that is what the stored bytes are.
-     */
-    private function sourceFilename(string $title): string
-    {
-        $name = trim(preg_replace('/[\/\\\\:*?"<>|\x00-\x1F]+/u', ' ', $title) ?? '');
-        $name = trim((string) preg_replace('/\s+/u', ' ', $name));
-
-        if ($name === '') {
-            $name = 'Kunnskapsartikkel';
-        }
-
-        return Str::limit($name, 180, '').'.md';
     }
 }

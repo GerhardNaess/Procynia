@@ -53,7 +53,7 @@ class ProcessRequirementExtractionChunk implements ShouldQueue
     public function handle(RequirementExtractionRunService $service): void
     {
         $this->withinAiCallContext(
-            $this->requirementExtractionCallAiCallContext($this->callId, 'saved_notice.requirement_extraction.chunk', $this->runId),
+            $this->requirementExtractionCallAiCallContext($this->callId, 'tender.requirement_extraction.chunk', $this->runId),
             function () use ($service): void {
                 $this->handleInAiCallContext($service);
             },

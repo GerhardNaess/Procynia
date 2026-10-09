@@ -1,17 +1,25 @@
 import { router, usePage } from '@inertiajs/react';
-import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
+import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
-import AiQuotaCard from '../../../Components/App/AiQuotaCard';
+import AiCapacityCard from '../../../Components/App/AiCapacityCard';
 import AlertBox from '../../../Components/App/AlertBox';
-import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { packageActionLabel, packageConfirmation, packageStatus, splitPackages } from '../../../Support/packagePresentation';
 
-function classNames(...values) {
-    return values.filter(Boolean).join(' ');
-}
+/**
+ * One type scale for the whole page, so a section heading always outranks the text explaining it
+ * and a value always outranks its label. Section headings had shrunk to body size and read like
+ * metadata under the intro.
+ */
+const SECTION_CARD = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6';
+const SECTION_HEADING = 'text-[1.375rem] font-semibold leading-8 tracking-tight text-slate-950';
+const SECTION_HELP = 'mt-1 max-w-3xl text-base leading-7 text-slate-600';
+const FACT_LABEL = 'text-base text-slate-600';
+const FACT_VALUE = 'mt-0.5 text-lg font-semibold text-slate-900';
+// Only the primary role carries its own focus ring; the others get the same one here.
+const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600';
 
 const STATUS_BADGE_TONES = {
     active: 'green',
@@ -42,26 +50,6 @@ function resolveLabel(value, labels, fallback) {
 }
 
 
-function SummaryCard({ label, value, hint, hintLabel }) {
-    return (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
-                <span>{label}</span>
-                {hint && (
-                    <InfoHint
-                        size="sm"
-                        label={hintLabel ?? `Vis forklaring for ${label}`}
-                        text={hint}
-                    />
-                )}
-            </div>
-            <div className="mt-3 text-lg font-semibold text-slate-900">
-                {value}
-            </div>
-        </div>
-    );
-}
-
 function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLabel = 'Bekreft', cancelLabel = 'Avbryt', warning = false }) {
     if (!isOpen) {
         return null;
@@ -70,23 +58,20 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
             <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-                <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+                <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
                 {(Array.isArray(message) ? message : [message]).map((line) => (
                     <p key={line} className="mt-2 text-base leading-6 text-slate-600">{line}</p>
                 ))}
                 <div className="mt-5 flex justify-end gap-3">
                     <button
                         onClick={onCancel}
-                        className={`rounded-lg px-4 py-2 text-base font-medium ${SECONDARY_COLOURS}`}
+                        className={`${SECONDARY_ACTION} ${FOCUS_RING}`}
                     >
                         {cancelLabel}
                     </button>
                     <button
                         onClick={onConfirm}
-                        className={classNames(
-                            'rounded-lg px-4 py-2 text-base font-medium',
-                            warning ? WARNING_COLOURS : PRIMARY_COLOURS
-                        )}
+                        className={warning ? `${WARNING_ACTION} ${FOCUS_RING}` : PRIMARY_ACTION}
                     >
                         {confirmLabel}
                     </button>
@@ -99,27 +84,27 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
 export default function BillingIndex() {
     const page = usePage().props;
     const {
-        available_plans: availablePlans = [],
-        customer_plan: customerPlan = {},
         subscription,
         invoices = [],
         billing_lines: billingLines = [],
-        ai_quota: aiQuota = null,
+        // The shared AI capacity, in AI units (CustomerAiCapacityService). No tokens, no money.
+        ai_capacity: aiCapacity = null,
+        // What each AI capacity level would include for this customer, in AI units.
+        ai_capacity_levels: aiCapacityLevels = [],
         // Resolved by ModuleEntitlementService. The page renders this verdict; it never decides
         // on its own which packages or modules are active.
         module_packages: modulePackages = [],
         translations = {},
-        errors = {},
         flash,
         locale = 'nb-NO',
     } = page;
 
     const tb = translations.billing ?? {};
-    const aiQuotaText = translations.ai_quota ?? {};
-    const planChangeText = tb.plan_change ?? {};
+    const cardText = tb.subscription_card ?? {};
+    const intervalLabels = tb.interval_labels ?? {};
+    const aiCapacityText = tb.ai_capacity ?? {};
     const summaryText = tb.summary ?? {};
     const alertText = tb.alerts ?? {};
-    const subscriptionText = tb.stripe_subscription ?? {};
     const modulesText = tb.modules ?? {};
     const packageLabels = modulesText.package_labels ?? {};
     const packageDescriptions = modulesText.package_descriptions ?? {};
@@ -131,35 +116,21 @@ export default function BillingIndex() {
     const statusLabels = tb.status_labels ?? {};
     const lineTypeLabels = tb.billing_line_type_labels ?? {};
     const billingLineStatusLabels = tb.billing_line_status_labels ?? {};
-    const summaryHints = tb.summary_hints ?? {};
 
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmResume, setConfirmResume] = useState(false);
     // Bestill or Avbestill waiting for confirmation: the package's key.
     const [confirmPackageKey, setConfirmPackageKey] = useState(null);
-    const [planChangeOpen, setPlanChangeOpen] = useState(false);
-    const [planChangeStep, setPlanChangeStep] = useState('selection');
-    const [selectedPlanKey, setSelectedPlanKey] = useState('');
-    const [selectedInterval, setSelectedInterval] = useState('monthly');
 
     const sortedInvoices = [...invoices].sort((left, right) => (right.date_sort ?? 0) - (left.date_sort ?? 0));
-    const hasRegisteredSubscription = Boolean(subscription?.plan || subscription?.plan_label);
+    // The page names the product, Basis — never the legacy plan tier the backend still keeps.
+    const hasRegisteredSubscription = Boolean(subscription);
     const hasProcyniaServices = billingLines.length > 0;
-    const currentPlanKey = normalizeKey(subscription?.plan ?? customerPlan.plan);
-    const currentPlanLabel = subscription?.plan_label
-        ?? customerPlan.plan_label
-        ?? planChangeText.current_plan
-        ?? 'Nåværende abonnement';
-    const currentIntervalKey = normalizeKey(subscription?.billing_interval ?? customerPlan.billing_interval ?? 'monthly');
-    const currentIntervalLabel = currentIntervalKey === 'yearly'
-        ? (planChangeText.yearly ?? 'Årlig')
-        : (planChangeText.monthly ?? 'Månedlig');
-    const canChangePlan = availablePlans.length > 0 && currentPlanKey !== 'enterprise';
-    const selectedPlan = availablePlans.find((plan) => normalizeKey(plan.key) === selectedPlanKey) ?? null;
-    const selectedPlanIntervals = selectedPlan?.intervals ?? [];
-    const selectedIntervalOption = selectedPlanIntervals.find((option) => normalizeKey(option.interval) === selectedInterval)
-        ?? selectedPlanIntervals[0]
-        ?? null;
+    const productLabel = cardText.product ?? 'Basis';
+    const currentIntervalLabel = normalizeKey(subscription?.billing_interval) === 'yearly'
+        ? (intervalLabels.yearly ?? 'Årlig')
+        : (intervalLabels.monthly ?? 'Månedlig');
+    const isEnding = Boolean(subscription?.cancel_at_period_end);
 
     const formatDate = (dateStr) => {
         if (!dateStr) {
@@ -204,29 +175,6 @@ export default function BillingIndex() {
         ?? summaryText.not_available
         ?? 'Ikke tilgjengelig';
 
-    const formatCount = (count) => {
-        if (count === 0) {
-            return summaryText.none ?? 'Ingen';
-        }
-
-        const template = count === 1 ? summaryText.active_one : summaryText.active_many;
-        return (template ?? ':count aktive').replace(':count', String(count));
-    };
-
-    const formatMoney = (value) => new Intl.NumberFormat(locale).format(Number(value ?? 0));
-
-    const formatPlanIntervalPrice = (value, interval) => {
-        if (value === null || value === undefined) {
-            return summaryText.not_available ?? 'Ikke tilgjengelig';
-        }
-
-        const intervalUnit = normalizeKey(interval) === 'yearly'
-            ? (planChangeText.yearly_unit ?? 'year')
-            : (planChangeText.monthly_unit ?? 'month');
-
-        return `${formatMoney(value)} kr/${intervalUnit}`;
-    };
-
     const isOutstandingInvoice = (status) => new Set(['open', 'unpaid', 'past_due', 'incomplete', 'incomplete_expired'])
         .has(normalizeKey(status));
 
@@ -241,61 +189,7 @@ export default function BillingIndex() {
         }).format(outstandingAmount)
         : null;
 
-    const buildPlanLabel = (plan) => {
-        const intervalPrices = (plan.intervals ?? [])
-            .map((interval) => formatPlanIntervalPrice(interval.price_nok, interval.interval))
-            .join(' · ');
-        const currentBadge = plan.is_current ? ` (${planChangeText.current_badge ?? 'Nåværende'})` : '';
-
-        return `${plan.name}${intervalPrices ? ` — ${intervalPrices}` : ''}${currentBadge}`;
-    };
-
-    const subscriptionSummaryValue = `${currentPlanLabel}${currentIntervalLabel ? ` · ${currentIntervalLabel}` : ''}`;
-
-    const procyniaServicesValue = formatCount(billingLines.length);
-
     const showAddonsWithoutSubscriptionWarning = !hasRegisteredSubscription && hasProcyniaServices;
-    const currentPlanOption = availablePlans.find((plan) => normalizeKey(plan.key) === currentPlanKey) ?? null;
-    const currentPlanIntervalOption = currentPlanOption?.intervals?.find((option) => normalizeKey(option.interval) === currentIntervalKey)
-        ?? currentPlanOption?.intervals?.[0]
-        ?? null;
-    const currentPlanSummary = currentPlanOption ? {
-        label: planChangeText.current_plan ?? 'Nåværende abonnement',
-        name: currentPlanLabel,
-        intervalLabel: currentIntervalLabel,
-        priceLabel: currentPlanIntervalOption?.price_nok !== undefined && currentPlanIntervalOption?.price_nok !== null
-            ? formatPlanIntervalPrice(currentPlanIntervalOption.price_nok, currentPlanIntervalOption.interval)
-            : null,
-        includedUsers: currentPlanOption.included_users ?? null,
-        includedAiCredits: currentPlanOption.included_ai_credits ?? null,
-    } : null;
-    const selectedPlanSummary = selectedPlan ? {
-        label: planChangeText.selected_plan ?? 'Valgt abonnement',
-        name: selectedPlan.name,
-        intervalLabel: selectedIntervalOption?.label
-            ?? (normalizeKey(selectedInterval) === 'yearly'
-                ? (planChangeText.yearly ?? 'Årlig')
-                : (planChangeText.monthly ?? 'Månedlig')),
-        priceLabel: selectedIntervalOption
-            ? formatPlanIntervalPrice(selectedIntervalOption.price_nok, selectedIntervalOption.interval)
-            : null,
-        includedUsers: selectedPlan.included_users ?? null,
-        includedAiCredits: selectedPlan.included_ai_credits ?? null,
-    } : null;
-    const isSamePlanSelection = normalizeKey(selectedPlanKey) === currentPlanKey
-        && normalizeKey(selectedInterval) === currentIntervalKey;
-    const planPreviewSummary = isSamePlanSelection
-        ? (currentPlanSummary ?? selectedPlanSummary)
-        : (selectedPlanSummary ?? currentPlanSummary);
-    const planPreviewIntervalTitle = isSamePlanSelection
-        ? (planChangeText.current_interval ?? 'Nåværende faktureringsperiode')
-        : (planChangeText.selected_interval ?? 'Valgt intervall');
-    const planPreviewIntervalLabel = isSamePlanSelection
-        ? currentIntervalLabel
-        : (selectedPlanSummary?.intervalLabel ?? currentIntervalLabel);
-    const canConfirmPlanChange = Boolean(selectedPlanKey && selectedInterval && !isSamePlanSelection);
-    const planChangeError = errors.plan ?? errors.interval ?? '';
-
     const handleCancel = () => {
         router.post('/app/billing/cancel', {}, {
             preserveScroll: true,
@@ -306,6 +200,10 @@ export default function BillingIndex() {
     const resolvePackageName = (key) => packageLabels[key] ?? key;
     const resolveModuleLabel = (key) => moduleLabels[key] ?? key;
     const { base: basePackage, options: optionPackages } = splitPackages(modulePackages);
+    // "Wiki, Kvalitet og Avvik og forbedringer" — said once, in the Basis card.
+    const basisModules = basePackage?.modules?.length
+        ? new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(basePackage.modules.map((key) => resolveModuleLabel(key)))
+        : null;
     const confirmPackage = modulePackages.find((entry) => entry.key === confirmPackageKey) ?? null;
     const confirmation = confirmPackage ? packageConfirmation(confirmPackage, modulesText, resolvePackageName) : null;
 
@@ -326,15 +224,15 @@ export default function BillingIndex() {
         const presentation = packageStatus(entry, modulesText);
 
         return (
-            <div data-testid={`package-status-${entry.key}`}>
+            <div data-testid={`package-status-${entry.key}`} className="flex flex-col items-start gap-1 sm:items-end">
                 <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>
                 {entry.status === 'requested' && entry.requested_at && (
-                    <div className="mt-1 text-base leading-6 text-slate-600">
+                    <div className="text-base leading-6 text-slate-600">
                         {(modulesText.requested_at ?? 'Bestilt :date').replace(':date', formatDate(entry.requested_at))}
                     </div>
                 )}
                 {entry.status === 'active' && entry.activated_at && (
-                    <div className="mt-1 text-base leading-6 text-slate-600">
+                    <div className="text-base leading-6 text-slate-600">
                         {(modulesText.activated_at ?? 'Aktivert :date').replace(':date', formatDate(entry.activated_at))}
                     </div>
                 )}
@@ -353,7 +251,7 @@ export default function BillingIndex() {
             <button
                 type="button"
                 onClick={() => setConfirmPackageKey(entry.key)}
-                className={`whitespace-nowrap rounded-lg px-4 py-2 text-base font-medium ${entry.action === 'cancel' ? SECONDARY_COLOURS : PRIMARY_COLOURS}`}
+                className={`whitespace-nowrap ${entry.action === 'cancel' ? `${SECONDARY_ACTION} ${FOCUS_RING}` : PRIMARY_ACTION}`}
             >
                 {label}
             </button>
@@ -364,66 +262,6 @@ export default function BillingIndex() {
         router.post('/app/billing/resume', {}, {
             preserveScroll: true,
             onSuccess: () => setConfirmResume(false),
-        });
-    };
-
-    const openPlanChangeModal = () => {
-        if (!availablePlans.length) {
-            return;
-        }
-
-        const initialPlan = availablePlans.find((plan) => normalizeKey(plan.key) === currentPlanKey) ?? availablePlans[0];
-        const initialInterval = initialPlan?.intervals?.find((interval) => normalizeKey(interval.interval) === currentIntervalKey)?.interval
-            ?? initialPlan?.intervals?.[0]?.interval
-            ?? 'monthly';
-
-        setSelectedPlanKey(initialPlan?.key ?? '');
-        setSelectedInterval(normalizeKey(initialInterval));
-        setPlanChangeStep('selection');
-        setPlanChangeOpen(true);
-    };
-
-    const openPlanChangeConfirmation = () => {
-        if (!canConfirmPlanChange) {
-            return;
-        }
-
-        setPlanChangeStep('confirm');
-    };
-
-    const closePlanChangeModal = () => {
-        setPlanChangeOpen(false);
-        setPlanChangeStep('selection');
-    };
-
-    const handlePlanSelection = (planKey) => {
-        const nextPlan = availablePlans.find((plan) => normalizeKey(plan.key) === normalizeKey(planKey));
-
-        setSelectedPlanKey(planKey);
-
-        if (!nextPlan) {
-            return;
-        }
-
-        const preferredInterval = nextPlan.intervals?.find((interval) => normalizeKey(interval.interval) === selectedInterval)?.interval
-            ?? nextPlan.intervals?.[0]?.interval
-            ?? 'monthly';
-
-        setSelectedInterval(normalizeKey(preferredInterval));
-    };
-
-    const handlePlanChangeSubmit = () => {
-        if (!canConfirmPlanChange) {
-            return;
-        }
-
-        router.post('/app/billing/change-plan', {
-            plan: selectedPlanKey,
-            interval: selectedInterval,
-        }, {
-            preserveScroll: true,
-            preserveState: true,
-            onSuccess: closePlanChangeModal,
         });
     };
 
@@ -446,23 +284,23 @@ export default function BillingIndex() {
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tb.title ?? 'Abonnement'}</h1>
                         <PageHelpButton
                             buttonLabel={tb.page_help_button ?? 'Hjelp'}
-                            title={tb.page_help_title ?? 'Om abonnement, tilleggstjenester og fakturaer'}
-                            intro={tb.page_help_intro ?? 'Siden gir deg oversikt over abonnement, tilleggstjenester og fakturahistorikk.'}
+                            title={tb.page_help_title ?? 'Om abonnementet'}
+                            intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og separat AI-kapasitet. Basis er grunnproduktet. Opsjoner gir tilgang til flere moduler. AI-kapasiteten deles av alle funksjoner som bruker AI.'}
                             sections={[
                                 {
                                     title: tb.page_help_section_overview ?? 'Hva du finner her',
                                     items: [
                                         {
-                                            title: tb.page_help_item_subscription_title ?? 'Abonnement',
-                                            text: tb.page_help_item_subscription_text ?? 'Viser plan, periode, inkluderte brukere og AI-kapasitet.',
+                                            title: tb.page_help_item_subscription_title ?? 'Basis',
+                                            text: tb.page_help_item_subscription_text ?? 'Grunnproduktet: hvordan abonnementet faktureres og hvor mange brukere som er inkludert. Her kan abonnementet også sies opp.',
                                         },
                                         {
-                                            title: tb.page_help_item_modules_title ?? 'Moduler og pakker',
-                                            text: tb.page_help_item_modules_text ?? 'Viser hvilke pakker kundemiljøet har, og hvilke moduler hver pakke aktiverer.',
+                                            title: tb.page_help_item_modules_title ?? 'Opsjoner',
+                                            text: tb.page_help_item_modules_text ?? 'Moduler som kan bestilles og avbestilles hver for seg. Avbestilling sletter ikke data.',
                                         },
                                         {
-                                            title: tb.page_help_item_services_title ?? 'Tilleggstjenester',
-                                            text: tb.page_help_item_services_text ?? 'Viser tilleggstjenester som er knyttet til kunden.',
+                                            title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
+                                            text: tb.page_help_item_ai_capacity_text ?? 'AI-kapasiteten beregnes ut fra virksomhetens brukere og aktive moduler. Valgt nivå bestemmer hvor mye ekstra kapasitet virksomheten har. Alle AI-funksjoner bruker den samme kapasiteten.',
                                         },
                                         {
                                             title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
@@ -474,178 +312,147 @@ export default function BillingIndex() {
                         />
                     </div>
                     <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        {tb.subtitle ?? 'Oversikt over abonnement, tilleggstjenester og fakturaer.'}
-                    </p>
-                    <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        {tb.intro ?? 'Her ser du kundens abonnement, tilleggstjenester og fakturering. Fakturaer og PDF-er vises når de finnes.'}
+                        {tb.subtitle ?? 'Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer.'}
                     </p>
                 </section>
-
-                <section className="grid gap-4 md:grid-cols-2">
-                    <SummaryCard
-                        label={summaryText.subscription ?? 'Abonnement'}
-                        value={subscriptionSummaryValue}
-                        hint={summaryHints.subscription}
-                    />
-                    <SummaryCard
-                        label={summaryText.procynia_services ?? 'Tilleggstjenester'}
-                        value={procyniaServicesValue}
-                        hint={summaryHints.addons}
-                    />
-                </section>
-
-                <AiQuotaCard quota={aiQuota} texts={aiQuotaText} locale={locale} />
 
                 {showAddonsWithoutSubscriptionWarning && (
                     <AlertBox>
-                        {alertText.addons_without_subscription ?? 'Kontoen har aktive tillegg, men ingen aktivt abonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
+                        {alertText.addons_without_subscription ?? 'Kontoen har aktive fakturerte tjenester, men ingen aktivt abonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
                     </AlertBox>
                 )}
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2">
-                        <h2 className="text-base font-semibold text-slate-900">
-                            {subscriptionText.heading ?? 'Abonnement'}
-                        </h2>
-                        <InfoHint size="sm" label="Vis forklaring for abonnement" text={tb.hint_subscription} />
-                    </div>
-
-                    <div className="mt-4 space-y-4">
-                        <p className="text-base leading-6 text-slate-600">
-                            {hasRegisteredSubscription
-                                ? (subscriptionText.registered ?? 'Abonnementet er registrert.')
-                                : (subscriptionText.empty ?? 'Ingen aktivt abonnement er registrert.')}
-                        </p>
-
-                        <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-base md:grid-cols-2">
-                            <dt className="text-slate-600">{subscriptionText.plan ?? 'Abonnement'}</dt>
-                            <dd className="font-medium text-slate-900">{currentPlanLabel}</dd>
-
-                            <dt className="text-slate-600">{subscriptionText.interval ?? 'Intervall'}</dt>
-                            <dd className="font-medium text-slate-900">{currentIntervalLabel}</dd>
-
-                            {subscription?.included_users !== undefined && subscription?.included_users !== null && (
-                                <>
-                                    <dt className="text-slate-600">{subscriptionText.included_users ?? 'Inkluderte brukere'}</dt>
-                                    <dd className="font-medium text-slate-900">{subscription.included_users}</dd>
-                                </>
-                            )}
-
-                            {subscription?.included_ai_credits !== undefined && subscription?.included_ai_credits !== null && (
-                                <>
-                                    <dt className="flex items-center gap-1.5 text-slate-600">
-                                        {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
-                                        <InfoHint size="sm" label="Vis forklaring for KI-tilbud" text={tb.hint_ai_credits} />
-                                    </dt>
-                                    <dd className="font-medium text-slate-900">{subscription.included_ai_credits}</dd>
-                                </>
-                            )}
-                        </dl>
-
-                        <div className="flex flex-wrap gap-3 pt-2">
-                            {canChangePlan && (
-                                <button
-                                    onClick={openPlanChangeModal}
-                                    className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
-                                >
-                                    {planChangeText.button ?? 'Endre abonnement'}
-                                </button>
-                            )}
-                            {subscription?.status === 'active' && !subscription.cancel_at_period_end && (
-                                <button
-                                    onClick={() => setConfirmCancel(true)}
-                                    className={`rounded-lg px-4 py-2 text-base font-medium ${WARNING_COLOURS}`}
-                                >
-                                    {tb.cancel ?? 'Si opp abonnement'}
-                                </button>
-                            )}
-                            {subscription?.cancel_at_period_end && (
-                                <button
-                                    onClick={() => setConfirmResume(true)}
-                                    className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
-                                >
-                                    {tb.resume ?? 'Gjenoppta abonnement'}
-                                </button>
-                            )}
+                {/* 1. Basis: the base product and how the subscription is billed. Never options or AI capacity. */}
+                <section data-testid="subscription-card" className={SECTION_CARD}>
+                    <div data-testid={basePackage ? `package-row-${basePackage.key}` : undefined}>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                            <h2 className={SECTION_HEADING}>{productLabel}</h2>
+                            <div data-testid={basePackage ? `package-status-${basePackage.key}` : undefined}>
+                                {hasRegisteredSubscription ? (
+                                    <StatusBadge tone={isEnding ? 'amber' : 'green'}>
+                                        {isEnding
+                                            ? (cardText.status_ending ?? 'Avsluttes ved periodeslutt')
+                                            : (cardText.status_active ?? 'Aktiv')}
+                                    </StatusBadge>
+                                ) : basePackage && (
+                                    <StatusBadge tone={packageStatus(basePackage, modulesText).tone}>
+                                        {packageStatus(basePackage, modulesText).label}
+                                    </StatusBadge>
+                                )}
+                            </div>
                         </div>
+                        {basisModules && (
+                            <p className={SECTION_HELP}>
+                                {(cardText.contains ?? 'Inneholder :modules.').replace(':modules', basisModules)}
+                            </p>
+                        )}
                     </div>
+
+                    {hasRegisteredSubscription ? (
+                        <>
+                            <dl data-testid="subscription-facts" className="mt-4 grid grid-cols-2 gap-x-8 gap-y-4 sm:flex sm:flex-wrap sm:gap-x-12">
+                                <div>
+                                    <dt className={FACT_LABEL}>{cardText.billing_interval ?? 'Fakturering'}</dt>
+                                    <dd className={FACT_VALUE}>{currentIntervalLabel}</dd>
+                                </div>
+
+                                {subscription.included_users !== null && subscription.included_users !== undefined && (
+                                    <div>
+                                        <dt className={FACT_LABEL}>{cardText.included_users ?? 'Inkluderte brukere'}</dt>
+                                        <dd className={FACT_VALUE}>{subscription.included_users}</dd>
+                                    </div>
+                                )}
+
+                                {subscription.period_end && (
+                                    <div>
+                                        <dt className={FACT_LABEL}>
+                                            {isEnding ? (cardText.ends_at ?? 'Avsluttes') : (cardText.next_invoice ?? 'Neste fakturadato')}
+                                        </dt>
+                                        <dd className={FACT_VALUE}>{formatDate(subscription.period_end)}</dd>
+                                    </div>
+                                )}
+                            </dl>
+
+                            <div className="mt-5 flex flex-wrap gap-3">
+                                {subscription.status === 'active' && !isEnding && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfirmCancel(true)}
+                                        className={`${WARNING_ACTION} ${FOCUS_RING}`}
+                                    >
+                                        {tb.cancel ?? 'Si opp abonnement'}
+                                    </button>
+                                )}
+                                {isEnding && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfirmResume(true)}
+                                        className={PRIMARY_ACTION}
+                                    >
+                                        {tb.resume ?? 'Gjenoppta abonnement'}
+                                    </button>
+                                )}
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <p className="mt-3 text-base leading-7 text-slate-600">
+                                {cardText.empty ?? 'Ingen aktivt abonnement er registrert.'}
+                            </p>
+                            {basePackage && packageActionLabel(basePackage, modulesText) && (
+                                <div className="mt-4">{renderPackageAction(basePackage)}</div>
+                            )}
+                        </>
+                    )}
                 </section>
 
-                <section data-testid="module-packages" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2">
-                        <h2 className="text-base font-semibold text-slate-900">
-                            {modulesText.heading ?? 'Moduler og pakker'}
-                        </h2>
-                        <InfoHint size="sm" label="Vis forklaring for moduler og pakker" text={modulesText.hint} />
-                    </div>
-                    <p className="mt-2 text-base leading-6 text-slate-600">
-                        {modulesText.help ?? 'Basis er grunnpakken i Procynia. Du kan i tillegg bestille de modulene virksomheten trenger. Opsjoner kan aktiveres og avbestilles uavhengig av hverandre. Avbestilling sletter ikke data.'}
+                {/* 2. Opsjoner: each option on its own. What Basis contains is not repeated here. */}
+                <section data-testid="module-packages" className={SECTION_CARD}>
+                    <h2 className={SECTION_HEADING}>
+                        {modulesText.options_heading ?? 'Opsjoner'}
+                    </h2>
+                    <p className={SECTION_HELP}>
+                        {modulesText.options_help ?? 'Bestill og avbestill hver opsjon for seg. Brukere får tilgang gjennom rollene sine. Avbestilling sletter ikke data.'}
                     </p>
-
-                    {basePackage && (
-                        <div data-testid={`package-row-${basePackage.key}`} className="mt-5 rounded-xl border border-slate-200 p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <h3 className="text-base font-semibold text-slate-900">{modulesText.base_heading ?? 'Basis'}</h3>
-                                    <p className="mt-1 text-base leading-6 text-slate-600">
-                                        {modulesText.base_help ?? 'Basis er grunnpakken i Procynia.'}
-                                    </p>
-                                </div>
-                                <div className="flex flex-wrap items-start gap-3">
-                                    {renderPackageStatus(basePackage)}
-                                    {renderPackageAction(basePackage)}
-                                </div>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-1.5">
-                                {basePackage.modules.map((moduleKey) => (
-                                    <span
-                                        key={moduleKey}
-                                        className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-base font-medium leading-6 text-slate-700"
-                                    >
-                                        {resolveModuleLabel(moduleKey)}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <h3 className="mt-6 text-base font-semibold text-slate-900">{modulesText.options_heading ?? 'Opsjoner'}</h3>
-                    <p className="mt-1 text-base leading-6 text-slate-600">
-                        {modulesText.options_help ?? 'Bestill og avbestill hver modul for seg.'}
-                    </p>
-                    <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
                         {optionPackages.map((entry) => (
                             <li
                                 key={entry.key}
                                 data-testid={`package-row-${entry.key}`}
-                                className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_10rem_9rem] sm:items-start"
+                                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
                             >
-                                <div className="min-w-0">
-                                    <div className="font-medium text-slate-900">{resolvePackageName(entry.key)}</div>
+                                <div className="min-w-0 sm:flex-1">
+                                    <h3 className="text-lg font-semibold text-slate-900">{resolvePackageName(entry.key)}</h3>
                                     {packageDescriptions[entry.key] && (
-                                        <p className="mt-1 text-base leading-6 text-slate-600">{packageDescriptions[entry.key]}</p>
+                                        <p className="mt-0.5 text-base leading-6 text-slate-600">{packageDescriptions[entry.key]}</p>
                                     )}
                                 </div>
-                                {renderPackageStatus(entry)}
-                                <div className="sm:text-right">{renderPackageAction(entry)}</div>
+                                {/* Status and action belong to the row, but never outweigh the module's name. */}
+                                <div data-testid={`package-side-${entry.key}`} className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
+                                    {renderPackageStatus(entry)}
+                                    {renderPackageAction(entry)}
+                                </div>
                             </li>
                         ))}
                     </ul>
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2">
-                        <h2 className="text-base font-semibold text-slate-900">
-                            {servicesText.heading ?? 'Tilleggstjenester'}
-                        </h2>
-                        <InfoHint size="sm" label="Vis forklaring for tilleggstjenester" text={tb.hint_procynia_services} />
-                    </div>
+                {/* 3. AI-kapasitet: one pool for every module, not sized by Basis or the options. */}
+                <AiCapacityCard capacity={aiCapacity} levels={aiCapacityLevels} texts={aiCapacityText} locale={locale} />
 
-                    {billingLines.length > 0 ? (
+                {/* Invoiced services outside Basis and the options (seats, one-off services). Only when there are any. */}
+                {hasProcyniaServices && (
+                    <section data-testid="other-services" className={SECTION_CARD}>
+                        <h2 className={SECTION_HEADING}>
+                            {servicesText.heading ?? 'Andre fakturerte tjenester'}
+                        </h2>
+                        <p className={SECTION_HELP}>
+                            {servicesText.help ?? 'Tjenester som faktureres i tillegg til Basis og opsjonene.'}
+                        </p>
                         <div className="mt-4 overflow-x-auto">
                             <table className="w-full text-base">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
+                                    <tr className="border-b border-slate-200 text-left text-base font-medium text-slate-600">
                                         <th className="pb-2 pr-4">{servicesTableText.service ?? 'Tjeneste'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.type ?? 'Type'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.status ?? 'Status'}</th>
@@ -672,26 +479,22 @@ export default function BillingIndex() {
                                 </tbody>
                             </table>
                         </div>
-                    ) : (
-                        <p className="mt-4 text-base leading-6 text-slate-600">
-                            {servicesText.empty ?? 'Ingen tilleggstjenester registrert. Tilleggstjenester beskriver ekstra tjenester som er knyttet til abonnementet, men er ikke økonomisk fasit.'}
-                        </p>
-                    )}
-                </section>
+                    </section>
+                )}
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-base font-semibold text-slate-900">
+                <section data-testid="invoices" className={SECTION_CARD}>
+                    <h2 className={SECTION_HEADING}>
                         {invoicesText.heading ?? 'Fakturaer og betalinger'}
                     </h2>
-                    <p className="mt-2 text-base leading-6 text-slate-600">
+                    <p className={SECTION_HELP}>
                         {invoicesText.help ?? 'Her finner du utestående beløp, fakturahistorikk og eventuelle PDF-er.'}
                     </p>
 
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div className={FACT_LABEL}>
                             {invoicesText.outstanding_label ?? 'Utestående beløp'}
                         </div>
-                        <div className="mt-2 text-base font-semibold text-slate-900">
+                        <div className={FACT_VALUE}>
                             {outstandingAmountLabel ?? (invoicesText.no_outstanding ?? 'Ingen utestående beløp registrert.')}
                         </div>
                     </div>
@@ -700,7 +503,7 @@ export default function BillingIndex() {
                         <div className="mt-4 overflow-x-auto">
                             <table className="w-full text-base">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
+                                    <tr className="border-b border-slate-200 text-left text-base font-medium text-slate-600">
                                         <th className="pb-2 pr-4">{invoicesTableText.number ?? 'Fakturanummer'}</th>
                                         <th className="pb-2 pr-4">{invoicesTableText.date ?? 'Dato'}</th>
                                         <th className="pb-2 pr-4">{invoicesTableText.amount ?? 'Beløp'}</th>
@@ -727,7 +530,7 @@ export default function BillingIndex() {
                                                         href={invoice.invoice_pdf ?? invoice.hosted_invoice_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="text-base font-medium text-blue-700 hover:underline"
+                                                        className={`rounded text-base font-medium text-blue-700 hover:underline ${FOCUS_RING}`}
                                                     >
                                                         PDF
                                                     </a>
@@ -741,242 +544,12 @@ export default function BillingIndex() {
                             </table>
                         </div>
                     ) : (
-                        <p className="mt-4 text-base leading-6 text-slate-600">
+                        <p className="mt-4 text-base leading-7 text-slate-600">
                             {invoicesText.empty ?? 'Ingen fakturaer tilgjengelig.'}
                         </p>
                     )}
                 </section>
             </div>
-
-            {planChangeOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
-                    <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-                        <div className="space-y-2">
-                            <h3 className="text-lg font-semibold text-slate-900">
-                                {planChangeStep === 'confirm'
-                                    ? (planChangeText.confirm ?? 'Bekreft abonnementsendring')
-                                    : (planChangeText.heading ?? 'Endre abonnement')}
-                            </h3>
-                            <p className="text-base leading-6 text-slate-600">
-                                {planChangeStep === 'confirm'
-                                    ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.')
-                                    : (planChangeText.description ?? 'Velg et nytt abonnement.')}
-                            </p>
-                        </div>
-
-                        {planChangeError && (
-                            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-base leading-6 text-red-700">
-                                {planChangeError}
-                            </div>
-                        )}
-
-                        {planChangeStep === 'selection' ? (
-                            <>
-                                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                    <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
-                                        {planPreviewSummary?.label ?? planChangeText.current_plan ?? 'Nåværende abonnement'}
-                                    </div>
-                                    <div className="mt-2 text-base font-semibold text-slate-900">
-                                        {planPreviewSummary?.name ?? currentPlanLabel}
-                                    </div>
-                                    <div className="mt-1 text-base text-slate-600">
-                                        {planPreviewIntervalTitle}: {planPreviewIntervalLabel}
-                                    </div>
-                                    {planPreviewSummary && (
-                                        <dl className="mt-4 grid gap-x-8 gap-y-3 text-base md:grid-cols-2">
-                                            {planPreviewSummary.priceLabel && (
-                                                <div>
-                                                    <dt className="text-slate-600">
-                                                        {planChangeText.price ?? 'Pris'}
-                                                    </dt>
-                                                    <dd className="mt-1 font-medium text-slate-900">
-                                                        {planPreviewSummary.priceLabel}
-                                                    </dd>
-                                                </div>
-                                            )}
-                                            {planPreviewSummary.includedUsers !== null && planPreviewSummary.includedUsers !== undefined && (
-                                                <div>
-                                                    <dt className="text-slate-600">
-                                                        {subscriptionText.included_users ?? 'Inkluderte brukere'}
-                                                    </dt>
-                                                    <dd className="mt-1 font-medium text-slate-900">
-                                                        {planPreviewSummary.includedUsers}
-                                                    </dd>
-                                                </div>
-                                            )}
-                                            {planPreviewSummary.includedAiCredits !== null && planPreviewSummary.includedAiCredits !== undefined && (
-                                                <div>
-                                                    <dt className="text-slate-600">
-                                                        {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
-                                                    </dt>
-                                                    <dd className="mt-1 font-medium text-slate-900">
-                                                        {planPreviewSummary.includedAiCredits}
-                                                    </dd>
-                                                </div>
-                                            )}
-                                        </dl>
-                                    )}
-                                </div>
-
-                                <div className="mt-5 grid gap-5 lg:grid-cols-2">
-                                    <div>
-                                        <label className="block text-base font-medium text-slate-700">
-                                            {planChangeText.select_plan ?? 'Velg nytt abonnement'}
-                                        </label>
-                                        <select
-                                            value={selectedPlanKey}
-                                            onChange={(event) => handlePlanSelection(event.target.value)}
-                                            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                        >
-                                            {availablePlans.map((plan) => (
-                                                <option key={plan.key} value={plan.key}>
-                                                    {buildPlanLabel(plan)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {errors.plan && (
-                                            <p className="mt-2 text-base text-red-700">{errors.plan}</p>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <div className="block text-base font-medium text-slate-700">
-                                            {planChangeText.select_interval ?? 'Velg faktureringsperiode'}
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap gap-2">
-                                            {selectedPlanIntervals.map((interval) => (
-                                                <button
-                                                    key={interval.interval}
-                                                    type="button"
-                                                    onClick={() => setSelectedInterval(normalizeKey(interval.interval))}
-                                                    className={classNames(
-                                                        'rounded-full border px-3 py-2 text-base font-medium transition',
-                                                        normalizeKey(interval.interval) === selectedInterval
-                                                            ? 'border-blue-300 bg-blue-50 text-blue-800'
-                                                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                                                    )}
-                                                >
-                                                    <span className="block">{interval.label}</span>
-                                                    <span className="block text-base font-normal text-slate-600">
-                                                        {formatPlanIntervalPrice(interval.price_nok, interval.interval)}
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                        {errors.interval && (
-                                            <p className="mt-2 text-base text-red-700">{errors.interval}</p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                    <button
-                                        onClick={closePlanChangeModal}
-                                        className="rounded-lg border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
-                                    >
-                                        {planChangeText.cancel ?? 'Avbryt'}
-                                    </button>
-                                    <button
-                                        onClick={openPlanChangeConfirmation}
-                                        disabled={!canConfirmPlanChange}
-                                        className={classNames(
-                                            'rounded-lg px-4 py-2 text-base font-medium text-white',
-                                            canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
-                                        )}
-                                    >
-                                        {planChangeText.next_step ?? 'Fortsett'}
-                                    </button>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <AlertBox className="mt-4">
-                                    <p className="font-medium leading-6">
-                                        {planChangeText.confirm_note ?? 'Når du bekrefter, oppdateres abonnementet. Det kan endre hvilke tilleggstjenester og tilganger som er aktive.'}
-                                    </p>
-                                </AlertBox>
-
-                                {selectedPlanSummary && (
-                                    <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-base text-slate-900">
-                                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
-                                            {planChangeText.summary ?? 'Oppsummering'}
-                                        </div>
-                                        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
-                                            <div className="text-slate-600">
-                                                {planChangeText.from_plan ?? 'Fra abonnement'}
-                                            </div>
-                                            <div className="font-semibold text-slate-900">
-                                                {currentPlanLabel}
-                                            </div>
-                                            <div className="text-slate-600">
-                                                {planChangeText.to_plan ?? 'Til abonnement'}
-                                            </div>
-                                            <div className="font-semibold text-slate-900">
-                                                {selectedPlanSummary.name}
-                                            </div>
-                                            <div className="text-slate-600">
-                                                {planChangeText.billing_interval ?? 'Intervall'}
-                                            </div>
-                                            <div className="font-semibold text-slate-900">
-                                                {selectedPlanSummary.intervalLabel}
-                                            </div>
-                                            {selectedPlanSummary.priceLabel && (
-                                                <>
-                                                    <div className="text-slate-600">
-                                                        {planChangeText.price ?? 'Pris'}
-                                                    </div>
-                                                    <div className="font-semibold text-slate-900">
-                                                        {selectedPlanSummary.priceLabel}
-                                                    </div>
-                                                </>
-                                            )}
-                                            {selectedPlanSummary.includedUsers !== null && selectedPlanSummary.includedUsers !== undefined && (
-                                                <>
-                                                    <div className="text-slate-600">
-                                                        {planChangeText.included_users ?? 'Inkluderte brukere'}
-                                                    </div>
-                                                    <div className="font-semibold text-slate-900">
-                                                        {selectedPlanSummary.includedUsers}
-                                                    </div>
-                                                </>
-                                            )}
-                                            {selectedPlanSummary.includedAiCredits !== null && selectedPlanSummary.includedAiCredits !== undefined && (
-                                                <>
-                                                    <div className="text-slate-600">
-                                                        {planChangeText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
-                                                    </div>
-                                                    <div className="font-semibold text-slate-900">
-                                                        {selectedPlanSummary.includedAiCredits}
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                    <button
-                                        onClick={() => setPlanChangeStep('selection')}
-                                        className="rounded-lg border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
-                                    >
-                                        {planChangeText.back ?? 'Gå tilbake'}
-                                    </button>
-                                    <button
-                                        onClick={handlePlanChangeSubmit}
-                                        disabled={!canConfirmPlanChange}
-                                        className={classNames(
-                                            'rounded-lg px-4 py-2 text-base font-medium text-white',
-                                            canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
-                                        )}
-                                    >
-                                        {planChangeText.confirm ?? 'Bekreft abonnementsendring'}
-                                    </button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
 
             <ConfirmDialog
                 isOpen={confirmCancel}

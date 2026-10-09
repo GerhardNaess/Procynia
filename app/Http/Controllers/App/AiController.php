@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
@@ -35,6 +36,7 @@ use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
 use App\Services\InfoCenter\RequirementResponsibilityTaskService;
 use App\Services\SavedNoticeAccessService;
+use App\Support\Ai\AiCallContextScope;
 use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
@@ -407,12 +409,33 @@ class AiController extends Controller
                 // reliable link to any cell. Prepared BEFORE the document row is created, so a
                 // workbook we cannot read safely leaves nothing half-imported behind — the file on
                 // disk is removed and the user is told why.
+                //
+                // Structure discovery is AI work on this case, so it runs under the same commercial
+                // guard as every other case AI call: it reserves (or reuses) the case's credit before
+                // the provider is called, and an exhausted quota stops it here instead of being
+                // recorded afterwards by the extraction run.
                 try {
-                    $excelInput = $this->xlsxRequirementImportPreparer->prepare(
-                        $absolutePath,
-                        $originalFilename,
-                        $this->customerContext->resolveLanguageCode($request->user()),
+                    $excelInput = app(AiCallContextScope::class)->within(
+                        new AiCallContext(
+                            customerId: (int) $record->customer_id,
+                            userId: $request->user()?->id,
+                            feature: 'tender',
+                            operation: 'tender.excel_structure_discovery',
+                            resourceType: 'saved_notice',
+                            resourceId: (int) $record->id,
+                            savedNoticeId: (int) $record->id,
+                            commercialCredit: true,
+                        ),
+                        fn (): array => $this->xlsxRequirementImportPreparer->prepare(
+                            $absolutePath,
+                            $originalFilename,
+                            $this->customerContext->resolveLanguageCode($request->user()),
+                        ),
                     );
+                } catch (AiCostControlException $exception) {
+                    Storage::disk('local')->delete($storedPath);
+
+                    return back()->with('error', app(AiCostControlPresenter::class)->message($exception, $record->customer));
                 } catch (XlsxRequirementImportException $exception) {
                     Storage::disk('local')->delete($storedPath);
 

@@ -45,7 +45,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
         EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
     ): void {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_ingest'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.finalize_ingest'),
             function () use ($service, $articleClient, $wikiAnswerStalenessService): void {
                 $this->failWithoutRetryOnCostControlBlock(fn (): mixed => $this->handleInAiCallContext($service, $articleClient, $wikiAnswerStalenessService));
             },

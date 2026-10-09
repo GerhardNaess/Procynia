@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import KpiContextPanel from '../Objectives/KpiContextPanel';
 import ImprovementActions from './ImprovementActions';
@@ -43,6 +44,7 @@ export default function ImprovementShow() {
         audit_origin: auditOrigin = null,
         supplier_origin: supplierOrigin = null,
         today = '',
+        knowledge_handoff: knowledgeHandoff = null,
     } = usePage().props;
 
     const tr = translations?.improvements ?? {};
@@ -274,6 +276,8 @@ export default function ImprovementShow() {
                         idPrefix="improvement-context"
                     />
                 )}
+
+                <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`improvement-case-${item.id}`} />
 
                 <ImprovementHistory entries={statusHistory} locale={locale} tr={tr} />
             </div>

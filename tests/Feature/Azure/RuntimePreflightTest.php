@@ -29,6 +29,8 @@ class RuntimePreflightTest extends TestCase
 
     public function test_the_preflight_passes_in_a_correctly_configured_runtime(): void
     {
+        // A correctly configured runtime has synced its model prices (deploy step before the check).
+        Artisan::call('ai:sync-model-prices');
         $service = app(RuntimePreflightService::class);
         $checks = $service->run(azure: false);
 
@@ -65,6 +67,7 @@ class RuntimePreflightTest extends TestCase
             'Logging',
             'Legacy backup',
             'Queue connection',
+            'AI active model prices',
         ] as $expected) {
             $this->assertContains($expected, $names, sprintf('The preflight must check [%s].', $expected));
         }
@@ -174,6 +177,7 @@ class RuntimePreflightTest extends TestCase
 
     public function test_the_command_exits_zero_in_a_healthy_runtime(): void
     {
+        Artisan::call('ai:sync-model-prices');
         $this->assertSame(0, Artisan::call('ops:runtime-check'));
 
         $output = Artisan::output();

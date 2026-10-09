@@ -11,6 +11,7 @@ use App\Services\EnterpriseWiki\GraphProjection\NullGraphProjectionService;
 use App\Services\EnterpriseWiki\GraphQuery\GraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\Neo4jGraphQueryService;
 use App\Services\EnterpriseWiki\GraphQuery\NullGraphQueryService;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSourceRegistry;
 use App\Services\OpportunitySources\OpportunitySourceRegistry;
 use App\Services\Quality\QualityActivityLinkCleanup;
 use App\Services\Ted\TedSourceAdapter;
@@ -96,6 +97,9 @@ class AppServiceProvider extends ServiceProvider
         $events->listen(JobQueued::class, static function (JobQueued $event): void {
             EnterpriseWikiQueueReservationTrace::logDispatch($event);
         });
+
+        // A record handed over to Enterprise Wiki takes its provenance with it when it is deleted.
+        WikiKnowledgeSourceRegistry::registerDeletionListeners();
 
         // A risk, a KPI or an avvik/forbedring linked to a Kvalitet activity loses the link when the
         // step leaves the working flow, or the flow goes. Hooked here so Kvalitet's own code never

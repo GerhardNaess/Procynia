@@ -5,6 +5,8 @@ namespace App\Support\Ai;
 use App\Exceptions\Ai\AiCostControlException;
 use App\Models\Customer;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
+use App\Services\Ai\Commercial\CustomerAiCapacityService;
+use Carbon\CarbonImmutable;
 
 /**
  * Turns a hard-stop reason code into something a bid manager can act on.
@@ -16,12 +18,17 @@ use App\Services\Ai\Commercial\AiQuotaStatusService;
  */
 class AiCostControlPresenter
 {
-    public function __construct(private readonly AiQuotaStatusService $quotaStatus) {}
+    public function __construct(
+        private readonly AiQuotaStatusService $quotaStatus,
+        private readonly CustomerAiCapacityService $capacity,
+    ) {}
 
     public function message(AiCostControlException $exception, ?Customer $customer = null): string
     {
         return match ($exception->reason) {
             AiCostControlException::QUOTA_EXHAUSTED => $this->quotaExhaustedMessage($customer),
+            AiCostControlException::CAPACITY_EXHAUSTED,
+            AiCostControlException::CAPACITY_INSUFFICIENT => $this->capacityMessage($exception->reason, $customer),
             AiCostControlException::NOT_INCLUDED => __('procynia.ai_quota.hard_stop.not_included'),
             AiCostControlException::CUSTOMER_SUSPENDED => __('procynia.ai_quota.hard_stop.customer_suspended'),
 
@@ -73,5 +80,24 @@ class AiCostControlPresenter
             'allowance' => $status->allowance(),
             'period_end' => $status->periodEnd,
         ]);
+    }
+
+    /**
+     * The shared capacity says when it comes back. An insufficient-capacity refusal must not claim
+     * that everything is used: part of what is missing may only be reserved by work in progress.
+     */
+    private function capacityMessage(string $reason, ?Customer $customer): string
+    {
+        $key = $reason === AiCostControlException::CAPACITY_EXHAUSTED ? 'capacity_exhausted' : 'capacity_insufficient';
+
+        if (! $customer instanceof Customer) {
+            return __("procynia.ai_quota.hard_stop.{$key}_generic");
+        }
+
+        $nextPeriod = CarbonImmutable::parse($this->capacity->forCustomer($customer)->toArray()['next_period_start'])
+            ->locale(app()->getLocale())
+            ->isoFormat('LL');
+
+        return __("procynia.ai_quota.hard_stop.{$key}", ['date' => $nextPeriod]);
     }
 }

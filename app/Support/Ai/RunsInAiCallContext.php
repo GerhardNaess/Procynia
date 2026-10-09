@@ -5,6 +5,7 @@ namespace App\Support\Ai;
 use App\Data\Ai\AiCallContext;
 use App\Exceptions\Ai\AiCostControlException;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiDocumentOrigin;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\RequirementExtractionCall;
@@ -45,15 +46,17 @@ trait RunsInAiCallContext
     protected function enterpriseWikiRunAiCallContext(?int $runId, string $operation): AiCallContext
     {
         $run = $runId === null ? null : EnterpriseWikiIngestRun::query()->find($runId);
+        $resource = $run?->source_id === null ? null : EnterpriseWikiDocumentOrigin::usageResourceFor((int) $run->source_id);
 
         return new AiCallContext(
             runId: $run?->id,
             documentId: $run?->source_id,
             customerId: $run?->customer_id,
-            feature: 'enterprise_wiki',
+            userId: $this->enterpriseWikiDocumentUploaderId($run?->source_id),
+            feature: 'wiki',
             operation: $operation,
-            resourceType: 'enterprise_wiki_document',
-            resourceId: $run?->source_id,
+            resourceType: $resource['type'] ?? 'enterprise_wiki_document',
+            resourceId: $resource['id'] ?? $run?->source_id,
             jobId: $run?->uuid,
         );
     }
@@ -73,15 +76,25 @@ trait RunsInAiCallContext
     protected function enterpriseWikiDocumentAiCallContext(int $documentId, string $operation): AiCallContext
     {
         $customerId = EnterpriseWikiDocument::query()->whereKey($documentId)->value('customer_id');
+        $resource = EnterpriseWikiDocumentOrigin::usageResourceFor($documentId);
 
         return new AiCallContext(
             documentId: $documentId,
             customerId: is_numeric($customerId) ? (int) $customerId : null,
-            feature: 'enterprise_wiki',
+            userId: $this->enterpriseWikiDocumentUploaderId($documentId),
+            feature: 'wiki',
             operation: $operation,
-            resourceType: 'enterprise_wiki_document',
-            resourceId: $documentId,
+            resourceType: $resource['type'],
+            resourceId: $resource['id'],
         );
+    }
+
+    /** The person who put the source in the Wiki — the user a run's usage is attributed to. */
+    private function enterpriseWikiDocumentUploaderId(?int $documentId): ?int
+    {
+        $userId = $documentId === null ? null : EnterpriseWikiDocument::query()->whereKey($documentId)->value('uploaded_by_user_id');
+
+        return is_numeric($userId) ? (int) $userId : null;
     }
 
     /**
@@ -120,7 +133,7 @@ trait RunsInAiCallContext
 
         return new AiCallContext(
             customerId: is_numeric($customerId) ? (int) $customerId : null,
-            feature: 'saved_notice',
+            feature: 'tender',
             operation: $operation,
             resourceType: 'requirement_extraction_run',
             resourceId: $runId,

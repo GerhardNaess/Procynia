@@ -49,7 +49,7 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
     public function handle(EnterpriseWikiGenerateAppliedPagesService $service): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.generate_page'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.generate_page'),
             function () use ($service): void {
                 $this->handleInAiCallContext($service);
             },

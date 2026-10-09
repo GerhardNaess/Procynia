@@ -5,7 +5,10 @@ namespace Tests\Feature\App;
 use App\Data\Ai\Requirements\Excel\WorkbookFieldRoleData;
 use App\Data\Ai\Requirements\Excel\WorkbookSheetSchemaData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
+use App\Models\AiModelPrice;
+use App\Models\AiUsageAttempt;
 use App\Models\Customer;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\RequirementExtractionRun;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
@@ -16,6 +19,7 @@ use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Mockery\MockInterface;
@@ -140,6 +144,40 @@ class XlsxRequirementImportTest extends TestCase
             'warnings' => [],
             'confidence' => 0.9,
         ];
+    }
+
+    private function useRealDiscoveryClient(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-key',
+            'services.openai.base_url' => 'https://openai.test/v1',
+        ]);
+        AiModelPrice::query()->firstOrCreate(
+            ['provider' => 'openai', 'model' => 'gpt-4.1-mini', 'is_active' => true],
+            ['currency' => 'usd', 'input_price_per_1m_tokens' => 0.40, 'cached_input_price_per_1m_tokens' => 0.10,
+                'output_price_per_1m_tokens' => 1.60, 'valid_from' => now()->subDay()->toDateString(), 'last_verified_at' => now()],
+        );
+        Http::fake(['https://openai.test/v1/responses' => Http::response([
+            'status' => 'completed',
+            'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode($this->matrixDiscovery())]]]],
+            'usage' => ['input_tokens' => 100, 'output_tokens' => 50, 'total_tokens' => 150],
+        ], 200)]);
+    }
+
+    private function spendCreditOnAnotherCase(array $context): void
+    {
+        $other = $context['saved_notice']->replicate(['external_id']);
+        $other->external_id = 'EXCEL-OTHER-'.Str::upper(Str::random(6));
+        $other->save();
+
+        CustomerAiCaseUsage::query()->create([
+            'customer_id' => $context['customer']->id,
+            'saved_notice_id' => $other->id,
+            'source_operation_key' => 'tender.test',
+            'activated_at' => now(),
+            'period_start' => now()->startOfMonth()->toDateString(),
+            'period_end' => now()->endOfMonth()->toDateString(),
+        ]);
     }
 
     private function mockDiscovery(array $discovery, int $times = 1): void
@@ -532,6 +570,44 @@ class XlsxRequirementImportTest extends TestCase
     }
 
     // ── the other formats are untouched ──────────────────────────────────────
+
+    // ── the commercial guard ─────────────────────────────────────────────────
+
+    public function test_structure_discovery_cannot_start_a_new_case_once_the_quota_is_spent(): void
+    {
+        $context = $this->context();
+        $context['customer']->forceFill(['included_ai_credits' => 1])->save();
+        $this->spendCreditOnAnotherCase($context);
+        $this->useRealDiscoveryClient();
+        $this->spyExtractionRun();
+
+        $this->upload($context, $this->matrixWorkbook())
+            ->assertRedirect()
+            ->assertSessionHas('error');
+
+        // Refused at the provider boundary: no AI call, no half-imported document.
+        Http::assertNothingSent();
+        $this->assertSame(0, SavedNoticeAiDocument::query()->where('saved_notice_id', $context['saved_notice']->id)->count());
+        $this->assertSame(0, CustomerAiCaseUsage::query()->where('saved_notice_id', $context['saved_notice']->id)->count());
+    }
+
+    public function test_structure_discovery_holds_the_case_credit_and_is_attributed_to_the_case(): void
+    {
+        $context = $this->context();
+        $this->useRealDiscoveryClient();
+        $this->spyExtractionRun();
+
+        $this->upload($context, $this->matrixWorkbook())->assertRedirect()->assertSessionMissing('error');
+
+        // The credit is committed by the discovery call itself, not afterwards by the extraction run.
+        $this->assertSame(1, CustomerAiCaseUsage::query()->where('saved_notice_id', $context['saved_notice']->id)->count());
+        $attempt = AiUsageAttempt::query()->where('customer_id', $context['customer']->id)->sole();
+        $this->assertSame('tender', $attempt->feature);
+        $this->assertSame('tender.excel_structure_discovery', $attempt->operation_key);
+        $this->assertSame('saved_notice', $attempt->resource_type);
+        $this->assertSame((int) $context['saved_notice']->id, (int) $attempt->resource_id);
+        $this->assertSame((int) $context['user']->id, (int) $attempt->user_id);
+    }
 
     public function test_a_pdf_upload_still_uses_the_ordinary_text_path(): void
     {

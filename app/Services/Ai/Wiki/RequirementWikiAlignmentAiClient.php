@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -36,7 +37,13 @@ class RequirementWikiAlignmentAiClient
         self::STATUS_POSSIBLE_CONFLICT,
     ];
 
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'tender.requirement_alignment';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -86,7 +93,7 @@ class RequirementWikiAlignmentAiClient
         }
 
         $payload = $this->buildPayload($requirementIdentifier, $requirementText, $answerSections, $pages, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'RequirementWikiAlignmentAiClient');
 
         return $this->normalize($decoded, $answerSections, array_column($pages, 'page_id'));
@@ -233,7 +240,7 @@ class RequirementWikiAlignmentAiClient
         ]));
 
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

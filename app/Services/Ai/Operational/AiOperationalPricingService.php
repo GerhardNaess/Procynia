@@ -8,7 +8,9 @@ use App\Data\Ai\Operational\AiPriceState;
 use App\Models\AiModelPrice;
 use App\Models\AiUsageAttempt;
 use App\Models\ExchangeRate;
+use App\Support\Ai\AiOperationCatalog;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The one place a provider call is turned into money.
@@ -148,7 +150,15 @@ class AiOperationalPricingService
         $currency = strtoupper((string) $price->currency);
         $fx = $this->fxState($currency, $at);
 
-        $inputCost = ((int) $attempt->input_tokens) / 1_000_000 * (float) $price->input_price_per_1m_tokens;
+        // Cached tokens are part of input_tokens. They are billed at the cached-input rate where the
+        // model has one; a model without a cached rate bills them as ordinary input.
+        $inputTokens = (int) $attempt->input_tokens;
+        $cachedTokens = min($inputTokens, (int) $attempt->cached_input_tokens);
+        $inputRate = (float) $price->input_price_per_1m_tokens;
+        $cachedRate = $price->cached_input_price_per_1m_tokens !== null ? (float) $price->cached_input_price_per_1m_tokens : $inputRate;
+
+        $inputCost = ($inputTokens - $cachedTokens) / 1_000_000 * $inputRate
+            + $cachedTokens / 1_000_000 * $cachedRate;
         $outputCost = ((int) $attempt->output_tokens) / 1_000_000 * (float) $price->output_price_per_1m_tokens;
         $native = $inputCost + $outputCost;
 
@@ -172,6 +182,7 @@ class AiOperationalPricingService
             fxRateDate: $fx->rateDate,
             priceState: $priceState->state,
             fxState: $fx->state,
+            cachedInputPricePer1m: $price->cached_input_price_per_1m_tokens !== null ? (float) $price->cached_input_price_per_1m_tokens : null,
         );
     }
 
@@ -213,17 +224,24 @@ class AiOperationalPricingService
         return round($nok, 4);
     }
 
-    /** @return array{input_tokens: int, output_tokens: int} */
+    /**
+     * The token ceilings an operation reserves against, from the operation registry
+     * (config/ai_operations.php). Reaching the emergency fallback is logged: it means an
+     * operation was added without stating what it may cost.
+     *
+     * @return array{input_tokens: int, output_tokens: int, source: string}
+     */
     public function operationEstimate(?string $operationKey): array
     {
-        $registry = (array) config('procynia.ai.operation_estimates', []);
-        $default = (array) ($registry['default'] ?? ['input_tokens' => 40000, 'output_tokens' => 8000]);
-        $entry = (array) ($registry[$operationKey ?? ''] ?? $default);
+        $estimate = AiOperationCatalog::estimate($operationKey);
 
-        return [
-            'input_tokens' => max(0, (int) ($entry['input_tokens'] ?? $default['input_tokens'] ?? 0)),
-            'output_tokens' => max(0, (int) ($entry['output_tokens'] ?? $default['output_tokens'] ?? 0)),
-        ];
+        if ($estimate['source'] === AiOperationCatalog::ESTIMATE_FALLBACK) {
+            Log::warning('[AI_COST_CONTROL] AI operation has no reservation estimate; using the emergency fallback.', [
+                'operation' => $operationKey,
+            ]);
+        }
+
+        return $estimate;
     }
 
     private function withMargin(float $value, float $percent): float

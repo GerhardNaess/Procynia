@@ -7,6 +7,7 @@ use App\Data\Ai\Requirements\RequirementExtractionResultData;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\User;
 use App\Services\Ai\Requirements\Excel\WorkbookDeterministicCandidateResolver;
+use App\Support\Ai\AiOperationCatalog;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -497,12 +498,7 @@ class RequirementExtractionPipeline
      */
     private function relevanceModel(): string
     {
-        $model = trim((string) config(
-            'services.openai.requirement_relevance_model',
-            config('services.openai.requirement_extraction_model', config('services.openai.model', 'gpt-4.1-mini')),
-        ));
-
-        return $model !== '' ? $model : 'gpt-4.1-mini';
+        return AiOperationCatalog::model('tender.requirement_relevance');
     }
 
     /**
@@ -513,9 +509,7 @@ class RequirementExtractionPipeline
      */
     private function extractionModel(): string
     {
-        $model = trim((string) config('services.openai.requirement_extraction_model', config('services.openai.model', 'gpt-4.1-mini')));
-
-        return $model !== '' ? $model : 'gpt-4.1-mini';
+        return AiOperationCatalog::model('tender.requirement_extraction');
     }
 
     /**

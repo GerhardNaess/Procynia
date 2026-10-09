@@ -5,16 +5,17 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\BillingProduct;
 use App\Models\Customer;
-use App\Services\Ai\Commercial\AiQuotaStatusService;
+use App\Services\Ai\Commercial\AiCapacityLevelService;
+use App\Services\Ai\Commercial\CustomerAiCapacityService;
+use App\Services\Billing\BillingEntitlementService;
 use App\Services\Billing\BillingService;
+use App\Services\Billing\CustomerBillingPeriodResolver;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
-use Throwable;
 
 class BillingController extends Controller
 {
@@ -26,26 +27,31 @@ class BillingController extends Controller
 
         $customer = $user->customer;
         $billingService = app(BillingService::class);
-        $availablePlans = $this->availablePlanOptions($customer);
         $activeBillingLines = $billingService->activeBillingLines($customer);
         $basePlanLines = $activeBillingLines->filter(fn ($line): bool => $line->billingProduct?->category === BillingProduct::CATEGORY_BASE_PLAN);
         $basePlanLine = $basePlanLines->sortByDesc(fn ($line): int => $line->created_at?->timestamp ?? 0)->first();
+        // The legacy plan key (free/pro/max/ultra/enterprise) still decides whether a subscription
+        // is registered, but it is never sent to the page: customers see Basis + options + AI
+        // capacity, not the old commercial tiers that still live under the hood.
         $planKey = data_get($basePlanLine?->metadata, 'plan_key') ?? $customer->subscription_plan ?? Customer::PLAN_FREE;
         $hasRegisteredSubscription = $basePlanLine !== null || $planKey !== Customer::PLAN_FREE;
 
         $subscriptionData = null;
 
         if ($hasRegisteredSubscription) {
+            $includedUsers = app(BillingEntitlementService::class)->includedUsers($customer);
+            $period = app(CustomerBillingPeriodResolver::class)->current($customer);
+
             $subscriptionData = [
                 'status' => $basePlanLine?->status === 'pending_cancel'
                     ? 'active'
                     : ($basePlanLine?->status ?? 'active'),
-                'plan' => $planKey,
-                'plan_label' => config("procynia_plans.{$planKey}.name", $customer->planName()),
-                'billing_interval' => $basePlanLine?->billingPrice?->interval ?? $customer->billing_interval,
+                'billing_interval' => $basePlanLine?->billingPrice?->interval ?? $customer->billing_interval ?? Customer::BILLING_MONTHLY,
                 'cancel_at_period_end' => $basePlanLine?->status === 'pending_cancel',
-                'included_users' => $customer->included_users,
-                'included_ai_credits' => $customer->included_ai_credits,
+                // The number canAddUser() enforces; zero or less means no limit, so nothing is shown.
+                'included_users' => $includedUsers > 0 ? $includedUsers : null,
+                // Only a period Stripe reported is a reliable invoice date; a derived one is not shown.
+                'period_end' => $period->isProviderPeriod() ? $period->end->toDateString() : null,
             ];
         }
 
@@ -91,14 +97,15 @@ class BillingController extends Controller
             ->all();
 
         return Inertia::render('App/Billing/Index', [
-            'customer_plan' => $this->customerPlanContext($customer),
-            'available_plans' => $availablePlans,
             'subscription' => $subscriptionData,
             'invoices' => $invoices,
             'billing_lines' => $billingLines,
-            // The same commercial state the hard stop enforces, so the page can never claim the
-            // customer has capacity that the guard would refuse.
-            'ai_quota' => app(AiQuotaStatusService::class)->forCustomer($customer)->toArray(),
+            // The shared AI capacity, in AI units — the same figures the capacity gate reads. The
+            // Anbud AI-case quota is Tender's own and is shown in the AI workspace, not here.
+            'ai_capacity' => app(CustomerAiCapacityService::class)->forCustomer($customer)->toArray(),
+            // What each level would include for this customer right now — units only, never the
+            // multiplier or the weights behind them.
+            'ai_capacity_levels' => app(CustomerAiCapacityService::class)->levelOptions($customer),
             // Resolved server-side: the page renders this verdict rather than deciding for itself
             // which packages are active.
             'module_packages' => app(ModuleEntitlementService::class)->overviewFor($customer),
@@ -179,6 +186,36 @@ class BillingController extends Controller
             ]));
     }
 
+    /**
+     * Choose the AI capacity level (Nivå 1/2/3). Same permission as ordering and cancelling options.
+     * The key is validated against the catalog here, never trusted from the page; the customer is
+     * always the signed-in user's own. Applies at once; usage and the billing period are untouched.
+     */
+    public function changeAiCapacityLevel(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user->canManageCustomerBilling(), 403);
+
+        $customer = $user->customer;
+        abort_unless($customer instanceof Customer, 404);
+
+        $level = (string) $request->validate(['level' => ['required', 'string', 'max:64']])['level'];
+        $refused = app(AiCapacityLevelService::class)->change($customer, $level, $user);
+
+        if ($refused !== null) {
+            return redirect()
+                ->route('app.billing.index')
+                ->with('error', __("procynia.billing.ai_capacity.level_refused.{$refused}"));
+        }
+
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', __('procynia.billing.ai_capacity.level_changed', [
+                'level' => app(CustomerAiCapacityService::class)->forCustomer($customer->fresh())->tierName,
+            ]));
+    }
+
     public function cancel(Request $request): RedirectResponse
     {
         $user = $request->user();
@@ -203,130 +240,5 @@ class BillingController extends Controller
         return redirect()
             ->route('app.billing.index')
             ->with('success', 'Abonnementet er gjenopptatt.');
-    }
-
-    public function changePlan(Request $request): RedirectResponse
-    {
-        $user = $request->user();
-
-        abort_unless($user->canManageCustomerBilling(), 403);
-
-        $customer = $user->customer;
-        abort_unless($customer instanceof Customer, 404);
-
-        $availablePlans = $this->availablePlanOptions($customer);
-        $allowedPlans = array_values(array_map(
-            fn (array $plan): string => (string) $plan['key'],
-            $availablePlans
-        ));
-
-        $validated = $request->validate([
-            'plan' => ['required', 'string', Rule::in($allowedPlans)],
-            'interval' => ['required', 'string', Rule::in([Customer::BILLING_MONTHLY, Customer::BILLING_YEARLY])],
-        ], [
-            'plan.required' => __('procynia.billing.plan_change.validation_plan'),
-            'plan.in' => __('procynia.billing.plan_change.validation_plan'),
-            'interval.required' => __('procynia.billing.plan_change.validation_interval'),
-            'interval.in' => __('procynia.billing.plan_change.validation_interval'),
-        ]);
-
-        $selectedPlan = collect($availablePlans)->firstWhere('key', $validated['plan']);
-
-        if (! $selectedPlan || ! collect($selectedPlan['intervals'] ?? [])->contains(fn (array $interval): bool => ($interval['interval'] ?? null) === $validated['interval'])) {
-            return back()->withErrors([
-                'interval' => __('procynia.billing.plan_change.validation_interval'),
-            ]);
-        }
-
-        try {
-            app(SubscriptionService::class)->changePlan($customer, $validated['plan'], $validated['interval']);
-        } catch (Throwable $throwable) {
-            return back()->withErrors([
-                'plan' => $this->planChangeErrorMessage($throwable),
-            ]);
-        }
-
-        return redirect()
-            ->route('app.billing.index')
-            ->with('success', __('procynia.billing.plan_change.success'));
-    }
-
-    private function customerPlanContext(Customer $customer): array
-    {
-        $billingInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
-
-        return [
-            'plan' => $customer->subscription_plan ?? Customer::PLAN_FREE,
-            'plan_label' => $customer->planName(),
-            'billing_interval' => $billingInterval,
-            'billing_interval_label' => $billingInterval === Customer::BILLING_YEARLY
-                ? __('procynia.billing.plan_change.yearly')
-                : __('procynia.billing.plan_change.monthly'),
-        ];
-    }
-
-    private function availablePlanOptions(Customer $customer): array
-    {
-        $currentPlan = $customer->subscription_plan ?? Customer::PLAN_FREE;
-        $currentInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
-        $plans = [];
-
-        foreach (config('procynia_plans', []) as $planKey => $plan) {
-            if (in_array($planKey, [Customer::PLAN_FREE, Customer::PLAN_ENTERPRISE], true)) {
-                continue;
-            }
-
-            $intervals = [];
-
-            foreach ([Customer::BILLING_MONTHLY, Customer::BILLING_YEARLY] as $interval) {
-                $priceKey = $interval === Customer::BILLING_YEARLY ? 'yearly_price_nok' : 'monthly_price_nok';
-                $price = $plan[$priceKey] ?? null;
-
-                if ($price === null) {
-                    continue;
-                }
-
-                $intervals[] = [
-                    'interval' => $interval,
-                    'label' => $interval === Customer::BILLING_YEARLY
-                        ? __('procynia.billing.plan_change.yearly')
-                        : __('procynia.billing.plan_change.monthly'),
-                    'price_nok' => $price,
-                    'is_current' => $currentPlan === $planKey && $currentInterval === $interval,
-                ];
-            }
-
-            if ($intervals === []) {
-                continue;
-            }
-
-            $plans[] = [
-                'key' => $planKey,
-                'name' => $plan['name'] ?? ucfirst($planKey),
-                'included_users' => $plan['included_users'] ?? null,
-                'included_ai_credits' => $plan['included_ai_credits'] ?? null,
-                'is_current' => $currentPlan === $planKey,
-                'intervals' => $intervals,
-            ];
-        }
-
-        return $plans;
-    }
-
-    private function planChangeErrorMessage(Throwable $throwable): string
-    {
-        $paymentSetupMessage = __('procynia.billing.plan_change.payment_setup_missing');
-        $message = strtolower($throwable->getMessage());
-
-        if (
-            str_contains($message, 'payment setup')
-            || str_contains($message, 'betalingsoppsettet')
-            || str_starts_with($throwable::class, 'Stripe\\')
-            || str_starts_with($throwable::class, 'Laravel\\Cashier\\')
-        ) {
-            return $paymentSetupMessage;
-        }
-
-        return __('procynia.billing.plan_change.error');
     }
 }

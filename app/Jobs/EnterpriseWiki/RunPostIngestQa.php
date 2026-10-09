@@ -40,7 +40,7 @@ class RunPostIngestQa implements ShouldQueue
     public function handle(EnterpriseWikiPostIngestQaService $qaService): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.post_ingest_qa'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.post_ingest_qa'),
             function () use ($qaService): void {
                 $this->handleInAiCallContext($qaService);
             },

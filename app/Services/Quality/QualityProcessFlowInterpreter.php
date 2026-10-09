@@ -66,7 +66,7 @@ class QualityProcessFlowInterpreter
             new AiCallContext(
                 customerId: (int) $item->customer_id,
                 feature: 'quality',
-                operation: 'process_flow_interpretation',
+                operation: 'quality.interpret_process',
                 resourceType: 'quality_item',
                 resourceId: (int) $item->id,
             ),

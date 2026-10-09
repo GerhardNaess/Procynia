@@ -56,7 +56,7 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
     {
         $this->withinAiCallContext(
-            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.document_flow'),
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'wiki.document_flow'),
             function () use ($flowService): void {
                 $this->handleInAiCallContext($flowService);
             },

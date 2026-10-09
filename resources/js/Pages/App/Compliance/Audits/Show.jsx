@@ -3,6 +3,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
+import WikiKnowledgeHandoffPanel from '../../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../../Support/actionStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
 import { AttentionReasons } from '../Requirements/ComplianceAttention';
@@ -41,6 +42,7 @@ export default function ComplianceAuditShow() {
         finding_options: findingOptions = null,
         finding_types: findingTypes = [],
         handoff = null,
+        knowledge_handoff: knowledgeHandoff = null,
         status_history: statusHistory = [],
         permissions = {},
         editable_fields: editableFields = [],
@@ -227,6 +229,8 @@ export default function ComplianceAuditShow() {
                         </p>
                     )}
                 </section>
+
+                <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`compliance-audit-${audit.id}`} />
 
                 <AuditHistory entries={statusHistory} locale={locale} ta={ta} />
             </div>

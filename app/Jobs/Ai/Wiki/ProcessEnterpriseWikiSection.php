@@ -46,7 +46,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
         WikiSectionAiClient $aiClient,
     ): void {
         $this->withinAiCallContext(
-            $this->enterpriseWikiSectionAiCallContext($this->sectionId, 'enterprise_wiki.process_section'),
+            $this->enterpriseWikiSectionAiCallContext($this->sectionId, 'wiki.process_section'),
             function () use ($ingestService, $parser, $aiClient): void {
                 $this->handleInAiCallContext($ingestService, $parser, $aiClient);
             },

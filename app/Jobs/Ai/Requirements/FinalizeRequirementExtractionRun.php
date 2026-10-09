@@ -38,7 +38,7 @@ class FinalizeRequirementExtractionRun implements ShouldQueue
     public function handle(RequirementExtractionRunService $service): void
     {
         $this->withinAiCallContext(
-            $this->requirementExtractionRunAiCallContext($this->runId, 'saved_notice.requirement_extraction.finalize'),
+            $this->requirementExtractionRunAiCallContext($this->runId, 'tender.requirement_extraction.finalize'),
             function () use ($service): void {
                 $this->handleInAiCallContext($service);
             },

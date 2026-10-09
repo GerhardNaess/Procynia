@@ -73,7 +73,7 @@ test('Leverandøroppfølging is cancelled on its own while Risiko stays, and com
     // Basis on its own, active, with nothing to press; then the five options.
     await page.goto('/app/billing');
     const basis = page.getByTestId('package-row-basis');
-    await expect(basis).toContainText('Basis er grunnpakken i Procynia.');
+    await expect(basis).toContainText('Inneholder Wiki, Kvalitet og Avvik og forbedringer.');
     await expect(page.getByTestId('package-status-basis')).toContainText('Aktiv');
     await expect(basis.getByRole('button')).toHaveCount(0);
     for (const [key, status, action] of [

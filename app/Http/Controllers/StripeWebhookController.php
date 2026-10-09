@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\InvoiceLog;
 use App\Notifications\SubscriptionPaymentFailedNotification;
 use App\Services\Billing\BillingService;
+use App\Services\Billing\CustomerBillingPeriodRecorder;
 use App\Services\SubscriptionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -55,11 +56,23 @@ class StripeWebhookController extends WebhookController
         return $this->successMethod();
     }
 
+    protected function handleCustomerSubscriptionCreated(array $payload): Response
+    {
+        $response = parent::handleCustomerSubscriptionCreated($payload);
+
+        if ($customer = $this->resolveCustomer($payload)) {
+            $this->recordBillingPeriod($customer, $payload);
+        }
+
+        return $response;
+    }
+
     protected function handleCustomerSubscriptionDeleted(array $payload): Response
     {
         $customer = $this->resolveCustomer($payload);
 
         if ($customer) {
+            $this->recordBillingPeriod($customer, $payload);
             app(BillingService::class)->closeAccountBilling($customer, 'immediate');
             app(SubscriptionService::class)->syncPlanMeta($customer, Customer::PLAN_FREE, Customer::BILLING_MONTHLY);
 
@@ -77,6 +90,8 @@ class StripeWebhookController extends WebhookController
         $customer = $this->resolveCustomer($payload);
 
         if ($customer) {
+            // A renewal arrives here too: Stripe moves the current period and sends `updated`.
+            $this->recordBillingPeriod($customer, $payload);
             app(BillingService::class)->syncSubscriptionFromStripe($customer);
             app(BillingService::class)->syncPlanFromCurrentSubscription($customer);
         }
@@ -120,6 +135,25 @@ class StripeWebhookController extends WebhookController
         }
 
         return $this->successMethod();
+    }
+
+    /**
+     * Keep the local billing period in step with the subscription in the event. Read from the
+     * payload itself, so the period is recorded without a call back to Stripe.
+     */
+    private function recordBillingPeriod(Customer $customer, array $payload): void
+    {
+        $subscription = $payload['data']['object'] ?? null;
+
+        if (! is_array($subscription) || ($subscription['object'] ?? 'subscription') !== 'subscription') {
+            return;
+        }
+
+        app(CustomerBillingPeriodRecorder::class)->recordStripeSubscription(
+            $customer,
+            $subscription,
+            is_numeric($payload['created'] ?? null) ? (int) $payload['created'] : null,
+        );
     }
 
     private function resolveCustomer(array $payload): ?Customer

@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -32,7 +33,13 @@ use RuntimeException;
  */
 class WikiClaimVerificationAiClient
 {
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'wiki.verify_claim';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -113,7 +120,7 @@ class WikiClaimVerificationAiClient
 
         $candidates = $this->normalizeCandidates($sourceElements, $fallbackSourceText);
         $payload = $this->buildPayload($claimText, $candidates, $blockMarkdown, $documentLabel, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload, operation: self::OPERATION);
         $decoded = $this->responsesDecoder->decode($response, 'WikiClaimVerificationAiClient');
 
         return $this->validate($decoded, array_column($candidates, 'key'));
@@ -164,7 +171,7 @@ class WikiClaimVerificationAiClient
     private function buildPayload(string $claimText, array $candidates, ?string $blockMarkdown, ?string $documentLabel, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',

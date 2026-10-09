@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -29,7 +30,13 @@ class EnterpriseWikiSemanticSearchPlanAiClient
 
     public const MAX_SELECTED_PAGES = 8;
 
-    private const MODEL = 'gpt-4.1-mini';
+    public const OPERATION = 'wiki.navigation_plan';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
+    public static function model(): string
+    {
+        return AiOperationCatalog::model(self::OPERATION);
+    }
 
     private const TEMPERATURE = 0;
 
@@ -56,6 +63,7 @@ class EnterpriseWikiSemanticSearchPlanAiClient
         $response = $this->openAiClient->createResponse(
             $this->buildPayload(trim($input), $wikiIndex, $this->languageName($languageCode)),
             timeoutSeconds: 120,
+            operation: self::OPERATION,
         );
         $decoded = $this->responsesDecoder->decode($response, 'EnterpriseWikiSemanticSearchPlanAiClient');
 
@@ -116,7 +124,7 @@ class EnterpriseWikiSemanticSearchPlanAiClient
     private function buildPayload(string $input, array $wikiIndex, string $languageName): array
     {
         return [
-            'model' => self::MODEL,
+            'model' => self::model(),
             'input' => [
                 [
                     'role' => 'developer',
@@ -209,7 +217,7 @@ class EnterpriseWikiSemanticSearchPlanAiClient
                 'intent' => trim((string) ($understanding['intent'] ?? '')),
             ],
             'selected_pages' => $selected,
-            'model' => self::MODEL,
+            'model' => self::model(),
         ];
     }
 

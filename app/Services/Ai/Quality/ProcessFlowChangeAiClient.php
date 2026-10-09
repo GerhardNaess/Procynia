@@ -4,6 +4,7 @@ namespace App\Services\Ai\Quality;
 
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiOperationCatalog;
 use RuntimeException;
 
 /**
@@ -89,9 +90,12 @@ class ProcessFlowChangeAiClient
         return ProcessFlowInterpretationAiClient::isAvailable();
     }
 
+    public const OPERATION = 'quality.propose_process_change';
+
+    /** The model is chosen centrally per operation — config/ai_operations.php. */
     public static function model(): string
     {
-        return ProcessFlowInterpretationAiClient::model();
+        return AiOperationCatalog::model(self::OPERATION);
     }
 
     /**
@@ -200,7 +204,7 @@ class ProcessFlowChangeAiClient
             'temperature' => self::TEMPERATURE,
             'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
-        ], timeoutSeconds: 120);
+        ], timeoutSeconds: 120, operation: self::OPERATION);
 
         return $this->normalize(
             $this->responsesDecoder->decode($response, 'ProcessFlowChangeAiClient'),
