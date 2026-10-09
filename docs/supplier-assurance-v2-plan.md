@@ -1631,7 +1631,7 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 | 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); merget til lokal `main` i `e9add9d8`, ikke pushet | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
 | 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) — **teknisk fullført** på `feat/supplier-requirement-wiki-guidance` (§28); merget til lokal `main` i `2e4f72b4`, ikke pushet | Utvikling | — |
 | 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) — **teknisk fullført**: 6A–6C merget til lokal `main` i `6c8a9641`; 6D (Risiko, Avvik, Etterlevelse, Kvalitet, Mål og KPI), tildelingsvarsler og fristpåminnelser (inkl. Leverandørers 60 dager) merget til lokal `main` i `c1ee14df`, ikke pushet ([notifications-and-tasks-plan.md](notifications-and-tasks-plan.md)) | Ferdig, felles | — |
-| 7 | Excel-import av leverandører og profiler — **teknisk fullført** på `feat/supplier-excel-import` (§29), ikke committet/merget | Utvikling | — |
+| 7 | Excel-import av leverandører og profiler — **teknisk fullført** (§29); merget til lokal `main` i `0987d556`, ikke pushet | Ferdig | — |
 | 8 | Visning av nyere kravmalversjon; firøyneprinsipp på beslutning | Ved behov | — |
 | 9 | Kobling til Kvalitet (prosess) og Mål og KPI (leverandør-KPI) | Ved behov, eid av målmodulen | v1-plan §7.5–7.6 |
 
@@ -1841,8 +1841,9 @@ leverandør på leverandørsiden. NO/EN, 16 px, 390 px uten sideveis scrolling.
 
 ## 29. Punkt 7 — Excel-import av leverandører
 
-Status: **teknisk fullført** på `feat/supplier-excel-import` (worktree `.wt-import`, fra `main` `d516c26c`).
-Ikke committet, ikke merget, ikke pushet.
+Status: **teknisk fullført og merget til lokal `main`** — commit `2e535c6f` på `feat/supplier-excel-import`,
+merget med `--no-ff` i `0987d556`. Ikke pushet. Migrasjonen `2026_10_10_000002_create_supplier_imports_table`
+er kjørt i lokal dev-database.
 
 ### 29.1 Flyt
 
