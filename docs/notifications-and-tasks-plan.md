@@ -1,8 +1,8 @@
 # Varsler og «Mine oppgaver» — arkitektur (punkt 6)
 
-Status: **Punkt 6 er teknisk fullført.** Fase 6A–6C er merget til lokal `main` i `6c8a9641`; fase 6D,
-tildelingsvarsler for styringsmodulene, fristpåminnelser og språkrettingen er committet på
-`feat/punkt6-complete`, ikke merget, pushet eller deployet. E2E-suiten er ikke kjørt ferdig (§11).
+Status: **Punkt 6 er teknisk fullført og merget til lokal `main`.** Fase 6A–6C i `6c8a9641`; fase 6D,
+tildelingsvarsler for styringsmodulene, fristpåminnelser og språkrettingen i `c1ee14df`
+(`feat/punkt6-complete`, `c441bb1c`). Ikke pushet eller deployet. E2E-suiten er ikke kjørt ferdig (§11).
 Driftsavhengigheter før produksjon: se §9.
 
 Dette dokumentet er kontrakten for hvordan Procynias moduler bruker den felles varselbjellen og
