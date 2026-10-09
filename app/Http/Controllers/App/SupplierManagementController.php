@@ -29,6 +29,8 @@ use App\Services\Suppliers\SupplierLifecycleService;
 use App\Services\Suppliers\SupplierReviewSchedule;
 use App\Services\Suppliers\SupplierRiskService;
 use App\Support\CustomerContext;
+use App\Support\PrivateFiles\PrivateFileScanStatus;
+use App\Support\PrivateFiles\PrivateFileType;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -227,8 +229,9 @@ class SupplierManagementController extends Controller
         $changes = $supplier->statusChanges()->with('changedBy:id,name')->get();
         $criticalityChanges = $supplier->criticalityChanges()->with('changedBy:id,name')->get();
         $assessments = $supplier->assessments()->with('assessedBy:id,name')->get();
-        $documents = $supplier->documents()->with('updatedBy:id,name')->get();
-        $undeletable = $this->documentsInControls($documents);
+        $documents = $supplier->documents()->with(['updatedBy:id,name', 'fileUploadedBy:id,name'])->get();
+        $usedInControls = $this->documentsUsedInControls($documents);
+        $undeletable = $this->documentsInControls($documents, $usedInControls);
         $today = now();
         // Dokumentasjon: supplier.edit, or supplier.assure so the person who controls can register the
         // documentation they rely on (supplier-assurance-v2-plan §13.2).
@@ -310,7 +313,20 @@ class SupplierManagementController extends Controller
                 'deletable' => ! isset($undeletable[(int) $document->id]),
                 'updated_at' => $document->updated_at?->toIso8601String(),
                 'updated_by_name' => $document->updatedBy?->name,
+                // The private file (v2.1): what the person needs to see, never the storage path.
+                'file' => $document->hasFile() ? [
+                    'name' => $document->file_original_name,
+                    'mime_type' => $document->file_mime_type,
+                    'size_bytes' => $document->file_size_bytes,
+                    'uploaded_at' => $document->file_uploaded_at?->toIso8601String(),
+                    'uploaded_by_name' => $document->fileUploadedBy?->name,
+                    'downloadable' => PrivateFileScanStatus::isDownloadable($document->file_scan_status),
+                    'download_url' => route('app.supplier-management.documents.file', ['supplierId' => $supplier->id, 'documentId' => $document->id], false),
+                ] : null,
+                // A control rests on this row: its file is evidence and is neither replaced nor removed.
+                'file_locked' => isset($usedInControls[(int) $document->id]),
             ])->all(),
+            'document_file_accept' => PrivateFileType::ACCEPT,
             // null, not empty: the person cannot read Avvik og forbedringer, so nothing is said about it.
             'improvement_cases' => $this->improvements->casesFor($user, $supplier),
             // supplier.edit hands off from the supplier and its assessments and links cases;
@@ -650,20 +666,33 @@ class SupplierManagementController extends Controller
      * @return array<string, mixed>
      */
     /**
-     * The documentation rows that may not be deleted: those named in a control, and every row renewing
-     * one of them (SupplierDocument::isDeletable(), for the whole list in one query).
+     * The documentation rows named in a control (SupplierDocument::isUsedInControl(), for the whole
+     * list in one query).
      *
      * @param  Collection<int, SupplierDocument>  $documents
      * @return array<int, true>
      */
-    private function documentsInControls(Collection $documents): array
+    private function documentsUsedInControls(Collection $documents): array
     {
-        $kept = SupplierRequirementEvaluationDocument::query()
+        return SupplierRequirementEvaluationDocument::query()
             ->whereIn('supplier_document_id', $documents->pluck('id'))
             ->distinct()
             ->pluck('supplier_document_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true])
             ->all();
+    }
+
+    /**
+     * The documentation rows that may not be deleted: those named in a control, and every row renewing
+     * one of them (SupplierDocument::isDeletable(), for the whole list).
+     *
+     * @param  Collection<int, SupplierDocument>  $documents
+     * @param  array<int, true>  $usedInControls
+     * @return array<int, true>
+     */
+    private function documentsInControls(Collection $documents, array $usedInControls): array
+    {
+        $kept = $usedInControls;
         $replacedBy = $documents->pluck('replaced_by_document_id', 'id');
 
         foreach (array_keys($kept) as $id) {

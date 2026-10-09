@@ -30,6 +30,7 @@ use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Suppliers\Assurance\SupplierRequirementTemplateLibrary;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\PrivateFiles\PrivateFileStore;
 use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -497,6 +498,9 @@ class SupplierE2EFixture
                 // kravkilde with its requirements go with the customer.
                 $customer->delete();
             });
+
+            // The run's private files (v2.1): the rows are gone with the customer, so are the files.
+            app(PrivateFileStore::class)->disk()->deleteDirectory("customers/{$customer->id}/".SupplierDocument::FILE_AREA);
         }
     }
 

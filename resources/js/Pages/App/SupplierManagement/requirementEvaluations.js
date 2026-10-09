@@ -133,6 +133,8 @@ export function snapshotDocument(document, tr) {
         location: document?.location ?? null,
         validFrom: document?.valid_from ?? null,
         validUntil: document?.valid_until ?? null,
+        fileName: document?.file_name ?? null,
+        fileSha256: document?.file_sha256 ?? null,
         changed: Boolean(document?.changed_since),
         now: now && (document?.changed_since || noLongerHolds)
             ? { title: now.title, status: documentStatusLabel(now.status, tr), validUntil: now.valid_until ?? null }

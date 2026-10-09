@@ -162,13 +162,16 @@ describe('Documentation', () => {
         assert.equal(new Set(Object.values(DOCUMENT_STATUS_TONES)).size, 4);
     });
 
-    test('a location is a link only when it is a web address, and the page never offers a file', () => {
+    test('a location is a link only when it is a web address, and a file is only ever the server\'s download URL', () => {
         assert.equal(locationHref('https://contoso.sharepoint.com/sites/innkjop/avtaler'), 'https://contoso.sharepoint.com/sites/innkjop/avtaler');
         for (const text of ['Arkiv sak 2026/114', 'javascript:alert(1)', 'file:///C:/avtaler/dba.pdf', '', null]) {
             assert.equal(locationHref(text), null, String(text));
         }
+        // Since v2.1 a row may carry a private file (supplier-assurance-v2-plan §27): it is fetched only
+        // through the module's own route, never from the location text.
         const section = source('./SupplierDocuments.jsx');
-        assert.doesNotMatch(section, /type="file"|download|upload/i);
+        assert.doesNotMatch(section, /href=\{(document\.)?location\}/);
+        assert.equal((section.match(/download_url/g) ?? []).length, 1);
     });
 
     test('a renewal keeps the type, name and standard, and asks for a new location and validity', () => {

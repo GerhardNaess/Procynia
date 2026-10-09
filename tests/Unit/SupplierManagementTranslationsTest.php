@@ -29,6 +29,14 @@ class SupplierManagementTranslationsTest extends TestCase
             }
 
             $this->assertNotSame('', $strings['navigation']['modules']['suppliers'] ?? '');
+
+            // The template review notice sits beside the templates, not among them (2d369f0b).
+            $templates = $strings['supplier_management']['templates'];
+            $this->assertIsString($templates['unreviewed'] ?? null);
+            foreach ($templates['list'] as $key => $template) {
+                $this->assertIsArray($template, "templates.list.{$key}");
+                $this->assertNotSame('', $template['name'] ?? '', "templates.list.{$key}.name");
+            }
             $this->assertNotSame('', $strings['governance']['descriptions']['suppliers'] ?? '');
         }
 

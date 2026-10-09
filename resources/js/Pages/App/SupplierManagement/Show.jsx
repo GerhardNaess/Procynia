@@ -68,6 +68,7 @@ export default function SupplierManagementShow() {
         documents = [],
         document_types: documentTypes = [],
         document_standards: documentStandards = [],
+        document_file_accept: documentFileAccept,
         knowledge_handoff: knowledgeHandoff = null,
         improvement_cases: improvementCases = null,
         improvement_handoff: improvementHandoff = null,
@@ -419,6 +420,7 @@ export default function SupplierManagementShow() {
                             documents={documents}
                             types={documentTypes}
                             standards={documentStandards}
+                            accept={documentFileAccept}
                             reconfirmable={controlRequirements?.reconfirmable ?? {}}
                             permissions={permissions}
                             locale={locale}

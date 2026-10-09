@@ -509,6 +509,9 @@ Route::prefix('app')
             Route::patch('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'update'])->whereNumber(['supplierId', 'documentId'])->name('documents.update');
             Route::post('/{supplierId}/documents/{documentId}/renew', [SupplierDocumentController::class, 'renew'])->whereNumber(['supplierId', 'documentId'])->name('documents.renew');
             Route::delete('/{supplierId}/documents/{documentId}', [SupplierDocumentController::class, 'destroy'])->whereNumber(['supplierId', 'documentId'])->name('documents.destroy');
+            Route::get('/{supplierId}/documents/{documentId}/file', [SupplierDocumentController::class, 'downloadFile'])->whereNumber(['supplierId', 'documentId'])->name('documents.file');
+            Route::post('/{supplierId}/documents/{documentId}/file', [SupplierDocumentController::class, 'storeFile'])->whereNumber(['supplierId', 'documentId'])->name('documents.file.store');
+            Route::delete('/{supplierId}/documents/{documentId}/file', [SupplierDocumentController::class, 'destroyFile'])->whereNumber(['supplierId', 'documentId'])->name('documents.file.destroy');
             // Avvik og forbedringer hos leverandøren: a new case through ImprovementCaseCreator, or an
             // existing one connected; the case itself stays Avvik og forbedringer's.
             Route::post('/{supplierId}/improvement-cases', [SupplierImprovementController::class, 'store'])->whereNumber('supplierId')->name('improvement-cases.store');

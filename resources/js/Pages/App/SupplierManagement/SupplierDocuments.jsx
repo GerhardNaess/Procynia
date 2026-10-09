@@ -9,6 +9,8 @@ import {
     documentFormData,
     documentStatusLabel,
     documentTypeLabel,
+    fileActions,
+    fileSummary,
     locationHref,
 } from './supplierManagement';
 
@@ -19,6 +21,88 @@ const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 
 const LABEL = 'block text-base font-semibold text-slate-900';
 const HINT = 'mt-1 text-base text-slate-600';
 const ERROR = 'mt-1 text-base text-rose-700';
+const FILE_INPUT = 'mt-1 block w-full min-w-0 text-base text-slate-900 file:mr-3 file:min-h-10 file:rounded-xl file:border file:border-slate-200 file:bg-white file:px-3 file:py-2 file:text-base file:font-semibold file:text-slate-900';
+
+const fill = (text, values) => Object.entries(values).reduce((out, [key, value]) => out.replace(`:${key}`, String(value)), text ?? '');
+
+/** The file input, with what is accepted said in words. */
+function FileField({ id, accept, form, required = false, d }) {
+    return (
+        <div>
+            <label htmlFor={id} className={LABEL}>{d.file ?? 'Fil'}{required && <RequiredMark />}</label>
+            <p id={`${id}-hint`} className={HINT}>{required ? (d.file_hint_required ?? 'PDF, Word (.docx), Excel (.xlsx), PNG eller JPG. Maks 20 MB.') : (d.file_hint ?? 'Valgfritt. PDF, Word (.docx), Excel (.xlsx), PNG eller JPG. Maks 20 MB.')}</p>
+            <input
+                id={id}
+                type="file"
+                accept={accept}
+                required={required}
+                aria-required={required || undefined}
+                aria-describedby={`${id}-hint`}
+                onChange={(event) => form.setData('file', event.target.files?.[0] ?? null)}
+                className={FILE_INPUT}
+                data-testid="document-file-input"
+            />
+            {form.progress && <progress value={form.progress.percentage} max="100" className="mt-2 w-full">{form.progress.percentage}%</progress>}
+            {form.errors.file && <p className={ERROR}>{form.errors.file}</p>}
+        </div>
+    );
+}
+
+/** Last opp fil / Erstatt fil on a row that may change its file. */
+function FileForm({ supplierId, document, replace, accept, onDone, tr }) {
+    const d = tr.documents ?? {};
+    const form = useForm({ file: null });
+
+    const send = (event) => {
+        event.preventDefault();
+        form.post(`/app/supplier-management/${supplierId}/documents/${document.id}/file`, { preserveScroll: true, forceFormData: true, onSuccess: onDone });
+    };
+
+    return (
+        <form onSubmit={send} className="mt-4 space-y-4 border-t border-slate-100 pt-4" data-testid="document-file-form">
+            <div>
+                <h3 className="text-lg font-semibold text-slate-950">{replace ? (d.file_replace_heading ?? 'Erstatt fil') : (d.file_upload_heading ?? 'Last opp fil')}</h3>
+                {replace && <p className={HINT}>{d.file_replace_intro ?? 'Den nye filen erstatter den forrige. Er dette en ny utgave av dokumentet, bruk «Registrer fornyet» i stedet.'}</p>}
+            </div>
+            <FileField id={`supplier-document-${document.id}-file`} accept={accept} form={form} required d={d} />
+            <div className="flex flex-wrap justify-end gap-3">
+                <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+                <button type="submit" disabled={form.processing || ! form.data.file} className={PRIMARY_ACTION}>
+                    {form.processing ? (tr.saving ?? 'Lagrer...') : (d.file_submit ?? 'Last opp')}
+                </button>
+            </div>
+        </form>
+    );
+}
+
+/** The row's file: download it, what it is and who uploaded it — or that there is none. */
+function DocumentFile({ document, date, locale, d }) {
+    const file = document.file;
+    const uploaded = file?.uploaded_at
+        ? fill(file.uploaded_by_name ? (d.file_uploaded ?? 'Lastet opp :date av :name') : (d.file_uploaded_no_name ?? 'Lastet opp :date'), { date: date(file.uploaded_at), name: file.uploaded_by_name ?? '' })
+        : null;
+
+    return (
+        <div className="mt-3 min-w-0" data-testid="document-file">
+            <p className={TERM}>{d.file ?? 'Fil'}</p>
+            {file ? (
+                <>
+                    {file.downloadable ? (
+                        <a href={file.download_url} download className="mt-1 inline-block break-words text-base font-semibold text-violet-700 hover:text-violet-900" data-testid="document-file-download">
+                            {fill(d.file_download ?? 'Last ned «:name»', { name: file.name })}
+                        </a>
+                    ) : (
+                        <p className="mt-1 break-words text-base text-slate-900">{file.name} – {d.file_blocked ?? 'kan ikke lastes ned før filen er kontrollert for skadelig innhold.'}</p>
+                    )}
+                    <p className="mt-1 text-base text-slate-600" data-testid="document-file-summary">{[fileSummary(file, locale), uploaded].filter(Boolean).join(' · ')}</p>
+                    {document.file_locked && <p className="mt-1 text-base text-slate-600" data-testid="document-file-locked">{d.file_locked ?? 'Filen er brukt som grunnlag i en kontroll og kan ikke byttes eller fjernes. Har dere fått en ny utgave, bruk «Registrer fornyet».'}</p>}
+                </>
+            ) : (
+                <p className="mt-1 text-base text-slate-600" data-testid="document-file-none">{d.file_none ?? 'Ingen fil er lastet opp.'}</p>
+            )}
+        </div>
+    );
+}
 
 /** Where the document is kept: a link when it is a web address, otherwise the reference as text. */
 function Location({ location, d }) {
@@ -37,14 +121,15 @@ function Location({ location, d }) {
  * Legg til, Rediger and Registrer fornyet share one form. A renewal keeps the type of the document
  * it renews, so the type is shown, not asked.
  */
-function DocumentForm({ supplierId, mode, document, types, standards = [], onDone, tr }) {
+function DocumentForm({ supplierId, mode, document, types, standards = [], accept, onDone, tr }) {
     const d = tr.documents ?? {};
-    const form = useForm(documentFormData(mode, document));
+    // Legg til and Registrer fornyet may bring the file along; Rediger changes the description only.
+    const form = useForm(mode === 'edit' ? documentFormData(mode, document) : { ...documentFormData(mode, document), file: null });
     const id = (field) => `supplier-document-${field}`;
 
     const send = (event) => {
         event.preventDefault();
-        const options = { preserveScroll: true, onSuccess: onDone };
+        const options = { preserveScroll: true, onSuccess: onDone, forceFormData: mode !== 'edit' && form.data.file !== null };
 
         if (mode === 'edit') {
             form.patch(`/app/supplier-management/${supplierId}/documents/${document.id}`, options);
@@ -135,6 +220,8 @@ function DocumentForm({ supplierId, mode, document, types, standards = [], onDon
                 />
                 {form.errors.location && <p className={ERROR}>{form.errors.location}</p>}
             </div>
+
+            {mode !== 'edit' && <FileField id={id('file')} accept={accept} form={form} d={d} />}
 
             <div className="grid gap-5 sm:grid-cols-2">
                 <div>
@@ -236,20 +323,27 @@ function ReconfirmForm({ supplierId, document, requirements, onDone, tr }) {
 
 /**
  * Dokumentasjon on the supplier page: which documentation exists, where it is kept, how long it is
- * valid and whether it has expired — a description of each document, never the document. Current
- * rows first, replaced ones after them, each as a card so nothing scrolls sideways on a phone.
+ * valid and whether it has expired — and, since v2.1, the one private file a row may carry, always
+ * downloaded through the module's own route. Current rows first, replaced ones after them, each as a
+ * card so nothing scrolls sideways on a phone. A row a control rests on keeps its file and says why.
  *
  * Legg til, Rediger, Registrer fornyet and Slett are offered only when the server says this person
  * may change the documentation; for an ended supplier someone with the right is told why not. A row
  * used in a control is never offered Slett, and says why; a renewed edition offers «Bekreft kravene
  * på nytt» when the server lists requirements for it.
  */
-export default function SupplierDocuments({ supplierId, supplierStatus, documents = [], types = [], standards = [], reconfirmable = {}, permissions = {}, locale, tr }) {
+export default function SupplierDocuments({ supplierId, supplierStatus, documents = [], types = [], standards = [], accept = '.pdf,.docx,.xlsx,.png,.jpg,.jpeg', reconfirmable = {}, permissions = {}, locale, tr }) {
     const d = tr.documents ?? {};
     // What is open: { mode: 'create' } or { mode: 'edit'|'renew'|'reconfirm', document }, one at a time.
     const [open, setOpen] = useState(null);
     const canManage = permissions.can_manage_documents ?? false;
     const date = (iso) => formatLongDate(iso, locale);
+
+    const removeFile = (document) => {
+        if (window.confirm(d.file_remove_confirm ?? 'Fjerne filen? Dokumentasjonsraden blir stående uten fil.')) {
+            router.delete(`/app/supplier-management/${supplierId}/documents/${document.id}/file`, { preserveScroll: true });
+        }
+    };
 
     const destroy = (document) => {
         if (! window.confirm(d.delete_confirm ?? 'Slette denne dokumentasjonen? Bruk dette bare når den ble registrert ved en feil. Er dokumentet fornyet, bruk «Registrer fornyet» i stedet.')) {
@@ -302,6 +396,7 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                                     </div>
                                 )}
                             </dl>
+                            <DocumentFile document={document} date={date} locale={locale} d={d} />
                             {document.status === 'replaced' && <p className="mt-2 text-base text-slate-600">{d.replaced_hint ?? 'Erstattet av en fornyet utgave.'}</p>}
                             {document.deletable === false && <p className="mt-2 text-base text-slate-600" data-testid="document-used-in-control">{d.used_in_control}</p>}
 
@@ -310,6 +405,15 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                                     <button type="button" onClick={() => setOpen({ mode: 'edit', document })} className={SECONDARY_ACTION}>{d.edit ?? 'Rediger'}</button>
                                     {document.status !== 'replaced' && (
                                         <button type="button" onClick={() => setOpen({ mode: 'renew', document })} className={SECONDARY_ACTION}>{d.renew ?? 'Registrer fornyet'}</button>
+                                    )}
+                                    {fileActions(document, canManage).upload && (
+                                        <button type="button" onClick={() => setOpen({ mode: 'file', document })} className={SECONDARY_ACTION}>{d.file_upload ?? 'Last opp fil'}</button>
+                                    )}
+                                    {fileActions(document, canManage).replace && (
+                                        <button type="button" onClick={() => setOpen({ mode: 'file', document })} className={SECONDARY_ACTION}>{d.file_replace ?? 'Erstatt fil'}</button>
+                                    )}
+                                    {fileActions(document, canManage).remove && (
+                                        <button type="button" onClick={() => removeFile(document)} className={SECONDARY_ACTION}>{d.file_remove ?? 'Fjern fil'}</button>
                                     )}
                                     {(reconfirmable[document.id] ?? []).length > 0 && (
                                         <button type="button" onClick={() => setOpen({ mode: 'reconfirm', document })} className={PRIMARY_ACTION}>{tr.control?.reconfirm?.open ?? 'Bekreft kravene på nytt'}</button>
@@ -322,8 +426,11 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                             {open?.mode === 'reconfirm' && open.document.id === document.id && (
                                 <ReconfirmForm supplierId={supplierId} document={document} requirements={reconfirmable[document.id] ?? []} onDone={() => setOpen(null)} tr={tr} />
                             )}
-                            {canManage && open?.document?.id === document.id && open.mode !== 'reconfirm' && (
-                                <DocumentForm supplierId={supplierId} mode={open.mode} document={document} types={types} standards={standards} onDone={() => setOpen(null)} tr={tr} />
+                            {canManage && open?.mode === 'file' && open.document.id === document.id && (
+                                <FileForm supplierId={supplierId} document={document} replace={Boolean(document.file)} accept={accept} onDone={() => setOpen(null)} tr={tr} />
+                            )}
+                            {canManage && open?.document?.id === document.id && ! ['reconfirm', 'file'].includes(open.mode) && (
+                                <DocumentForm supplierId={supplierId} mode={open.mode} document={document} types={types} standards={standards} accept={accept} onDone={() => setOpen(null)} tr={tr} />
                             )}
                         </li>
                     ))}
@@ -334,7 +441,7 @@ export default function SupplierDocuments({ supplierId, supplierStatus, document
                 <button type="button" onClick={() => setOpen({ mode: 'create' })} className={`mt-4 ${PRIMARY_ACTION}`}>{d.add ?? 'Legg til dokumentasjon'}</button>
             )}
             {canManage && open?.mode === 'create' && (
-                <DocumentForm supplierId={supplierId} mode="create" document={null} types={types} standards={standards} onDone={() => setOpen(null)} tr={tr} />
+                <DocumentForm supplierId={supplierId} mode="create" document={null} types={types} standards={standards} accept={accept} onDone={() => setOpen(null)} tr={tr} />
             )}
             {! canManage && permissions.has_document_right && supplierStatus === 'ended' && (
                 <p className="mt-4 text-base text-slate-600" data-testid="documents-read-only">{d.reopen_to_change ?? 'Leverandøren er avsluttet. Gjenåpne den for å endre dokumentasjonen.'}</p>

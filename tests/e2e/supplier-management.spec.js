@@ -338,9 +338,9 @@ test('documentation is added, corrected, renewed and deleted, and is read-only o
     const section = page.getByTestId('supplier-documents');
     await expect(section.getByTestId('documents-none')).toHaveText('Ingen dokumentasjon er registrert.');
 
-    // Legg til dokumentasjon: a reference to where the document is, never an upload.
+    // Legg til dokumentasjon: here a reference to where the document is, without a file (the file is optional).
     await section.getByRole('button', { name: 'Legg til dokumentasjon' }).click();
-    await expect(section.locator('input[type="file"]')).toHaveCount(0);
+    await expect(section.locator('input[type="file"]')).toHaveCount(1);
     await section.locator('#supplier-document-type').selectOption({ label: 'Sertifikat' });
     await section.locator('#supplier-document-title').fill('ISO 27001-sertifikat');
     await section.locator('#supplier-document-location').fill('https://contoso.sharepoint.com/sites/innkjop/iso27001.pdf');

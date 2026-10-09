@@ -5,6 +5,11 @@ namespace App\Services\Suppliers;
 use App\Models\Supplier;
 use App\Models\SupplierDocument;
 use App\Models\User;
+use App\Support\PrivateFiles\PrivateFileRule;
+use App\Support\PrivateFiles\PrivateFileScanStatus;
+use App\Support\PrivateFiles\PrivateFileStore;
+use App\Support\PrivateFiles\StoredPrivateFile;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -14,8 +19,15 @@ use Illuminate\Validation\ValidationException;
  * §4.4, §6.3).
  *
  * Registers, corrects, renews and deletes the description of a document — type, name, where it is
- * kept, how long it is valid, a comment. Never a file: location is stored as the text it was given
- * and nothing here, or anywhere else, fetches it. Never the Enterprise Wiki document store either.
+ * kept, how long it is valid, a comment. Location is stored as the text it was given and nothing
+ * fetches it. Never the Enterprise Wiki document store.
+ *
+ * Since v2.1 (supplier-assurance-v2-plan §27) a row may carry one private file, through the shared
+ * PrivateFileStore — never Wiki, never AI. The file is written first, then the row in a transaction;
+ * if the row cannot be written, the new file is deleted again. A file that is replaced or removed is
+ * deleted only after the transaction commits, and never while a row or a control's snapshot still
+ * refers to it; a deletion that fails is left for private-files:prune-orphans. A row a control rests
+ * on keeps its file: it can be neither replaced nor removed.
  *
  * «Registrer fornyet» adds a new row of the same type and points the renewed row at it, in one
  * transaction. Only a row that has not been replaced already can be renewed, and the new row always
@@ -32,6 +44,8 @@ use Illuminate\Validation\ValidationException;
  */
 class SupplierDocumentService
 {
+    public function __construct(private readonly PrivateFileStore $files) {}
+
     /** @return array<string, list<mixed>> */
     public static function rules(): array
     {
@@ -46,15 +60,35 @@ class SupplierDocumentService
         ];
     }
 
-    /** @param  array<string, mixed>  $validated */
-    public function create(Supplier $supplier, User $actor, array $validated): SupplierDocument
+    /**
+     * The optional file on Legg til and Registrer fornyet, and the required one on «Last opp fil».
+     *
+     * @return array<string, list<mixed>>
+     */
+    public static function fileRules(bool $required = false): array
     {
-        return $this->whileOpen($supplier, fn (Supplier $locked): SupplierDocument => SupplierDocument::query()->create($this->fields($validated) + [
-            'customer_id' => (int) $locked->customer_id,
-            'supplier_id' => (int) $locked->id,
-            'created_by' => $actor->id,
-            'updated_by' => $actor->id,
-        ]));
+        return [
+            'file' => [$required ? 'required' : 'nullable', new PrivateFileRule(
+                __('procynia.supplier_management.validation.file_type'),
+                __('procynia.supplier_management.validation.file_size'),
+            )],
+        ];
+    }
+
+    /** @param  array<string, mixed>  $validated */
+    public function create(Supplier $supplier, User $actor, array $validated, ?UploadedFile $file = null): SupplierDocument
+    {
+        return $this->withNewFile($supplier, $file, fn (?StoredPrivateFile $stored): SupplierDocument => $this->whileOpen($supplier, function (Supplier $locked) use ($actor, $validated, $stored): SupplierDocument {
+            $document = new SupplierDocument($this->fields($validated) + [
+                'customer_id' => (int) $locked->customer_id,
+                'supplier_id' => (int) $locked->id,
+                'created_by' => $actor->id,
+                'updated_by' => $actor->id,
+            ]);
+            $document->forceFill($this->fileColumns($stored, $actor))->save();
+
+            return $document;
+        }));
     }
 
     /** @param  array<string, mixed>  $validated */
@@ -73,9 +107,9 @@ class SupplierDocumentService
      *
      * @param  array<string, mixed>  $validated  everything but the type, which the renewed row decides
      */
-    public function renew(SupplierDocument $document, User $actor, array $validated): SupplierDocument
+    public function renew(SupplierDocument $document, User $actor, array $validated, ?UploadedFile $file = null): SupplierDocument
     {
-        return $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor, $validated): SupplierDocument {
+        return $this->withNewFile($document->supplier, $file, fn (?StoredPrivateFile $stored): SupplierDocument => $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor, $validated, $stored): SupplierDocument {
             $old = SupplierDocument::query()
                 ->whereKey($document->id)
                 ->where('supplier_id', $locked->id)
@@ -86,7 +120,7 @@ class SupplierDocumentService
                 throw ValidationException::withMessages(['title' => __('procynia.supplier_management.validation.document_already_replaced')]);
             }
 
-            $new = SupplierDocument::query()->create([
+            $new = new SupplierDocument([
                 'document_type' => $old->document_type,
             ] + $this->fields($validated) + [
                 'customer_id' => (int) $locked->customer_id,
@@ -94,10 +128,49 @@ class SupplierDocumentService
                 'created_by' => $actor->id,
                 'updated_by' => $actor->id,
             ]);
+            $new->forceFill($this->fileColumns($stored, $actor))->save();
 
             $old->forceFill(['replaced_by_document_id' => $new->id, 'updated_by' => $actor->id])->save();
 
             return $new;
+        }));
+    }
+
+    /**
+     * «Last opp fil» / «Erstatt fil»: puts a file on the row. The earlier file, if any, is deleted once
+     * the row no longer refers to it. Refused for a row a control rests on.
+     */
+    public function attachFile(SupplierDocument $document, User $actor, UploadedFile $file): SupplierDocument
+    {
+        return $this->withNewFile($document->supplier, $file, fn (?StoredPrivateFile $stored): SupplierDocument => $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor, $stored): SupplierDocument {
+            $row = $this->lockedFileRow($document, $locked);
+            $previous = $row->file_path;
+
+            $row->forceFill($this->fileColumns($stored, $actor) + ['updated_by' => $actor->id])->save();
+
+            if ($previous !== null) {
+                $this->files->deleteAfterCommit($previous, (int) $locked->customer_id, SupplierDocument::FILE_AREA);
+            }
+
+            return $row;
+        }));
+    }
+
+    /** «Fjern fil»: the row stays, without a file. Refused for a row a control rests on. */
+    public function removeFile(SupplierDocument $document, User $actor): SupplierDocument
+    {
+        return $this->whileOpen($document->supplier, function (Supplier $locked) use ($document, $actor): SupplierDocument {
+            $row = $this->lockedFileRow($document, $locked);
+
+            if (! $row->hasFile()) {
+                throw ValidationException::withMessages(['file' => __('procynia.supplier_management.validation.file_missing')]);
+            }
+
+            $previous = (string) $row->file_path;
+            $row->forceFill($this->fileColumns(null, $actor) + ['updated_by' => $actor->id])->save();
+            $this->files->deleteAfterCommit($previous, (int) $locked->customer_id, SupplierDocument::FILE_AREA);
+
+            return $row;
         });
     }
 
@@ -112,8 +185,72 @@ class SupplierDocumentService
                 throw ValidationException::withMessages(['title' => __('procynia.supplier_management.validation.document_used_in_control')]);
             }
 
+            $path = $document->file_path;
             $document->delete();
+
+            if ($path !== null) {
+                $this->files->deleteAfterCommit($path, (int) $document->customer_id, SupplierDocument::FILE_AREA);
+            }
         });
+    }
+
+    /**
+     * The row locked inside the supplier lock, for a change of its file — refused while a control
+     * rests on it (its file is that control's evidence).
+     */
+    private function lockedFileRow(SupplierDocument $document, Supplier $locked): SupplierDocument
+    {
+        $row = SupplierDocument::query()
+            ->whereKey($document->id)
+            ->where('supplier_id', $locked->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        if ($row->isUsedInControl()) {
+            throw ValidationException::withMessages(['file' => __('procynia.supplier_management.validation.file_locked')]);
+        }
+
+        return $row;
+    }
+
+    /**
+     * Stores the file (if any) before $write, and deletes it again if $write does not complete — so a
+     * refused or failed write never leaves a file behind.
+     *
+     * @template T
+     *
+     * @param  callable(?StoredPrivateFile): T  $write
+     * @return T
+     */
+    private function withNewFile(Supplier $supplier, ?UploadedFile $file, callable $write): mixed
+    {
+        $stored = $file === null ? null : $this->files->store($file, (int) $supplier->customer_id, SupplierDocument::FILE_AREA);
+
+        try {
+            return $write($stored);
+        } catch (\Throwable $exception) {
+            if ($stored !== null) {
+                $this->files->delete($stored->path, (int) $supplier->customer_id, SupplierDocument::FILE_AREA);
+            }
+
+            throw $exception;
+        }
+    }
+
+    /** @return array<string, mixed> the file columns for $stored, or all empty */
+    private function fileColumns(?StoredPrivateFile $stored, User $actor): array
+    {
+        return [
+            'file_key' => $stored?->key,
+            'file_path' => $stored?->path,
+            'file_original_name' => $stored?->originalName,
+            'file_mime_type' => $stored?->mimeType,
+            'file_size_bytes' => $stored?->sizeBytes,
+            'file_sha256' => $stored?->sha256,
+            'file_scan_status' => $stored === null ? null : PrivateFileScanStatus::NOT_SCANNED,
+            'file_uploaded_by' => $stored === null ? null : $actor->id,
+            'file_uploaded_at' => $stored === null ? null : now(),
+        ];
     }
 
     /**

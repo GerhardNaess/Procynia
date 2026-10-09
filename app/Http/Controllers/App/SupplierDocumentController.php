@@ -9,13 +9,22 @@ use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Services\Suppliers\SupplierDocumentService;
 use App\Support\CustomerContext;
+use App\Support\PrivateFiles\PrivateFileResponse;
+use App\Support\PrivateFiles\PrivateFileScanStatus;
+use App\Support\PrivateFiles\PrivateFileStore;
 use App\Support\Suppliers\SupplierValidationMessages;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Dokumentasjon on the supplier page: registers, corrects, renews and deletes the description of a
- * supplier's documentation — never a file (plan §4.4).
+ * supplier's documentation (plan §4.4), and — since v2.1 (supplier-assurance-v2-plan §27) — uploads,
+ * replaces, removes and downloads the one private file a row may carry.
+ *
+ * Downloading needs only supplier.view. The file is found through the supplier and the row, then
+ * checked again against the customer's own storage prefix before a byte is read, and is always sent
+ * as an attachment (PrivateFileResponse). A file whose scan status is not downloadable is refused.
  *
  * supplier.edit or supplier.assure — the person who controls registers the documentation they rely
  * on (supplier-assurance-v2-plan §13.2). supplier.assess and supplier.delete grant nothing here,
@@ -30,6 +39,7 @@ class SupplierDocumentController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly SupplierAccessService $access,
         private readonly SupplierDocumentService $documents,
+        private readonly PrivateFileStore $files,
     ) {}
 
     public function store(Request $request, int $supplierId): RedirectResponse
@@ -40,7 +50,7 @@ class SupplierDocumentController extends Controller
             return $this->endedRefusal();
         }
 
-        $this->documents->create($supplier, $user, $this->validated($request));
+        $this->documents->create($supplier, $user, $this->validated($request, withFile: true), $request->file('file'));
 
         return back()->with('success', __('procynia.supplier_management.flash.document_created'));
     }
@@ -69,9 +79,61 @@ class SupplierDocumentController extends Controller
             return $this->endedRefusal();
         }
 
-        $this->documents->renew($document, $user, $this->validated($request, renewal: true));
+        $this->documents->renew($document, $user, $this->validated($request, renewal: true, withFile: true), $request->file('file'));
 
         return back()->with('success', __('procynia.supplier_management.flash.document_renewed'));
+    }
+
+    /** Last opp fil / Erstatt fil. */
+    public function storeFile(Request $request, int $supplierId, int $documentId): RedirectResponse
+    {
+        [$user, $supplier] = $this->editableSupplier($supplierId);
+        $document = $this->documentOf($supplier, $documentId);
+
+        if ($supplier->isEnded()) {
+            return $this->endedRefusal();
+        }
+
+        $request->validate(SupplierDocumentService::fileRules(required: true), SupplierValidationMessages::messages(), SupplierValidationMessages::attributes());
+        $this->documents->attachFile($document, $user, $request->file('file'));
+
+        return back()->with('success', __('procynia.supplier_management.flash.document_file_uploaded'));
+    }
+
+    /** Fjern fil: the row stays. */
+    public function destroyFile(int $supplierId, int $documentId): RedirectResponse
+    {
+        [$user, $supplier] = $this->editableSupplier($supplierId);
+        $document = $this->documentOf($supplier, $documentId);
+
+        if ($supplier->isEnded()) {
+            return $this->endedRefusal();
+        }
+
+        $this->documents->removeFile($document, $user);
+
+        return back()->with('success', __('procynia.supplier_management.flash.document_file_removed'));
+    }
+
+    /** Last ned: supplier.view, ended suppliers included. */
+    public function downloadFile(int $supplierId, int $documentId): StreamedResponse
+    {
+        $user = $this->customerContext->currentUser();
+        abort_unless($this->access->canOpenModule($user), 403);
+
+        $supplier = $this->access->findVisibleSupplier($user, $supplierId) ?? abort(404);
+        $document = $this->documentOf($supplier, $documentId);
+        $path = (string) $document->file_path;
+
+        abort_unless(
+            $document->hasFile()
+                && $this->files->belongsTo($path, (int) $supplier->customer_id, SupplierDocument::FILE_AREA)
+                && $this->files->disk()->exists($path),
+            404,
+        );
+        abort_unless(PrivateFileScanStatus::isDownloadable($document->file_scan_status), 403);
+
+        return PrivateFileResponse::download($this->files->disk(), $path, (string) $document->file_original_name, (string) $document->file_mime_type);
     }
 
     public function destroy(int $supplierId, int $documentId): RedirectResponse
@@ -114,9 +176,9 @@ class SupplierDocumentController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validated(Request $request, bool $renewal = false): array
+    private function validated(Request $request, bool $renewal = false, bool $withFile = false): array
     {
-        $rules = SupplierDocumentService::rules();
+        $rules = SupplierDocumentService::rules() + ($withFile ? SupplierDocumentService::fileRules() : []);
 
         if ($renewal) {
             unset($rules['document_type']);

@@ -717,7 +717,7 @@ Tre spesifikasjoner, med egen fixture, markørnavngitte data og `remaining()` = 
 | Innkjøp, bestillinger, faktura, spend-analyse, ERP-integrasjon | Innkjøpssystem, ikke styring |
 | Sourcing og anbud mot leverandører | Annet domene |
 | Kontraktsforhandling, avtaleversjoner, e-signatur, kontraktsworkflow, full kontraktslivssyklus | Kontraktsstyring; egen planlagt modul (`contracts`) |
-| Dokumentopplasting og eget dokumentlager | Kan vurderes i v1.1 (§4.4) |
+| Dokumentopplasting og eget dokumentlager | Kan vurderes i v1.1 (§4.4). *Bygget som v2.1, se v2-plan §27* |
 | Leverandørspesifikke dokumenter i Enterprise Wiki | Wiki er kunnskapslag, ikke arkiv (§4.4) |
 | **Leverandørspesifikk vurdering av enkeltkrav** | Egen vurderingstype; kan bli egen modell senere hvis behovet blir reelt (§7.3). *Bygget i v2 som kontroller av kontrollkrav (ikke av Etterlevelse-krav), se v2-plan §8* |
 | Visning av kravets etterlevelsesstatus på leverandøren | Den gjelder virksomheten, ikke leverandøren (§7.3) |
