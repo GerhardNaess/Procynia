@@ -188,6 +188,11 @@ function SnapshotDocument({ document, locale, tr }) {
             <p className="break-words text-base font-semibold text-slate-900" data-testid="snapshot-title">{doc.title}{doc.standard ? ` (${doc.standard})` : ''}</p>
             {validity && <p className="break-words text-base text-slate-700" data-testid="snapshot-validity">{validity}</p>}
             {doc.location && <p className="break-all text-base text-slate-700">{d.location_short ?? 'Plassering'}: {doc.location}</p>}
+            {doc.fileName && (
+                <p className="break-all text-base text-slate-700" data-testid="snapshot-file">
+                    {d.file ?? 'Fil'}: {doc.fileName} · <span title={doc.fileSha256}>{d.file_checksum ?? 'SHA-256'} {doc.fileSha256?.slice(0, 12)}…</span>
+                </p>
+            )}
             {doc.now && (
                 <div className="mt-2 border-t border-slate-100 pt-2" data-testid="snapshot-now">
                     {doc.changed && <p className="text-base text-amber-800">{ev.changed_since ?? 'Dokumentet er endret etter kontrollen.'}</p>}

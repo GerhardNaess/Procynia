@@ -27,6 +27,11 @@ Schedule::command('notifications:bid-workflow')
     ->dailyAt('06:30')
     ->withoutOverlapping();
 
+// Private customer files nobody references any more (an interrupted upload, a failed deletion).
+Schedule::command('private-files:prune-orphans')
+    ->dailyAt('03:40')
+    ->withoutOverlapping();
+
 Schedule::command('ops:scheduler-heartbeat')->everyMinute();
 // Legacy Compose backup. Only scheduled where the runtime can actually execute it: the command ends
 // in scripts/backup-production.sh, which needs a Docker CLI and a Compose project. Azure Container

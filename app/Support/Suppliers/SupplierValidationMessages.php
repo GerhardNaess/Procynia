@@ -19,6 +19,8 @@ final class SupplierValidationMessages
             'array' => __('procynia.supplier_management.validation.rules.choose'),
             'string' => __('procynia.supplier_management.validation.rules.required'),
             'email' => __('procynia.supplier_management.validation.rules.email'),
+            // A file the server refused before it reached the app (most often larger than PHP allows).
+            'uploaded' => __('procynia.supplier_management.validation.file_upload_failed'),
             'max' => [
                 'string' => __('procynia.supplier_management.validation.rules.max_string'),
             ],

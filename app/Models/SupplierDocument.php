@@ -9,9 +9,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * One line in a supplier's dokumentasjonsoversikt: which document exists, where it is kept and how
- * long it is valid (docs/supplier-management-v1-plan.md §4.4). A description of a document, never
- * the document — there is no file, and location is only text: nothing fetches, downloads or
- * previews it.
+ * long it is valid (docs/supplier-management-v1-plan.md §4.4). Location is only text: nothing
+ * fetches or previews it.
+ *
+ * Since v2.1 a row may also carry one private file (supplier-assurance-v2-plan §27), stored through
+ * App\Support\PrivateFiles under customers/{customer_id}/supplier-documents/. The file columns are
+ * written only by SupplierDocumentService, all set or all empty; file_path is internal and never
+ * shown. A row a control rests on keeps its file: it can be neither replaced nor removed
+ * (isUsedInControl()), and the control's snapshot keeps the file's key and SHA-256.
  *
  * Mutable. Corrected in place and deleted when registered by mistake, both only while the supplier
  * is not ended. A renewed document is a new row; the old one points at it (replaced_by_document_id)
@@ -68,6 +73,9 @@ class SupplierDocument extends Model
      */
     public const EXPIRING_SOON_DAYS = 60;
 
+    /** The private file area (config/private_files.php) the rows' files are kept in. */
+    public const FILE_AREA = 'supplier-documents';
+
     protected $fillable = [
         'customer_id',
         'supplier_id',
@@ -87,7 +95,23 @@ class SupplierDocument extends Model
         return [
             'valid_from' => 'date',
             'valid_until' => 'date',
+            'file_size_bytes' => 'integer',
+            'file_uploaded_at' => 'datetime',
         ];
+    }
+
+    public function hasFile(): bool
+    {
+        return $this->file_path !== null;
+    }
+
+    /**
+     * Named as the basis of a control. Its file is then evidence: it can be neither replaced nor
+     * removed — a new edition is registered with «Registrer fornyet».
+     */
+    public function isUsedInControl(): bool
+    {
+        return SupplierRequirementEvaluationDocument::query()->where('supplier_document_id', $this->id)->exists();
     }
 
     public function isReplaced(): bool
@@ -161,5 +185,10 @@ class SupplierDocument extends Model
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    public function fileUploadedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'file_uploaded_by');
     }
 }

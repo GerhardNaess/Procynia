@@ -371,6 +371,9 @@ class SupplierRequirementPayload
                     'location' => $used->document_location,
                     'valid_from' => $used->document_valid_from?->toDateString(),
                     'valid_until' => $used->document_valid_until?->toDateString(),
+                    // The file the control was based on (v2.1): name and SHA-256 as they were then.
+                    'file_name' => $used->document_file_name,
+                    'file_sha256' => $used->document_file_sha256,
                     'changed_since' => $now !== null && $used->differsFrom($now),
                     'now' => $now === null ? null : [
                         'title' => $now->title,

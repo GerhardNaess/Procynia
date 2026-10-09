@@ -6,6 +6,8 @@ implementering. Faglig/juridisk review av kravmalene er fortsatt en **åpen rele
 malinnholdet** — se §19.2. Gjeldende implementeringsstatus, avvik fra planen og gjenstående arbeid
 står i [§26](#26-gjeldende-implementeringsstatus).
 Sist statusgjennomgått mot koden: **2026-10-09** (`main` @ `170d9a84`).
+**v2.1 — filopplasting og privat dokumentlager:** **Teknisk fullført – produksjonsavhengigheter
+gjenstår** (grenen `feat/supplier-document-files`, ikke merget; virusskanning blokkerer produksjon) — se §27.
 Utgangspunkt: `main` @ `b7e45e98` (2026-10-08). Bygger på [Leverandøroppfølging v1](supplier-management-v1-plan.md),
 som er ferdig og merget (`e74d4232`).
 
@@ -710,8 +712,9 @@ Wiki, og Leverandørkontroll har fortsatt ingen AI (§2 pkt. 10).
 
 ### 10.6 Filopplasting
 
-Utenfor v2. Mulig v2.1: privat modul-eid lager (v1 §4.4). Datamodellen over er laget slik at en fil
-kan legges til på `supplier_documents` uten å endre kontrollene.
+Utenfor v2. **Bygget som v2.1** (§27): én privat fil per dokumentasjonsrad, i et modul-eid lager
+gjennom en felles kjerne for private kundefiler — ikke Enterprise Wiki. Kontrollene er uendret; deres
+øyeblikksbilde har fått filens nøkkel, navn og SHA-256.
 
 ---
 
@@ -1096,7 +1099,7 @@ krav og overstyringer (fase 2), kontroller (fase 3), beslutninger (fase 4) og ak
 
 | Utenfor | Hvorfor / når |
 |---|---|
-| Filopplasting / dokumentlager | v2.1 (§10.6) |
+| Filopplasting / dokumentlager | v2.1 (§10.6) — teknisk implementert, se §27 |
 | Leverandørportal, egenerklæring/spørreskjema sendt til leverandøren | Eksterne brukere = ny sikkerhetsmodell |
 | AI-forslag til profil, kravstatus, beslutning; AI-lesing av sertifikater | Ikke i v2 |
 | Score, vekting, prosent, risikomatrise for leverandøren | Prinsipp 5 |
@@ -1622,7 +1625,7 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 | 1 | Utnevn reviewer og gjennomfør faglig/juridisk review av 39 krav og 9 maler; fyll `basis_text`/`guidance` der review krever det | Release-gate | Produktbeslutning |
 | 2 | ~~Avklar synlighet av kravmaler til gaten er lukket~~ — **ferdig** (`ceaf1c1a`): merket som ikke kvalitetssikret | Produktbeslutning | — |
 | 3 | ~~Rett rekkefølgen for «siste kontroll» i `SupplierKnowledgeSource`~~ — **ferdig** (`ceaf1c1a`) | Liten retting | — |
-| 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) | Planlagt | Sikkerhetsdesign for filer |
+| 4 | Filopplasting / privat dokumentlager (§10.6, v2.1) — **Teknisk fullført – produksjonsavhengigheter gjenstår** (`feat/supplier-document-files`, §27); ikke merget | Utvikling | Produksjon: virusskanning, ev. Azure Blob (§27.8) |
 | 5 | Lenke fra kontrollkrav til Wiki-veiledning (§18) | Planlagt | Wiki |
 | 6 | Bjelle / Mine oppgaver for styringsmodulene (§14) | Planlagt, felles | Felles oppgavemodell |
 | 7 | Excel-import av leverandører og profiler | Planlagt | — |
@@ -1632,3 +1635,127 @@ Ingen tester er kjørt i denne statusgjennomgangen (bare dokumentasjon er endret
 Utenfor scope og fortsatt bevisst ikke planlagt: leverandørportal og utsendte spørreskjema, AI-forslag,
 score/prosent, eksterne oppslag (Brønnøysund, kreditt, landrisiko), modellering av anskaffelsen,
 cross-module signaler i Trenger oppmerksomhet.
+
+---
+
+## 27. v2.1 — Filopplasting og privat dokumentlager
+
+Status **2026-10-09:** **Teknisk fullført – produksjonsavhengigheter gjenstår.** Implementert, sluttkontrollert
+og testet på `feat/supplier-document-files` (fra `main` @ `a833a778`). Ikke merget. **Ikke produksjonsklar**
+før manglende virusskanning er håndtert eller formelt risikovurdert og godkjent (§27.8).
+
+### 27.1 Beslutninger
+
+| Beslutning | Valgt |
+|---|---|
+| Lager | Ny, liten **felles kjerne for private kundefiler** (`App\Support\PrivateFiles`), Leverandører som første modul. **Ikke** Enterprise Wiki-lageret: det er Wikis kildelag, lesbart for alle med `wiki.view` og behandlet av AI (v1 §4.4) |
+| Eksisterende filhåndtering | Uendret i Wiki, Kvalitet og Anbud |
+| Modell | **Én fil per dokumentasjonsrad**, som kolonner på `supplier_documents`. Rader uten fil er fortsatt gyldige. «Registrer fornyet» gir ny rad med eventuell ny fil |
+| Låsing | En rad som er grunnlag i en kontroll, kan ikke få filen byttet, fjernet eller slettet (også ikke første opplasting). Ny utgave = «Registrer fornyet» |
+| Rettigheter | Ingen nye. Last ned: `supplier.view`. Last opp / erstatt / fjern: `supplier.edit` **eller** `supplier.assure` (som dokumentasjonsrader, §13.2). Avsluttet leverandør: skrivebeskyttet, nedlasting tillatt |
+| Filtyper | PDF, DOCX, XLSX, PNG, JPG/JPEG, maks 20 MB |
+| AI og Wiki | Leverandørfiler leses aldri av AI, legges aldri i Wiki og tekstuttrekkes ikke |
+
+### 27.2 Felles kjerne (`App\Support\PrivateFiles`, `config/private_files.php`)
+
+| Del | Ansvar |
+|---|---|
+| `PrivateFileType` | Avgjør filtype fra **innholdet**: PDF-hode og `%%EOF`, PNG/JPEG-signatur + dekoding, DOCX/XLSX som lesbar OOXML-pakke med riktig hoveddel. Filendelsen må stemme med innholdet; makroer (`vbaProject.bin`, `macroEnabled`) avvises. Content-Type kommer fra denne listen, aldri fra nettleseren |
+| `PrivateFileRule` | Valideringsregel (størrelse + type), med modulens egne meldinger |
+| `PrivateFileStore` | Skriver til `customers/{customer_id}/{area}/{ULID}.{ext}` via Laravel Storage (ingen lokale stier — klar for Azure Blob ved å bytte `disk`). Beregner SHA-256 og størrelse fra bytene. Sletter bare innenfor kundens område og bare filer ingen rad refererer til (sti eller nøkkel). `deleteAfterCommit()` sletter først når transaksjonen er committet |
+| `PrivateFileResponse` | Nedlasting: `Content-Disposition: attachment` (UTF-8-navn + ASCII-reserve), `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, lagret Content-Type |
+| `PrivateFileScanStatus` | `not_scanned` · `pending` · `clean` · `infected`. `infected` serveres aldri; `require_clean_scan = true` blokkerer alt som ikke er `clean` |
+| `private-files:prune-orphans` | Sletter filer ingen rad refererer til og som er eldre enn 24 t (`--dry-run` lister). Planlagt daglig 03:40. **Sikkerhetsbrems:** finner en kjøring flere enn `prune_max_per_run` (100) foreldreløse filer, slettes ingenting og kommandoen feiler (`--force` for bevisst sletting). Hver sletting og feil logges med sti og kunde |
+
+En ny modul tar kjernen i bruk ved å legge til et område i `config/private_files.php` med de kolonnene
+som refererer til filene.
+
+### 27.3 Datamodell (`2026_10_09_000007_add_files_to_supplier_documents`)
+
+| Tabell | Nye kolonner |
+|---|---|
+| `supplier_documents` | `file_key` (ULID, unik — filidentitet), `file_path` (intern, unik, aldri vist), `file_original_name`, `file_mime_type`, `file_size_bytes`, `file_sha256`, `file_scan_status`, `file_uploaded_by` (nullOnDelete), `file_uploaded_at` |
+| `supplier_requirement_evaluation_documents` | `document_file_key`, `document_file_name`, `document_file_sha256` — kontrollens øyeblikksbilde av filen |
+
+CHECK-er (PostgreSQL): alle filkolonner satt eller alle tomme; stien må være
+`customers/{egen customer_id}/supplier-documents/{file_key}.{pdf|docx|xlsx|png|jpg}`; tillatte
+MIME-typer; 1 byte–20 MB; SHA-256 som 64 hex; gyldig skannestatus. Øyeblikksbildets filfelt er alle
+satt eller alle tomme. Nye nullbare kolonner endrer ingen historikkrad; triggerne er uendret.
+Migrasjonen er reversibel (verifisert med rollback + migrate).
+
+### 27.4 Kontrollhistorikk og filintegritet
+
+- Kontrollen tar øyeblikksbilde av filens **nøkkel, navn og SHA-256** sammen med de øvrige
+  dokumentfeltene (`SupplierRequirementEvaluationDocument::SNAPSHOT`). Kontrollhistorikken viser
+  filnavnet og en forkortet kontrollsum.
+- En rad som er grunnlag i en kontroll, låses for filendringer (`SupplierDocument::isUsedInControl()`),
+  sjekket med leverandørraden låst. Raden kunne allerede ikke slettes (§10.4).
+- Lagringen sletter aldri en fil som en rad refererer til med sti eller en kontroll med nøkkel. Dermed
+  kan det alltid dokumenteres at filen kontrollen bygget på, fortsatt finnes og har samme SHA-256.
+
+### 27.5 Feil og opprydding
+
+| Situasjon | Håndtering |
+|---|---|
+| Ugyldig, forfalsket eller for stor fil | Avvist i validering; ingenting skrives |
+| Raden kan ikke lagres (validering i transaksjon, avsluttet leverandør, samtidighet) | Den nye filen slettes igjen |
+| Erstatning eller fjerning | Gammel fil slettes etter commit; ved rollback beholdes den |
+| Sletting feiler i lagringen | Endringen står; feilen logges; filen fjernes av `prune-orphans` |
+| Avbrutt opplasting, slettet kunde | `prune-orphans` fjerner filer uten referanse etter 24 t |
+| Feil eller tom database, manglende referansekolonne i konfigurasjonen | Sikkerhetsbremsen stopper kjøringen før noe slettes; en referansekolonne som ikke finnes i databasen får kjøringen til å feile før sletting |
+| Samtidighet | Referansesjekken leser committede rader og gjøres på nytt rett før hver sletting. Rader peker bare på filer skrevet i samme forespørsel (alltid «unge»), og en transaksjon som fjerner en referanse har ikke fjernet den før commit. 24 t-grensen beskytter pågående opplastinger; sikkerhetsbremsen beskytter mot feilkonfigurasjon, som 24 t-grensen alene ikke gjør |
+
+### 27.6 Brukergrensesnitt
+
+Under Dokumentasjon: valgfritt filfelt i «Legg til» og «Registrer fornyet»; per rad «Fil» med
+«Last ned «navn»», type og størrelse, hvem/når; «Last opp fil», «Erstatt fil» og «Fjern fil» når det er
+tillatt; forklaring når filen er låst av en kontroll. Ingen lagringssti i payload eller UI. 16 px,
+390 px uten sideveis scrolling (E2E `readability.js`), NO/EN.
+
+### 27.6.1 Sluttkontroll (2026-10-09)
+
+Sikkerhet, opprydding, kontrollhistorikk, migrasjon og brukeropplevelse er gjennomgått. Funnet og rettet:
+
+1. **Opprydding uten sikkerhetsbrems** — en feil eller tom database kunne fått alle filer til å se
+   foreldreløse ut. Rettet med `prune_max_per_run` og logging av hver sletting.
+2. **Zip-bombe i DOCX/XLSX** — `[Content_Types].xml` ble pakket ut uten størrelsesgrense. Rettet: maks 1 MB.
+3. **Upload over PHP-grensen** viste den uoversatte nøkkelen `validation.uploaded` (eller typefeil).
+   Rettet: norsk/engelsk melding om at filen ikke kunne lastes opp / er for stor.
+
+Bekreftet uten endring: tenant-isolasjon (oppslag via leverandør, 404 på tvers, stiprefiks sjekket
+før lesing, DB-CHECK på sti), serverautorisasjon (samme regel som dokumentasjonsrader), ingen intern
+sti eller offentlig URL i payload, sikkerhetsheadere, `infected` serveres aldri, `require_clean_scan`
+håndheves, ingen kode i Wiki/AI leser leverandørfiler. Kjent og akseptert: PDF-er og Office-filer kan
+inneholde aktivt innhold (JavaScript, innebygde objekter); de serveres alltid som vedlegg med `nosniff`,
+og skanning (§27.8) er tiltaket.
+
+Skannestatus skiller tydelig mellom: **ikke skannet** (`not_scanned`, alle filer i dag), **venter**
+(`pending`), **godkjent av skanner** (`clean`) og **infisert** (`infected`, aldri nedlastbar).
+
+### 27.7 Tester (2026-10-09)
+
+| Nivå | Tester |
+|---|---|
+| PHP Feature | `SupplierDocumentFileTest` (10; inkl. sikkerhetsbrems/logging, upload over PHP-grensen og kontroll uten fil): lagring med type fra innhold og SHA-256 for alle fem typer; forfalskede, korrupte, makro-, ikke-tillatte, tomme og > 20 MB filer avvist uten spor; nedlasting med `supplier.view`, 403 uten rettighet/System Owner uten rolle, 404 for annen kunde/annen leverandør/uten fil/fil borte, sikkerhetsheadere, skannestatus; erstatning og fjerning (edit og assure), sletting etter commit; låsing etter kontroll og øyeblikksbilde/integritet; fornyelse med ny fil; avsluttet leverandør; nektet skriving uten filrester; lagringsfeil ved sletting + `prune-orphans`; DB-CHECK mot sti hos annen kunde |
+| PHP Unit | `PrivateFileTypeTest` (3): typegjenkjenning, stiregel per kunde/område, trygt filnavn |
+| JS | `documentFiles.test.js` (4) + oppdatert v1-assert i `supplierManagement.test.js` |
+| E2E | `supplier-document-files.spec.js`: legg til med fil → last ned (attachment, nosniff, no-store) → erstatt → fjern → avvist feilmerket fil → last opp → fornyet med ny fil; desktop og 390 px. `supplier-management.spec.js` dokumentasjonsreisen oppdatert |
+| Regresjon (sluttkontroll) | Leverandør-/PrivateFile-/Wiki-handoff-tester 246/246; Azure/Security/Operations 208 + 3 hoppet over (Redis lokalt); modul-, navigasjons-, rolle- og Styring-tester 83/83; leverandør-JS 77/77; leverandør-E2E 17/17 (`supplier-document-files`, `supplier-management`, `supplier-assurance`). Full PHP-/E2E-suite er **ikke** kjørt |
+
+### 27.8 Åpne produksjonsavhengigheter
+
+1. **Virusskanning (blokkerende for produksjon).** Procynia har ingen skanning. Filer lagres med
+   `not_scanned`. Før produksjon må enten Defender for Storage (eller en skanner) kobles til og skrive
+   skannestatus, med `private_files.require_clean_scan = true`, eller manglende skanning risikovurderes
+   og godkjennes formelt. Defender for Storage er ikke konfigurert i Bicep i dag.
+2. **Azure Blob (gjenstår, avklares før produksjon).** Filene ligger foreløpig på `local` (Azure
+   Files-monteringen, som fungerer i dag). Kjernen bruker bare Storage-abstraksjonen; flytting til den
+   private blob-beholderen `documents` (privat, versjonering og soft delete) krever en disk-konfigurasjon
+   og flytting av eksisterende filer. Om dette må skje før produksjon, er en driftsbeslutning.
+3. **Planlagt opprydding** forutsetter at scheduler-containeren kjører (som i dag).
+
+
+### 27.9 Dokumentasjon
+
+Word-utviklingsplanen for Leverandører finnes ikke i repository og er ikke oppdatert i denne oppgaven.
+Oppdatering av den med v2.1 er en separat dokumentasjonsoppgave.

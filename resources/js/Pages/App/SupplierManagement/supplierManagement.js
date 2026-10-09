@@ -300,6 +300,51 @@ export function locationHref(location) {
     return /^https?:\/\/[^\s]+$/i.test(value) ? value : null;
 }
 
+const FILE_TYPE_LABELS = {
+    'application/pdf': 'PDF',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
+    'image/png': 'PNG',
+    'image/jpeg': 'JPG',
+};
+
+/**
+ * A documentation row's file as a person reads it: «PDF · 1,2 MB». The type is the one the server
+ * decided from the content.
+ *
+ * @param {{mime_type?: string, size_bytes?: number}|null} file
+ * @param {string} [locale]
+ * @returns {string}
+ */
+export function fileSummary(file, locale = 'nb-NO') {
+    if (! file) {
+        return '';
+    }
+
+    const bytes = Number(file.size_bytes ?? 0);
+    const format = (value, digits) => new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value);
+    const size = bytes >= 1024 * 1024
+        ? `${format(bytes / (1024 * 1024), 1)} MB`
+        : `${format(Math.max(1, Math.round(bytes / 1024)), 0)} kB`;
+
+    return [FILE_TYPE_LABELS[file.mime_type] ?? null, size].filter(Boolean).join(' · ');
+}
+
+/**
+ * Which file actions a row offers: upload when it has none, replace and remove when it has one —
+ * none while a control rests on the row, or when the person may not change the documentation.
+ *
+ * @param {{file?: object|null, file_locked?: boolean}} document
+ * @param {boolean} canManage
+ * @returns {{upload: boolean, replace: boolean, remove: boolean}}
+ */
+export function fileActions(document, canManage) {
+    const open = Boolean(canManage) && ! document?.file_locked;
+    const has = Boolean(document?.file);
+
+    return { upload: open && ! has, replace: open && has, remove: open && has };
+}
+
 /**
  * The form a documentation row starts from: empty for Legg til; the row as it is for Rediger; and
  * for Registrer fornyet the same type and name, with a new location, validity and comment to fill in.

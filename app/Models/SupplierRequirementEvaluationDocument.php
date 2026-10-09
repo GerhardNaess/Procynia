@@ -8,7 +8,9 @@ use LogicException;
 
 /**
  * One documentation row given as the basis of a control, with the row's type, name, standard,
- * location and validity as the person saw them (docs/supplier-assurance-v2-plan.md §10.2.1).
+ * location and validity as the person saw them (docs/supplier-assurance-v2-plan.md §10.2.1) — and,
+ * since v2.1, the key, name and SHA-256 of the row's file, which is what shows which file the control
+ * was based on (§27).
  *
  * The snapshot is what the history shows; the document row itself stays editable and is what
  * today's status is read from. Correcting the row never changes this one, and the row cannot be
@@ -26,6 +28,9 @@ class SupplierRequirementEvaluationDocument extends Model
         'document_location' => 'location',
         'document_valid_from' => 'valid_from',
         'document_valid_until' => 'valid_until',
+        'document_file_key' => 'file_key',
+        'document_file_name' => 'file_original_name',
+        'document_file_sha256' => 'file_sha256',
     ];
 
     public $timestamps = false;
@@ -40,6 +45,9 @@ class SupplierRequirementEvaluationDocument extends Model
         'document_location',
         'document_valid_from',
         'document_valid_until',
+        'document_file_key',
+        'document_file_name',
+        'document_file_sha256',
     ];
 
     protected function casts(): array
