@@ -1,8 +1,8 @@
 # Varsler og «Mine oppgaver» — plan og arkitektur (punkt 6)
 
-Status: **Fase 6A–6C implementert, testet og committet på `feat/my-tasks-suppliers`, ikke merget
-eller pushet.** Punkt 6 er ikke fullført: 6A–6C venter på merge, og fase 6D og fristvarsling er ikke
-påbegynt.
+Status: **Fase 6A–6C merget til lokal `main`** (`feat/my-tasks-suppliers`, `7e1195bd`, merget med
+`--no-ff` i `6c8a9641`), ikke pushet. **Punkt 6 er ikke fullført:** fase 6D (øvrige styringsmoduler),
+automatiske fristpåminnelser (§8) og eventuelle senere forbedringer av oppgaveoversikten gjenstår.
 
 Dette dokumentet er kontrakten for hvordan styringsmodulene kobles til Procynias felles varselbjelle
 og «Mine oppgaver». Leverandører er første styringsmodul som bruker begge.
