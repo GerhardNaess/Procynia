@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { publicationLabel, publicationTone } from '../../../Support/processPublication';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import ProcessFlowPanel from '../../../Components/App/ProcessFlowPanel';
+import { qualityHelp, qualityItemHelpPage } from './qualityHelp';
 import {
     DESTRUCTIVE_COLOURS,
     PRIMARY_ACTION,
@@ -122,32 +124,35 @@ export default function QualityItem() {
                     ← {tq.back_to_quality ?? 'Tilbake til Kvalitet'}
                 </Link>
 
-                <header className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge tone={TYPE_TONES[item.quality_type] ?? 'slate'}>
-                            {typeLabels?.[item.quality_type] ?? item.quality_type}
-                        </StatusBadge>
-                        {publication ? (
-                            <StatusBadge tone={publicationTone(publication)}>
-                                {publicationLabel(publication, tq.publication)}
+                <header className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <StatusBadge tone={TYPE_TONES[item.quality_type] ?? 'slate'}>
+                                {typeLabels?.[item.quality_type] ?? item.quality_type}
                             </StatusBadge>
-                        ) : (
-                            <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
-                                {statusLabels?.[item.status] ?? item.status}
-                            </StatusBadge>
+                            {publication ? (
+                                <StatusBadge tone={publicationTone(publication)}>
+                                    {publicationLabel(publication, tq.publication)}
+                                </StatusBadge>
+                            ) : (
+                                <StatusBadge tone={STATUS_TONES[item.status] ?? 'slate'}>
+                                    {statusLabels?.[item.status] ?? item.status}
+                                </StatusBadge>
+                            )}
+                            {item.code && <span className="text-base text-slate-500">{item.code}</span>}
+                        </div>
+                        {/* No handlingsmeny here. Deleting a whole process is done from the Kvalitet
+                            list, where the process is one row among the others and the consequence is
+                            plain; the Flyt tab's "Slett flyt" removes the flow alone. A page about one
+                            document is not the place to decide that document should not exist. */}
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
+                        {item.purpose && (
+                            <p className="max-w-3xl whitespace-pre-line text-base leading-6 text-slate-600">
+                                {item.purpose}
+                            </p>
                         )}
-                        {item.code && <span className="text-base text-slate-500">{item.code}</span>}
                     </div>
-                    {/* No handlingsmeny here. Deleting a whole process is done from the Kvalitet
-                        list, where the process is one row among the others and the consequence is
-                        plain; the Flyt tab's "Slett flyt" removes the flow alone. A page about one
-                        document is not the place to decide that document should not exist. */}
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
-                    {item.purpose && (
-                        <p className="max-w-3xl whitespace-pre-line text-base leading-6 text-slate-600">
-                            {item.purpose}
-                        </p>
-                    )}
+                    <PageHelpButton {...qualityHelp(tq, qualityItemHelpPage(item.quality_type))} />
                 </header>
 
                 {hasFlow && <DetailTabs td={td} item={item} activeTab={activeTab} />}

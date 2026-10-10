@@ -218,6 +218,164 @@ return [
         'delete_dialog_deleting' => 'Deleting …',
         'delete_dialog_cancel' => 'Cancel',
         'back_to_quality' => 'Back to Quality',
+        // PageHelp, one entry per view: the four tabs on the Kvalitet page, and one document's page
+        // by kind — a process, a control, or any of the four governing document types.
+        'help' => [
+            'button' => 'Help',
+            'overview' => [
+                'title' => 'About Quality',
+                'intro' => 'Quality describes how the organisation works, which governing documents apply, who is responsible, and how you check that the agreed ways of working are followed.',
+                'sections' => [
+                    [
+                        'title' => 'Governing documents',
+                        'items' => [
+                            ['title' => 'Policy', 'text' => 'High-level principles and direction for the organisation. A policy can be linked to the processes it governs.'],
+                            ['title' => 'Procedure', 'text' => 'Describes how an activity or task is to be carried out.'],
+                            ['title' => 'Work instruction', 'text' => 'More detailed directions for the work itself.'],
+                            ['title' => 'Checklist', 'text' => 'The points to go through so that nothing is missed. The points are entered on the checklist\'s own page.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Processes and controls',
+                        'items' => [
+                            ['title' => 'Processes', 'text' => 'Describe how the organisation carries out its work: who does what, and in which order. A process has an owner, a status, review dates and the policies that govern it.'],
+                            ['title' => 'Controls', 'text' => 'Verify that a requirement, routine or way of working is actually followed. Evidence is the documentation that the control has been carried out.'],
+                            ['title' => 'Register in the quality system', 'text' => 'At the bottom of Overview you create a governing document, a process or a control. Choose the type, give it a title, and fill in the rest on its own page.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Needs attention',
+                        'items' => [
+                            ['title' => 'What is shown here?', 'text' => 'Fixed rules over what is registered, recalculated every time the page opens. The findings point to gaps and follow-up needs — they are not registered nonconformities. Retired documents are not counted. Choose «Show» to see which items are affected.'],
+                            ['title' => 'Controls without evidence', 'text' => 'No evidence is registered for the control. Open the control and add evidence once it has been carried out.'],
+                            ['title' => 'Controls without an activity', 'text' => 'The control is not placed on any activity in a process flow, or the activity no longer exists. Controls that belong to an activity are added from that activity in the process flow.'],
+                            ['title' => 'Processes without a governing document', 'text' => 'No policy in force is linked to the process. Open the process and link a policy under Governing documents.'],
+                            ['title' => 'Processes overdue for review', 'text' => 'The next review date has passed. Review the process and record a new «Last reviewed» date. Processes without a review interval have no date and never appear here.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Getting started',
+                        'items' => [
+                            ['title' => '1. Processes', 'text' => 'Create or review the processes that describe how you work.'],
+                            ['title' => '2. Governing documents', 'text' => 'Register the policies, procedures, work instructions and checklists that apply.'],
+                            ['title' => '3. Link policies to processes', 'text' => 'Link each process to the policies that govern it, from the process page.'],
+                            ['title' => '4. Controls', 'text' => 'Add controls to the activities in the process flow where something needs to be verified.'],
+                            ['title' => '5. Follow up', 'text' => 'Use Needs attention to find gaps and reviews that are overdue. The order is a suggestion, not a workflow you have to follow.'],
+                        ],
+                    ],
+                ],
+            ],
+            'processes' => [
+                'title' => 'About processes',
+                'intro' => 'This tab lists every process in the quality system with its owner, status and next review. Open a process to describe it and see its flow.',
+                'sections' => [
+                    [
+                        'title' => 'Processes',
+                        'items' => [
+                            ['title' => 'What is a process?', 'text' => 'A description of how the organisation carries out a piece of work from start to finish — who does what, in which order, and where the work branches.'],
+                            ['title' => 'New process', 'text' => 'Created under «Register in the quality system» at the bottom of Overview, with the type Process.'],
+                            ['title' => 'Status', 'text' => 'A new process is «Not published». It comes into force the first time its flow is approved and published. «With unpublished changes» means the working version has changed since the last published revision.'],
+                            ['title' => 'Next review', 'text' => 'Calculated from «Last reviewed» and the review interval. Once the date has passed, the process appears under Needs attention on Overview.'],
+                        ],
+                    ],
+                ],
+            ],
+            'controls' => [
+                'title' => 'About controls',
+                'intro' => 'The control register lists every control: what is checked, who does it, how often, where in the processes it is used, and whether evidence is registered.',
+                'sections' => [
+                    [
+                        'title' => 'The control register',
+                        'items' => [
+                            ['title' => 'Control and evidence', 'text' => 'The control is what is to be checked. The evidence is the documentation that the check was actually done. «No evidence» means nothing has been registered yet.'],
+                            ['title' => 'Used in', 'text' => 'The process activities the control is placed on. The link opens the activity in the process flow. «Not linked to any activity» means the control does not say where in the work it applies.'],
+                            ['title' => 'New control', 'text' => 'Add the control from the activity in the process flow, so it is placed where it belongs. Responsibility, frequency, method and evidence are filled in on the control\'s own page.'],
+                        ],
+                    ],
+                ],
+            ],
+            'tools' => [
+                'title' => 'About tools',
+                'intro' => 'Tools are the documents needed to carry out the controls correctly, gathered in one library.',
+                'sections' => [
+                    [
+                        'title' => 'Tools',
+                        'items' => [
+                            ['title' => 'Register a tool', 'text' => 'Upload a new document or choose one already in the document archive, and give it a name and a type. The file is not copied.'],
+                            ['title' => 'Link to controls', 'text' => 'A tool is linked from the control\'s page, under Tools. The library shows which controls each tool is used in.'],
+                        ],
+                    ],
+                ],
+            ],
+            'process' => [
+                'title' => 'About the process',
+                'intro' => 'The process page has two tabs: Document, with governance information and links, and Flow, which shows how the process is carried out.',
+                'sections' => [
+                    [
+                        'title' => 'Document',
+                        'items' => [
+                            ['title' => 'Owner', 'text' => 'The person responsible for the process being correctly described, followed and reviewed.'],
+                            ['title' => 'Status', 'text' => 'The process comes into force when its flow is approved and published for the first time. After that it can be set to «Under review» or «Retired». A retired process keeps its revisions as history.'],
+                            ['title' => 'Review', 'text' => 'Fill in the review interval in months and when the process was last reviewed. The next review is calculated from these. When the process has been reviewed, update «Last reviewed».'],
+                            ['title' => 'Governing documents', 'text' => 'Link the policies that govern the process. The link copies no content, and the policy itself shows which processes it governs.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Flow',
+                        'items' => [
+                            ['title' => 'Describe the process', 'text' => 'Write in your own words who does what and in which order. Procynia proposes a flow that you check and correct before you adopt it. The structure can also be edited by hand.'],
+                            ['title' => 'Approve and publish', 'text' => 'Changes are made in a working version. «Approve and publish» makes the working version the new revision in force. Earlier revisions stay in the history.'],
+                            ['title' => 'Activities', 'text' => 'Open an activity in the flow to add controls, or to write down the knowledge behind the step as an article in Wiki.'],
+                        ],
+                    ],
+                ],
+            ],
+            'control' => [
+                'title' => 'About the control',
+                'intro' => 'The control page describes what is to be verified and how, and gathers the evidence that the control has been carried out.',
+                'sections' => [
+                    [
+                        'title' => 'The control',
+                        'items' => [
+                            ['title' => 'Criterion', 'text' => 'What the control is to verify, written so that whoever carries it out can see what is good enough.'],
+                            ['title' => 'Responsibility and frequency', 'text' => 'Who carries out the control, and how often. Method describes how it is done.'],
+                            ['title' => 'Owner and status', 'text' => 'The owner is responsible for the control being correctly described. The status says whether the control is a draft, in force, under review or retired. Retired controls do not appear under Needs attention.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Placement and evidence',
+                        'items' => [
+                            ['title' => 'Used in process activities', 'text' => 'The activities in the process flows where the control applies. It is placed from the activity in the flow. A control without an activity appears under Needs attention.'],
+                            ['title' => 'Evidence', 'text' => 'Register evidence each time the control has been carried out: a name, a short description and, optionally, a document from the document archive. Without evidence, the control appears under Needs attention.'],
+                            ['title' => 'Tools', 'text' => 'The documents from the tool library needed to carry out the control correctly.'],
+                        ],
+                    ],
+                ],
+            ],
+            'document' => [
+                'title' => 'About the document',
+                'intro' => 'This page gathers the governance information for a governing document, its files and the Wiki pages behind it.',
+                'sections' => [
+                    [
+                        'title' => 'Document types',
+                        'items' => [
+                            ['title' => 'Policy', 'text' => 'High-level principles and direction. The page shows which processes the policy governs. The link is made from the process.'],
+                            ['title' => 'Procedure and work instruction', 'text' => 'A procedure describes how a task is to be carried out. A work instruction gives the detailed directions. Both are described by their purpose and any files.'],
+                            ['title' => 'Checklist', 'text' => 'The points to go through. Enter the points under Structure, and mark the mandatory ones.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Governance and maintenance',
+                        'items' => [
+                            ['title' => 'Owner', 'text' => 'The person responsible for the document being correct and up to date.'],
+                            ['title' => 'Status', 'text' => '«Draft» is work in progress, «In force» is what the organisation follows, «Under review» still applies while it is being updated, and «Retired» no longer applies but is kept.'],
+                            ['title' => 'Review', 'text' => 'Fill in the review interval and when the document was last reviewed. The next review is calculated from these. Update «Last reviewed» when the document has been reviewed.'],
+                            ['title' => 'Files and Wiki', 'text' => 'Upload the document itself or templates, and link Wiki pages with the knowledge behind it. Wiki pages are not changed by being linked.'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'detail' => [
             'control_placements_heading' => 'Used in process activities',
             'control_placements_empty' => 'This control is not linked to any process activity.',

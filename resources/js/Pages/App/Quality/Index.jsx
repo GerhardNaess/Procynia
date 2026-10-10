@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { publicationLabel, publicationTone } from '../../../Support/processPublication';
 import { itemLabel } from '../../../Support/qualityStructure';
+import { qualityHelp, qualityTabHelpPage } from './qualityHelp';
 import {
     DESTRUCTIVE_COLOURS,
     PRIMARY_ACTION,
@@ -81,14 +83,17 @@ export default function QualityIndex() {
     return (
         <CustomerAppLayout title={tq.index_title ?? 'Kvalitet'} showPageTitle={false}>
             <div className="space-y-6">
-                <header className="space-y-2">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                        {tq.index_title ?? 'Kvalitet'}
-                    </h1>
-                    <p className="max-w-3xl text-base leading-6 text-slate-600">
-                        {tq.index_description
-                            ?? 'Styrende dokumenter, prosesser og kontroller — med eier, status og revisjon.'}
-                    </p>
+                <header className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-2">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                            {tq.index_title ?? 'Kvalitet'}
+                        </h1>
+                        <p className="max-w-3xl text-base leading-6 text-slate-600">
+                            {tq.index_description
+                                ?? 'Styrende dokumenter, prosesser og kontroller — med eier, status og revisjon.'}
+                        </p>
+                    </div>
+                    <PageHelpButton {...qualityHelp(tq, qualityTabHelpPage(activeTab))} />
                 </header>
 
                 {activeTab === 'overview' && (

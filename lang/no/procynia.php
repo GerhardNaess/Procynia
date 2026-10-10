@@ -220,6 +220,164 @@ return [
         'delete_dialog_deleting' => 'Sletter …',
         'delete_dialog_cancel' => 'Avbryt',
         'back_to_quality' => 'Tilbake til Kvalitet',
+        // PageHelp, one entry per view: the four tabs on the Kvalitet page, and one document's page
+        // by kind — a process, a control, or any of the four governing document types.
+        'help' => [
+            'button' => 'Hjelp',
+            'overview' => [
+                'title' => 'Om Kvalitet',
+                'intro' => 'Kvalitet beskriver hvordan virksomheten arbeider, hvilke styrende dokumenter som gjelder, hvem som har ansvaret, og hvordan dere kontrollerer at arbeidsmåtene blir fulgt.',
+                'sections' => [
+                    [
+                        'title' => 'Styrende dokumenter',
+                        'items' => [
+                            ['title' => 'Policy', 'text' => 'Overordnede prinsipper og føringer for virksomheten. En policy kan kobles til prosessene den styrer.'],
+                            ['title' => 'Prosedyre', 'text' => 'Beskriver hvordan en aktivitet eller oppgave skal gjennomføres.'],
+                            ['title' => 'Arbeidsinstruks', 'text' => 'Mer detaljerte anvisninger for selve utførelsen.'],
+                            ['title' => 'Sjekkliste', 'text' => 'Punktene som må gjennomgås for at ingenting skal bli glemt. Punktene legges inn på sjekklistens egen side.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Prosesser og kontroller',
+                        'items' => [
+                            ['title' => 'Prosesser', 'text' => 'Beskriver hvordan virksomheten gjennomfører arbeidet: hvem som gjør hva, og i hvilken rekkefølge. En prosess har eier, status, revisjonsdatoer og policyene som styrer den.'],
+                            ['title' => 'Kontroller', 'text' => 'Verifiserer at et krav, en rutine eller en arbeidsmåte faktisk blir fulgt. Evidens er dokumentasjonen på at kontrollen er gjennomført.'],
+                            ['title' => 'Registrer i kvalitetssystemet', 'text' => 'Nederst på Oversikt oppretter du et styrende dokument, en prosess eller en kontroll. Velg type, gi det en tittel, og fyll ut resten på dokumentets egen side.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Trenger oppmerksomhet',
+                        'items' => [
+                            ['title' => 'Hva vises her?', 'text' => 'Faste regler over det som er registrert, regnet ut på nytt hver gang siden åpnes. Funnene viser mangler og oppfølgingsbehov — de er ikke registrerte avvik. Utgåtte dokumenter regnes ikke med. Velg «Vis» for å se hvilke det gjelder.'],
+                            ['title' => 'Kontroller uten evidens', 'text' => 'Kontrollen har ingen registrert evidens. Åpne kontrollen og legg til evidens når den er gjennomført.'],
+                            ['title' => 'Kontroller uten aktivitet', 'text' => 'Kontrollen er ikke plassert på noen aktivitet i en prosessflyt, eller aktiviteten finnes ikke lenger. Kontroller som skal høre til en aktivitet, legges til fra aktiviteten i prosessens flyt.'],
+                            ['title' => 'Prosesser uten styrende dokument', 'text' => 'Ingen gjeldende policy er koblet til prosessen. Åpne prosessen og koble til en policy under Styrende dokumenter.'],
+                            ['title' => 'Prosesser forfalt til revisjon', 'text' => 'Neste revisjonsdato har passert. Gjennomgå prosessen og registrer ny «Sist revidert»-dato. Prosesser uten revisjonsintervall får ingen dato og vises aldri her.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Kom i gang',
+                        'items' => [
+                            ['title' => '1. Prosesser', 'text' => 'Opprett eller gjennomgå prosessene som beskriver hvordan dere arbeider.'],
+                            ['title' => '2. Styrende dokumenter', 'text' => 'Registrer policyene, prosedyrene, arbeidsinstruksene og sjekklistene som gjelder.'],
+                            ['title' => '3. Koble policyer til prosesser', 'text' => 'Koble hver prosess til policyene som styrer den, fra prosessens side.'],
+                            ['title' => '4. Kontroller', 'text' => 'Legg til kontroller på aktivitetene i prosessflyten der noe skal verifiseres.'],
+                            ['title' => '5. Følg opp', 'text' => 'Bruk Trenger oppmerksomhet til å finne mangler og revisjoner som har forfalt. Rekkefølgen er et forslag, ikke en arbeidsflyt dere må følge.'],
+                        ],
+                    ],
+                ],
+            ],
+            'processes' => [
+                'title' => 'Om prosesser',
+                'intro' => 'Fanen viser alle prosessene i kvalitetssystemet med eier, status og neste revisjon. Åpne en prosess for å beskrive den og se flyten.',
+                'sections' => [
+                    [
+                        'title' => 'Prosesser',
+                        'items' => [
+                            ['title' => 'Hva er en prosess?', 'text' => 'En beskrivelse av hvordan virksomheten gjennomfører et arbeid, fra start til slutt — hvem som gjør hva, i hvilken rekkefølge, og hvor arbeidet forgrener seg.'],
+                            ['title' => 'Ny prosess', 'text' => 'Opprettes under «Registrer i kvalitetssystemet» nederst på Oversikt, med typen Prosess.'],
+                            ['title' => 'Status', 'text' => 'En ny prosess er «Ikke publisert». Den blir gjeldende første gang flyten godkjennes og publiseres. «Med upubliserte endringer» betyr at arbeidsversjonen er endret etter siste publiserte revisjon.'],
+                            ['title' => 'Neste revisjon', 'text' => 'Regnes ut fra «Sist revidert» og revisjonsintervallet. Når datoen har passert, vises prosessen under Trenger oppmerksomhet på Oversikt.'],
+                        ],
+                    ],
+                ],
+            ],
+            'controls' => [
+                'title' => 'Om kontroller',
+                'intro' => 'Kontrollregisteret viser alle kontrollene: hva som kontrolleres, hvem som gjør det, hvor ofte, hvor i prosessene de brukes, og om evidens er registrert.',
+                'sections' => [
+                    [
+                        'title' => 'Kontrollregisteret',
+                        'items' => [
+                            ['title' => 'Kontroll og evidens', 'text' => 'Kontrollen er det som skal sjekkes. Evidensen er dokumentasjonen på at sjekken faktisk er gjort. «Ingen evidens» betyr at ingenting er registrert ennå.'],
+                            ['title' => 'Brukes i', 'text' => 'Prosessaktivitetene kontrollen er plassert på. Lenken åpner aktiviteten i prosessens flyt. «Ikke koblet til noen aktivitet» betyr at kontrollen ikke sier hvor i arbeidet den gjelder.'],
+                            ['title' => 'Ny kontroll', 'text' => 'Legg til kontrollen fra aktiviteten i prosessens flyt, så blir den plassert der den hører hjemme. Ansvarlig, frekvens, metode og evidens fyller du ut på kontrollens egen side.'],
+                        ],
+                    ],
+                ],
+            ],
+            'tools' => [
+                'title' => 'Om verktøy',
+                'intro' => 'Verktøy er dokumentene som trengs for å utføre kontrollene riktig, samlet i ett bibliotek.',
+                'sections' => [
+                    [
+                        'title' => 'Verktøy',
+                        'items' => [
+                            ['title' => 'Registrer verktøy', 'text' => 'Last opp et nytt dokument eller velg et som allerede ligger i dokumentarkivet, og gi det navn og type. Filen kopieres ikke.'],
+                            ['title' => 'Koble til kontroller', 'text' => 'Verktøyet kobles til fra kontrollens side, under Verktøy. Biblioteket viser hvilke kontroller hvert verktøy brukes i.'],
+                        ],
+                    ],
+                ],
+            ],
+            'process' => [
+                'title' => 'Om prosessen',
+                'intro' => 'Prosessiden har to faner: Dokument med styringsinformasjon og koblinger, og Flyt som viser hvordan prosessen gjennomføres.',
+                'sections' => [
+                    [
+                        'title' => 'Dokument',
+                        'items' => [
+                            ['title' => 'Eier', 'text' => 'Personen som har ansvaret for at prosessen er riktig beskrevet, fulgt og revidert.'],
+                            ['title' => 'Status', 'text' => 'Prosessen blir gjeldende når flyten godkjennes og publiseres første gang. Etter det kan den settes til «Under revisjon» eller «Utgått». En utgått prosess beholder revisjonene som historikk.'],
+                            ['title' => 'Revisjon', 'text' => 'Fyll ut revisjonsintervall i måneder og når prosessen sist ble revidert. Neste revisjon regnes ut av dette. Når prosessen er gjennomgått, oppdaterer du «Sist revidert».'],
+                            ['title' => 'Styrende dokumenter', 'text' => 'Koble til policyene som styrer prosessen. Koblingen kopierer ikke innhold, og policyen viser selv hvilke prosesser den styrer.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Flyt',
+                        'items' => [
+                            ['title' => 'Beskriv prosessen', 'text' => 'Skriv med egne ord hvem som gjør hva og i hvilken rekkefølge. Procynia foreslår en flyt du kontrollerer og retter før du tar den i bruk. Strukturen kan også redigeres manuelt.'],
+                            ['title' => 'Godkjenn og publiser', 'text' => 'Endringer gjøres i en arbeidsversjon. «Godkjenn og publiser» gjør arbeidsversjonen til ny gjeldende revisjon. Tidligere revisjoner blir liggende i historikken.'],
+                            ['title' => 'Aktiviteter', 'text' => 'Åpne en aktivitet i flyten for å legge til kontroller, eller for å skrive ned kunnskapen bak steget som artikkel i Wiki.'],
+                        ],
+                    ],
+                ],
+            ],
+            'control' => [
+                'title' => 'Om kontrollen',
+                'intro' => 'Kontrollsiden beskriver hva som skal verifiseres og hvordan, og samler evidensen for at kontrollen er gjennomført.',
+                'sections' => [
+                    [
+                        'title' => 'Kontrollen',
+                        'items' => [
+                            ['title' => 'Kriterium', 'text' => 'Hva kontrollen skal verifisere, skrevet slik at den som utfører kontrollen ser hva som er godt nok.'],
+                            ['title' => 'Ansvar og frekvens', 'text' => 'Hvem som utfører kontrollen, og hvor ofte. Metode beskriver hvordan den gjennomføres.'],
+                            ['title' => 'Eier og status', 'text' => 'Eieren har ansvaret for at kontrollen er riktig beskrevet. Statusen sier om kontrollen er utkast, gjeldende, under revisjon eller utgått. Utgåtte kontroller vises ikke under Trenger oppmerksomhet.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Plassering og evidens',
+                        'items' => [
+                            ['title' => 'Brukes i prosessaktiviteter', 'text' => 'Aktivitetene i prosessflytene der kontrollen gjelder. Plasseringen gjøres fra aktiviteten i flyten. En kontroll uten aktivitet vises under Trenger oppmerksomhet.'],
+                            ['title' => 'Evidens', 'text' => 'Registrer evidens hver gang kontrollen er gjennomført: et navn, en kort beskrivelse og eventuelt et dokument fra dokumentarkivet. Uten evidens vises kontrollen under Trenger oppmerksomhet.'],
+                            ['title' => 'Verktøy', 'text' => 'Dokumentene fra verktøybiblioteket som trengs for å utføre kontrollen riktig.'],
+                        ],
+                    ],
+                ],
+            ],
+            'document' => [
+                'title' => 'Om dokumentet',
+                'intro' => 'Siden samler styringsinformasjonen for et styrende dokument, filene og Wiki-sidene bak det.',
+                'sections' => [
+                    [
+                        'title' => 'Dokumenttyper',
+                        'items' => [
+                            ['title' => 'Policy', 'text' => 'Overordnede prinsipper og føringer. Siden viser hvilke prosesser policyen styrer. Koblingen gjøres fra prosessen.'],
+                            ['title' => 'Prosedyre og arbeidsinstruks', 'text' => 'En prosedyre beskriver hvordan en oppgave skal gjennomføres. En arbeidsinstruks gir de detaljerte anvisningene. Begge beskrives med formål og eventuelle filer.'],
+                            ['title' => 'Sjekkliste', 'text' => 'Punktene som må gjennomgås. Legg inn punktene under Struktur, og marker de obligatoriske.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Styring og vedlikehold',
+                        'items' => [
+                            ['title' => 'Eier', 'text' => 'Personen som har ansvaret for at dokumentet er riktig og oppdatert.'],
+                            ['title' => 'Status', 'text' => '«Utkast» er under arbeid, «Gjeldende» er det virksomheten følger, «Under revisjon» gjelder fortsatt mens det oppdateres, og «Utgått» gjelder ikke lenger, men beholdes.'],
+                            ['title' => 'Revisjon', 'text' => 'Fyll ut revisjonsintervall og når dokumentet sist ble revidert. Neste revisjon regnes ut av dette. Oppdater «Sist revidert» når dokumentet er gjennomgått.'],
+                            ['title' => 'Filer og Wiki', 'text' => 'Last opp selve dokumentet eller maler, og koble til Wiki-sider med kunnskapen bak. Wiki-sidene endres ikke av å bli koblet.'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'detail' => [
             'control_placements_heading' => 'Brukes i prosessaktiviteter',
             'control_placements_empty' => 'Kontrollen er ikke koblet til noen prosessaktivitet.',
