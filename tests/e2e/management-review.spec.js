@@ -186,7 +186,40 @@ test('a management review is created, assessed, decided, finalized and reported'
     await expectReadable(page, '07-register');
 });
 
-test('the section menu shows progress and attention apart, explains both, and follows save, change and removal', async ({ page }) => {
+/** What one nav item draws as its marker: how many markers, and the one's look and place. */
+async function markerOf(item) {
+    return item.evaluate((button) => {
+        const icons = button.querySelectorAll('[data-icon]');
+        const icon = icons[0];
+        const box = icon?.getBoundingClientRect();
+        const style = icon ? getComputedStyle(icon) : null;
+        // Tailwind 4 colours are oklch; paint one pixel to read them as RGB, then name the tint.
+        const tint = (color) => {
+            const context = document.createElement('canvas').getContext('2d');
+            context.fillStyle = color;
+            context.fillRect(0, 0, 1, 1);
+            const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+            if (a === 0) return 'none';
+            if (g > r && g >= b && g - r >= 10) return 'green';
+            if (r >= g && g > b && r - b >= 15) return 'orange';
+            if (Math.max(r, g, b) - Math.min(r, g, b) < 45) return 'grey';
+            return `rgb(${r}, ${g}, ${b})`;
+        };
+
+        return {
+            count: icons.length,
+            marker: icon?.dataset.icon,
+            width: Math.round(box?.width ?? 0),
+            height: Math.round(box?.height ?? 0),
+            background: style ? tint(style.backgroundColor) : null,
+            border: style ? tint(style.borderTopColor) : null,
+            symbol: icon?.querySelector('svg') ? 'tick' : (icon?.textContent.trim() || ''),
+            rightGap: Math.round(button.getBoundingClientRect().right - (box?.right ?? 0)),
+        };
+    });
+}
+
+test('each section shows exactly one marker — grey, orange or green — explained, and following save and removal', async ({ page }) => {
     test.setTimeout(150_000);
 
     const people = await managementReviewFixture(`seedJourney('${suffix}', '${MANAGEMENT_REVIEW_E2E_PASSWORD}')`);
@@ -200,87 +233,86 @@ test('the section menu shows progress and attention apart, explains both, and fo
     await page.waitForURL(/\/app\/management-reviews\/\d+$/);
     const reviewUrl = page.url();
 
-    const risks = page.getByTestId('mr-nav-risks');
+    const quality = page.getByTestId('mr-nav-quality');
     const resources = page.getByTestId('mr-nav-resources');
     const missing = page.getByTestId('mr-readiness-judgements');
 
-    // Not assessed: an empty ring. The high risk is flagged beside it, not instead of it.
-    await expect(risks).toHaveAttribute('data-progress', 'open');
-    await expect(risks).toHaveAttribute('data-attention', 'true');
-    await expect(risks.locator('[data-icon="open"]')).toBeVisible();
-    await expect(risks.locator('[data-icon="attention"]')).toBeVisible();
-    await expect(resources).toHaveAttribute('data-progress', 'open');
-    await expect(resources).toHaveAttribute('data-attention', 'false');
-    await expect(resources.locator('[data-icon="attention"]')).toHaveCount(0);
+    // Every section: one marker, 20 × 20, at the same place on the right.
+    const navItems = page.locator('nav [data-marker]');
+    const gaps = new Set();
+    for (const item of await navItems.all()) {
+        const marker = await markerOf(item);
+        expect(marker.count, 'one marker per section').toBe(1);
+        expect([marker.width, marker.height]).toEqual([20, 20]);
+        gaps.add(marker.rightGap);
+    }
+    expect(gaps.size, 'every marker at the same right-hand position').toBe(1);
 
-    // The explanation: on hover, on keyboard focus, and in the button's accessible name.
-    await risks.hover();
-    await expect(page.getByRole('tooltip')).toContainText('Ikke vurdert. Forhold krever oppmerksomhet:');
+    // Kvalitetsarbeid before: one orange circle with «!», nothing else. Ressurser: one plain grey circle.
+    expect(await markerOf(quality)).toMatchObject({ count: 1, marker: 'attention', background: 'orange', border: 'orange', symbol: '!' });
+    expect(await markerOf(resources)).toMatchObject({ count: 1, marker: 'open', background: 'grey', border: 'grey', symbol: '' });
+
+    // The explanation: on hover, on keyboard focus, and in the accessible name.
+    await quality.hover();
+    await expect(page.getByRole('tooltip')).toContainText('Ikke vurdert – forhold krever oppmerksomhet:');
     await page.mouse.move(900, 10);
     await expect(page.getByRole('tooltip')).toHaveCount(0);
     await resources.focus();
     await expect(page.getByRole('tooltip')).toHaveText('Ikke vurdert.');
-    // No earlier review yet: the checklist does not ask for this one, and the menu says so.
     await page.getByTestId('mr-nav-previous_decisions').focus();
     await expect(page.getByRole('tooltip')).toHaveText('Ikke vurdert. Ikke påkrevd for ferdigstilling.');
-    await expect(risks).toHaveAccessibleName(/^Risiko og risikobilde \(Ikke vurdert\. Forhold krever oppmerksomhet: .+\)$/);
-    const width = await risks.evaluate((element) => element.getBoundingClientRect().width);
+    await expect(quality).toHaveAccessibleName(/^Kvalitetsarbeid \(Ikke vurdert – forhold krever oppmerksomhet: .+\)$/);
+    const height = await quality.evaluate((element) => element.getBoundingClientRect().height);
 
-    // Opening a section marks nothing.
-    await risks.click();
-    await expect(page.getByTestId('mr-section-status')).toHaveAttribute('data-progress', 'open');
-    await expect(page.getByTestId('mr-section-status')).toContainText('Ikke vurdert');
-    await expect(page.getByTestId('mr-section-attention')).toContainText('Forhold krever oppmerksomhet');
-    await expect(risks).toHaveAttribute('data-progress', 'open');
+    // Opening the section marks nothing.
+    await quality.click();
+    expect((await markerOf(quality)).marker).toBe('attention');
+    await expect(page.getByTestId('mr-section-status')).toHaveAttribute('data-marker', 'attention');
+    await page.screenshot({ path: `test-results/mr-markers-1-before-${suffix}.png`, clip: await page.getByRole('navigation', { name: 'Seksjoner i gjennomgåelsen' }).locator('ul').boundingBox() });
 
-    // Saved: the green tick, with the attention still shown — and the checklist agrees.
-    await page.getByTestId('mr-judgement-needs_improvement').check();
-    await page.getByTestId('mr-save-assessment').click();
-    await expect(risks).toHaveAttribute('data-progress', 'judged', { timeout: 15_000 });
-    await expect(risks).toHaveAttribute('data-attention', 'true');
-    await expect(risks.locator('[data-icon="judged"]')).toBeVisible();
-    await expect(risks.locator('[data-icon="attention"]')).toBeVisible();
-    await expect(page.getByTestId('mr-section-status')).toContainText('Vurdering gjennomført');
-    await expect(page.getByTestId('mr-section-attention')).toBeVisible();
-    expect(await risks.evaluate((element) => element.getBoundingClientRect().width)).toBe(width);
-    await risks.hover();
-    await expect(page.getByRole('tooltip')).toContainText('Vurdering gjennomført. Forhold krever oppmerksomhet:');
-    await page.getByTestId('mr-nav-overview').click();
-    await expect(missing.getByRole('button', { name: 'Risiko og risikobilde' })).toHaveCount(0);
-    await expect(missing.getByRole('button', { name: 'Ressurser, kompetanse og forbedringsbehov' })).toHaveCount(1);
-
-    // Changed: still assessed. After a reload: still assessed.
-    await risks.click();
+    // Saved: one green circle with a tick — and the attention is still told in the section.
     await page.getByTestId('mr-judgement-satisfactory').check();
     await page.getByTestId('mr-save-assessment').click();
-    await expect(page.getByText('Lagret.', { exact: true }).first()).toBeVisible();
-    await expect(risks).toHaveAttribute('data-progress', 'judged');
-    await page.reload();
-    await expect(risks).toHaveAttribute('data-progress', 'judged');
-    await expect(risks).toHaveAttribute('data-attention', 'true');
+    await expect(quality).toHaveAttribute('data-marker', 'judged', { timeout: 15_000 });
+    expect(await markerOf(quality)).toMatchObject({ count: 1, marker: 'judged', background: 'green', border: 'green', symbol: 'tick' });
+    await expect(page.getByTestId('mr-section-status')).toContainText('Vurdering gjennomført – forhold krever fortsatt oppmerksomhet:');
+    await expect(page.getByTestId('mr-section-status').locator('[data-icon]')).toHaveCount(1);
+    expect(await quality.evaluate((element) => element.getBoundingClientRect().height)).toBe(height);
+    await quality.hover();
+    await expect(page.getByRole('tooltip')).toContainText('Vurdering gjennomført – forhold krever fortsatt oppmerksomhet:');
+    await page.screenshot({ path: `test-results/mr-markers-2-judged-${suffix}.png`, clip: await page.getByRole('navigation', { name: 'Seksjoner i gjennomgåelsen' }).locator('ul').boundingBox() });
+    await page.getByTestId('mr-nav-overview').click();
+    await expect(missing.getByRole('button', { name: 'Kvalitetsarbeid' })).toHaveCount(0);
 
-    // Removed: back to the empty ring, in the menu, the section and the checklist — and after a reload.
+    // After a reload: still green.
+    await page.reload();
+    expect(await markerOf(quality)).toMatchObject({ count: 1, marker: 'judged', background: 'green', border: 'green' });
+
+    // Removed: back to one orange circle — the attention is still there — in menu, section and checklist.
+    await quality.click();
     await page.getByTestId('mr-remove-assessment').click();
-    await expect(risks).toHaveAttribute('data-progress', 'open', { timeout: 15_000 });
-    await expect(page.getByTestId('mr-section-status')).toHaveAttribute('data-progress', 'open');
-    await expect(page.getByTestId('mr-remove-assessment')).toHaveCount(0);
+    await expect(quality).toHaveAttribute('data-marker', 'attention', { timeout: 15_000 });
+    expect(await markerOf(quality)).toMatchObject({ count: 1, marker: 'attention', background: 'orange', border: 'orange', symbol: '!' });
     await page.goto(reviewUrl);
-    await expect(risks).toHaveAttribute('data-progress', 'open');
-    await expect(missing.getByRole('button', { name: 'Risiko og risikobilde' })).toHaveCount(1);
+    expect((await markerOf(quality)).marker).toBe('attention');
+    await expect(missing.getByRole('button', { name: 'Kvalitetsarbeid' })).toHaveCount(1);
     await expectReadable(page, '09-status-markers');
 
     // A phone has no hover and no menu icons: the select and the section say the same in words.
-    await risks.click();
+    await quality.click();
     await page.getByTestId('mr-judgement-needs_improvement').check();
     await page.getByTestId('mr-save-assessment').click();
-    await expect(risks).toHaveAttribute('data-progress', 'judged', { timeout: 15_000 });
+    await expect(quality).toHaveAttribute('data-marker', 'judged', { timeout: 15_000 });
     await page.setViewportSize(PHONE);
-    await expect(page.getByTestId('mr-nav-select').locator('option[value="risks"]')).toHaveText('Risiko og risikobilde (vurdert · krever oppmerksomhet)');
-    await expect(page.getByTestId('mr-nav-select').locator('option[value="resources"]')).toHaveText('Ressurser, kompetanse og forbedringsbehov (ikke vurdert)');
+    const select = page.getByTestId('mr-nav-select');
+    await expect(select.locator('option[value="quality"]')).toHaveText('Kvalitetsarbeid (vurdert, krever fortsatt oppmerksomhet)');
+    await expect(select.locator('option[value="risks"]')).toHaveText('Risiko og risikobilde (ikke vurdert, krever oppmerksomhet)');
+    await expect(select.locator('option[value="resources"]')).toHaveText('Ressurser, kompetanse og forbedringsbehov (ikke vurdert)');
     await expect(page.getByTestId('mr-section-status')).toBeVisible();
-    await expect(page.getByTestId('mr-section-status')).toContainText('Vurdering gjennomført');
-    await expect(page.getByTestId('mr-section-attention')).toContainText('Forhold krever oppmerksomhet');
+    await expect(page.getByTestId('mr-section-status').locator('[data-icon="judged"]')).toBeVisible();
+    await expect(page.getByTestId('mr-section-status')).toContainText('forhold krever fortsatt oppmerksomhet');
     expect(await sidewaysOverflow(page), 'section status scrolls sideways').toEqual([]);
+    await page.screenshot({ path: `test-results/mr-markers-3-phone-${suffix}.png` });
 });
 
 test('on a phone the sections are one select and nothing scrolls sideways', async ({ page }) => {

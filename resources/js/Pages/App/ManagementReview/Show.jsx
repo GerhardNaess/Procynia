@@ -11,7 +11,7 @@ import SectionBasis from './SectionBasis';
 import { DecisionList } from './ReviewDecisions';
 import {
     ATTENTION_METRICS, DECISIONS, HISTORY, JUDGEMENT_TONES, MODULE_LINKS, OVERVIEW, REVIEW_STATUS_TONES,
-    attentionItems, fill, formatDay, formatMoment, judgementLabel, markerLabel, neighbours, paneFromSearch, reviewHelp,
+    attentionItems, fill, formatDay, formatMoment, judgementLabel, neighbours, paneFromSearch, reviewHelp,
     sectionOptionLabel, sectionStatus, sectionTitle, statusDescription, statusLabel,
 } from './reviewSections';
 
@@ -19,28 +19,29 @@ const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-700';
 const ERROR = 'mt-1 text-base text-rose-700';
-const ICON = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-sm font-bold leading-none';
+const ICON = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[13px] font-bold leading-none';
 
-/** Fremdrift: an empty ring until a judgement is saved, then a filled green tick. */
-function ProgressIcon({ progress }) {
-    if (progress === 'judged') {
-        return (
-            <span className={`${ICON} bg-emerald-600 text-white`} data-icon="judged">
-                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
-            </span>
-        );
-    }
+/**
+ * The one marker a section gets — chosen by sectionStatus(), drawn here. Each state has a shape of
+ * its own as well as a colour: nothing, a tick, an exclamation mark, a dash.
+ */
+const MARKER_STYLE = {
+    open: 'border-slate-400 bg-slate-50',
+    attention: 'border-amber-400 bg-amber-50 text-amber-700',
+    judged: 'border-emerald-500 bg-emerald-50 text-emerald-700',
+    unavailable: 'border-slate-200 bg-white text-slate-400',
+};
 
-    if (progress === 'unavailable') {
-        return <span className={`${ICON} text-slate-500`} data-icon="unavailable">–</span>;
-    }
-
-    return <span className={`${ICON} border-2 border-slate-400`} data-icon="open" />;
-}
-
-/** Oppmerksomhet: a shape of its own (not just a colour) beside, never instead of, the progress. */
-function AttentionIcon() {
-    return <span className={`${ICON} border border-amber-300 bg-amber-100 text-amber-800`} data-icon="attention">!</span>;
+function StatusIcon({ marker }) {
+    return (
+        <span className={`${ICON} ${MARKER_STYLE[marker] ?? MARKER_STYLE.open}`} data-icon={marker} aria-hidden="true">
+            {marker === 'judged' && (
+                <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 8.5l3 3 6-7" /></svg>
+            )}
+            {marker === 'attention' && '!'}
+            {marker === 'unavailable' && '–'}
+        </span>
+    );
 }
 
 /**
@@ -243,28 +244,23 @@ function SectionNav({ sections, decisions, readiness, pane, onOpen, t }) {
     const item = (key, label, status = null) => {
         const active = pane === key;
         const description = status ? statusDescription(status, t) : null;
-        const attention = status ? status.attention.length > 0 : false;
         const button = (
             <button
                 type="button"
                 onClick={() => onOpen(key)}
                 aria-current={active ? 'page' : undefined}
-                className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-base transition ${active ? 'bg-violet-50 font-semibold text-violet-800' : 'text-slate-700 hover:bg-slate-50'}`}
+                className={`flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-left text-base leading-6 transition ${active ? 'bg-violet-50 font-semibold text-violet-800' : 'text-slate-700 hover:bg-slate-50'}`}
                 data-testid={`mr-nav-${key}`}
+                data-marker={status?.marker}
                 data-progress={status?.progress}
-                data-attention={status ? String(attention) : undefined}
+                data-attention={status ? String(status.attention.length > 0) : undefined}
             >
                 <span className="min-w-0 break-words">
                     {label}
                     {description && <span className="sr-only">{`(${description})`}</span>}
                 </span>
-                {status && (
-                    // Both slots always take their room, so a marker coming or going moves nothing.
-                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
-                        <span className="inline-flex h-5 w-5">{attention && <AttentionIcon />}</span>
-                        <ProgressIcon progress={status.progress} />
-                    </span>
-                )}
+                {/* One marker, fixed at the right and level with the first line of the name. */}
+                {status && <span className="mt-0.5 shrink-0"><StatusIcon marker={status.marker} /></span>}
             </button>
         );
 
@@ -426,15 +422,11 @@ function SectionPane({ review, section, sections, readiness, decisions, ownerOpt
 function SectionStatus({ section, readiness, t }) {
     const status = sectionStatus(section, readiness);
 
+    // The same one marker as the navigation; what is still flagged is told in the words beside it.
     return (
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-base text-slate-800" data-testid="mr-section-status" data-progress={status.progress} data-attention={String(status.attention.length > 0)}>
-            <span className="inline-flex items-center gap-2"><span aria-hidden="true"><ProgressIcon progress={status.progress} /></span>{markerLabel(status.progress, t)}{status.optional && <span className="text-slate-600">{` · ${markerLabel('optional', t)}`}</span>}</span>
-            {status.attention.length > 0 && (
-                <span className="inline-flex min-w-0 items-start gap-2" data-testid="mr-section-attention">
-                    <span aria-hidden="true" className="mt-0.5"><AttentionIcon /></span>
-                    <span className="min-w-0 break-words">{markerLabel('attention', t)}: {status.attention.map((item) => `${item.label} ${item.value}`).join(', ')}</span>
-                </span>
-            )}
+        <div className="mt-3 flex items-start gap-2 text-base leading-6 text-slate-800" data-testid="mr-section-status" data-marker={status.marker} data-progress={status.progress} data-attention={String(status.attention.length > 0)}>
+            <span className="mt-0.5 shrink-0"><StatusIcon marker={status.marker} /></span>
+            <span className="min-w-0 break-words">{statusDescription(status, t)}</span>
         </div>
     );
 }

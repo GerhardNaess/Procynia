@@ -11,6 +11,7 @@ use App\Models\ManagementReview;
 use App\Models\ManagementReviewDecision;
 use App\Models\ManagementReviewEvent;
 use App\Models\ManagementReviewSnapshotSection;
+use App\Models\QualityItem;
 use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Models\User;
@@ -43,7 +44,7 @@ class ManagementReviewE2EFixture
     /**
      * The run's customer with a quality manager who runs the review (every review permission, and
      * read access to the modules in one fagområde), a colleague who reads reviews and can own a
-     * tiltak, a high risk and an open deviation in that fagområde.
+     * tiltak, a high risk and an open deviation in that fagområde, and a control without evidence.
      *
      * @return array{email: string, name: string, colleague_email: string, colleague_name: string, area: string}
      */
@@ -87,6 +88,13 @@ class ManagementReviewE2EFixture
             ]);
 
             self::deviation($customer, $area, 'Avvik '.strtoupper($suffix));
+            // A control in force with no evidence: «Kvalitetsarbeid» needs attention.
+            QualityItem::query()->create([
+                'customer_id' => $customer->id,
+                'quality_type' => QualityItem::TYPE_CONTROL,
+                'title' => 'Tilgangskontroll '.strtoupper($suffix),
+                'status' => QualityItem::STATUS_ACTIVE,
+            ]);
 
             return [
                 'email' => $manager->email,
