@@ -14,7 +14,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class QualityItemRelation extends Model
 {
-    /** Policy -> Process. The governing document sets the frame the process must work inside. */
+    /**
+     * Styrende dokument -> Process. The document sets the frame the process works inside: a policy
+     * its principles, a procedure or work instruction how parts of it are carried out, a checklist
+     * what must not be forgotten. One relation for all four, because the process asks one question
+     * of them — "which documents apply to me?" — and the Styrende dokumenter section answers it.
+     */
     public const TYPE_GOVERNS = 'governs';
 
     /** Process -> Procedure. The procedure is how a part of the process is actually carried out. */
@@ -54,6 +59,9 @@ class QualityItemRelation extends Model
     public const TYPE_MATRIX = [
         self::TYPE_GOVERNS => [
             [QualityItem::TYPE_POLICY, QualityItem::TYPE_PROCESS],
+            [QualityItem::TYPE_PROCEDURE, QualityItem::TYPE_PROCESS],
+            [QualityItem::TYPE_WORK_INSTRUCTION, QualityItem::TYPE_PROCESS],
+            [QualityItem::TYPE_CHECKLIST, QualityItem::TYPE_PROCESS],
         ],
         self::TYPE_HAS_PROCEDURE => [
             [QualityItem::TYPE_PROCESS, QualityItem::TYPE_PROCEDURE],

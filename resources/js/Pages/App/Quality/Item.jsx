@@ -6,6 +6,7 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { publicationLabel, publicationTone } from '../../../Support/processPublication';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import ProcessFlowPanel from '../../../Components/App/ProcessFlowPanel';
+import SearchableMultiSelect from '../../../Components/App/SearchableMultiSelect';
 import { qualityHelp, qualityItemHelpPage } from './qualityHelp';
 import {
     DESTRUCTIVE_COLOURS,
@@ -95,6 +96,8 @@ export default function QualityItem() {
         activity_article_error: articleError = null,
         focus_activity_key: focusActivityKey = null,
         control_placements: controlPlacements = [],
+        control_activity_options: controlActivityOptions = [],
+        activity_control_options: activityControlOptions = [],
         control_evidence: controlEvidence = [],
         control_tools: controlTools = [],
         control_tool_options: controlToolOptions = [],
@@ -179,6 +182,8 @@ export default function QualityItem() {
                         articleDraft={articleDraft}
                         articleError={articleError}
                         focusActivityKey={focusActivityKey}
+                        controlOptions={activityControlOptions}
+                        statusLabels={statusLabels}
                     />
                 ) : (
                     <>
@@ -211,11 +216,18 @@ export default function QualityItem() {
                                 governingDocuments={governingDocuments}
                                 options={governingDocumentOptions}
                                 typeLabels={typeLabels}
+                                statusLabels={statusLabels}
                             />
                         )}
 
                         {item.quality_type === 'control' && (
-                            <ControlPlacementsPanel td={td} placements={controlPlacements} />
+                            <ControlPlacementsPanel
+                                td={td}
+                                item={item}
+                                canEdit={canEdit}
+                                placements={controlPlacements}
+                                options={controlActivityOptions}
+                            />
                         )}
 
                         {item.quality_type === 'control' && (
@@ -239,7 +251,7 @@ export default function QualityItem() {
                             />
                         )}
 
-                        {item.quality_type === 'policy' && (
+                        {['policy', 'procedure', 'work_instruction', 'checklist'].includes(item.quality_type) && (
                             <GovernedProcessesPanel td={td} processes={governedProcesses} />
                         )}
 
@@ -305,12 +317,64 @@ function DetailTabs({ td, item, activeTab }) {
 
 /**
  * Where this control is applied: the process activities it sits on, each a link back into the flow
- * with the activity open. Read-only — a control is placed and taken off from the activity itself.
+ * with the activity open.
+ *
+ * A control already in the register is placed here, on one or more activities, through the same
+ * endpoint the activity in the flow uses — so the rules for where a control may go live in one place
+ * (QualityActivityControlService::place()). One control may sit on several activities; moving it is
+ * linking the new one and removing the old. Removing a row takes the control off that activity and
+ * nothing else: the control, its evidence and its history stay.
  */
-function ControlPlacementsPanel({ td, placements }) {
+function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
+    const [chosen, setChosen] = useState([]);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const retired = item.status === 'retired';
+
+    const placed = new Set(placements.map((placement) => `${placement.process_id}:${placement.activity_key}`));
+    const pickerOptions = options
+        .map((option) => ({ ...option, value: `${option.process_id}:${option.activity_key}` }))
+        .filter((option) => ! placed.has(option.value))
+        .map((option) => ({
+            value: option.value,
+            label: `${option.process_title} › ${option.activity_label}`,
+            description: [option.process_code, option.activity_role].filter(Boolean).join(' · ') || undefined,
+            keywords: option.activity_role ?? '',
+            process_id: option.process_id,
+            activity_key: option.activity_key,
+        }));
+
+    function submit(event) {
+        event.preventDefault();
+        const placementsToSave = chosen
+            .map((value) => pickerOptions.find((option) => option.value === value))
+            .filter(Boolean)
+            .map((option) => ({ process_id: option.process_id, activity_key: option.activity_key, control_item_id: item.id }));
+
+        setBusy(true);
+        setError(null);
+        router.post('/app/quality/activity-controls', { placements: placementsToSave }, {
+            preserveScroll: true,
+            onSuccess: () => setChosen([]),
+            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onFinish: () => setBusy(false),
+        });
+    }
+
+    function remove(placement) {
+        if (! window.confirm(td.control_placements_remove_confirm ?? 'Fjerne kontrollen fra aktiviteten? Kontrollen, evidensen og historikken beholdes.')) {
+            return;
+        }
+
+        router.delete(`/app/quality/activity-controls/${placement.id}`, { preserveScroll: true });
+    }
+
     return (
-        <section className={CARD}>
+        <section className={CARD} data-testid="control-placements">
             <h2 className="text-xl font-semibold text-slate-950">{td.control_placements_heading ?? 'Brukes i prosessaktiviteter'}</h2>
+            {canEdit && (
+                <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.control_placements_help ?? ''}</p>
+            )}
 
             {placements.length === 0 ? (
                 <p className="mt-4 text-base text-slate-600">
@@ -319,15 +383,62 @@ function ControlPlacementsPanel({ td, placements }) {
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
                     {placements.map((placement) => (
-                        <li key={placement.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-2 text-base">
+                        <li key={placement.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-base">
                             <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
                                 {placement.process_title}
                             </Link>
                             <span className="text-slate-400">›</span>
                             <ActivityName td={td} placement={placement} />
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className={`ml-auto ${ROW_DESTRUCTIVE}`}
+                                    onClick={() => remove(placement)}
+                                    aria-label={(td.control_placements_remove_label ?? 'Fjern kontrollen fra :activity')
+                                        .replace(':activity', `${placement.process_title} › ${placement.activity_label ?? ''}`)}
+                                >
+                                    {td.control_placements_remove ?? 'Fjern fra aktivitet'}
+                                </button>
+                            )}
                         </li>
                     ))}
                 </ul>
+            )}
+
+            {canEdit && (
+                retired ? (
+                    <p className="mt-4 text-base text-slate-500">
+                        {td.control_placements_retired ?? 'Kontrollen er utgått og kan ikke knyttes til nye aktiviteter.'}
+                    </p>
+                ) : pickerOptions.length === 0 ? (
+                    <p className="mt-4 text-base text-slate-500">
+                        {td.control_placements_no_options ?? 'Det finnes ingen flere aktiviteter å velge.'}
+                    </p>
+                ) : (
+                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-start gap-3">
+                        <div className="min-w-0 flex-1 basis-64">
+                            <label htmlFor="control-placement-picker" className={LABEL}>
+                                {td.control_placements_add ?? 'Knytt til aktivitet'}
+                            </label>
+                            <SearchableMultiSelect
+                                id="control-placement-picker"
+                                options={pickerOptions}
+                                values={chosen}
+                                onChange={setChosen}
+                                placeholder={td.control_placements_placeholder ?? 'Søk og velg aktiviteter'}
+                                searchLabel={td.control_placements_search ?? 'Søk på prosess, aktivitet eller rolle'}
+                                noResultsLabel={td.control_placements_no_results ?? 'Ingen aktiviteter passer søket.'}
+                                removeLabel={td.control_placements_deselect ?? 'Fjern :name fra utvalget'}
+                                selectedLabel={td.control_placements_selected ?? 'Valgt'}
+                                testId="control-placement-picker"
+                            />
+                            {error && <p className="mt-1 text-base text-rose-600" role="alert">{error}</p>}
+                        </div>
+                        <button type="submit" className={`mt-8 ${PRIMARY_ACTION}`} disabled={busy || chosen.length === 0}>
+                            {td.control_placements_submit ?? 'Knytt til'}
+                        </button>
+                    </form>
+                )
             )}
         </section>
     );
@@ -917,9 +1028,9 @@ function RowEditor({
 }
 
 /**
- * The processes a policy governs: the other end of the `governs` rows a process lists under
- * Styrende dokumenter. Read-only here — the link is made and removed on the process — and said in
- * the policy's own terms, never as a relation type.
+ * The processes a styrende dokument governs: the other end of the `governs` rows a process lists
+ * under Styrende dokumenter. Read-only here — the link is made and removed on the process — and said
+ * in the document's own terms, never as a relation type.
  */
 function GovernedProcessesPanel({ td, processes }) {
     return (
@@ -947,29 +1058,42 @@ function GovernedProcessesPanel({ td, processes }) {
 }
 
 /**
- * The styrende dokumenter a process works inside.
+ * The styrende dokumenter a process works inside: its policies, procedures, work instructions and
+ * checklists, in one list.
  *
- * Not a store of its own: each row is a `governs` relation (policy -> process), the same row the
- * Kvalitet overview draws and the policy's own page lists under "Styrer disse prosessene". Linking posts to the shared
- * relations endpoint, which checks the tenant and the type matrix; nothing of the policy is copied.
+ * Not a store of its own: each row is a `governs` relation (document -> process), the same row the
+ * document's own page lists under "Styrer disse prosessene". Adding posts the chosen documents to
+ * the process's governing-documents endpoint, which writes them through the shared relation rules —
+ * tenant, type matrix, no duplicates; nothing of the document is copied or changed. Removing a row
+ * removes the relation and never the document.
  */
-function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, options, typeLabels }) {
-    const form = useForm({
-        from_item_id: '',
-        to_item_id: item.id,
-        relation_type: 'governs',
-    });
+function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, options, typeLabels, statusLabels }) {
+    const [chosen, setChosen] = useState([]);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+
+    const pickerOptions = options.map((option) => ({
+        value: option.id,
+        label: option.code ? `${option.code} — ${option.title}` : option.title,
+        description: [typeLabels?.[option.quality_type] ?? option.quality_type, statusLabels?.[option.status] ?? option.status]
+            .filter(Boolean)
+            .join(' · '),
+    }));
 
     function submit(event) {
         event.preventDefault();
-        form.post('/app/quality/relations', {
+        setBusy(true);
+        setError(null);
+        router.post(`/app/quality/items/${item.id}/governing-documents`, { document_ids: chosen }, {
             preserveScroll: true,
-            onSuccess: () => form.reset('from_item_id'),
+            onSuccess: () => setChosen([]),
+            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onFinish: () => setBusy(false),
         });
     }
 
     return (
-        <section className={CARD}>
+        <section className={CARD} data-testid="governing-documents">
             <h2 className="text-xl font-semibold text-slate-950">{td.governing_heading ?? 'Styrende dokumenter'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.governing_help ?? ''}</p>
 
@@ -984,13 +1108,19 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
                             <StatusBadge tone={TYPE_TONES[relation.other_quality_type] ?? 'slate'}>
                                 {typeLabels?.[relation.other_quality_type] ?? relation.other_quality_type}
                             </StatusBadge>
-                            <Link href={relation.other_url} className="font-semibold text-slate-950 hover:underline">
+                            <Link href={relation.other_url} className="min-w-0 break-words font-semibold text-slate-950 hover:underline">
                                 {relation.other_code ? `${relation.other_code} — ${relation.other_title}` : relation.other_title}
                             </Link>
+                            {relation.other_status && (
+                                <StatusBadge tone={STATUS_TONES[relation.other_status] ?? 'slate'}>
+                                    {statusLabels?.[relation.other_status] ?? relation.other_status}
+                                </StatusBadge>
+                            )}
                             {canEdit && (
                                 <button
                                     type="button"
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
+                                    aria-label={(td.governing_remove_label ?? 'Fjern koblingen til :title').replace(':title', relation.other_title ?? '')}
                                     onClick={() => {
                                         if (window.confirm(td.governing_remove_confirm ?? 'Fjerne koblingen?')) {
                                             router.delete(`/app/quality/relations/${relation.id}`, { preserveScroll: true });
@@ -1006,36 +1136,31 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
             )}
 
             {canEdit && (
-                options.length === 0 ? (
+                pickerOptions.length === 0 ? (
                     <p className="mt-4 text-base text-slate-500">
-                        {td.governing_no_options ?? 'Alle registrerte policyer er allerede koblet til.'}
+                        {td.governing_no_options ?? 'Alle styrende dokumenter som gjelder, er allerede koblet til.'}
                     </p>
                 ) : (
-                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-end gap-3">
-                        <div className="min-w-[16rem] flex-1">
-                            <Field
-                                label={td.governing_select ?? 'Styrende dokument'}
-                                error={form.errors.from_item_id ?? form.errors.relation_type ?? form.errors.to_item_id}
-                            >
-                                <select
-                                    className={INPUT}
-                                    value={form.data.from_item_id}
-                                    onChange={(e) => form.setData('from_item_id', e.target.value)}
-                                >
-                                    <option value="">{td.governing_placeholder ?? 'Velg styrende dokument'}</option>
-                                    {options.map((option) => (
-                                        <option key={option.id} value={option.id}>
-                                            {option.code ? `${option.code} — ${option.title}` : option.title}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
+                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-start gap-3">
+                        <div className="min-w-0 flex-1 basis-64">
+                            <label htmlFor="governing-document-picker" className={LABEL}>
+                                {td.governing_select ?? 'Legg til styrende dokumenter'}
+                            </label>
+                            <SearchableMultiSelect
+                                id="governing-document-picker"
+                                options={pickerOptions}
+                                values={chosen}
+                                onChange={setChosen}
+                                placeholder={td.governing_placeholder ?? 'Søk og velg dokumenter'}
+                                searchLabel={td.governing_search ?? 'Søk på tittel, nummer eller dokumenttype'}
+                                noResultsLabel={td.governing_no_results ?? 'Ingen dokumenter passer søket.'}
+                                removeLabel={td.governing_deselect ?? 'Fjern :name fra utvalget'}
+                                selectedLabel={td.governing_selected ?? 'Valgt'}
+                                testId="governing-document-picker"
+                            />
+                            {error && <p className="mt-1 text-base text-rose-600" role="alert">{error}</p>}
                         </div>
-                        <button
-                            type="submit"
-                            className={PRIMARY_ACTION}
-                            disabled={form.processing || form.data.from_item_id === ''}
-                        >
+                        <button type="submit" className={`mt-8 ${PRIMARY_ACTION}`} disabled={busy || chosen.length === 0}>
                             {td.governing_submit ?? 'Koble til'}
                         </button>
                     </form>

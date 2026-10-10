@@ -351,6 +351,156 @@ class QualityActivityControlTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // Placing a control that already exists
+    // ---------------------------------------------------------------------
+
+    public function test_an_existing_control_is_placed_without_a_copy_and_keeps_its_evidence_and_details(): void
+    {
+        $customer = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $process = $this->process($customer);
+        $blueprint = $this->blueprintFor($customer, $process);
+        app(QualityProcessBlueprintService::class)->approve((int) $customer->id, $process, $editor);
+        $revision = QualityProcessRevision::query()->where('quality_item_id', $process->id)->sole();
+        $revisionPayload = $revision->payload;
+        $payloadBefore = $blueprint->fresh()->payload;
+
+        $control = $this->control($customer);
+        $control->update(['owner_user_id' => $editor->id, 'code' => 'K-07']);
+        QualityControlDetail::query()->create([
+            'customer_id' => $customer->id,
+            'quality_item_id' => $control->id,
+            'criterion' => 'Alle tilganger er gjennomgått.',
+            'frequency' => 'quarterly',
+        ]);
+        $this->actingAs($editor)->post("/app/quality/items/{$control->id}/evidence", [
+            'title' => 'Gjennomgang Q3',
+            'description' => 'Signert liste.',
+        ])->assertSessionHasNoErrors();
+        $itemsBefore = QualityItem::query()->where('customer_id', $customer->id)->count();
+
+        $placement = ['process_id' => $process->id, 'activity_key' => 'vurder', 'control_item_id' => $control->id];
+
+        $this->actingAs($editor)
+            ->post('/app/quality/activity-controls', ['placements' => [$placement]])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+        // Sent again: still one row.
+        $this->actingAs($editor)
+            ->post('/app/quality/activity-controls', ['placements' => [$placement]])
+            ->assertSessionHasNoErrors();
+
+        $link = QualityActivityControl::query()->where('control_item_id', $control->id)->sole();
+        $this->assertSame((int) $process->id, (int) $link->quality_item_id);
+        $this->assertSame('vurder', $link->activity_key);
+
+        // No copy, nothing about the control changed.
+        $this->assertSame($itemsBefore, QualityItem::query()->where('customer_id', $customer->id)->count());
+        $control->refresh()->load('controlDetail');
+        $this->assertSame('K-07', $control->code);
+        $this->assertSame((int) $editor->id, (int) $control->owner_user_id);
+        $this->assertSame('quarterly', $control->controlDetail->frequency);
+        $this->assertSame(1, QualityItemDocument::query()->where('quality_item_id', $control->id)
+            ->where('relation_type', QualityItemDocument::RELATION_TYPE_EVIDENCE)->count());
+
+        // The working version and the published revision are untouched.
+        $this->assertEquals($payloadBefore, $blueprint->fresh()->payload);
+        $this->assertEquals($revisionPayload, $revision->fresh()->payload);
+        $this->assertSame(1, QualityProcessRevision::query()->where('quality_item_id', $process->id)->count());
+
+        // The activity lists it, and the control's page leads back.
+        $nodes = collect($this->actingAs($editor)->get("/app/quality/items/{$process->id}?tab=flow")
+            ->assertOk()->viewData('page')['props']['blueprint']['nodes'])->keyBy('key');
+        $this->assertSame([(int) $control->id], array_column($nodes['vurder']['controls'], 'control_item_id'));
+        $this->assertSame(['Vurder avviket'], array_column($this->actingAs($editor)->get("/app/quality/items/{$control->id}")
+            ->viewData('page')['props']['control_placements'], 'activity_label'));
+
+        // A second activity is a second placement; removing one keeps the control and the other.
+        $second = $this->process($customer);
+        $this->blueprintFor($customer, $second);
+        $this->actingAs($editor)->post('/app/quality/activity-controls', ['placements' => [
+            ['process_id' => $second->id, 'activity_key' => 'vurder', 'control_item_id' => $control->id],
+        ]])->assertSessionHasNoErrors();
+        $this->assertSame(2, QualityActivityControl::query()->where('control_item_id', $control->id)->count());
+
+        $this->actingAs($editor)->delete("/app/quality/activity-controls/{$link->id}")->assertRedirect();
+        $this->assertSame(1, QualityActivityControl::query()->where('control_item_id', $control->id)->count());
+        $this->assertNotNull($control->fresh());
+        $this->assertSame(1, QualityItemDocument::query()->where('quality_item_id', $control->id)->count());
+    }
+
+    public function test_placing_refuses_what_is_not_a_saved_activity_or_a_control_in_force(): void
+    {
+        $customer = $this->customer();
+        $other = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $process = $this->blueprintedProcess($customer);
+        $unflowed = $this->process($customer);
+        $control = $this->control($customer);
+        $retired = $this->control($customer);
+        $retired->update(['status' => QualityItem::STATUS_RETIRED]);
+        $policy = QualityItem::query()->create([
+            'customer_id' => $customer->id,
+            'quality_type' => QualityItem::TYPE_POLICY,
+            'title' => 'Policy',
+            'status' => QualityItem::STATUS_ACTIVE,
+        ]);
+        $foreignControl = $this->control($other);
+        $foreignProcess = $this->blueprintedProcess($other);
+
+        $place = fn (int $processId, string $key, int $controlId, ?User $as = null) => $this->actingAs($as ?? $editor)
+            ->post('/app/quality/activity-controls', ['placements' => [
+                ['process_id' => $processId, 'activity_key' => $key, 'control_item_id' => $controlId],
+            ]]);
+
+        $place($process->id, 'finnes-ikke', $control->id)->assertSessionHasErrors('placements.0.activity_key');
+        $place($unflowed->id, 'vurder', $control->id)->assertSessionHasErrors('placements.0.activity_key');
+        $place($process->id, 'vurder', $retired->id)->assertSessionHasErrors('placements.0.control_item_id');
+        $place($process->id, 'vurder', $policy->id)->assertSessionHasErrors('placements.0.control_item_id');
+        $place($control->id, 'vurder', $control->id)->assertSessionHasErrors('placements.0.process_id');
+        $place($process->id, 'vurder', $foreignControl->id)->assertSessionHasErrors('placements.0.control_item_id');
+        $place($foreignProcess->id, 'vurder', $control->id)->assertSessionHasErrors('placements.0.process_id');
+        $this->actingAs($editor)->post('/app/quality/activity-controls', ['placements' => []])->assertSessionHasErrors('placements');
+        $place($process->id, 'vurder', $control->id, $reader)->assertForbidden();
+
+        // One bad placement refuses the whole set.
+        $this->actingAs($editor)->post('/app/quality/activity-controls', ['placements' => [
+            ['process_id' => $process->id, 'activity_key' => 'vurder', 'control_item_id' => $control->id],
+            ['process_id' => $process->id, 'activity_key' => 'finnes-ikke', 'control_item_id' => $control->id],
+        ]])->assertSessionHasErrors('placements.1.activity_key');
+
+        $this->assertSame(0, QualityActivityControl::query()->count());
+    }
+
+    public function test_the_pickers_offer_the_customers_own_controls_and_activities_in_force_to_editors_only(): void
+    {
+        $customer = $this->customer();
+        $other = $this->customer();
+        $editor = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW, CustomerPermissionCatalog::QUALITY_EDIT]);
+        $reader = $this->member($customer, [CustomerPermissionCatalog::QUALITY_VIEW]);
+        $process = $this->blueprintedProcess($customer);
+        $retiredProcess = $this->blueprintedProcess($customer);
+        $retiredProcess->update(['status' => QualityItem::STATUS_RETIRED]);
+        $control = $this->control($customer);
+        $retired = $this->control($customer);
+        $retired->update(['status' => QualityItem::STATUS_RETIRED]);
+        $this->control($other);
+        $this->blueprintedProcess($other);
+
+        $processProps = $this->actingAs($editor)->get("/app/quality/items/{$process->id}?tab=flow")->viewData('page')['props'];
+        $this->assertSame([(int) $control->id], array_column($processProps['activity_control_options'], 'id'));
+
+        $controlProps = $this->actingAs($editor)->get("/app/quality/items/{$control->id}")->viewData('page')['props'];
+        $this->assertSame([(int) $process->id], array_values(array_unique(array_column($controlProps['control_activity_options'], 'process_id'))));
+        $this->assertSame(['start', 'vurder', 'slutt'], array_column($controlProps['control_activity_options'], 'activity_key'));
+        $this->assertSame('Kvalitetsleder', $controlProps['control_activity_options'][1]['activity_role']);
+
+        $this->assertSame([], $this->actingAs($reader)->get("/app/quality/items/{$process->id}?tab=flow")->viewData('page')['props']['activity_control_options']);
+        $this->assertSame([], $this->actingAs($reader)->get("/app/quality/items/{$control->id}")->viewData('page')['props']['control_activity_options']);
+    }
+
+    // ---------------------------------------------------------------------
     // Evidence on a control
     // ---------------------------------------------------------------------
 

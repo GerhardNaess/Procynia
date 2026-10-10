@@ -61,7 +61,7 @@ class QualityAttentionService
             ],
             [
                 'key' => self::PROCESSES_WITHOUT_GOVERNING_POLICY,
-                'items' => $this->rows($this->processesWithoutGoverningPolicy($customerId)),
+                'items' => $this->rows($this->processesWithoutGoverningDocument($customerId)),
             ],
             [
                 'key' => self::PROCESSES_OVERDUE_FOR_REVIEW,
@@ -107,24 +107,26 @@ class QualityAttentionService
     }
 
     /**
-     * A process no policy in force governs. `governs` is the one relation that names a process's
-     * governing document — see QualityItemRelation::TYPE_GOVERNS.
+     * A process no styrende dokument in force governs — a policy, procedure, work instruction or
+     * checklist alike. `governs` is the one relation that names a process's governing document, and
+     * its type matrix says which kinds may stand at its start — see QualityItemRelation::TYPE_GOVERNS.
+     * The finding keeps its original key, which Ledelsens gjennomgåelse snapshots by name.
      *
      * @return Collection<int, QualityItem>
      */
-    private function processesWithoutGoverningPolicy(int $customerId): Collection
+    private function processesWithoutGoverningDocument(int $customerId): Collection
     {
         return $this->inForce($customerId, QualityItem::TYPE_PROCESS)
             ->whereNotExists(function ($query) use ($customerId): void {
                 $query->selectRaw('1')
                     ->from('quality_item_relations')
-                    ->join('quality_items as policies', 'policies.id', '=', 'quality_item_relations.from_item_id')
+                    ->join('quality_items as documents', 'documents.id', '=', 'quality_item_relations.from_item_id')
                     ->whereColumn('quality_item_relations.to_item_id', 'quality_items.id')
                     ->where('quality_item_relations.customer_id', $customerId)
                     ->where('quality_item_relations.relation_type', QualityItemRelation::TYPE_GOVERNS)
-                    ->where('policies.customer_id', $customerId)
-                    ->where('policies.quality_type', QualityItem::TYPE_POLICY)
-                    ->where('policies.status', '!=', QualityItem::STATUS_RETIRED);
+                    ->where('documents.customer_id', $customerId)
+                    ->whereIn('documents.quality_type', QualityItemRelation::allowedFromTypes(QualityItemRelation::TYPE_GOVERNS))
+                    ->where('documents.status', '!=', QualityItem::STATUS_RETIRED);
             })
             ->get();
     }

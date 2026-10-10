@@ -44,6 +44,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -204,6 +205,14 @@ class QualityController extends Controller
             'control_placements' => $customerId !== null && $item->quality_type === QualityItem::TYPE_CONTROL
                 ? ($this->activityControls->placementsByControl((int) $customerId, [(int) $item->id])[(int) $item->id] ?? [])
                 : [],
+            // The activities this control could be placed on, and — on a process — the controls
+            // that could be placed on its activities. Both are placed through placeActivityControls().
+            'control_activity_options' => $customerId !== null && $isControl && $this->may($user, CustomerPermissionCatalog::QUALITY_EDIT)
+                ? $this->activityControls->activityOptions((int) $customerId)
+                : [],
+            'activity_control_options' => $customerId !== null && $item->quality_type === QualityItem::TYPE_PROCESS && $this->may($user, CustomerPermissionCatalog::QUALITY_EDIT)
+                ? $this->activityControls->controlOptions((int) $customerId)
+                : [],
             'subprocess_options' => $this->subprocessOptions($customerId, $item, $user),
             // A draft article, flashed by the redirect that produced it. Nothing is stored until
             // the user has read it and pressed create — see QualityActivityArticleService.
@@ -245,18 +254,18 @@ class QualityController extends Controller
             'control_tool_options' => $isControl && $customerId !== null ? $this->tools->optionsForControl((int) $customerId, $item) : [],
             'document_options' => $this->documentOptions($customerId, $request),
             'document_search' => trim((string) $request->query('document_search', '')),
-            // A process's styrende dokumenter are the policies that govern it — the incoming side
-            // of the same `governs` rows the overview edits, never a separate store. Linking and
-            // unlinking post to storeRelation()/destroyRelation() like every other relation.
+            // A process's styrende dokumenter are the policies, procedures, work instructions and
+            // checklists that govern it — the incoming side of the `governs` rows, never a separate
+            // store. Linking posts to storeGoverningDocuments(), unlinking to destroyRelation().
             'governing_documents' => $item->quality_type === QualityItem::TYPE_PROCESS
                 ? $this->governingDocuments($relations)
                 : [],
             'governing_document_options' => $item->quality_type === QualityItem::TYPE_PROCESS
                 ? $this->governingDocumentOptions($customerId, $relations)
                 : [],
-            // The other end of the same rows: on a policy, the processes it governs. Read-only
-            // here; the link is made and removed on the process, under Styrende dokumenter.
-            'governed_processes' => $item->quality_type === QualityItem::TYPE_POLICY
+            // The other end of the same rows: on a styrende dokument, the processes it governs.
+            // Read-only here; the link is made and removed on the process, under Styrende dokumenter.
+            'governed_processes' => in_array($item->quality_type, QualityItemRelation::allowedFromTypes(QualityItemRelation::TYPE_GOVERNS), true)
                 ? $this->governedProcesses($relations)
                 : [],
         ]);
@@ -1205,6 +1214,34 @@ class QualityController extends Controller
         return back()->with('success', __('procynia.quality.flash.control_added'));
     }
 
+    /**
+     * Places existing controls on activities — several controls on one activity from the flow, or
+     * one control on an activity from its own page. Nothing is copied: each row only says where a
+     * control that is already in the register applies. Every rule (tenant, types, retired control,
+     * activity in the working version) is QualityActivityControlService::place()'s.
+     */
+    public function placeActivityControls(Request $request): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        abort_if($customerId === null, 404);
+
+        $validated = $request->validate([
+            'placements' => ['required', 'array', 'min:1', 'max:50'],
+            'placements.*.process_id' => ['required', 'integer'],
+            'placements.*.activity_key' => ['required', 'string', 'max:80'],
+            'placements.*.control_item_id' => ['required', 'integer'],
+        ], [
+            'placements.required' => __('procynia.quality.errors.placement_required'),
+        ]);
+
+        $this->activityControls->place((int) $customerId, $validated['placements'], $user);
+
+        return back()->with('success', trans_choice('procynia.quality.flash.controls_placed', count($validated['placements'])));
+    }
+
     /** Takes a control off its activity. The control stays in the register. */
     public function destroyActivityControl(QualityActivityControl $control): RedirectResponse
     {
@@ -1246,6 +1283,59 @@ class QualityController extends Controller
         $this->items->relate((int) $customerId, $fromItem, $toItem, $validated['relation_type'], $user);
 
         return back()->with('success', __('procynia.quality.flash.related'));
+    }
+
+    /**
+     * Links one or more styrende dokumenter to a process, as `governs` rows written through relate()
+     * — the same rule set every relation goes through, so the type matrix and the tenant decide.
+     * A retired document is refused: it no longer applies, so it cannot newly govern anything. A
+     * document already linked stays one row.
+     */
+    public function storeGoverningDocuments(Request $request, QualityItem $item): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $this->authorizePermission($user, CustomerPermissionCatalog::QUALITY_EDIT);
+        $this->assertOwnedByCustomer((int) $item->customer_id, $customerId);
+        $this->assertProcess($item);
+
+        $validated = $request->validate([
+            'document_ids' => ['required', 'array', 'min:1', 'max:50'],
+            'document_ids.*' => ['required', 'integer', 'distinct'],
+        ], [
+            'document_ids.required' => __('procynia.quality.errors.governing_document_required'),
+        ]);
+
+        $documents = QualityItem::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('id', $validated['document_ids'])
+            ->get()
+            ->keyBy('id');
+
+        foreach ($validated['document_ids'] as $documentId) {
+            $document = $documents->get((int) $documentId);
+
+            if ($document === null) {
+                throw ValidationException::withMessages([
+                    'document_ids' => __('procynia.quality.errors.item_not_found'),
+                ]);
+            }
+
+            if ($document->status === QualityItem::STATUS_RETIRED) {
+                throw ValidationException::withMessages([
+                    'document_ids' => __('procynia.quality.errors.governing_document_retired'),
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($customerId, $item, $validated, $documents, $user): void {
+            foreach ($validated['document_ids'] as $documentId) {
+                $this->items->relate((int) $customerId, $documents->get((int) $documentId), $item, QualityItemRelation::TYPE_GOVERNS, $user);
+            }
+        });
+
+        return back()->with('success', trans_choice('procynia.quality.flash.governing_documents_linked', count($validated['document_ids'])));
     }
 
     public function destroyRelation(QualityItemRelation $relation): RedirectResponse
@@ -2122,7 +2212,7 @@ class QualityController extends Controller
         return QualityItemRelation::query()
             ->where('customer_id', $customerId)
             ->where(fn ($query) => $query->where('from_item_id', $itemId)->orWhere('to_item_id', $itemId))
-            ->with(['fromItem:id,title,quality_type,code', 'toItem:id,title,quality_type,code'])
+            ->with(['fromItem:id,title,quality_type,code,status', 'toItem:id,title,quality_type,code,status'])
             ->orderBy('id')
             ->get()
             ->map(static function (QualityItemRelation $relation) use ($itemId): array {
@@ -2137,6 +2227,7 @@ class QualityController extends Controller
                     'other_title' => $other?->title,
                     'other_code' => $other?->code,
                     'other_quality_type' => $other?->quality_type,
+                    'other_status' => $other?->status,
                     'other_url' => $other !== null
                         ? route('app.quality.items.show', ['item' => $other->id])
                         : null,
@@ -2177,8 +2268,9 @@ class QualityController extends Controller
     }
 
     /**
-     * The policies that may still be linked to a process: the customer's own, minus those already
-     * governing it. The types come from the matrix, so widening `governs` widens the picker.
+     * The styrende dokumenter that may still be linked to a process: the customer's own, minus those
+     * already governing it and those retired. The types come from the matrix, so widening `governs`
+     * widens the picker. Drafts are offered with their status, so the user sees the difference.
      *
      * @param  list<array<string, mixed>>  $relations  {@see relationsForItem()}
      * @return list<array<string, mixed>>
@@ -2191,13 +2283,15 @@ class QualityController extends Controller
             ->where('customer_id', $customerId)
             ->whereIn('quality_type', QualityItemRelation::allowedFromTypes(QualityItemRelation::TYPE_GOVERNS))
             ->whereNotIn('id', $linkedIds)
+            ->where('status', '!=', QualityItem::STATUS_RETIRED)
             ->orderBy('title')
-            ->get(['id', 'title', 'code', 'quality_type'])
+            ->get(['id', 'title', 'code', 'quality_type', 'status'])
             ->map(static fn (QualityItem $option): array => [
                 'id' => (int) $option->id,
                 'title' => $option->title,
                 'code' => $option->code,
                 'quality_type' => $option->quality_type,
+                'status' => $option->status,
             ])
             ->values()
             ->all();

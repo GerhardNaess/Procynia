@@ -27,7 +27,7 @@ test('a control placed on an activity is in the register and leads back to the a
 
     await page.getByRole('button', { name: `Åpne kunnskapen bak ${ACTIVITY}` }).first().click();
     const controls = page.getByRole('dialog').locator('section', { has: page.getByRole('heading', { name: 'Kontroller' }) });
-    await controls.getByRole('button', { name: 'Legg til kontroll' }).click();
+    await controls.getByRole('button', { name: 'Ny kontroll' }).click();
     await controls.getByLabel('Navn på kontrollen').fill(title);
     await controls.getByLabel('Hva skal kontrolleres').fill(criterion);
     await controls.getByRole('button', { name: 'Lagre kontroll' }).click();

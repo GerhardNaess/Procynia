@@ -31,7 +31,7 @@ test('an activity gets a control, shows it, and loses it again', async ({ page }
     const panel = page.getByRole('dialog');
     const controls = panel.locator('section', { has: page.getByRole('heading', { name: 'Kontroller' }) });
 
-    await controls.getByRole('button', { name: 'Legg til kontroll' }).click();
+    await controls.getByRole('button', { name: 'Ny kontroll' }).click();
     await controls.getByLabel('Navn på kontrollen').fill(title);
     await controls.getByLabel('Hva skal kontrolleres').fill('Innkjøpsleder bekrefter at terskelverdien er vurdert.');
     await controls.getByRole('button', { name: 'Lagre kontroll' }).click();

@@ -136,6 +136,42 @@ class QualityAttentionTest extends TestCase
         $this->assertSame([(int) $process->id], $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
     }
 
+    public function test_a_process_governed_by_a_procedure_work_instruction_or_checklist_is_not_a_finding(): void
+    {
+        $customer = $this->customer();
+        $types = [QualityItem::TYPE_PROCEDURE, QualityItem::TYPE_WORK_INSTRUCTION, QualityItem::TYPE_CHECKLIST];
+
+        foreach ($types as $type) {
+            $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Prosess '.$type);
+            $document = $this->item($customer, $type, 'Dokument '.$type);
+
+            $this->assertContains((int) $process->id, $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
+
+            app(QualityItemService::class)->relate((int) $customer->id, $document, $process, QualityItemRelation::TYPE_GOVERNS);
+            $this->assertNotContains((int) $process->id, $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
+
+            // A retired document governs nothing, whatever its type.
+            $document->update(['status' => QualityItem::STATUS_RETIRED]);
+            $this->assertContains((int) $process->id, $this->ids($customer, QualityAttentionService::PROCESSES_WITHOUT_GOVERNING_POLICY));
+        }
+    }
+
+    public function test_placing_an_existing_control_clears_the_finding(): void
+    {
+        $customer = $this->customer();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Avvikshåndtering');
+        $this->blueprintFor($customer, $process, withAssessment: true);
+        $control = $this->item($customer, QualityItem::TYPE_CONTROL, 'Fire øyne');
+
+        $this->assertSame([(int) $control->id], $this->ids($customer, QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY));
+
+        app(QualityActivityControlService::class)->place((int) $customer->id, [
+            ['process_id' => $process->id, 'activity_key' => 'vurder', 'control_item_id' => $control->id],
+        ]);
+
+        $this->assertSame([], $this->ids($customer, QualityAttentionService::CONTROLS_WITHOUT_ACTIVITY));
+    }
+
     public function test_a_process_is_overdue_only_once_its_derived_review_date_has_passed(): void
     {
         $customer = $this->customer();

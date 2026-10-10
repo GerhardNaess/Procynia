@@ -297,6 +297,10 @@ Route::prefix('app')
             // is not written. Removing takes it off the activity and leaves it in the register.
             Route::post('/items/{item}/activities/controls', [QualityController::class, 'storeActivityControl'])
                 ->name('items.activities.controls.store');
+            // Placing controls that already exist — from the activity, or from the control's own
+            // page. Both post here, so where a control may go is decided in one place.
+            Route::post('/activity-controls', [QualityController::class, 'placeActivityControls'])
+                ->name('activity-controls.store');
             Route::delete('/activity-controls/{control}', [QualityController::class, 'destroyActivityControl'])
                 ->name('activity-controls.destroy');
 
@@ -329,6 +333,10 @@ Route::prefix('app')
             Route::post('/items/{item}/tools', [QualityController::class, 'storeControlTool'])
                 ->name('items.tools.store');
 
+            // Styrende dokumenter on a process: several at once, each an ordinary `governs` row.
+            // Removing one is relations.destroy, like every other relation.
+            Route::post('/items/{item}/governing-documents', [QualityController::class, 'storeGoverningDocuments'])
+                ->name('items.governing-documents.store');
             Route::post('/relations', [QualityController::class, 'storeRelation'])->name('relations.store');
             Route::delete('/relations/{relation}', [QualityController::class, 'destroyRelation'])->name('relations.destroy');
         });

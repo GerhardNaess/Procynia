@@ -4,6 +4,7 @@ import ProcessSwimlaneDiagram from './ProcessSwimlaneDiagram';
 import ProcessFlowStepList from './ProcessFlowStepList';
 import ProcessFlowChangeCard from './ProcessFlowChangeCard';
 import ActionDialog from './ActionDialog';
+import SearchableMultiSelect from './SearchableMultiSelect';
 import StatusBadge from './StatusBadge';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
 import {
@@ -117,6 +118,10 @@ export default function ProcessFlowPanel({
     subprocessOptions = [],
     articleDraft = null,
     articleError = null,
+    // Controls already in the register that may be placed on an activity (not retired), and the
+    // status names to describe them with. The activity panel leaves out those already on it.
+    controlOptions = [],
+    statusLabels = {},
 }) {
     const tb = tq.blueprint ?? {};
     const nodeTypeLabels = tb.node_types ?? {};
@@ -518,6 +523,8 @@ export default function ProcessFlowPanel({
                     activity={activityByKey(shown, activityKey)}
                     controls={controlsByKey(shown)[activityKey]}
                     canEditControls={canEdit}
+                    controlOptions={controlOptions}
+                    statusLabels={statusLabels}
                     canCreate={canCreateWikiArticles}
                     aiAvailable={flowAiAvailable}
                     draft={articleDraft}
@@ -793,6 +800,8 @@ export default function ProcessFlowPanel({
                 activity={activityByKey(draft, activityKey)}
                 controls={savedControls[activityKey]}
                 canEditControls={canEdit}
+                controlOptions={controlOptions}
+                statusLabels={statusLabels}
                 startAddingControl={activityAddsControl}
                 canCreate={canCreateWikiArticles}
                 aiAvailable={flowAiAvailable}
@@ -2324,6 +2333,8 @@ function ActivityArticlePanel({
     // saved yet, which is the one case a control cannot be added.
     controls = undefined,
     canEditControls = false,
+    controlOptions = [],
+    statusLabels = {},
     // Open with the "Legg til kontroll" form showing, when the panel was reached from that action.
     startAddingControl = false,
     onClose,
@@ -2432,6 +2443,8 @@ function ActivityArticlePanel({
                         activityKey={activity.key}
                         controls={controls}
                         canEdit={canEditControls}
+                        options={controlOptions}
+                        statusLabels={statusLabels}
                         startAdding={startAddingControl}
                     />
 
@@ -2586,22 +2599,63 @@ function ActivityArticlePanel({
  * The controls placed on one activity: what is checked at this step.
  *
  * Each is an ordinary control in the quality register — the name links to it — and this list only
- * shows where it applies. Removing takes it off the activity and leaves it in the register. The
- * diagram is not involved; it stays a picture of the flow.
+ * shows where it applies. A new control is registered from here; one that already exists is chosen
+ * and placed without a copy, through the same endpoint the control's own page uses. Removing takes
+ * it off the activity and leaves it in the register. The diagram is not involved; it stays a
+ * picture of the flow.
  *
  * Both writes preserve state, so the dialog stays open on the activity it was used from and any
  * unsaved work in the flow editor behind it is kept.
  */
-function ActivityControls({ tb, itemId, activityKey, controls, canEdit, startAdding = false }) {
+function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options = [], statusLabels = {}, startAdding = false }) {
     // Mounted afresh each time the panel opens, so the initial value is the one that applies.
-    const [adding, setAdding] = useState(startAdding);
+    // false, or which form is open: 'new' registers a control, 'existing' places ones that exist.
+    const [adding, setAdding] = useState(startAdding ? 'new' : false);
     const [title, setTitle] = useState('');
     const [criterion, setCriterion] = useState('');
+    const [chosen, setChosen] = useState([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
     const list = controls ?? [];
     const saved = controls !== undefined;
+    const placedIds = new Set(list.map((control) => control.control_item_id));
+    const pickerOptions = options
+        .filter((option) => ! placedIds.has(option.id))
+        .map((option) => ({
+            value: option.id,
+            label: option.code ? `${option.code} — ${option.title}` : option.title,
+            description: statusLabels?.[option.status] ?? option.status,
+            keywords: option.criterion ?? '',
+        }));
+
+    function open(mode) {
+        setError(null);
+        setAdding(mode);
+    }
+
+    function attach(event) {
+        event.preventDefault();
+        setBusy(true);
+        setError(null);
+
+        router.post('/app/quality/activity-controls', {
+            placements: chosen.map((controlItemId) => ({
+                process_id: itemId,
+                activity_key: activityKey,
+                control_item_id: controlItemId,
+            })),
+        }, {
+            preserveState: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                setAdding(false);
+                setChosen([]);
+            },
+            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onFinish: () => setBusy(false),
+        });
+    }
 
     function add(event) {
         event.preventDefault();
@@ -2685,12 +2739,61 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, startAdd
             )}
 
             {canEdit && saved && ! adding && (
-                <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={() => setAdding(true)}>
-                    {tb.controls_add ?? 'Legg til kontroll'}
-                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" className={ROW_ADD} onClick={() => open('new')}>
+                        {tb.controls_new ?? 'Ny kontroll'}
+                    </button>
+                    <button type="button" className={ROW_ADD} onClick={() => open('existing')}>
+                        {tb.controls_attach ?? 'Velg eksisterende kontroll'}
+                    </button>
+                </div>
             )}
 
-            {canEdit && saved && adding && (
+            {canEdit && saved && adding === 'existing' && (
+                <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={attach}>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-picker">
+                        {tb.controls_attach_label ?? 'Eksisterende kontroller'}
+                    </label>
+                    <p className="mt-1 text-sm leading-5 text-slate-600" id="activity-control-picker-help">
+                        {tb.controls_attach_help ?? 'Kontrollen beholder eier, frekvens, evidens og historikk, og kan også stå på andre aktiviteter.'}
+                    </p>
+
+                    {pickerOptions.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-500">
+                            {tb.controls_attach_none ?? 'Alle kontroller som ikke er utgått, står allerede på denne aktiviteten.'}
+                        </p>
+                    ) : (
+                        <SearchableMultiSelect
+                            id="activity-control-picker"
+                            options={pickerOptions}
+                            values={chosen}
+                            onChange={setChosen}
+                            placeholder={tb.controls_attach_placeholder ?? 'Søk og velg kontroller'}
+                            searchLabel={tb.controls_attach_search ?? 'Søk på navn eller kontrollnummer'}
+                            noResultsLabel={tb.controls_attach_no_results ?? 'Ingen kontroller passer søket.'}
+                            removeLabel={tb.controls_attach_deselect ?? 'Fjern :name fra utvalget'}
+                            selectedLabel={tb.controls_attach_selected ?? 'Valgt'}
+                            describedBy="activity-control-picker-help"
+                            testId="activity-control-picker"
+                        />
+                    )}
+
+                    {error && (
+                        <p className="mt-2 text-sm text-red-700" role="alert">{error}</p>
+                    )}
+
+                    <div className="mt-3 flex flex-wrap justify-end gap-3">
+                        <button type="button" className={SECONDARY_ACTION} onClick={() => setAdding(false)} disabled={busy}>
+                            {tb.controls_cancel ?? 'Avbryt'}
+                        </button>
+                        <button type="submit" className={PRIMARY_ACTION} disabled={busy || chosen.length === 0}>
+                            {tb.controls_attach_submit ?? 'Knytt til aktiviteten'}
+                        </button>
+                    </div>
+                </form>
+            )}
+
+            {canEdit && saved && adding === 'new' && (
                 <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={add}>
                     <p className="text-sm leading-5 text-slate-600">
                         {tb.controls_help

@@ -437,7 +437,8 @@ class QualityItemTest extends TestCase
 
         $linked = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy', 'POL-01');
         $unlinked = $this->item($customer, QualityItem::TYPE_POLICY, 'Informasjonssikkerhetspolicy');
-        $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste');
+        $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste');
+        $this->item($customer, QualityItem::TYPE_CONTROL, 'Kontroll');
         $this->item($otherCustomer, QualityItem::TYPE_POLICY, 'Fremmed policy');
         $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
 
@@ -458,9 +459,9 @@ class QualityItemTest extends TestCase
         $this->assertSame((int) $linked->id, $props['governing_documents'][0]['other_item_id']);
         $this->assertSame('POL-01', $props['governing_documents'][0]['other_code']);
 
-        // The picker offers this customer's policies that are not yet linked — never a checklist,
-        // never another customer's policy, never the one already governing the process.
-        $this->assertSame([(int) $unlinked->id], array_column($props['governing_document_options'], 'id'));
+        // The picker offers this customer's styrende dokumenter that are not yet linked — any of the
+        // four types, never a control, never another customer's, never the one already governing.
+        $this->assertEqualsCanonicalizing([(int) $unlinked->id, (int) $checklist->id], array_column($props['governing_document_options'], 'id'));
 
         // The other end reads the same row: no mirrored relation, no copied content.
         $policyProps = $this->actingAs($owner)
@@ -523,6 +524,125 @@ class QualityItemTest extends TestCase
         $this->actingAs($otherOwner)->delete("/app/quality/relations/{$relation->id}");
 
         $this->assertNotNull($relation->fresh());
+    }
+
+    public function test_every_governing_document_type_links_to_a_process_and_keeps_existing_policy_links(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $procedure = $this->item($customer, QualityItem::TYPE_PROCEDURE, 'Bestillingsprosedyre');
+        $instruction = $this->item($customer, QualityItem::TYPE_WORK_INSTRUCTION, 'Signering i ERP');
+        $checklist = $this->item($customer, QualityItem::TYPE_CHECKLIST, 'Sjekkliste for mottak');
+        $procedure->update(['status' => QualityItem::STATUS_DRAFT, 'owner_user_id' => $owner->id]);
+
+        // An existing policy link, made the way it always has been.
+        $this->actingAs($owner)->post('/app/quality/relations', [
+            'from_item_id' => $policy->id,
+            'to_item_id' => $process->id,
+            'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+        ])->assertSessionHasNoErrors();
+        $policyLink = QualityItemRelation::query()->sole();
+
+        $procedureBefore = $procedure->fresh()->only(['title', 'status', 'owner_user_id', 'purpose', 'code']);
+
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/governing-documents", [
+                'document_ids' => [$procedure->id, $instruction->id, $checklist->id],
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        // Sending one again — or the policy already linked — never makes a second row.
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$process->id}/governing-documents", ['document_ids' => [$procedure->id, $policy->id]])
+            ->assertSessionHasNoErrors();
+
+        $rows = QualityItemRelation::query()->where('to_item_id', $process->id)->get();
+        $this->assertCount(4, $rows);
+        $this->assertTrue($rows->every(fn (QualityItemRelation $row): bool => $row->relation_type === QualityItemRelation::TYPE_GOVERNS));
+        $this->assertNotNull($policyLink->fresh());
+
+        // Linking changes nothing about the document.
+        $this->assertSame($procedureBefore, $procedure->fresh()->only(['title', 'status', 'owner_user_id', 'purpose', 'code']));
+
+        $props = $this->actingAs($owner)->get("/app/quality/items/{$process->id}")->assertOk()->viewData('page')['props'];
+        $this->assertEqualsCanonicalizing(
+            [QualityItem::TYPE_POLICY, QualityItem::TYPE_PROCEDURE, QualityItem::TYPE_WORK_INSTRUCTION, QualityItem::TYPE_CHECKLIST],
+            array_column($props['governing_documents'], 'other_quality_type'),
+        );
+        $statuses = array_column($props['governing_documents'], 'other_status', 'other_item_id');
+        $this->assertSame(QualityItem::STATUS_DRAFT, $statuses[(int) $procedure->id]);
+        $this->assertSame([], $props['governing_document_options']);
+
+        // Each document's own page lists the process.
+        foreach ([$procedure, $instruction, $checklist] as $document) {
+            $documentProps = $this->actingAs($owner)->get("/app/quality/items/{$document->id}")->assertOk()->viewData('page')['props'];
+            $this->assertSame([(int) $process->id], array_column($documentProps['governed_processes'], 'other_item_id'));
+        }
+
+        // Removing a link removes the link alone.
+        $instructionLink = $rows->firstWhere('from_item_id', $instruction->id);
+        $this->actingAs($owner)->delete("/app/quality/relations/{$instructionLink->id}")->assertRedirect();
+        $this->assertNull($instructionLink->fresh());
+        $this->assertNotNull($instruction->fresh());
+        $this->assertSame(3, QualityItemRelation::query()->where('to_item_id', $process->id)->count());
+    }
+
+    public function test_linking_governing_documents_refuses_retired_foreign_and_wrong_types_and_needs_edit(): void
+    {
+        Queue::fake();
+
+        ['customer' => $customer, 'owner' => $owner] = $this->context();
+        ['customer' => $otherCustomer] = $this->context();
+        $process = $this->item($customer, QualityItem::TYPE_PROCESS, 'Anskaffelsesprosess');
+        $otherProcess = $this->item($customer, QualityItem::TYPE_PROCESS, 'Leverandoroppfolging');
+        $policy = $this->item($customer, QualityItem::TYPE_POLICY, 'Innkjopspolicy');
+        $retired = $this->item($customer, QualityItem::TYPE_PROCEDURE, 'Gammel prosedyre');
+        $retired->update(['status' => QualityItem::STATUS_RETIRED]);
+        $control = $this->item($customer, QualityItem::TYPE_CONTROL, 'Kontroll');
+        $foreign = $this->item($otherCustomer, QualityItem::TYPE_POLICY, 'Fremmed policy');
+
+        $post = fn (QualityItem $target, array $ids) => $this->actingAs($owner)
+            ->post("/app/quality/items/{$target->id}/governing-documents", ['document_ids' => $ids]);
+
+        $post($process, [$retired->id])->assertSessionHasErrors('document_ids');
+        $post($process, [$foreign->id])->assertSessionHasErrors('document_ids');
+        $post($process, [$control->id])->assertSessionHasErrors('relation_type');
+        $post($process, [$otherProcess->id])->assertSessionHasErrors('relation_type');
+        $post($process, [])->assertSessionHasErrors('document_ids');
+        // Only a process has styrende dokumenter.
+        $post($policy, [$retired->id])->assertSessionHasErrors('quality_type');
+        // One bad id refuses the whole set.
+        $post($process, [$policy->id, $retired->id])->assertSessionHasErrors('document_ids');
+
+        $this->assertSame(0, QualityItemRelation::query()->count());
+
+        // A retired document is not offered, but one already linked stays listed with its status.
+        QualityItemRelation::query()->create([
+            'customer_id' => $customer->id,
+            'from_item_id' => $retired->id,
+            'to_item_id' => $process->id,
+            'relation_type' => QualityItemRelation::TYPE_GOVERNS,
+            'source' => QualityItemRelation::SOURCE_MANUAL,
+        ]);
+        $props = $this->actingAs($owner)->get("/app/quality/items/{$process->id}")->viewData('page')['props'];
+        $this->assertSame([(int) $policy->id], array_column($props['governing_document_options'], 'id'));
+        $this->assertSame([QualityItem::STATUS_RETIRED], array_column($props['governing_documents'], 'other_status'));
+
+        // Another customer's process is a 404, and reading Kvalitet is not editing it.
+        $foreignProcess = $this->item($otherCustomer, QualityItem::TYPE_PROCESS, 'Fremmed prosess');
+        $this->actingAs($owner)
+            ->post("/app/quality/items/{$foreignProcess->id}/governing-documents", ['document_ids' => [$policy->id]])
+            ->assertNotFound();
+
+        $reader = $this->qualityReader($customer);
+        $this->actingAs($reader)
+            ->post("/app/quality/items/{$process->id}/governing-documents", ['document_ids' => [$policy->id]])
+            ->assertForbidden();
+        $this->assertSame(1, QualityItemRelation::query()->count());
     }
 
     // ---------------------------------------------------------------------
@@ -1274,6 +1394,29 @@ class QualityItemTest extends TestCase
         }
 
         return ['customer' => $customer, 'owner' => $owner];
+    }
+
+    private function qualityReader(Customer $customer): User
+    {
+        $reader = User::query()->create([
+            'name' => 'Leser',
+            'email' => 'reader-'.Str::lower(Str::random(10)).'@procynia.local',
+            'password' => bcrypt('secret-password'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $role = CustomerRole::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Leser '.Str::upper(Str::random(6)),
+            'is_active' => true,
+        ]);
+        $role->syncPermissions([CustomerPermissionCatalog::QUALITY_VIEW]);
+        $reader->customerRoles()->attach($role->id, ['customer_id' => $customer->id]);
+
+        return $reader;
     }
 
     private function grant(Customer $customer, string $package): void

@@ -3,14 +3,15 @@ import { SYSTEM_OWNER, loginAs } from './helpers/auth.js';
 import { DESKTOP, expectReadable } from './helpers/readability.js';
 
 /**
- * A process shows the styrende dokumenter that govern it, and a quality editor links and unlinks
- * them in place. The link is a `governs` relation, so the policy's own page lists the process too —
- * under «Styrer disse prosessene», never as a generic relation list.
+ * A process shows the styrende dokumenter that govern it — policies, procedures, work instructions
+ * and checklists in one list — and a quality editor searches for, links and unlinks them in place.
+ * The link is a `governs` relation, so the document's own page lists the process too — under
+ * «Styrer disse prosessene», never as a generic relation list.
  *
- * The policy is registered through the app itself (the same POST the create form sends), with a
- * unique title so repeated runs never pick up a policy an earlier run left linked.
+ * The documents are registered through the app itself (the same POST the create form sends), with
+ * unique titles so repeated runs never pick up a document an earlier run left linked.
  */
-test('a process links a governing document, the policy sees the process, and the link is removed', async ({ page }) => {
+test('a process links several governing document types, each sees the process, and a link is removed', async ({ page }) => {
     await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
     await page.goto('/app/quality');
 
@@ -20,48 +21,71 @@ test('a process links a governing document, the policy sees the process, and the
         test.skip(true, 'No seeded quality process in this environment.');
     }
 
-    const policyTitle = `E2E policy ${Date.now()}`;
+    const stamp = Date.now();
+    const procedureTitle = `E2E prosedyre ${stamp}`;
+    const checklistTitle = `E2E sjekkliste ${stamp}`;
     const xsrf = (await page.context().cookies()).find((cookie) => cookie.name === 'XSRF-TOKEN');
-    const created = await page.request.post('/app/quality/items', {
-        headers: { 'X-XSRF-TOKEN': decodeURIComponent(xsrf.value), Accept: 'text/html' },
-        form: { quality_type: 'policy', title: policyTitle },
-    });
-    expect(created.ok()).toBeTruthy();
+
+    for (const [type, title] of [['procedure', procedureTitle], ['checklist', checklistTitle]]) {
+        const created = await page.request.post('/app/quality/items', {
+            headers: { 'X-XSRF-TOKEN': decodeURIComponent(xsrf.value), Accept: 'text/html' },
+            form: { quality_type: type, title },
+        });
+        expect(created.ok()).toBeTruthy();
+    }
 
     await page.goto('/app/quality');
     await processLink.first().click();
     await page.waitForURL(/\/app\/quality\/items\/\d+/);
     const processUrl = page.url();
 
-    const panel = page.locator('section', { has: page.getByRole('heading', { name: 'Styrende dokumenter' }) });
+    const panel = page.getByTestId('governing-documents');
     await expect(panel).toBeVisible();
 
-    await panel.getByLabel('Styrende dokument').selectOption({ label: policyTitle });
+    // Search narrows the list; each option says its type and status.
+    const picker = panel.getByLabel('Legg til styrende dokumenter');
+    await picker.fill(`E2E prosedyre ${stamp}`);
+    const procedureOption = panel.getByRole('option', { name: new RegExp(procedureTitle) });
+    await expect(procedureOption).toContainText('Prosedyre');
+    await expect(procedureOption).toContainText('Utkast');
+    await expect(panel.getByRole('option', { name: new RegExp(checklistTitle) })).toHaveCount(0);
+    await procedureOption.click();
+    await picker.fill(checklistTitle);
+    await panel.getByRole('option', { name: new RegExp(checklistTitle) }).click();
     await panel.getByRole('button', { name: 'Koble til' }).click();
 
-    const linked = panel.getByRole('link', { name: policyTitle });
-    await expect(linked).toBeVisible();
+    const linkedProcedure = panel.getByRole('link', { name: procedureTitle });
+    await expect(linkedProcedure).toBeVisible();
+    await expect(panel.getByRole('link', { name: checklistTitle })).toBeVisible();
+    await expect(panel.locator('li', { has: page.getByRole('link', { name: procedureTitle }) })).toContainText('Prosedyre');
+    await expect(panel.locator('li', { has: page.getByRole('link', { name: procedureTitle }) })).toContainText('Utkast');
     await expectReadable(page, 'quality-governing', 'process');
     await page.setViewportSize(DESKTOP);
 
-    // From the policy, the process it governs — said in the policy's own terms.
-    await linked.click();
+    // From the procedure, the process it governs — said in the document's own terms.
+    await linkedProcedure.click();
     await page.waitForURL(/\/app\/quality\/items\/\d+/);
     const governed = page.locator('section', { has: page.getByRole('heading', { name: 'Styrer disse prosessene' }) });
     await expect(governed).toBeVisible();
     await expect(governed.getByRole('link', { name: /E2E liten prosess/ })).toBeVisible();
     await expectNoRelationVocabulary(page);
-    await expectReadable(page, 'quality-governing', 'policy');
+    await expectReadable(page, 'quality-governing', 'procedure');
     await page.setViewportSize(DESKTOP);
 
-    // Back on the process, remove the link; the policy itself stays.
+    // Back on the process, remove one link; the document itself stays and is offered again.
     await page.goto(processUrl);
     page.once('dialog', (dialog) => dialog.accept());
-    await panel.locator('li', { has: page.getByRole('link', { name: policyTitle }) })
-        .getByRole('button', { name: 'Fjern kobling' })
-        .click();
-    await expect(panel.getByRole('link', { name: policyTitle })).toHaveCount(0);
-    await expect(panel.getByLabel('Styrende dokument').locator('option', { hasText: policyTitle })).toHaveCount(1);
+    await panel.getByRole('button', { name: `Fjern koblingen til ${checklistTitle}` }).click();
+    await expect(panel.getByRole('link', { name: checklistTitle })).toHaveCount(0);
+    await expect(panel.getByRole('link', { name: procedureTitle })).toBeVisible();
+    await picker.fill(checklistTitle);
+    await expect(panel.getByRole('option', { name: new RegExp(checklistTitle) })).toHaveCount(1);
+
+    // Clean up the procedure link so later runs see the seeded process as it was.
+    await page.keyboard.press('Escape');
+    page.once('dialog', (dialog) => dialog.accept());
+    await panel.getByRole('button', { name: `Fjern koblingen til ${procedureTitle}` }).click();
+    await expect(panel.getByRole('link', { name: procedureTitle })).toHaveCount(0);
 });
 
 /** A control page speaks of where the control is used and its evidence, never of relations. */
