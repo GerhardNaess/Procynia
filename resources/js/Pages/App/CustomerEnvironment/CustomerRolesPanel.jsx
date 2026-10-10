@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
 import { rolesInDomain } from './customerRoleMatrix';
 import BusinessAreasPanel from './BusinessAreasPanel';
+import PermissionSection, { MATRIX } from './PermissionSection';
+import { countLabel } from './permissionSections';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -27,11 +29,15 @@ function classNames(...values) {
  * by fagområde today (Risiko), so an administrator reads «what may this role do, and where» on
  * one row without learning a separate access mechanism.
  *
+ * Each domain is one collapsible PermissionSection. Which sections are open is the page's state
+ * (Index owns it, so «Utvid alle» also reaches the bid-role section passed in as `children`);
+ * opening or closing one never touches a role.
+ *
  * This panel defines roles; it does not hand them out. Assignment lives on Rediger bruker, where
  * the rest of a person's identity is set, so an administrator answers "what is this person" in one
  * place and on one save.
  */
-export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {} }) {
+export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}, openSections = [], onToggleSection = () => {}, children = null }) {
     const {
         domains = [],
         roles = [],
@@ -42,6 +48,10 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
         explicit_grant_domains: explicitGrantDomains = [],
     } = customerRoles;
     const tba = t.business_areas ?? {};
+    const ts = t.sections ?? {};
+    // A matrix checkbox has no visible label of its own, so it names both its row and its column.
+    const checkboxLabel = (permissionLabel, roleName) =>
+        (ts.checkbox_label ?? ':permission – :role').replace(':permission', permissionLabel).replace(':role', roleName);
     const isAreaScoped = (domain) => areaScopedDomains.includes(domain.key);
     const areaSummary = (role) => {
         if (role.all_business_areas) {
@@ -119,7 +129,9 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
             { permissions: next },
             {
                 preserveScroll: true,
-                preserveState: false,
+                // The props carry the saved state; keeping the page's own state is what keeps the
+                // open sections open after a click.
+                preserveState: true,
                 onFinish: () => setSavingRoleId(null),
             },
         );
@@ -133,7 +145,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
             { is_active: !role.is_active },
             {
                 preserveScroll: true,
-                preserveState: false,
+                preserveState: true,
                 onFinish: () => setSavingRoleId(null),
             },
         );
@@ -144,7 +156,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
             return;
         }
 
-        router.delete(role.delete_url, { preserveScroll: true, preserveState: false });
+        router.delete(role.delete_url, { preserveScroll: true, preserveState: true });
     };
 
     const toggleFormPermission = (permissionKey) => {
@@ -171,6 +183,103 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
 
     return (
         <>
+            <div className="space-y-4">
+                {children}
+                {domains.map((domain) => {
+                    const domainRoles = rolesInDomain(roles, domain);
+
+                    return (
+                        <PermissionSection
+                            key={domain.key}
+                            sectionKey={domain.key}
+                            title={domain.label}
+                            subtitle={ts.descriptions?.[domain.key] ?? null}
+                            meta={[
+                                countLabel(domain.permissions.length, { one: ts.permissions_one, other: ts.permissions_other ?? ':count rettigheter' }),
+                                countLabel(domainRoles.length, { one: ts.roles_one, other: ts.roles_other ?? ':count roller' }),
+                            ].join(' · ')}
+                            open={openSections.includes(domain.key)}
+                            onToggle={() => onToggleSection(domain.key)}
+                        >
+                            {explicitGrantDomains.includes(domain.key) ? (
+                                <p className="mb-4 text-base leading-6 text-slate-600" data-testid={`explicit-grant-note-${domain.key}`}>
+                                    {t.explicit_grant_note ?? 'System Owner får ikke disse rettighetene automatisk. Skal du arbeide her, gi deg selv en rolle med rettighetene.'}
+                                </p>
+                            ) : null}
+                            {domainRoles.length === 0 ? (
+                                <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-base leading-6 text-slate-600">
+                                    {t.domain_no_roles ?? 'Ingen av rollene har rettigheter her ennå. Rediger en rolle for å gi den rettigheter i dette området.'}
+                                </p>
+                            ) : (
+                                <div className={MATRIX.wrapper}>
+                                    <table className={MATRIX.table}>
+                                        <thead>
+                                            <tr className={MATRIX.headRow}>
+                                                <th scope="col" className={`${MATRIX.stickyHead} min-w-[12rem]`}>
+                                                    {t.col_role ?? 'Rolle'}
+                                                </th>
+                                                {domain.permissions.map((permission) => (
+                                                    <th key={permission.key} scope="col" className={MATRIX.head}>
+                                                        {permission.label}
+                                                    </th>
+                                                ))}
+                                                {isAreaScoped(domain) ? (
+                                                    <th scope="col" className={MATRIX.headLeft}>
+                                                        {t.col_areas ?? 'Fagområder'}
+                                                    </th>
+                                                ) : null}
+                                            </tr>
+                                        </thead>
+                                        <tbody className={MATRIX.body}>
+                                            {domainRoles.map((role) => (
+                                                <tr key={role.id} className={MATRIX.row}>
+                                                    <th scope="row" className={MATRIX.stickyCell}>
+                                                        <span className="font-medium">{role.name}</span>
+                                                        {!role.is_active ? (
+                                                            <span className="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-base font-semibold text-slate-600">
+                                                                {t.inactive ?? 'Inaktiv'}
+                                                            </span>
+                                                        ) : null}
+                                                    </th>
+                                                    {domain.permissions.map((permission) => {
+                                                        const checked = role.permission_keys.includes(permission.key);
+
+                                                        return (
+                                                            <td key={permission.key} className={MATRIX.cell}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={checked}
+                                                                    disabled={savingRoleId === role.id}
+                                                                    onChange={() => togglePermission(role, permission.key)}
+                                                                    aria-label={checkboxLabel(permission.label, role.name)}
+                                                                    className={MATRIX.checkbox}
+                                                                />
+                                                            </td>
+                                                        );
+                                                    })}
+                                                    {isAreaScoped(domain) ? (
+                                                        <td className="px-3 py-3.5 text-left align-middle text-base text-slate-700">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openEditRole(role)}
+                                                                title={t.areas_edit ?? 'Endre fagområder'}
+                                                                className="rounded-lg text-left underline decoration-slate-300 underline-offset-4 hover:text-violet-700 hover:decoration-violet-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                                            >
+                                                                {areaSummary(role)}
+                                                            </button>
+                                                        </td>
+                                                    ) : null}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </PermissionSection>
+                    );
+                })}
+            </div>
+
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -195,93 +304,7 @@ export default function CustomerRolesPanel({ customerRoles, modal: Modal, t = {}
                         <p className="mt-1 text-base leading-6 text-slate-600">{t.no_roles_hint ?? ''}</p>
                     </div>
                 ) : (
-                    <div className="mt-6 space-y-8">
-                        {domains.map((domain) => {
-                            const domainRoles = rolesInDomain(roles, domain);
-
-                            return (
-                                <div key={domain.key}>
-                                    <h3 className="text-base font-semibold text-slate-900">{domain.label}</h3>
-                                    {explicitGrantDomains.includes(domain.key) ? (
-                                        <p className="mt-1 text-base leading-6 text-slate-600" data-testid={`explicit-grant-note-${domain.key}`}>
-                                            {t.explicit_grant_note ?? 'System Owner får ikke disse rettighetene automatisk. Skal du arbeide her, gi deg selv en rolle med rettighetene.'}
-                                        </p>
-                                    ) : null}
-                                    {domainRoles.length === 0 ? (
-                                        <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-base leading-6 text-slate-600">
-                                            {t.domain_no_roles ?? 'Ingen av rollene har rettigheter her ennå. Rediger en rolle for å gi den rettigheter i dette området.'}
-                                        </p>
-                                    ) : (
-                                        <div className="mt-3 overflow-x-auto">
-                                            <table className="w-full text-base">
-                                                <thead>
-                                                    <tr className="border-b border-slate-200">
-                                                        <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                            {t.col_role ?? 'Rolle'}
-                                                        </th>
-                                                        {domain.permissions.map((permission) => (
-                                                            <th
-                                                                key={permission.key}
-                                                                className="px-3 pb-3 text-center text-sm font-semibold leading-5 text-slate-600"
-                                                            >
-                                                                {permission.label}
-                                                            </th>
-                                                        ))}
-                                                        {isAreaScoped(domain) ? (
-                                                            <th className="px-3 pb-3 text-left text-sm font-semibold leading-5 text-slate-600">
-                                                                {t.col_areas ?? 'Fagområder'}
-                                                            </th>
-                                                        ) : null}
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {domainRoles.map((role) => (
-                                                        <tr key={role.id}>
-                                                            <td className="py-4 pr-6 text-slate-900">
-                                                                <span className="font-medium">{role.name}</span>
-                                                                {!role.is_active ? (
-                                                                    <span className="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-sm font-semibold text-slate-600">
-                                                                        {t.inactive ?? 'Inaktiv'}
-                                                                    </span>
-                                                                ) : null}
-                                                            </td>
-                                                            {domain.permissions.map((permission) => {
-                                                                const checked = role.permission_keys.includes(permission.key);
-
-                                                                return (
-                                                                    <td key={permission.key} className="px-3 py-4 text-center">
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={checked}
-                                                                            disabled={savingRoleId === role.id}
-                                                                            onChange={() => togglePermission(role, permission.key)}
-                                                                            className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                        />
-                                                                    </td>
-                                                                );
-                                                            })}
-                                                            {isAreaScoped(domain) ? (
-                                                                <td className="px-3 py-4 text-base text-slate-700">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => openEditRole(role)}
-                                                                        title={t.areas_edit ?? 'Endre fagområder'}
-                                                                        className="rounded-lg text-left underline decoration-slate-300 underline-offset-4 hover:text-violet-700 hover:decoration-violet-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                                                                    >
-                                                                        {areaSummary(role)}
-                                                                    </button>
-                                                                </td>
-                                                            ) : null}
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-
+                    <div className="mt-6">
                         <div>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-base">

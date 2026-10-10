@@ -4,6 +4,8 @@ import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import CustomerEnvironmentHeader from './CustomerEnvironmentHeader';
 import CustomerRolesPanel from './CustomerRolesPanel';
+import PermissionSection, { MATRIX } from './PermissionSection';
+import { BASE_SECTION_KEY, allOpen, countLabel, sectionKeys, toggleSection } from './permissionSections';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -178,6 +180,12 @@ export default function CustomerEnvironmentIndex({
     const departmentsTabUrl = `${routes.index}?tab=departments`;
     const usersTabUrl = `${routes.index}?tab=users`;
     const [permissionSaving, setPermissionSaving] = useState(null);
+    // Tilganger opens with every module closed, so the first thing an administrator reads is the
+    // list of modules. Opening one is page state only — it never touches a permission.
+    const [openSections, setOpenSections] = useState([]);
+    const tcs = tce.roles?.sections ?? {};
+    const permissionSectionKeys = sectionKeys(customerRoles?.domains ?? [], permissionSettings !== null);
+    const toggleOpenSection = (key) => setOpenSections((open) => toggleSection(open, key));
     const userCreateHref = `${routes.users_create}?redirect_to=${encodeURIComponent(usersTabUrl)}`;
     const userEditHref = (user) => `${user.edit_url}?redirect_to=${encodeURIComponent(usersTabUrl)}`;
 
@@ -309,6 +317,85 @@ export default function CustomerEnvironmentIndex({
         });
     };
     const firstDepartmentError = Object.values(departmentForm.errors)[0] ?? null;
+
+    const baseSection = permissionSettings ? (
+        <PermissionSection
+            sectionKey={BASE_SECTION_KEY}
+            title={tcs.base_title ?? 'Anbudsroller og kundemiljø'}
+            subtitle={tcs.base_subtitle ?? 'Avdelinger, brukere, saker og Wiki-kontroll for de faste anbudsrollene. System Owner har alltid full tilgang og kan ikke endres.'}
+            meta={countLabel(permissionSettings.permission_rows.length, { one: tcs.permissions_one, other: tcs.permissions_other ?? ':count rettigheter' })}
+            open={openSections.includes(BASE_SECTION_KEY)}
+            onToggle={() => toggleOpenSection(BASE_SECTION_KEY)}
+        >
+            <div className={MATRIX.wrapper}>
+                <table className={MATRIX.table}>
+                    <thead>
+                        <tr className={MATRIX.headRow}>
+                            <th scope="col" className={`${MATRIX.stickyHead} min-w-[18rem]`}>
+                                Handling
+                            </th>
+                            {permissionSettings.role_columns.map((col) => (
+                                <th key={col.value} scope="col" className={MATRIX.head}>
+                                    {col.label}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className={MATRIX.body}>
+                        {permissionSettings.permission_rows.map((row) => (
+                            <tr key={row.key} className={MATRIX.row}>
+                                <th scope="row" className={MATRIX.stickyCell}>
+                                    <span className="font-medium">{row.label}</span>
+                                    {/* Only the rows that are genuinely easy to
+                                        confuse carry one; the rest read fine alone. */}
+                                    {row.description ? (
+                                        <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-500">
+                                            {row.description}
+                                        </span>
+                                    ) : null}
+                                </th>
+                                {permissionSettings.role_columns.map((col) => {
+                                    const checked = row.roles.includes(col.value);
+                                    const locked = col.locked;
+
+                                    return (
+                                        <td key={col.value} className={MATRIX.cell}>
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                disabled={locked || permissionSaving === row.key}
+                                                aria-label={(tcs.checkbox_label ?? ':permission – :role').replace(':permission', row.label).replace(':role', col.label)}
+                                                onChange={() => {
+                                                    const nextRoles = checked
+                                                        ? row.roles.filter((r) => r !== col.value)
+                                                        : [...row.roles, col.value];
+
+                                                    setPermissionSaving(row.key);
+
+                                                    router.patch(
+                                                        permissionSettings.update_url,
+                                                        { permission: row.key, roles: nextRoles },
+                                                        {
+                                                            preserveScroll: true,
+                                                            // Keeps the open sections open; the
+                                                            // props carry the saved roles.
+                                                            preserveState: true,
+                                                            onFinish: () => setPermissionSaving(null),
+                                                        },
+                                                    );
+                                                }}
+                                                className={MATRIX.checkbox}
+                                            />
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </PermissionSection>
+    ) : null;
 
     return (
         <CustomerAppLayout title="Kundemiljø" showPageTitle={false}>
@@ -734,87 +821,48 @@ export default function CustomerEnvironmentIndex({
 
                 {currentTab === 'permissions' && permissionSettings ? (
                     <section className="space-y-5">
-                        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                            <h2 className="text-lg font-semibold text-slate-950">Tilganger</h2>
-                            <p className="mt-1 text-base leading-6 text-slate-600">
-                                Styr hvilke roller som har tilgang til å utføre spesifikke handlinger i kundemiljøet. System Owner har alltid full tilgang og kan ikke endres.
-                            </p>
-
-                            <div className="mt-6 overflow-x-auto">
-                                <table className="w-full text-base">
-                                    <thead>
-                                        <tr className="border-b border-slate-200">
-                                            <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                Handling
-                                            </th>
-                                            {permissionSettings.role_columns.map((col) => (
-                                                <th key={col.value} className="pb-3 px-4 text-center text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                    {col.label}
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {permissionSettings.permission_rows.map((row) => (
-                                            <tr key={row.key}>
-                                                <td className="py-4 pr-6 text-slate-900">
-                                                    <span className="font-medium">{row.label}</span>
-                                                    {/* Only the rows that are genuinely easy to
-                                                        confuse carry one; the rest read fine alone. */}
-                                                    {row.description ? (
-                                                        <span className="mt-0.5 block max-w-md text-base font-normal leading-6 text-slate-500">
-                                                            {row.description}
-                                                        </span>
-                                                    ) : null}
-                                                </td>
-                                                {permissionSettings.role_columns.map((col) => {
-                                                    const checked = row.roles.includes(col.value);
-                                                    const locked = col.locked;
-
-                                                    return (
-                                                        <td key={col.value} className="px-4 py-4 text-center">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={checked}
-                                                                disabled={locked || permissionSaving === row.key}
-                                                                onChange={() => {
-                                                                    const nextRoles = checked
-                                                                        ? row.roles.filter((r) => r !== col.value)
-                                                                        : [...row.roles, col.value];
-
-                                                                    setPermissionSaving(row.key);
-
-                                                                    router.patch(
-                                                                        permissionSettings.update_url,
-                                                                        { permission: row.key, roles: nextRoles },
-                                                                        {
-                                                                            preserveScroll: true,
-                                                                            preserveState: false,
-                                                                            onFinish: () => setPermissionSaving(null),
-                                                                        },
-                                                                    );
-                                                                }}
-                                                                className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            />
-                                                        </td>
-                                                    );
-                                                })}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                        <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                                <h2 className="text-xl font-semibold text-slate-950">{tce.permissions_heading ?? 'Tilganger'}</h2>
+                                <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
+                                    {tcs.intro ?? 'Styr hvilke roller som har tilgang til å utføre spesifikke handlinger i kundemiljøet. Åpne en modul for å se og endre rettighetene.'}
+                                </p>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setOpenSections(permissionSectionKeys)}
+                                    disabled={allOpen(openSections, permissionSectionKeys)}
+                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${SECONDARY_COLOURS}`}
+                                >
+                                    {tcs.expand_all ?? 'Utvid alle'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setOpenSections([])}
+                                    disabled={openSections.length === 0}
+                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${SECONDARY_COLOURS}`}
+                                >
+                                    {tcs.collapse_all ?? 'Lukk alle'}
+                                </button>
                             </div>
                         </div>
 
-                        {/* Customer-defined roles sit below the fixed matrix, never inside it: the
-                            matrix is Procynia's anbud vocabulary, this is the customer's own. */}
                         {customerRoles ? (
+                            // Customer-defined roles follow the fixed matrix, never inside it: the
+                            // matrix is Procynia's anbud vocabulary, the domains are the customer's own.
                             <CustomerRolesPanel
                                 customerRoles={customerRoles}
                                 modal={EnvironmentModal}
                                 t={tce.roles ?? {}}
-                            />
-                        ) : null}
+                                openSections={openSections}
+                                onToggleSection={toggleOpenSection}
+                            >
+                                {baseSection}
+                            </CustomerRolesPanel>
+                        ) : (
+                            <div className="space-y-4">{baseSection}</div>
+                        )}
                     </section>
                 ) : null}
 
