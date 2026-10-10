@@ -45,14 +45,17 @@ export default function SearchableMultiSelect({
         setQuery('');
     };
 
+    // Closed on the outside click, not on its mousedown: the list sits in the page flow, so closing
+    // it at mousedown moves whatever is below it — typically the submit button — before the mouse is
+    // released, and the click the user aimed at that button lands on nothing.
     useEffect(() => {
         if (! open) return undefined;
-        const onMouseDown = (event) => {
+        const onClick = (event) => {
             if (! rootRef.current?.contains(event.target)) close();
         };
-        document.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('click', onClick);
 
-        return () => document.removeEventListener('mousedown', onMouseDown);
+        return () => document.removeEventListener('click', onClick);
     }, [open]);
 
     useEffect(() => setActive(0), [query]);
