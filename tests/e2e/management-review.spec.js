@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
-import { DESKTOP, PHONE, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
+import { DESKTOP, PHONE, expectPageHelp, expectReadable as expectReadableAt, sidewaysOverflow } from './helpers/readability.js';
 import {
     MANAGEMENT_REVIEW_E2E_PASSWORD,
     cleanUpManagementReviewE2eData,
@@ -41,14 +41,31 @@ test('a management review is created, assessed, decided, finalized and reported'
     await expectPageHelp(page, 'Om ledelsens gjennomgåelse', ['Slik fungerer det', 'Oppfølging']);
     await expectReadable(page, '01-empty');
 
-    // Ny gjennomgåelse: the period is filled in; a participant and ISO 9001 are chosen.
+    // Ny gjennomgåelse: the period is filled in; a participant, ISO 9001 and NIS2 are chosen from
+    // searchable pickers — the lists are not on screen until a field is used.
     await page.getByTestId('mr-create').click();
     await page.locator('#mr-title').fill(title);
     await page.locator('#mr-period-start').fill('2026-01-01');
     await page.locator('#mr-meeting-date').fill(new Date().toISOString().slice(0, 10));
-    await page.getByLabel(people.colleague_name).check();
-    await page.getByTestId('mr-framework-iso9001').check();
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await expect(page.locator('#mr-participants')).toHaveAttribute('placeholder', 'Velg deltakere');
+    await page.locator('#mr-participants').fill(people.colleague_name.slice(0, -2));
+    await page.getByTestId('mr-participants-list').getByRole('option', { name: people.colleague_name }).click();
+    await expect(page.getByRole('button', { name: `Fjern ${people.colleague_name}` })).toBeVisible();
+    await page.locator('#mr-frameworks').fill('kvalitet');
+    await page.getByTestId('mr-frameworks-option-iso9001').click();
+    // Keyboard: search by domain, choose with Enter, close with Escape.
+    await page.locator('#mr-frameworks').fill('cyber');
+    await expect(page.getByTestId('mr-frameworks-list').getByRole('option')).toHaveCount(1);
+    await page.locator('#mr-frameworks').press('Enter');
+    await page.locator('#mr-frameworks').press('Escape');
+    await expect(page.getByTestId('mr-frameworks-list')).toHaveCount(0);
+    await expect(page.getByTestId('mr-frameworks-chosen')).toContainText('ISO 9001 Kvalitetsledelse');
+    await expect(page.getByTestId('mr-frameworks-chosen')).toContainText('NIS2 Cybersikkerhet og regulatoriske krav');
+    await page.locator('#mr-frameworks').click();
+    await expect(page.getByTestId('mr-frameworks-option-dora')).toContainText('Regulatorisk rammeverk');
     await expectReadable(page, '02-create-form');
+    await page.locator('#mr-title').click();
     await page.getByRole('button', { name: 'Opprett gjennomgåelse' }).click();
     await page.waitForURL(/\/app\/management-reviews\/\d+$/);
     const reviewUrl = page.url();
@@ -58,6 +75,16 @@ test('a management review is created, assessed, decided, finalized and reported'
     await expect(page.getByTestId('mr-readiness-judgements')).toHaveAttribute('data-done', 'false');
     await expect(page.getByTestId('mr-attention')).toContainText('Risiko og risikobilde');
     await expect(page.getByTestId('mr-framework-disclaimer')).toContainText('ikke faglig verifisert');
+    // NIS2 is in scope, but nothing claims its requirements are covered.
+    await expect(page.getByTestId('mr-framework-nis2')).toHaveAttribute('data-coverage', 'none');
+    await expect(page.getByTestId('mr-framework-nis2')).toContainText('Automatisk dekningsanalyse er ikke tilgjengelig');
+    await expect(page.getByTestId('mr-framework-iso9001')).toHaveAttribute('data-coverage', 'unverified');
+
+    // Rediger opens with the choices kept.
+    await page.getByRole('button', { name: 'Rediger', exact: true }).click();
+    await expect(page.getByRole('button', { name: `Fjern ${people.colleague_name}` })).toBeVisible();
+    await expect(page.getByTestId('mr-frameworks-chosen')).toContainText('NIS2 Cybersikkerhet og regulatoriske krav');
+    await page.getByRole('button', { name: 'Avbryt', exact: true }).click();
     await expectPageHelp(page, 'Om denne gjennomgåelsen', ['Grunnlaget', 'Etter ferdigstilling']);
     await expectReadable(page, '03-overview');
 
@@ -169,6 +196,14 @@ test('on a phone the sections are one select and nothing scrolls sideways', asyn
     await page.goto('/app/management-reviews');
     await page.getByTestId('mr-create').click();
     await page.locator('#mr-title').fill(`LG mobil ${suffix}`);
+    // The pickers fit the phone, open or with long chips chosen.
+    await page.locator('#mr-frameworks').click();
+    await page.getByTestId('mr-frameworks-option-dora').click();
+    await page.getByTestId('mr-frameworks-option-nis2').click();
+    expect(await sidewaysOverflow(page), 'framework picker scrolls sideways').toEqual([]);
+    await page.locator('#mr-title').click();
+    await expect(page.getByTestId('mr-frameworks-list')).toHaveCount(0);
+    expect(await sidewaysOverflow(page), 'chosen frameworks scroll sideways').toEqual([]);
     await page.getByRole('button', { name: 'Opprett gjennomgåelse' }).click();
     await page.waitForURL(/\/app\/management-reviews\/\d+$/);
 

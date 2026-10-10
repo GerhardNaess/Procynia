@@ -1,3 +1,4 @@
+import SearchableMultiSelect from '../../../Components/App/SearchableMultiSelect';
 import RequiredMark from '../Risk/RequiredMark';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 
@@ -8,11 +9,17 @@ const ERROR = 'mt-1 text-base text-rose-700';
 
 /**
  * The fields of a review, for Ny gjennomgåelse and Rediger. Five that matter — title, period, scope,
- * responsible, frameworks — plus the optional meeting date and purpose. Participants only when
- * creating; afterwards they are managed on Oversikt. Status is never a field.
+ * responsible, frameworks — plus the optional meeting date, participants and purpose. Frameworks and
+ * participants are searchable pickers, never the whole list on screen. The participants chosen here
+ * are people in Procynia; someone outside it is added by name on Oversikt. Status is never a field.
  */
 export default function ReviewForm({ form, onSubmit, onCancel, t, ownerOptions = [], areaOptions = [], frameworkOptions = [], participantOptions = null, submitLabel }) {
     const tf = t.fields ?? {};
+    const pickerLabels = {
+        noResultsLabel: tf.picker_no_results ?? 'Ingen treff.',
+        removeLabel: tf.picker_remove ?? 'Fjern :name',
+        selectedLabel: tf.picker_selected ?? 'Valgt',
+    };
     const toggle = (field, value) => {
         const current = form.data[field] ?? [];
         form.setData(field, current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
@@ -82,33 +89,41 @@ export default function ReviewForm({ form, onSubmit, onCancel, t, ownerOptions =
             </fieldset>
 
             {frameworkOptions.length > 0 && (
-                <fieldset>
-                    <legend className={LABEL}>{tf.frameworks ?? 'Rammeverk'}</legend>
-                    <p className={HINT}>{tf.frameworks_hint ?? ''}</p>
-                    <div className="mt-2 flex flex-wrap gap-5">
-                        {frameworkOptions.map((key) => (
-                            <label key={key} className="flex min-h-11 items-center gap-2 text-base text-slate-800">
-                                <input type="checkbox" checked={(form.data.frameworks ?? []).includes(key)} onChange={() => toggle('frameworks', key)} className="h-5 w-5 rounded" data-testid={`mr-framework-${key}`} />
-                                {t.frameworks?.[key]?.name ?? key}
-                            </label>
-                        ))}
-                    </div>
-                </fieldset>
+                <div>
+                    <label htmlFor="mr-frameworks" className={LABEL}>{tf.frameworks ?? 'Rammeverk'}</label>
+                    <p id="mr-frameworks-hint" className={HINT}>{tf.frameworks_hint ?? ''}</p>
+                    <SearchableMultiSelect
+                        id="mr-frameworks"
+                        options={frameworkOptions.map((framework) => ({ value: framework.key, label: framework.label, description: `${framework.type_label} · ${framework.domain_label}` }))}
+                        values={form.data.frameworks ?? []}
+                        onChange={(next) => form.setData('frameworks', next)}
+                        placeholder={tf.frameworks_placeholder ?? 'Velg rammeverk'}
+                        searchLabel={tf.frameworks_search ?? 'Søk på navn eller fagområde'}
+                        describedBy="mr-frameworks-hint"
+                        testId="mr-frameworks"
+                        {...pickerLabels}
+                    />
+                    {form.errors.frameworks && <p className={ERROR}>{form.errors.frameworks}</p>}
+                </div>
             )}
 
             {participantOptions && participantOptions.length > 0 && (
-                <fieldset>
-                    <legend className={LABEL}>{tf.participants ?? 'Deltakere'}</legend>
-                    <p className={HINT}>{tf.participants_hint ?? ''}</p>
-                    <div className="mt-2 grid gap-x-5 gap-y-1 sm:grid-cols-2">
-                        {participantOptions.map((person) => (
-                            <label key={person.id} className="flex min-h-11 items-center gap-2 text-base text-slate-800">
-                                <input type="checkbox" checked={(form.data.participant_user_ids ?? []).includes(person.id)} onChange={() => toggle('participant_user_ids', person.id)} className="h-5 w-5 rounded" />
-                                {person.name}
-                            </label>
-                        ))}
-                    </div>
-                </fieldset>
+                <div>
+                    <label htmlFor="mr-participants" className={LABEL}>{tf.participants ?? 'Deltakere'}</label>
+                    <p id="mr-participants-hint" className={HINT}>{tf.participants_hint ?? ''}</p>
+                    <SearchableMultiSelect
+                        id="mr-participants"
+                        options={participantOptions.map((person) => ({ value: person.id, label: person.name }))}
+                        values={form.data.participant_user_ids ?? []}
+                        onChange={(next) => form.setData('participant_user_ids', next)}
+                        placeholder={tf.participants_placeholder ?? 'Velg deltakere'}
+                        searchLabel={tf.participants_search ?? 'Søk på navn'}
+                        describedBy="mr-participants-hint"
+                        testId="mr-participants"
+                        {...pickerLabels}
+                    />
+                    {form.errors.participant_user_ids && <p className={ERROR}>{form.errors.participant_user_ids}</p>}
+                </div>
             )}
 
             <div>

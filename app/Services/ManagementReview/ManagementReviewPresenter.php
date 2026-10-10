@@ -11,6 +11,7 @@ use App\Models\ManagementReviewParticipant;
 use App\Models\ManagementReviewSection;
 use App\Models\User;
 use App\Services\ManagementReview\ManagementReviewSectionCatalog as Catalog;
+use App\Support\FrameworkCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -35,6 +36,7 @@ final class ManagementReviewPresenter
         private readonly ManagementReviewReadiness $readiness,
         private readonly FrameworkCoverage $frameworks,
         private readonly BasisFormatter $formatter,
+        private readonly FrameworkCatalog $catalogOfFrameworks,
     ) {}
 
     /** @return array<string, mixed> */
@@ -99,6 +101,7 @@ final class ManagementReviewPresenter
             'all_business_areas' => (bool) $review->all_business_areas,
             'business_areas' => $review->all_business_areas ? [] : $review->businessAreas->map(fn ($area): array => ['id' => (int) $area->id, 'name' => $area->name])->values()->all(),
             'frameworks' => array_values((array) $review->frameworks),
+            'framework_labels' => array_map(fn (string $key): string => $this->catalogOfFrameworks->label($key), array_values((array) $review->frameworks)),
             'owner_user_id' => $review->owner_user_id !== null ? (int) $review->owner_user_id : null,
             'owner_name' => $review->owner?->name,
             'conclusion' => $review->conclusion,

@@ -126,12 +126,16 @@
 
     @foreach ($document['frameworks'] as $framework)
         <h2>{{ $framework['name'] }}</h2>
-        <p class="note">{{ $labels['framework_disclaimer'] }}</p>
-        <table>
-            @foreach ($framework['inputs'] as $input)
-                <tr><td style="width: 18%;">{{ $input['clause'] }}</td><td>{{ $input['label'] }}</td><td style="width: 22%;">{{ $input['state'] }}</td></tr>
-            @endforeach
-        </table>
+        @if ($framework['coverage'] === 'none')
+            <p class="note">{{ $labels['framework_no_coverage'] }}</p>
+        @else
+            <p class="note">{{ $labels['framework_disclaimer'] }}</p>
+            <table>
+                @foreach ($framework['inputs'] as $input)
+                    <tr><td style="width: 18%;">{{ $input['clause'] }}</td><td>{{ $input['label'] }}</td><td style="width: 22%;">{{ $input['state'] }}</td></tr>
+                @endforeach
+            </table>
+        @endif
     @endforeach
 
     @if (count($document['amendments']) > 0)

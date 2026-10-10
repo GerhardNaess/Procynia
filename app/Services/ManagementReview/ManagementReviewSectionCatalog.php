@@ -93,18 +93,25 @@ final class ManagementReviewSectionCatalog
     ) {}
 
     /**
-     * The sections of this review, in order. Stakeholder feedback belongs to the frameworks and is
-     * included only when the review follows one.
+     * The sections of this review, in order. A framework-only section (stakeholder feedback) is
+     * included only when a chosen framework's coverage mapping asks for it — choosing a framework
+     * without a mapping never adds a section.
      *
      * @return list<string>
      */
     public function keysFor(ManagementReview $review): array
     {
-        $frameworks = array_values((array) ($review->frameworks ?? []));
+        $mapped = [];
+
+        foreach ((array) ($review->frameworks ?? []) as $framework) {
+            foreach ((array) config('management_review.framework_coverage.'.$framework.'.inputs', []) as $input) {
+                array_push($mapped, ...(array) $input['sections']);
+            }
+        }
 
         return array_values(array_filter(
             array_keys(self::DEFINITIONS),
-            fn (string $key): bool => ! (self::DEFINITIONS[$key]['framework_only'] ?? false) || $frameworks !== [],
+            fn (string $key): bool => ! (self::DEFINITIONS[$key]['framework_only'] ?? false) || in_array($key, $mapped, true),
         ));
     }
 

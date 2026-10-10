@@ -89,7 +89,7 @@ final class ManagementReviewReportBuilder
                 [__(self::T.'fields.meeting_date'), $this->formatter->date($row['meeting_date']) ?? '—'],
                 [__(self::T.'fields.scope'), $row['all_business_areas'] ? __(self::T.'scope_all') : implode(', ', array_column($row['business_areas'], 'name'))],
                 [__(self::T.'fields.owner'), $row['owner_name'] ?? '—'],
-                $row['frameworks'] !== [] ? [__(self::T.'fields.frameworks'), implode(', ', array_map(fn (string $key): string => __(self::T.'frameworks.'.$key.'.name'), $row['frameworks']))] : null,
+                $row['frameworks'] !== [] ? [__(self::T.'fields.frameworks'), implode(', ', $row['framework_labels'])] : null,
                 ! $draft ? [__(self::T.'fields.finalized'), CarbonImmutable::parse($row['finalized_at'])->format('d.m.Y').' · '.$row['finalized_by_name']] : null,
                 $row['next_review_due_on'] !== null ? [__(self::T.'fields.next_review_due_on'), $this->formatter->date($row['next_review_due_on'])] : null,
             ])),
@@ -99,7 +99,8 @@ final class ManagementReviewReportBuilder
             'sections' => $sections,
             'decisions' => $decisions,
             'frameworks' => array_map(fn (array $framework): array => [
-                'name' => __(self::T.'frameworks.'.$framework['key'].'.name').' ('.$framework['version'].')',
+                'name' => $framework['label'].($framework['version'] !== '' ? ' ('.$framework['version'].')' : ''),
+                'coverage' => $framework['coverage'],
                 'inputs' => array_map(fn (array $input): array => [
                     'clause' => $input['clause'],
                     'label' => __(self::T.'frameworks.'.$framework['key'].'.inputs.'.$input['key']),

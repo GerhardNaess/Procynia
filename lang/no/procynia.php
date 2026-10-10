@@ -9395,6 +9395,32 @@ return [
         'cancel_blocking_runs_success' => 'Blokkerende kjøring(er) ble avbrutt. Dokumentet kan nå slettes.',
         'cancel_blocking_runs_none_active' => 'Fant ingen aktive kjøringer å avbryte for dette dokumentet.',
     ],
+    'framework_catalog' => [
+        'types' => [
+            'standard' => 'Standard',
+            'regulation' => 'Regulatorisk rammeverk',
+        ],
+        'domains' => [
+            'quality' => 'Kvalitet',
+            'information_security' => 'Informasjonssikkerhet',
+            'environment' => 'Miljø',
+            'occupational_health_safety' => 'Helse, miljø og sikkerhet',
+            'business_continuity' => 'Beredskap og kontinuitet',
+            'service_management' => 'IT-tjenester',
+            'cybersecurity' => 'Cybersikkerhet',
+            'digital_resilience' => 'Finans og IKT-risiko',
+        ],
+        'names' => [
+            'iso9001' => 'Kvalitetsledelse',
+            'iso27001' => 'Informasjonssikkerhet',
+            'iso14001' => 'Miljøledelse',
+            'iso45001' => 'Arbeidsmiljø',
+            'iso22301' => 'Kontinuitetsstyring',
+            'iso20000_1' => 'Tjenestestyring',
+            'nis2' => 'Cybersikkerhet og regulatoriske krav',
+            'dora' => 'Digital operasjonell motstandsdyktighet',
+        ],
+    ],
     'management_review' => [
         'module_name' => 'Ledelsens gjennomgåelse',
         'index_title' => 'Ledelsens gjennomgåelse',
@@ -9439,9 +9465,16 @@ return [
             'areas' => 'Fagområder',
             'owner' => 'Ansvarlig',
             'frameworks' => 'Rammeverk',
-            'frameworks_hint' => 'Valgfritt. Viser hvilke punkter i standarden gjennomgåelsen dekker, og legger til seksjonen Tilbakemeldinger fra kunder og interessenter.',
+            'frameworks_hint' => 'Valgfritt. Rammeverkene inngår i gjennomgåelsens omfang. For ISO 9001 og ISO/IEC 27001 viser oversikten også hvilke punkter som er vurdert.',
+            'frameworks_placeholder' => 'Velg rammeverk',
+            'frameworks_search' => 'Søk på navn eller fagområde',
             'participants' => 'Deltakere',
             'participants_hint' => 'Kan også legges til senere.',
+            'participants_placeholder' => 'Velg deltakere',
+            'participants_search' => 'Søk på navn',
+            'picker_no_results' => 'Ingen treff.',
+            'picker_remove' => 'Fjern :name',
+            'picker_selected' => 'Valgt',
             'finalized' => 'Ferdigstilt',
             'next_review_due_on' => 'Neste gjennomgåelse innen',
             'conclusion' => 'Samlet konklusjon',
@@ -9855,9 +9888,9 @@ return [
         ],
         'frameworks' => [
             'heading' => 'Dekning av rammeverk',
+            'no_coverage' => 'Valgt i gjennomgåelsens omfang. Automatisk dekningsanalyse er ikke tilgjengelig for dette rammeverket – bruk seksjonene til å dokumentere vurderingene.',
             'disclaimer' => 'Koblingen til standardens punkter er Procynias egen tolkning og ikke faglig verifisert. Oversikten viser hva gjennomgåelsen har vurdert – den bekrefter ikke at virksomheten etterlever standarden.',
             'iso9001' => [
-                'name' => 'ISO 9001',
                 'inputs' => [
                     'previous_actions' => 'Status for tiltak fra tidligere gjennomgåelser',
                     'context_changes' => 'Endringer i interne og eksterne forhold',
@@ -9874,7 +9907,6 @@ return [
                 ],
             ],
             'iso27001' => [
-                'name' => 'ISO 27001',
                 'inputs' => [
                     'previous_actions' => 'Status for tiltak fra tidligere gjennomgåelser',
                     'context_changes' => 'Endringer i interne og eksterne forhold',
@@ -9937,6 +9969,7 @@ return [
                 'case_hidden' => 'Oppfølgingen skjer i et fagområde du ikke har tilgang til.',
                 'truncated' => 'Viser :shown av :total.',
                 'framework_disclaimer' => 'Koblingen til standardens punkter er ikke faglig verifisert og bekrefter ikke etterlevelse.',
+                'framework_no_coverage' => 'Valgt i gjennomgåelsens omfang. Automatisk dekningsanalyse er ikke tilgjengelig for dette rammeverket.',
                 'amendments' => 'Rettelser etter ferdigstilling',
                 'reason' => 'Begrunnelse',
                 'history' => 'Historikk',

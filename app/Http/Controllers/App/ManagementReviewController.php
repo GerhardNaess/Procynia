@@ -16,6 +16,7 @@ use App\Services\ManagementReview\ManagementReviewPresenter;
 use App\Services\ManagementReview\ManagementReviewSectionCatalog;
 use App\Services\ManagementReview\ManagementReviewService;
 use App\Support\CustomerContext;
+use App\Support\FrameworkCatalog;
 use App\Support\ManagementReview\ManagementReviewValidationMessages;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -44,6 +45,7 @@ class ManagementReviewController extends Controller
         private readonly ManagementReviewPresenter $presenter,
         private readonly ManagementReviewBasisService $basis,
         private readonly ManagementReviewSectionCatalog $catalog,
+        private readonly FrameworkCatalog $frameworks,
     ) {}
 
     public function index(): Response
@@ -90,7 +92,7 @@ class ManagementReviewController extends Controller
             'owner_options' => $this->access->canEdit($user) ? $this->access->ownerCandidates($user) : [],
             'participant_options' => $this->access->canEdit($user) ? $this->participantOptions($user) : [],
             'area_options' => $this->areaOptions($user),
-            'framework_options' => array_keys((array) config('management_review.frameworks', [])),
+            'framework_options' => $this->frameworks->options('management_review'),
         ]);
     }
 
@@ -99,7 +101,7 @@ class ManagementReviewController extends Controller
         $user = $this->authorizedUser();
         abort_unless($this->access->canEdit($user), 403);
 
-        $review = $this->reviews->create($user, $this->validated($request, true));
+        $review = $this->reviews->create($user, $this->validated($request));
 
         return redirect()->route('app.management-review.show', ['reviewId' => $review->id])
             ->with('success', __('procynia.management_review.flash.created'));
@@ -115,7 +117,7 @@ class ManagementReviewController extends Controller
             'owner_options' => $this->access->canEdit($user) ? $this->access->ownerCandidates($user) : [],
             'participant_options' => $canEdit ? $this->participantOptions($user) : [],
             'area_options' => $canEdit ? $this->areaOptions($user) : [],
-            'framework_options' => array_keys((array) config('management_review.frameworks', [])),
+            'framework_options' => $this->frameworks->options('management_review'),
             'judgements' => ManagementReview::JUDGEMENTS,
             'handoff_options' => $canEdit ? $this->decisions->handOffOptions($user) : null,
         ]);
@@ -127,7 +129,7 @@ class ManagementReviewController extends Controller
         $review = $this->visibleOrFail($user, $reviewId);
         abort_unless($this->access->canEdit($user), 403);
 
-        $this->reviews->update($user, $review, $this->validated($request, false));
+        $this->reviews->update($user, $review, $this->validated($request));
 
         return back()->with('success', __('procynia.management_review.flash.updated'));
     }
@@ -265,7 +267,7 @@ class ManagementReviewController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validated(Request $request, bool $creating): array
+    private function validated(Request $request): array
     {
         return $request->validate([
             'title' => ['required', 'string', 'max:255'],
@@ -277,9 +279,10 @@ class ManagementReviewController extends Controller
             'business_area_ids' => ['nullable', 'array'],
             'business_area_ids.*' => ['integer'],
             'frameworks' => ['nullable', 'array'],
-            'frameworks.*' => ['string', Rule::in(array_keys((array) config('management_review.frameworks', [])))],
+            'frameworks.*' => ['string', Rule::in($this->frameworks->selectableKeys('management_review'))],
             'owner_user_id' => ['required', 'integer'],
-            ...($creating ? ['participant_user_ids' => ['nullable', 'array'], 'participant_user_ids.*' => ['integer']] : []),
+            'participant_user_ids' => ['nullable', 'array'],
+            'participant_user_ids.*' => ['integer'],
         ], ManagementReviewValidationMessages::messages(), ManagementReviewValidationMessages::attributes());
     }
 

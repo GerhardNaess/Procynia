@@ -10,6 +10,7 @@ use App\Models\ManagementReviewSnapshotSection;
 use App\Services\ManagementReview\ManagementReviewService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
+use App\Support\FrameworkCatalog;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -225,6 +226,166 @@ class ManagementReviewTest extends TestCase
         $section = ManagementReviewSection::query()->where('management_review_id', $review->id)->sole();
         $this->assertSame(['needs_improvement', 'Behov for mer kapasitet.', 'To nye rådgivere ansatt.'], [$section->judgement, $section->comment, $section->notes]);
         $this->assertSame('Systemet er egnet.', $review->fresh()->conclusion);
+    }
+
+    public function test_participants_are_chosen_when_editing_and_the_choice_is_checked(): void
+    {
+        ['customer' => $customer] = $this->mrContext();
+        $manager = $this->mrManager($customer);
+        $kari = $this->mrMember($customer, 'Kari Leder');
+        $ola = $this->mrMember($customer, 'Ola Kvalitet');
+        $per = $this->mrMember($customer, 'Per Drift');
+        $inactive = $this->mrMember($customer, 'Gammel Ansatt');
+        $inactive->forceFill(['is_active' => false])->save();
+        ['customer' => $other] = $this->mrContext();
+        $foreigner = $this->mrMember($other, 'Fremmed Person');
+
+        // One person who may not be chosen refuses the whole form: no review is created.
+        foreach ([$foreigner->id, $inactive->id, 999999999] as $wrong) {
+            $this->actingAs($manager)->post('/app/management-reviews', $this->mrPayload($manager, ['participant_user_ids' => [$kari->id, $wrong]]))
+                ->assertSessionHasErrors('participant_user_ids');
+        }
+        $this->assertSame(0, ManagementReview::query()->where('customer_id', $customer->id)->count());
+
+        $this->actingAs($manager)->post('/app/management-reviews', $this->mrPayload($manager, ['participant_user_ids' => [$kari->id, $ola->id]]))
+            ->assertSessionHasNoErrors();
+        $review = ManagementReview::query()->where('customer_id', $customer->id)->sole();
+        $review->participants()->where('user_id', $ola->id)->update(['role_label' => 'Kvalitetsleder']);
+        $this->actingAs($manager)->post("/app/management-reviews/{$review->id}/participants", ['name' => 'Ekstern revisor'])->assertSessionHasNoErrors();
+
+        // The edit form opens with the people already chosen, and only active people of the customer are offered.
+        $this->actingAs($manager)->get("/app/management-reviews/{$review->id}")
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('participants', fn ($rows) => collect($rows)->pluck('user_id')->filter()->values()->all() === [$kari->id, $ola->id])
+                ->where('participant_options', fn ($options) => ! collect($options)->pluck('id')->contains($inactive->id)
+                    && ! collect($options)->pluck('id')->contains($foreigner->id)
+                    && collect($options)->pluck('id')->contains($per->id)));
+
+        // Kari out, Per in: Ola keeps his role, the external participant by name stays.
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['participant_user_ids' => [$ola->id, $per->id]]))
+            ->assertSessionHasNoErrors();
+        $this->assertSame(['Ola Kvalitet', 'Ekstern revisor', 'Per Drift'], $review->participants()->orderBy('position')->orderBy('id')->pluck('name')->all());
+        $this->assertSame('Kvalitetsleder', $review->participants()->where('user_id', $ola->id)->value('role_label'));
+
+        // Someone already taking part stays choosable after being deactivated; a foreign person never is.
+        $ola->forceFill(['is_active' => false])->save();
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['participant_user_ids' => [$ola->id, $per->id]]))
+            ->assertSessionHasNoErrors();
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['title' => 'Endret', 'participant_user_ids' => [$ola->id, $foreigner->id]]))
+            ->assertSessionHasErrors('participant_user_ids');
+        $this->assertSame('Ledelsens gjennomgåelse 2026', $review->fresh()->title);
+        $this->assertSame(3, $review->participants()->count());
+
+        // A form without the field leaves the participants alone.
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager))->assertSessionHasNoErrors();
+        $this->assertSame(3, $review->participants()->count());
+    }
+
+    public function test_every_catalog_framework_can_be_chosen_and_only_mapped_ones_claim_coverage(): void
+    {
+        ['customer' => $customer] = $this->mrContext();
+        $manager = $this->mrManager($customer);
+        $all = ['iso9001', 'iso27001', 'iso14001', 'iso45001', 'iso22301', 'iso20000_1', 'nis2', 'dora'];
+
+        $this->actingAs($manager)->post('/app/management-reviews', $this->mrPayload($manager, ['frameworks' => array_reverse($all)]))
+            ->assertSessionHasNoErrors();
+        $review = ManagementReview::query()->where('customer_id', $customer->id)->sole();
+        // Stored by stable id, in catalog order.
+        $this->assertSame($all, $review->frameworks);
+
+        $this->actingAs($manager)->get("/app/management-reviews/{$review->id}")
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('framework_options', fn ($options) => collect($options)->pluck('key')->all() === $all
+                    && collect($options)->firstWhere('key', 'nis2')['type'] === 'regulation'
+                    && collect($options)->firstWhere('key', 'nis2')['coverage'] === 'none'
+                    && collect($options)->firstWhere('key', 'iso9001')['coverage'] === 'unverified'
+                    && collect($options)->firstWhere('key', 'dora')['label'] === 'DORA Digital operasjonell motstandsdyktighet')
+                ->where('review.framework_labels', fn ($labels) => collect($labels)->contains('NIS2 Cybersikkerhet og regulatoriske krav')
+                    && collect($labels)->contains('ISO 9001 Kvalitetsledelse'))
+                ->where('frameworks', function ($frameworks) use ($all): bool {
+                    $frameworks = collect($frameworks)->keyBy('key');
+
+                    return $frameworks->keys()->all() === $all
+                        && $frameworks['iso9001']['coverage'] === 'unverified' && $frameworks['iso9001']['verified'] === false && count($frameworks['iso9001']['inputs']) === 12
+                        && $frameworks['iso27001']['coverage'] === 'unverified' && count($frameworks['iso27001']['inputs']) === 10
+                        // No invented mapping or percentage for a framework without one.
+                        && $frameworks->except(['iso9001', 'iso27001'])->every(fn ($framework): bool => $framework['coverage'] === 'none' && $framework['inputs'] === []);
+                })
+                ->where('sections', fn ($sections) => collect($sections)->pluck('key')->contains('stakeholder_feedback')));
+
+        // Only frameworks without a mapping: they stay in scope, and no section is added for them.
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['frameworks' => ['nis2', 'dora']]))
+            ->assertSessionHasNoErrors();
+        $this->assertSame(['nis2', 'dora'], $review->fresh()->frameworks);
+        $this->actingAs($manager)->get("/app/management-reviews/{$review->id}")
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('review.frameworks', ['nis2', 'dora'])
+                ->where('sections', fn ($sections) => ! collect($sections)->pluck('key')->contains('stakeholder_feedback')));
+
+        // Nothing chosen is allowed; an unknown id is refused.
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['frameworks' => ['iso9001', 'nis3']]))
+            ->assertSessionHasErrors('frameworks.1');
+        $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['frameworks' => []]))
+            ->assertSessionHasNoErrors();
+        $this->assertSame([], $review->fresh()->frameworks);
+    }
+
+    public function test_a_finalized_review_keeps_the_framework_editions_it_was_checked_against(): void
+    {
+        ['customer' => $customer] = $this->mrContext();
+        $manager = $this->mrManager($customer);
+        $review = $this->mrReview($manager, ['frameworks' => ['iso9001', 'nis2']]);
+        $this->makeReady($manager, $review);
+        $this->actingAs($manager)->post("/app/management-reviews/{$review->id}/finalize")->assertSessionHasNoErrors();
+
+        // jsonb orders object keys by itself; the pairs are what count.
+        $this->assertEquals(['iso9001' => '2015', 'nis2' => '2022/2555'], $review->fresh()->framework_versions);
+
+        // A later catalog edition does not rewrite what the old review shows.
+        config()->set('frameworks.catalog.iso9001.version', '2026');
+        $this->actingAs($manager)->get("/app/management-reviews/{$review->id}")
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('review.frameworks', ['iso9001', 'nis2'])
+                ->where('frameworks.0.version', '2015')
+                ->where('frameworks.1.coverage', 'none')
+                ->where('frameworks.1.version', '2022/2555'));
+    }
+
+    public function test_the_framework_catalog_is_complete_and_translated(): void
+    {
+        $catalog = app(FrameworkCatalog::class);
+        $ids = array_keys((array) config('frameworks.catalog'));
+
+        // The ids existing reviews already store are still there.
+        $this->assertContains('iso9001', $ids);
+        $this->assertContains('iso27001', $ids);
+
+        foreach ((array) config('frameworks.catalog') as $key => $framework) {
+            $this->assertContains($framework['type'], (array) config('frameworks.types'), $key);
+            $this->assertNotSame('', (string) $framework['version'], $key);
+
+            foreach (['no', 'en'] as $locale) {
+                foreach (['names.'.$key, 'domains.'.$framework['domain'], 'types.'.$framework['type']] as $path) {
+                    $this->assertTrue(trans()->has('procynia.framework_catalog.'.$path, $locale, false), "{$locale}: {$path}");
+                }
+            }
+        }
+
+        $this->assertSame('regulation', config('frameworks.catalog.nis2.type'));
+        $this->assertSame('regulation', config('frameworks.catalog.dora.type'));
+
+        // Every coverage mapping belongs to a catalog framework, and its input texts exist.
+        foreach ((array) config('management_review.framework_coverage') as $key => $mapping) {
+            $this->assertTrue($catalog->exists($key), $key);
+            $this->assertSame(FrameworkCatalog::COVERAGE_UNVERIFIED, $catalog->coverage('management_review', $key));
+
+            foreach ($mapping['inputs'] as $input) {
+                $this->assertTrue(trans()->has('procynia.management_review.frameworks.'.$key.'.inputs.'.$input['key'], 'en', false), "{$key}.{$input['key']}");
+            }
+        }
+
+        $this->assertSame(FrameworkCatalog::COVERAGE_NONE, $catalog->coverage('management_review', 'dora'));
+        $this->assertSame('unknown_id', $catalog->label('unknown_id'));
     }
 
     // ---------------------------------------------------------------------

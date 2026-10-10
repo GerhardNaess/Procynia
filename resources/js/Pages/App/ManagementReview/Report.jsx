@@ -116,10 +116,14 @@ export default function ManagementReviewReport() {
 
                 {document.frameworks.map((framework) => (
                     <Block key={framework.name} title={framework.name}>
-                        <p className="text-slate-600">{labels.framework_disclaimer}</p>
-                        <ul className="mt-1">
-                            {framework.inputs.map((input) => <li key={`${input.clause}-${input.label}`}>{input.clause} {input.label}: <span className="font-semibold">{input.state}</span></li>)}
-                        </ul>
+                        {framework.coverage === 'none' ? <p className="text-slate-600">{labels.framework_no_coverage}</p> : (
+                            <>
+                                <p className="text-slate-600">{labels.framework_disclaimer}</p>
+                                <ul className="mt-1">
+                                    {framework.inputs.map((input) => <li key={`${input.clause}-${input.label}`}>{input.clause} {input.label}: <span className="font-semibold">{input.state}</span></li>)}
+                                </ul>
+                            </>
+                        )}
                     </Block>
                 ))}
 

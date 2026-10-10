@@ -9391,6 +9391,32 @@ return [
         'cancel_blocking_runs_success' => 'Blocking run(s) were cancelled. The document can now be deleted.',
         'cancel_blocking_runs_none_active' => 'Found no active runs to cancel for this document.',
     ],
+    'framework_catalog' => [
+        'types' => [
+            'standard' => 'Standard',
+            'regulation' => 'Regulatory framework',
+        ],
+        'domains' => [
+            'quality' => 'Quality',
+            'information_security' => 'Information security',
+            'environment' => 'Environment',
+            'occupational_health_safety' => 'Health, safety and environment',
+            'business_continuity' => 'Preparedness and continuity',
+            'service_management' => 'IT services',
+            'cybersecurity' => 'Cybersecurity',
+            'digital_resilience' => 'Finance and ICT risk',
+        ],
+        'names' => [
+            'iso9001' => 'Quality management',
+            'iso27001' => 'Information security',
+            'iso14001' => 'Environmental management',
+            'iso45001' => 'Occupational health and safety',
+            'iso22301' => 'Business continuity management',
+            'iso20000_1' => 'Service management',
+            'nis2' => 'Cybersecurity and regulatory requirements',
+            'dora' => 'Digital operational resilience',
+        ],
+    ],
     'management_review' => [
         'module_name' => 'Management review',
         'index_title' => 'Management review',
@@ -9435,9 +9461,16 @@ return [
             'areas' => 'Business areas',
             'owner' => 'Responsible',
             'frameworks' => 'Frameworks',
-            'frameworks_hint' => 'Optional. Shows which inputs of the standard the review covers, and adds the section Feedback from customers and interested parties.',
+            'frameworks_hint' => 'Optional. The frameworks are part of the review\'s scope. For ISO 9001 and ISO/IEC 27001 the overview also shows which inputs have been assessed.',
+            'frameworks_placeholder' => 'Choose frameworks',
+            'frameworks_search' => 'Search by name or domain',
             'participants' => 'Participants',
             'participants_hint' => 'Can also be added later.',
+            'participants_placeholder' => 'Choose participants',
+            'participants_search' => 'Search by name',
+            'picker_no_results' => 'No matches.',
+            'picker_remove' => 'Remove :name',
+            'picker_selected' => 'Selected',
             'finalized' => 'Finalised',
             'next_review_due_on' => 'Next review by',
             'conclusion' => 'Overall conclusion',
@@ -9851,9 +9884,9 @@ return [
         ],
         'frameworks' => [
             'heading' => 'Framework coverage',
+            'no_coverage' => 'Chosen as part of the review\'s scope. Automatic coverage analysis is not available for this framework – use the sections to document the assessments.',
             'disclaimer' => 'The mapping to the inputs of the standard is Procynia\'s own reading and is not professionally verified. It shows what the review has assessed – it does not confirm that the organisation complies with the standard.',
             'iso9001' => [
-                'name' => 'ISO 9001',
                 'inputs' => [
                     'previous_actions' => 'Status of actions from previous reviews',
                     'context_changes' => 'Changes in external and internal issues',
@@ -9870,7 +9903,6 @@ return [
                 ],
             ],
             'iso27001' => [
-                'name' => 'ISO 27001',
                 'inputs' => [
                     'previous_actions' => 'Status of actions from previous reviews',
                     'context_changes' => 'Changes in external and internal issues',
@@ -9933,6 +9965,7 @@ return [
                 'case_hidden' => 'Followed up in a business area you do not have access to.',
                 'truncated' => 'Showing :shown of :total.',
                 'framework_disclaimer' => 'The mapping to the inputs of the standard is not professionally verified and does not confirm compliance.',
+                'framework_no_coverage' => 'Chosen as part of the review\'s scope. Automatic coverage analysis is not available for this framework.',
                 'amendments' => 'Corrections after finalisation',
                 'reason' => 'Reason',
                 'history' => 'History',

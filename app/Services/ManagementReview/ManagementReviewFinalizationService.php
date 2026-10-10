@@ -6,6 +6,7 @@ use App\Models\ManagementReview;
 use App\Models\ManagementReviewEvent;
 use App\Models\ManagementReviewSnapshotSection;
 use App\Models\User;
+use App\Support\FrameworkCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -29,6 +30,7 @@ final class ManagementReviewFinalizationService
         private readonly ManagementReviewBasisService $basis,
         private readonly ManagementReviewReadiness $readiness,
         private readonly ManagementReviewService $reviews,
+        private readonly FrameworkCatalog $frameworks,
     ) {}
 
     public function finalize(User $actor, ManagementReview $review): ManagementReview
@@ -54,15 +56,13 @@ final class ManagementReviewFinalizationService
                 ]);
             }
 
-            $catalog = (array) config('management_review.frameworks', []);
-
             $locked->forceFill([
                 'status' => ManagementReview::STATUS_FINALIZED,
                 'finalized_at' => $now,
                 'finalized_by_user_id' => $actor->id,
                 'finalized_by_name' => $actor->name,
                 'framework_versions' => (object) collect((array) $locked->frameworks)
-                    ->mapWithKeys(fn (string $key): array => [$key => (string) ($catalog[$key]['version'] ?? '')])
+                    ->mapWithKeys(fn (string $key): array => [$key => (string) ($this->frameworks->version($key) ?? '')])
                     ->all(),
                 'updated_by' => $actor->id,
             ])->save();

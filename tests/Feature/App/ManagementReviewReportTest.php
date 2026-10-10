@@ -109,6 +109,27 @@ class ManagementReviewReportTest extends TestCase
         $this->assertSame('Draft', $english['status']);
     }
 
+    public function test_the_document_names_every_chosen_framework_and_claims_no_coverage_it_lacks(): void
+    {
+        ['customer' => $customer] = $this->mrContext();
+        $manager = $this->mrManager($customer);
+        $review = $this->mrReview($manager, ['frameworks' => ['iso9001', 'nis2', 'dora']]);
+
+        $document = $this->actingAs($manager)->get("/app/management-reviews/{$review->id}/report")->assertOk()->viewData('page')['props']['document'];
+        $meta = collect($document['meta'])->mapWithKeys(fn (array $row): array => [$row[0] => $row[1]]);
+        $this->assertSame('ISO 9001 Kvalitetsledelse, NIS2 Cybersikkerhet og regulatoriske krav, DORA Digital operasjonell motstandsdyktighet', $meta['Rammeverk']);
+
+        $frameworks = collect($document['frameworks']);
+        $this->assertSame(['ISO 9001 Kvalitetsledelse (2015)', 'NIS2 Cybersikkerhet og regulatoriske krav (2022/2555)', 'DORA Digital operasjonell motstandsdyktighet (2022/2554)'], $frameworks->pluck('name')->all());
+        $this->assertSame(['unverified', 'none', 'none'], $frameworks->pluck('coverage')->all());
+        $this->assertSame([[], []], $frameworks->slice(1)->pluck('inputs')->values()->all());
+
+        $pdf = $this->pdfText($this->actingAs($manager)->get("/app/management-reviews/{$review->id}/report.pdf")->assertOk()->streamedContent());
+        $this->assertStringContainsString('NIS2 Cybersikkerhet og regulatoriske krav', $pdf);
+        $this->assertStringContainsString('Automatisk dekningsanalyse er ikke tilgjengelig', $pdf);
+        $this->assertStringContainsString('ikke faglig verifisert', $pdf);
+    }
+
     /** @return array{0: ManagementReview, 1: User, 2: User} */
     private function finalizedWithSupplierSecret(): array
     {

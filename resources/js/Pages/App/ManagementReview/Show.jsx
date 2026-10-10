@@ -112,7 +112,7 @@ export default function ManagementReviewShow() {
                             <p className="text-base text-slate-700">
                                 {formatDay(review.period_start)}–{formatDay(review.period_end)}
                                 {' · '}{review.all_business_areas ? (t.scope_all ?? 'Hele virksomheten') : review.business_areas.map((area) => area.name).join(', ')}
-                                {review.frameworks.length > 0 && ` · ${review.frameworks.map((key) => t.frameworks?.[key]?.name ?? key).join(', ')}`}
+                                {review.framework_labels.length > 0 && ` · ${review.framework_labels.join(', ')}`}
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -148,7 +148,7 @@ export default function ManagementReviewShow() {
                     )}
                 </header>
 
-                {panel === 'edit' && <EditPanel review={review} t={t} ownerOptions={ownerOptions} areaOptions={areaOptions} frameworkOptions={frameworkOptions} onDone={() => setPanel(null)} />}
+                {panel === 'edit' && <EditPanel review={review} participants={participants} t={t} ownerOptions={ownerOptions} areaOptions={areaOptions} frameworkOptions={frameworkOptions} participantOptions={participantOptions} onDone={() => setPanel(null)} />}
                 {panel === 'finalize' && <FinalizePanel review={review} readiness={readiness} t={t} onDone={() => setPanel(null)} />}
 
                 <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-6">
@@ -571,18 +571,21 @@ function Frameworks({ frameworks, t }) {
     return (
         <section className={CARD} aria-labelledby="mr-frameworks-heading" data-testid="mr-frameworks">
             <h2 id="mr-frameworks-heading" className="text-xl font-semibold text-slate-950">{tf.heading ?? 'Dekning av rammeverk'}</h2>
-            <p className="mt-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-base text-sky-900" data-testid="mr-framework-disclaimer">{tf.disclaimer}</p>
+            {frameworks.some((framework) => framework.coverage !== 'none') && (
+                <p className="mt-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-base text-sky-900" data-testid="mr-framework-disclaimer">{tf.disclaimer}</p>
+            )}
             {frameworks.map((framework) => (
-                <div key={framework.key} className="mt-4">
-                    <h3 className="text-lg font-semibold text-slate-900">{tf[framework.key]?.name ?? framework.key} ({framework.version})</h3>
-                    <ul className="mt-2 divide-y divide-slate-100">
+                <div key={framework.key} className="mt-4" data-testid={`mr-framework-${framework.key}`} data-coverage={framework.coverage}>
+                    <h3 className="break-words text-lg font-semibold text-slate-900">{framework.label}{framework.version && ` (${framework.version})`}</h3>
+                    {framework.coverage === 'none' && <p className="mt-1 text-base text-slate-600">{tf.no_coverage ?? 'Valgt i gjennomgåelsens omfang. Automatisk dekningsanalyse er ikke tilgjengelig for dette rammeverket.'}</p>}
+                    {framework.inputs.length > 0 && <ul className="mt-2 divide-y divide-slate-100">
                         {framework.inputs.map((input) => (
                             <li key={`${framework.key}-${input.key}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
                                 <span className="min-w-0 text-base text-slate-800"><span className="text-slate-600">{input.clause}</span> {tf[framework.key]?.inputs?.[input.key] ?? input.key}</span>
                                 <StatusBadge tone={tone[input.state] ?? 'slate'}>{t.framework_states?.[input.state] ?? input.state}</StatusBadge>
                             </li>
                         ))}
-                    </ul>
+                    </ul>}
                 </div>
             ))}
         </section>
@@ -639,7 +642,13 @@ function Amendments({ review, amendments, canAmend, t }) {
     );
 }
 
-function EditPanel({ review, t, ownerOptions, areaOptions, frameworkOptions, onDone }) {
+function EditPanel({ review, participants, t, ownerOptions, areaOptions, frameworkOptions, participantOptions, onDone }) {
+    // Someone already taking part stays choosable even if no longer an active person in Procynia.
+    const chosenPeople = participants.filter((participant) => participant.user_id !== null);
+    const peopleOptions = [
+        ...participantOptions,
+        ...chosenPeople.filter((participant) => ! participantOptions.some((person) => person.id === participant.user_id)).map((participant) => ({ id: participant.user_id, name: participant.name })),
+    ];
     const form = useForm({
         title: review.title,
         purpose: review.purpose ?? '',
@@ -650,6 +659,7 @@ function EditPanel({ review, t, ownerOptions, areaOptions, frameworkOptions, onD
         business_area_ids: review.business_areas.map((area) => area.id),
         frameworks: review.frameworks,
         owner_user_id: review.owner_user_id ? String(review.owner_user_id) : '',
+        participant_user_ids: chosenPeople.map((participant) => participant.user_id),
     });
     const submit = (event) => {
         event.preventDefault();
@@ -659,7 +669,7 @@ function EditPanel({ review, t, ownerOptions, areaOptions, frameworkOptions, onD
 
     return (
         <section className={CARD} aria-label={t.edit ?? 'Rediger'}>
-            <ReviewForm form={form} onSubmit={submit} onCancel={onDone} t={t} ownerOptions={ownerOptions} areaOptions={areaOptions} frameworkOptions={frameworkOptions} submitLabel={t.save ?? 'Lagre'} />
+            <ReviewForm form={form} onSubmit={submit} onCancel={onDone} t={t} ownerOptions={ownerOptions} areaOptions={areaOptions} frameworkOptions={frameworkOptions} participantOptions={peopleOptions} submitLabel={t.save ?? 'Lagre'} />
         </section>
     );
 }

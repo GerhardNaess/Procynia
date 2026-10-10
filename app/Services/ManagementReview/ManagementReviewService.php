@@ -9,6 +9,7 @@ use App\Models\ManagementReviewEvent;
 use App\Models\ManagementReviewParticipant;
 use App\Models\ManagementReviewSection;
 use App\Models\User;
+use App\Support\FrameworkCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -26,6 +27,7 @@ final class ManagementReviewService
     public function __construct(
         private readonly ManagementReviewAccessService $access,
         private readonly ManagementReviewSectionCatalog $catalog,
+        private readonly FrameworkCatalog $frameworks,
     ) {}
 
     /** @param  array<string, mixed>  $data  validated */
@@ -40,7 +42,7 @@ final class ManagementReviewService
 
             $this->syncAreas($review, $data);
 
-            foreach (array_values(array_unique(array_map('intval', $data['participant_user_ids'] ?? []))) as $index => $userId) {
+            foreach ($this->participantUserIds($review, $data) as $index => $userId) {
                 $this->addParticipant($review, ['user_id' => $userId], $index);
             }
 
@@ -57,6 +59,10 @@ final class ManagementReviewService
             $locked = $this->lockedDraft($review);
             $locked->fill($this->fields($actor, $data) + ['updated_by' => $actor->id])->save();
             $this->syncAreas($locked, $data);
+
+            if (array_key_exists('participant_user_ids', $data)) {
+                $this->syncParticipantUsers($locked, $this->participantUserIds($locked, $data));
+            }
         });
     }
 
@@ -262,7 +268,7 @@ final class ManagementReviewService
     private function fields(User $actor, array $data): array
     {
         $this->assertValidOwner($actor, (int) $data['owner_user_id']);
-        $frameworks = array_values(array_intersect(array_keys((array) config('management_review.frameworks', [])), (array) ($data['frameworks'] ?? [])));
+        $frameworks = array_values(array_intersect($this->frameworks->selectableKeys('management_review'), (array) ($data['frameworks'] ?? [])));
 
         return [
             'title' => trim((string) $data['title']),
@@ -274,6 +280,48 @@ final class ManagementReviewService
             'frameworks' => $frameworks,
             'owner_user_id' => (int) $data['owner_user_id'],
         ];
+    }
+
+    /**
+     * The people chosen in the form become the review's participants who are users: new ones are
+     * added at the end, ones no longer chosen are removed. A participant registered by name only
+     * (someone outside Procynia) is not part of the choice and stays; one still chosen keeps its role.
+     *
+     * @param  list<int>  $userIds
+     */
+    private function syncParticipantUsers(ManagementReview $review, array $userIds): void
+    {
+        $review->participants()->whereNotNull('user_id')->whereNotIn('user_id', $userIds ?: [0])->delete();
+        $existing = $review->participants()->whereNotNull('user_id')->pluck('user_id')->map(fn ($id): int => (int) $id)->all();
+
+        foreach (array_diff($userIds, $existing) as $userId) {
+            $this->addParticipant($review, ['user_id' => $userId]);
+        }
+    }
+
+    /**
+     * The chosen participant ids, each an active person of the review's customer or someone already
+     * on this review (kept even if deactivated since) — one that is neither refuses the whole form,
+     * so nothing is saved halfway.
+     *
+     * @param  array<string, mixed>  $data
+     * @return list<int>
+     */
+    private function participantUserIds(ManagementReview $review, array $data): array
+    {
+        $ids = array_values(array_unique(array_map('intval', (array) ($data['participant_user_ids'] ?? []))));
+        $existing = $review->participants()->whereNotNull('user_id')->pluck('user_id')->map(fn ($id): int => (int) $id)->all();
+        $valid = User::query()
+            ->where('customer_id', $review->customer_id)
+            ->whereIn('id', $ids ?: [0])
+            ->where(fn ($query) => $query->where('is_active', true)->orWhereIn('id', $existing ?: [0]))
+            ->count();
+
+        if ($valid !== count($ids)) {
+            throw ValidationException::withMessages(['participant_user_ids' => __('procynia.management_review.validation.participant_not_allowed')]);
+        }
+
+        return $ids;
     }
 
     /** @param  array<string, mixed>  $data */
