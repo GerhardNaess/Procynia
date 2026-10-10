@@ -9,7 +9,9 @@ import {
     paneFromSearch,
     paneKeys,
     reviewHelp,
-    sectionMarker,
+    sectionOptionLabel,
+    sectionStatus,
+    statusDescription,
 } from './reviewSections.js';
 
 const sections = [{ key: 'previous_decisions' }, { key: 'risks' }, { key: 'resources' }];
@@ -24,16 +26,48 @@ const risks = (values, extra = {}) => ({
     ...extra,
 });
 
-test('a section with flagged numbers asks for attention until it is assessed', () => {
-    assert.equal(sectionMarker(risks({ level_high: 2, risks_open: 9 })), 'attention');
-    assert.equal(sectionMarker(risks({ level_high: 0, risks_open: 9 })), 'open');
-    assert.equal(sectionMarker(risks({ level_high: 2 }, { judgement: 'needs_improvement' })), 'judged');
+test('a section is open until a judgement is saved, and open again once it is removed', () => {
+    assert.equal(sectionStatus(risks({ risks_open: 9 })).progress, 'open');
+    assert.equal(sectionStatus(risks({ risks_open: 9 }, { judgement: 'satisfactory' })).progress, 'judged');
+    assert.equal(sectionStatus(risks({ risks_open: 9 }, { judgement: 'not_satisfactory' })).progress, 'judged');
+    // Opened but nothing saved — a comment alone is not an assessment.
+    assert.equal(sectionStatus(risks({ risks_open: 9 }, { judgement: null, comment: 'Lest' })).progress, 'open');
 });
 
-test('a section the reader cannot see, or with no module, is never «open» or «attention»', () => {
-    assert.equal(sectionMarker(risks({ level_high: 2 }, { state: 'no_access', basis: null })), 'unavailable');
-    assert.equal(sectionMarker({ key: 'suppliers', state: 'module_unavailable', basis: null }), 'unavailable');
-    assert.equal(sectionMarker({ key: 'suppliers', state: 'not_captured', basis: null }), 'unavailable');
+test('attention is shown beside the progress, never instead of it', () => {
+    const open = sectionStatus(risks({ level_high: 2, risks_open: 9 }));
+    assert.equal(open.progress, 'open');
+    assert.deepEqual(open.attention.map((item) => item.key), ['level_high']);
+
+    const judged = sectionStatus(risks({ level_high: 2 }, { judgement: 'needs_improvement' }));
+    assert.equal(judged.progress, 'judged');
+    assert.deepEqual(judged.attention.map((item) => item.key), ['level_high']);
+
+    assert.deepEqual(sectionStatus(risks({ level_high: 0 }, { judgement: 'satisfactory' })).attention, []);
+});
+
+test('a section the reader cannot see, or with no module, is unavailable and flags nothing', () => {
+    assert.deepEqual(sectionStatus(risks({ level_high: 2 }, { state: 'no_access', basis: null })), { progress: 'unavailable', attention: [], optional: false });
+    assert.equal(sectionStatus({ key: 'suppliers', state: 'module_unavailable', basis: null }).progress, 'unavailable');
+    assert.equal(sectionStatus({ key: 'suppliers', state: 'not_captured', basis: null }).progress, 'unavailable');
+});
+
+test('the status reads as words — the tooltip, the screen reader and the phone select say the same', () => {
+    const t = { sections: { risks: { title: 'Risiko' } } };
+    const both = risks({ level_high: 2 }, { judgement: 'satisfactory' });
+    assert.equal(statusDescription(sectionStatus(both), t), 'Vurdering gjennomført. Forhold krever oppmerksomhet: level_high 2.');
+    assert.equal(statusDescription(sectionStatus(risks({ risks_open: 1 })), t), 'Ikke vurdert.');
+    assert.equal(sectionOptionLabel(both, t), 'Risiko (vurdert · krever oppmerksomhet)');
+    assert.equal(sectionOptionLabel(risks({}), t), 'Risiko (ikke vurdert)');
+    // Open but not asked for by «Klar for ferdigstilling»: said so, read from the checklist itself.
+    const readiness = { items: [{ key: 'judgements', sections: ['resources'] }] };
+    assert.equal(sectionStatus(risks({}), readiness).optional, true);
+    assert.equal(sectionStatus({ key: 'resources', state: 'available' }, readiness).optional, false);
+    assert.equal(sectionStatus(risks({}, { judgement: 'satisfactory' }), readiness).optional, false);
+    assert.equal(sectionStatus(risks({})).optional, false);
+    assert.equal(statusDescription(sectionStatus(risks({}), readiness), t), 'Ikke vurdert. Ikke påkrevd for ferdigstilling.');
+    const en = { section: { markers: { judged: 'Assessment completed' }, markers_short: { judged: 'assessed' } } };
+    assert.equal(statusDescription(sectionStatus(risks({}, { judgement: 'satisfactory' })), en), 'Assessment completed.');
 });
 
 test('only the attention numbers of the section count, once each, and never zeros', () => {

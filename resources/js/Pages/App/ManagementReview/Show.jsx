@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ControlHint from '../../../Components/App/ControlHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import RequiredMark from '../Risk/RequiredMark';
@@ -10,20 +11,37 @@ import SectionBasis from './SectionBasis';
 import { DecisionList } from './ReviewDecisions';
 import {
     ATTENTION_METRICS, DECISIONS, HISTORY, JUDGEMENT_TONES, MODULE_LINKS, OVERVIEW, REVIEW_STATUS_TONES,
-    attentionItems, fill, formatDay, formatMoment, judgementLabel, neighbours, paneFromSearch, reviewHelp,
-    sectionMarker, sectionTitle, statusLabel,
+    attentionItems, fill, formatDay, formatMoment, judgementLabel, markerLabel, neighbours, paneFromSearch, reviewHelp,
+    sectionOptionLabel, sectionStatus, sectionTitle, statusDescription, statusLabel,
 } from './reviewSections';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-700';
 const ERROR = 'mt-1 text-base text-rose-700';
-const MARKER = {
-    judged: { symbol: '✓', className: 'text-emerald-700' },
-    attention: { symbol: '!', className: 'text-amber-700' },
-    open: { symbol: '○', className: 'text-slate-500' },
-    unavailable: { symbol: '–', className: 'text-slate-400' },
-};
+const ICON = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-sm font-bold leading-none';
+
+/** Fremdrift: an empty ring until a judgement is saved, then a filled green tick. */
+function ProgressIcon({ progress }) {
+    if (progress === 'judged') {
+        return (
+            <span className={`${ICON} bg-emerald-600 text-white`} data-icon="judged">
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
+            </span>
+        );
+    }
+
+    if (progress === 'unavailable') {
+        return <span className={`${ICON} text-slate-500`} data-icon="unavailable">–</span>;
+    }
+
+    return <span className={`${ICON} border-2 border-slate-400`} data-icon="open" />;
+}
+
+/** Oppmerksomhet: a shape of its own (not just a colour) beside, never instead of, the progress. */
+function AttentionIcon() {
+    return <span className={`${ICON} border border-amber-300 bg-amber-100 text-amber-800`} data-icon="attention">!</span>;
+}
 
 /**
  * Ledelsens gjennomgåelse — one review, worked section by section (plan §4.2).
@@ -152,7 +170,7 @@ export default function ManagementReviewShow() {
                 {panel === 'finalize' && <FinalizePanel review={review} readiness={readiness} t={t} onDone={() => setPanel(null)} />}
 
                 <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-6">
-                    <SectionNav sections={sections} decisions={decisions} pane={pane} onOpen={open} t={t} />
+                    <SectionNav sections={sections} decisions={decisions} readiness={readiness} pane={pane} onOpen={open} t={t} />
 
                     <div className="mt-4 min-w-0 space-y-6 lg:mt-0">
                         {pane === OVERVIEW && (
@@ -177,6 +195,7 @@ export default function ManagementReviewShow() {
                                 review={review}
                                 section={current}
                                 sections={sections}
+                                readiness={readiness}
                                 decisions={decisions.filter((decision) => decision.section_key === current.key)}
                                 ownerOptions={ownerOptions}
                                 handoffOptions={handoffOptions}
@@ -219,25 +238,39 @@ export default function ManagementReviewShow() {
     );
 }
 
-function SectionNav({ sections, decisions, pane, onOpen, t }) {
+function SectionNav({ sections, decisions, readiness, pane, onOpen, t }) {
     const ts = t.section ?? {};
-    const item = (key, label, marker = null) => {
+    const item = (key, label, status = null) => {
         const active = pane === key;
+        const description = status ? statusDescription(status, t) : null;
+        const attention = status ? status.attention.length > 0 : false;
+        const button = (
+            <button
+                type="button"
+                onClick={() => onOpen(key)}
+                aria-current={active ? 'page' : undefined}
+                className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-base transition ${active ? 'bg-violet-50 font-semibold text-violet-800' : 'text-slate-700 hover:bg-slate-50'}`}
+                data-testid={`mr-nav-${key}`}
+                data-progress={status?.progress}
+                data-attention={status ? String(attention) : undefined}
+            >
+                <span className="min-w-0 break-words">
+                    {label}
+                    {description && <span className="sr-only">{`(${description})`}</span>}
+                </span>
+                {status && (
+                    // Both slots always take their room, so a marker coming or going moves nothing.
+                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
+                        <span className="inline-flex h-5 w-5">{attention && <AttentionIcon />}</span>
+                        <ProgressIcon progress={status.progress} />
+                    </span>
+                )}
+            </button>
+        );
 
         return (
             <li key={key}>
-                <button
-                    type="button"
-                    onClick={() => onOpen(key)}
-                    aria-current={active ? 'page' : undefined}
-                    className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-base transition ${active ? 'bg-violet-50 font-semibold text-violet-800' : 'text-slate-700 hover:bg-slate-50'}`}
-                    data-testid={`mr-nav-${key}`}
-                >
-                    <span className="min-w-0 break-words">{label}</span>
-                    {marker && (
-                        <span aria-label={ts.markers?.[marker]} title={ts.markers?.[marker]} className={`shrink-0 font-semibold ${MARKER[marker].className}`}>{MARKER[marker].symbol}</span>
-                    )}
-                </button>
+                {description ? <ControlHint text={description} align="left" className="w-full">{button}</ControlHint> : button}
             </li>
         );
     };
@@ -249,14 +282,14 @@ function SectionNav({ sections, decisions, pane, onOpen, t }) {
                 <span className={LABEL}>{ts.nav_select ?? 'Gå til seksjon'}</span>
                 <select value={pane} onChange={(event) => onOpen(event.target.value)} className={`mt-1 ${INPUT}`} data-testid="mr-nav-select">
                     <option value={OVERVIEW}>{t.tabs?.overview ?? 'Oversikt'}</option>
-                    {sections.map((section) => <option key={section.key} value={section.key}>{sectionTitle(section.key, t)}</option>)}
+                    {sections.map((section) => <option key={section.key} value={section.key}>{sectionOptionLabel(section, t, readiness)}</option>)}
                     <option value={DECISIONS}>{`${t.tabs?.decisions ?? 'Beslutninger og tiltak'} (${decisions.length})`}</option>
                     <option value={HISTORY}>{t.tabs?.history ?? 'Historikk'}</option>
                 </select>
             </label>
             <ul className="hidden space-y-1 rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm lg:sticky lg:top-4 lg:block">
                 {item(OVERVIEW, t.tabs?.overview ?? 'Oversikt')}
-                {sections.map((section) => item(section.key, sectionTitle(section.key, t), sectionMarker(section)))}
+                {sections.map((section) => item(section.key, sectionTitle(section.key, t), sectionStatus(section, readiness)))}
                 {item(DECISIONS, `${t.tabs?.decisions ?? 'Beslutninger og tiltak'} (${decisions.length})`)}
                 {item(HISTORY, t.tabs?.history ?? 'Historikk')}
             </ul>
@@ -328,7 +361,7 @@ function Overview({ review, sections, participants, readiness, frameworks, amend
     );
 }
 
-function SectionPane({ review, section, sections, decisions, ownerOptions, handoffOptions, canEdit, finalized, onOpen, t }) {
+function SectionPane({ review, section, sections, readiness, decisions, ownerOptions, handoffOptions, canEdit, finalized, onOpen, t }) {
     const ts = t.section ?? {};
     const { previous, next } = neighbours(sections, section.key);
     const intro = t.sections?.[section.key]?.intro;
@@ -341,6 +374,7 @@ function SectionPane({ review, section, sections, decisions, ownerOptions, hando
                     <div className="min-w-0">
                         <h2 id={`mr-section-${section.key}`} className="text-2xl font-semibold text-slate-950">{sectionTitle(section.key, t)}</h2>
                         {intro && <p className="mt-1 text-base text-slate-600">{intro}</p>}
+                        <SectionStatus section={section} readiness={readiness} t={t} />
                     </div>
                     {section.state === 'available' && moduleLink && section.has_basis && (
                         <Link href={moduleLink} className="text-base font-semibold text-violet-700 hover:text-violet-900">{ts.open_module ?? 'Se nåsituasjonen i modulen'} →</Link>
@@ -385,6 +419,26 @@ function SectionPane({ review, section, sections, decisions, ownerOptions, hando
     );
 }
 
+/**
+ * The same status as the navigation, in words, where the section is open — on a phone the only
+ * place it shows, since the section select has no room for icons or tooltips.
+ */
+function SectionStatus({ section, readiness, t }) {
+    const status = sectionStatus(section, readiness);
+
+    return (
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-base text-slate-800" data-testid="mr-section-status" data-progress={status.progress} data-attention={String(status.attention.length > 0)}>
+            <span className="inline-flex items-center gap-2"><span aria-hidden="true"><ProgressIcon progress={status.progress} /></span>{markerLabel(status.progress, t)}{status.optional && <span className="text-slate-600">{` · ${markerLabel('optional', t)}`}</span>}</span>
+            {status.attention.length > 0 && (
+                <span className="inline-flex min-w-0 items-start gap-2" data-testid="mr-section-attention">
+                    <span aria-hidden="true" className="mt-0.5"><AttentionIcon /></span>
+                    <span className="min-w-0 break-words">{markerLabel('attention', t)}: {status.attention.map((item) => `${item.label} ${item.value}`).join(', ')}</span>
+                </span>
+            )}
+        </div>
+    );
+}
+
 function Assessment({ review, section, canEdit, t }) {
     const ts = t.section ?? {};
     const manual = section.type !== 'module';
@@ -417,6 +471,13 @@ function Assessment({ review, section, canEdit, t }) {
         form.put(`/app/management-reviews/${review.id}/sections/${section.key}`, { preserveScroll: true });
     };
 
+    // Takes back only the judgement; the saved comment and description stay as they are.
+    const removeJudgement = () => router.put(
+        `/app/management-reviews/${review.id}/sections/${section.key}`,
+        { judgement: null, comment: section.comment ?? '', notes: section.notes ?? '' },
+        { preserveScroll: true },
+    );
+
     return (
         <form onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-5" data-testid="mr-assessment-form">
             <h3 className="text-lg font-semibold text-slate-900">{ts.assessment ?? 'Ledelsens vurdering'}</h3>
@@ -442,7 +503,12 @@ function Assessment({ review, section, canEdit, t }) {
                 <label htmlFor={`mr-comment-${section.key}`} className={LABEL}>{ts.comment ?? 'Kommentar'} <span className="font-normal text-slate-600">({ts.comment_hint ?? 'Valgfritt.'})</span></label>
                 <textarea id={`mr-comment-${section.key}`} rows={3} maxLength={10000} value={form.data.comment} onChange={(event) => form.setData('comment', event.target.value)} className={`mt-1 ${INPUT}`} />
             </div>
-            <button type="submit" disabled={form.processing} className={PRIMARY_ACTION} data-testid="mr-save-assessment">{ts.save_assessment ?? 'Lagre vurdering'}</button>
+            <div className="flex flex-wrap gap-2">
+                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION} data-testid="mr-save-assessment">{ts.save_assessment ?? 'Lagre vurdering'}</button>
+                {section.judgement && (
+                    <button type="button" onClick={removeJudgement} disabled={form.processing} className={SECONDARY_ACTION} data-testid="mr-remove-assessment">{ts.remove_assessment ?? 'Fjern vurdering'}</button>
+                )}
+            </div>
         </form>
     );
 }

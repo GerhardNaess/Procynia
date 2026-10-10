@@ -124,8 +124,8 @@ test('a management review is created, assessed, decided, finalized and reported'
         const key = new URL(page.url()).searchParams.get('section');
         await page.getByTestId('mr-judgement-satisfactory').check();
         await page.getByTestId('mr-save-assessment').click();
-        // Saved: the section's marker in the navigation turns to «Vurdert».
-        await expect(page.getByTestId(`mr-nav-${key}`).getByLabel('Vurdert', { exact: true })).toBeVisible({ timeout: 15_000 });
+        // Saved: the section's marker in the navigation turns to the green tick.
+        await expect(page.getByTestId(`mr-nav-${key}`)).toHaveAttribute('data-progress', 'judged', { timeout: 15_000 });
         await page.getByTestId('mr-nav-overview').click();
     }
 
@@ -184,6 +184,103 @@ test('a management review is created, assessed, decided, finalized and reported'
     await expect(page.getByTestId('mr-review-table')).toContainText(title);
     await expect(page.getByTestId('mr-open-actions')).not.toContainText(action);
     await expectReadable(page, '07-register');
+});
+
+test('the section menu shows progress and attention apart, explains both, and follows save, change and removal', async ({ page }) => {
+    test.setTimeout(150_000);
+
+    const people = await managementReviewFixture(`seedJourney('${suffix}', '${MANAGEMENT_REVIEW_E2E_PASSWORD}')`);
+    await loginAs(page, people.email, MANAGEMENT_REVIEW_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+
+    await page.goto('/app/management-reviews');
+    await page.getByTestId('mr-create').click();
+    await page.locator('#mr-title').fill(`LG status ${suffix}`);
+    await page.getByRole('button', { name: 'Opprett gjennomgåelse' }).click();
+    await page.waitForURL(/\/app\/management-reviews\/\d+$/);
+    const reviewUrl = page.url();
+
+    const risks = page.getByTestId('mr-nav-risks');
+    const resources = page.getByTestId('mr-nav-resources');
+    const missing = page.getByTestId('mr-readiness-judgements');
+
+    // Not assessed: an empty ring. The high risk is flagged beside it, not instead of it.
+    await expect(risks).toHaveAttribute('data-progress', 'open');
+    await expect(risks).toHaveAttribute('data-attention', 'true');
+    await expect(risks.locator('[data-icon="open"]')).toBeVisible();
+    await expect(risks.locator('[data-icon="attention"]')).toBeVisible();
+    await expect(resources).toHaveAttribute('data-progress', 'open');
+    await expect(resources).toHaveAttribute('data-attention', 'false');
+    await expect(resources.locator('[data-icon="attention"]')).toHaveCount(0);
+
+    // The explanation: on hover, on keyboard focus, and in the button's accessible name.
+    await risks.hover();
+    await expect(page.getByRole('tooltip')).toContainText('Ikke vurdert. Forhold krever oppmerksomhet:');
+    await page.mouse.move(900, 10);
+    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    await resources.focus();
+    await expect(page.getByRole('tooltip')).toHaveText('Ikke vurdert.');
+    // No earlier review yet: the checklist does not ask for this one, and the menu says so.
+    await page.getByTestId('mr-nav-previous_decisions').focus();
+    await expect(page.getByRole('tooltip')).toHaveText('Ikke vurdert. Ikke påkrevd for ferdigstilling.');
+    await expect(risks).toHaveAccessibleName(/^Risiko og risikobilde \(Ikke vurdert\. Forhold krever oppmerksomhet: .+\)$/);
+    const width = await risks.evaluate((element) => element.getBoundingClientRect().width);
+
+    // Opening a section marks nothing.
+    await risks.click();
+    await expect(page.getByTestId('mr-section-status')).toHaveAttribute('data-progress', 'open');
+    await expect(page.getByTestId('mr-section-status')).toContainText('Ikke vurdert');
+    await expect(page.getByTestId('mr-section-attention')).toContainText('Forhold krever oppmerksomhet');
+    await expect(risks).toHaveAttribute('data-progress', 'open');
+
+    // Saved: the green tick, with the attention still shown — and the checklist agrees.
+    await page.getByTestId('mr-judgement-needs_improvement').check();
+    await page.getByTestId('mr-save-assessment').click();
+    await expect(risks).toHaveAttribute('data-progress', 'judged', { timeout: 15_000 });
+    await expect(risks).toHaveAttribute('data-attention', 'true');
+    await expect(risks.locator('[data-icon="judged"]')).toBeVisible();
+    await expect(risks.locator('[data-icon="attention"]')).toBeVisible();
+    await expect(page.getByTestId('mr-section-status')).toContainText('Vurdering gjennomført');
+    await expect(page.getByTestId('mr-section-attention')).toBeVisible();
+    expect(await risks.evaluate((element) => element.getBoundingClientRect().width)).toBe(width);
+    await risks.hover();
+    await expect(page.getByRole('tooltip')).toContainText('Vurdering gjennomført. Forhold krever oppmerksomhet:');
+    await page.getByTestId('mr-nav-overview').click();
+    await expect(missing.getByRole('button', { name: 'Risiko og risikobilde' })).toHaveCount(0);
+    await expect(missing.getByRole('button', { name: 'Ressurser, kompetanse og forbedringsbehov' })).toHaveCount(1);
+
+    // Changed: still assessed. After a reload: still assessed.
+    await risks.click();
+    await page.getByTestId('mr-judgement-satisfactory').check();
+    await page.getByTestId('mr-save-assessment').click();
+    await expect(page.getByText('Lagret.', { exact: true }).first()).toBeVisible();
+    await expect(risks).toHaveAttribute('data-progress', 'judged');
+    await page.reload();
+    await expect(risks).toHaveAttribute('data-progress', 'judged');
+    await expect(risks).toHaveAttribute('data-attention', 'true');
+
+    // Removed: back to the empty ring, in the menu, the section and the checklist — and after a reload.
+    await page.getByTestId('mr-remove-assessment').click();
+    await expect(risks).toHaveAttribute('data-progress', 'open', { timeout: 15_000 });
+    await expect(page.getByTestId('mr-section-status')).toHaveAttribute('data-progress', 'open');
+    await expect(page.getByTestId('mr-remove-assessment')).toHaveCount(0);
+    await page.goto(reviewUrl);
+    await expect(risks).toHaveAttribute('data-progress', 'open');
+    await expect(missing.getByRole('button', { name: 'Risiko og risikobilde' })).toHaveCount(1);
+    await expectReadable(page, '09-status-markers');
+
+    // A phone has no hover and no menu icons: the select and the section say the same in words.
+    await risks.click();
+    await page.getByTestId('mr-judgement-needs_improvement').check();
+    await page.getByTestId('mr-save-assessment').click();
+    await expect(risks).toHaveAttribute('data-progress', 'judged', { timeout: 15_000 });
+    await page.setViewportSize(PHONE);
+    await expect(page.getByTestId('mr-nav-select').locator('option[value="risks"]')).toHaveText('Risiko og risikobilde (vurdert · krever oppmerksomhet)');
+    await expect(page.getByTestId('mr-nav-select').locator('option[value="resources"]')).toHaveText('Ressurser, kompetanse og forbedringsbehov (ikke vurdert)');
+    await expect(page.getByTestId('mr-section-status')).toBeVisible();
+    await expect(page.getByTestId('mr-section-status')).toContainText('Vurdering gjennomført');
+    await expect(page.getByTestId('mr-section-attention')).toContainText('Forhold krever oppmerksomhet');
+    expect(await sidewaysOverflow(page), 'section status scrolls sideways').toEqual([]);
 });
 
 test('on a phone the sections are one select and nothing scrolls sideways', async ({ page }) => {

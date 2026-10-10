@@ -30,7 +30,7 @@ export const HISTORY = 'history';
 
 /**
  * The numbers in each section that say something needs the management's attention. A section with
- * any of them above zero gets the ⚠ marker and is listed under «Hva krever oppmerksomhet».
+ * any of them above zero gets the «!» marker and is listed under «Hva krever oppmerksomhet».
  */
 export const ATTENTION_METRICS = {
     previous_decisions: ['actions_overdue'],
@@ -85,23 +85,70 @@ export function attentionItems(section) {
     return items;
 }
 
+const MARKER_FALLBACKS = {
+    judged: 'Vurdering gjennomført',
+    open: 'Ikke vurdert',
+    attention: 'Forhold krever oppmerksomhet',
+    unavailable: 'Ikke tilgjengelig',
+    optional: 'Ikke påkrevd for ferdigstilling',
+};
+
+const MARKER_SHORT_FALLBACKS = {
+    judged: 'vurdert',
+    open: 'ikke vurdert',
+    attention: 'krever oppmerksomhet',
+    unavailable: 'ikke tilgjengelig',
+};
+
 /**
- * The marker beside a section in the navigation:
- *  - unavailable: the reader cannot see it, or there is no basis to see
- *  - judged: the management has assessed it
- *  - attention: not yet assessed, and something in it needs attention
- *  - open: not yet assessed
+ * Where a section stands, as two separate things — never one marker standing in for the other:
+ *
+ *  - progress: 'judged' once a judgement is saved (the same test «Klar for ferdigstilling» uses),
+ *    'open' until then and again once it is removed, 'unavailable' when the reader cannot see the
+ *    section or there is no basis to see. Opening a section changes nothing.
+ *  - attention: the flagged numbers of the basis, the same list «Hva krever oppmerksomhet» shows.
+ *    It stays while the numbers say so, judged or not; it never makes a judged section unfinished.
+ *  - optional: an open section «Klar for ferdigstilling» does not ask for (Tidligere beslutninger
+ *    before there is an earlier review). Read from the checklist itself, so the two never disagree.
  */
-export function sectionMarker(section) {
+export function sectionStatus(section, readiness = null) {
     if (section?.state && section.state !== 'available') {
-        return 'unavailable';
+        return { progress: 'unavailable', attention: [], optional: false };
     }
 
-    if (section?.judgement) {
-        return 'judged';
+    const progress = section?.judgement ? 'judged' : 'open';
+    const missing = readiness?.items?.find((item) => item.key === 'judgements')?.sections;
+    const optional = progress === 'open' && Array.isArray(missing) && ! missing.includes(section?.key);
+
+    return { progress, attention: attentionItems(section), optional };
+}
+
+export function markerLabel(marker, t = {}) {
+    return t.section?.markers?.[marker] ?? MARKER_FALLBACKS[marker] ?? marker;
+}
+
+/** The status in a sentence: «Vurdering gjennomført. Forhold krever oppmerksomhet: Høy risiko 1.» */
+export function statusDescription(status, t = {}) {
+    const parts = [markerLabel(status.progress, t)];
+
+    if (status.optional) {
+        parts.push(markerLabel('optional', t));
     }
 
-    return attentionItems(section).length > 0 ? 'attention' : 'open';
+    if (status.attention.length > 0) {
+        parts.push(`${markerLabel('attention', t)}: ${status.attention.map((item) => `${item.label} ${item.value}`).join(', ')}`);
+    }
+
+    return `${parts.join('. ')}.`;
+}
+
+/** A phone's section select carries no icons, so its options say the same in words. */
+export function sectionOptionLabel(section, t = {}, readiness = null) {
+    const status = sectionStatus(section, readiness);
+    const short = (marker) => t.section?.markers_short?.[marker] ?? MARKER_SHORT_FALLBACKS[marker];
+    const words = [short(status.progress), ...(status.attention.length > 0 ? [short('attention')] : [])];
+
+    return `${sectionTitle(section.key, t)} (${words.join(' · ')})`;
 }
 
 /** The panes in order: Oversikt, the sections, Beslutninger og tiltak, Historikk. */

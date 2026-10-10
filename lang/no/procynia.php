@@ -9526,6 +9526,7 @@ return [
             'comment_hint' => 'Valgfritt.',
             'notes' => 'Ledelsens beskrivelse',
             'save_assessment' => 'Lagre vurdering',
+            'remove_assessment' => 'Fjern vurdering',
             'not_judged' => 'Ikke vurdert',
             'decisions_here' => 'Beslutninger og tiltak i denne seksjonen',
             'add_decision' => 'Registrer beslutning eller tiltak',
@@ -9542,10 +9543,17 @@ return [
             'nav_label' => 'Seksjoner i gjennomgåelsen',
             'nav_select' => 'Gå til seksjon',
             'markers' => [
-                'judged' => 'Vurdert',
-                'attention' => 'Har oppmerksomhetspunkter',
+                'judged' => 'Vurdering gjennomført',
+                'attention' => 'Forhold krever oppmerksomhet',
                 'open' => 'Ikke vurdert',
                 'unavailable' => 'Ikke tilgjengelig',
+                'optional' => 'Ikke påkrevd for ferdigstilling',
+            ],
+            'markers_short' => [
+                'judged' => 'vurdert',
+                'attention' => 'krever oppmerksomhet',
+                'open' => 'ikke vurdert',
+                'unavailable' => 'ikke tilgjengelig',
             ],
         ],
         'states' => [
@@ -10054,6 +10062,7 @@ return [
                         ['title' => 'Perioderesultater og status', 'text' => 'Perioderesultater er det som skjedde i perioden. Status nå er tilstanden når grunnlaget hentes – ved ferdigstilling fryses den.'],
                         ['title' => 'Tilgang', 'text' => 'Du ser bare grunnlag fra moduler og fagområder du har tilgang til. Ledelsens vurdering av en seksjon vises bare for personer som kan se grunnlaget.'],
                         ['title' => 'Når noe mangler', 'text' => 'Seksjonen sier om det ikke finnes registrerte forhold, om modulen ikke er aktivert, eller om du ikke har tilgang – dette er ikke det samme som null avvik.'],
+                        ['title' => 'Symbolene i seksjonsmenyen', 'text' => 'Tom sirkel: ikke vurdert. Grønn hake: vurdering lagret. Oransje utropstegn: grunnlaget viser forhold som krever oppmerksomhet – det vises også når seksjonen er vurdert, og hindrer ikke ferdigstilling.'],
                     ]],
                     ['title' => 'Etter ferdigstilling', 'items' => [
                         ['title' => 'Låst', 'text' => 'En ferdigstilt gjennomgåelse kan ikke endres. Rettelser registreres som tillegg, og det opprinnelige innholdet bevares.'],

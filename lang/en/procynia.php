@@ -9522,6 +9522,7 @@ return [
             'comment_hint' => 'Optional.',
             'notes' => 'The management\'s description',
             'save_assessment' => 'Save assessment',
+            'remove_assessment' => 'Remove assessment',
             'not_judged' => 'Not assessed',
             'decisions_here' => 'Decisions and actions in this section',
             'add_decision' => 'Record decision or action',
@@ -9538,10 +9539,17 @@ return [
             'nav_label' => 'Sections of the review',
             'nav_select' => 'Go to section',
             'markers' => [
-                'judged' => 'Assessed',
-                'attention' => 'Has items needing attention',
+                'judged' => 'Assessment completed',
+                'attention' => 'Items need attention',
                 'open' => 'Not assessed',
                 'unavailable' => 'Not available',
+                'optional' => 'Not required for finalization',
+            ],
+            'markers_short' => [
+                'judged' => 'assessed',
+                'attention' => 'needs attention',
+                'open' => 'not assessed',
+                'unavailable' => 'not available',
             ],
         ],
         'states' => [
@@ -10050,6 +10058,7 @@ return [
                         ['title' => 'Period results and status', 'text' => 'Period results are what happened in the period. Status now is the state when the basis is read – at finalisation it is frozen.'],
                         ['title' => 'Access', 'text' => 'You see only the basis from modules and business areas you have access to. The management\'s assessment of a section is shown only to people who can see its basis.'],
                         ['title' => 'When something is missing', 'text' => 'The section says whether nothing is recorded, whether the module is not enabled, or whether you lack access – which is not the same as zero deviations.'],
+                        ['title' => 'The symbols in the section menu', 'text' => 'Empty circle: not assessed. Green tick: assessment saved. Orange exclamation mark: the basis shows items that need attention – it also shows when the section is assessed, and does not block finalization.'],
                     ]],
                     ['title' => 'After finalisation', 'items' => [
                         ['title' => 'Locked', 'text' => 'A finalised review cannot be changed. Corrections are recorded as additions, and the original content is kept.'],

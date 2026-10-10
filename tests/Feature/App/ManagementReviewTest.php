@@ -228,6 +228,31 @@ class ManagementReviewTest extends TestCase
         $this->assertSame('Systemet er egnet.', $review->fresh()->conclusion);
     }
 
+    public function test_removing_a_judgement_reopens_the_section_in_the_checklist_and_keeps_the_comment(): void
+    {
+        ['customer' => $customer] = $this->mrContext();
+        $manager = $this->mrManager($customer);
+        $review = $this->mrReview($manager);
+        $section = fn (Assert $page) => collect($page->toArray()['props']['sections'])->firstWhere('key', 'resources');
+        $missing = fn (Assert $page) => collect($page->toArray()['props']['readiness']['items'])->firstWhere('key', 'judgements')['sections'];
+
+        $this->actingAs($manager)->put("/app/management-reviews/{$review->id}/sections/resources", ['judgement' => 'satisfactory', 'comment' => 'Kapasiteten holder.'])
+            ->assertSessionHasNoErrors();
+        $this->actingAs($manager)->get("/app/management-reviews/{$review->id}")->assertInertia(function (Assert $page) use ($section, $missing) {
+            $this->assertSame('satisfactory', $section($page)['judgement']);
+            $this->assertNotContains('resources', $missing($page));
+        });
+
+        // «Fjern vurdering» sends the saved comment back with no judgement.
+        $this->actingAs($manager)->put("/app/management-reviews/{$review->id}/sections/resources", ['judgement' => null, 'comment' => 'Kapasiteten holder.'])
+            ->assertSessionHasNoErrors();
+        $this->actingAs($manager)->get("/app/management-reviews/{$review->id}")->assertInertia(function (Assert $page) use ($section, $missing) {
+            $this->assertNull($section($page)['judgement']);
+            $this->assertSame('Kapasiteten holder.', $section($page)['comment']);
+            $this->assertContains('resources', $missing($page));
+        });
+    }
+
     public function test_participants_are_chosen_when_editing_and_the_choice_is_checked(): void
     {
         ['customer' => $customer] = $this->mrContext();
