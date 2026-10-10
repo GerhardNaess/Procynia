@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiDocumentOrigin;
 use App\Models\QualityItem;
 use App\Services\EnterpriseWiki\Knowledge\Sources\ComplianceAuditKnowledgeSource;
 use App\Services\EnterpriseWiki\Knowledge\Sources\ImprovementCaseKnowledgeSource;
+use App\Services\EnterpriseWiki\Knowledge\Sources\ManagementReviewKnowledgeSource;
 use App\Services\EnterpriseWiki\Knowledge\Sources\ObjectiveKnowledgeSource;
 use App\Services\EnterpriseWiki\Knowledge\Sources\RiskKnowledgeSource;
 use App\Services\EnterpriseWiki\Knowledge\Sources\SupplierKnowledgeSource;
@@ -28,6 +29,7 @@ class WikiKnowledgeSourceRegistry
         'supplier' => SupplierKnowledgeSource::class,
         'improvement_case' => ImprovementCaseKnowledgeSource::class,
         'objective' => ObjectiveKnowledgeSource::class,
+        'management_review' => ManagementReviewKnowledgeSource::class,
     ];
 
     /**

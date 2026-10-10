@@ -346,3 +346,51 @@ test('on a phone the sections are one select and nothing scrolls sideways', asyn
     await page.waitForTimeout(500);
     await expectReadable(page, '08-phone');
 });
+
+test('a finalized review hands the management’s own, dated word over to the Wiki', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const seeded = await managementReviewFixture(`seedFinalizedForWiki('${suffix}', '${MANAGEMENT_REVIEW_E2E_PASSWORD}')`);
+    await loginAs(page, seeded.email, MANAGEMENT_REVIEW_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/management-reviews/${seeded.review_id}`);
+
+    const panel = page.locator('section', { has: page.getByRole('heading', { name: 'Kunnskap delt til Wiki', exact: true }) });
+    await expect(panel).toContainText('Ingen kunnskap er delt herfra ennå.');
+    await panel.getByRole('button', { name: 'Lag kunnskapsartikkel' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    // Always dated, and the person is told the Wiki will not follow a later review by itself.
+    await expect(dialog.getByTestId('knowledge-handoff-notice')).toContainText('det skjer ikke automatisk');
+    await expect(dialog.getByTestId('knowledge-handoff-context')).toContainText('Ledelsens gjennomgåelse for perioden');
+    // Nothing chosen in advance; the management's own word is offered, the people are not.
+    const conclusion = dialog.getByRole('checkbox', { name: /Ledelsens samlede konklusjon/ });
+    await expect(conclusion).not.toBeChecked();
+    await expect(dialog.getByRole('checkbox', { name: /Ledelsens vurdering: Risiko og risikobilde/ })).not.toBeChecked();
+    await expect(dialog).not.toContainText(seeded.participant);
+    await expect(dialog).not.toContainText(seeded.risk);
+    await expectReadable(page, '20-wiki-dialog');
+
+    await dialog.getByLabel('Læringspunkter').fill('Ledelsen går gjennom styringssystemet hvert halvår og følger opp beslutningene.');
+    await conclusion.check();
+    await dialog.getByRole('checkbox', { name: /Ledelsens vurdering: Risiko og risikobilde/ }).check();
+    await dialog.getByRole('button', { name: 'Send til Wiki' }).click();
+
+    await expect(page.getByText('Kunnskapen er lagt inn som kilde i Wiki.')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(panel).toContainText('Kilde mottatt – behandles i Wiki');
+
+    const handed = await managementReviewFixture(`handedOver(${seeded.review_id})`);
+    expect(handed.origins).toBe(1);
+    expect(handed.texts).toHaveLength(1);
+    expect(handed.texts[0]).toContain('Ledelsens gjennomgåelse for perioden');
+    expect(handed.texts[0]).toContain(seeded.conclusion);
+    expect(handed.texts[0]).toContain('Risikobildet følges opp kvartalsvis.');
+    expect(handed.texts[0]).not.toContain('Avvik skal lukkes innen 30 dager.');
+    expect(handed.texts[0]).not.toContain(seeded.participant);
+    expect(handed.texts[0]).not.toContain(seeded.risk);
+
+    await page.setViewportSize(PHONE);
+    await expectReadable(page, '21-review-after-wiki-handoff');
+});

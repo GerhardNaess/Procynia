@@ -8,6 +8,7 @@ use App\Models\ImprovementCase;
 use App\Models\ManagementReview;
 use App\Models\ManagementReviewDecision;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeHandoffService;
 use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\ManagementReview\ManagementReviewBasisService;
 use App\Services\ManagementReview\ManagementReviewDecisionService;
@@ -46,6 +47,7 @@ class ManagementReviewController extends Controller
         private readonly ManagementReviewBasisService $basis,
         private readonly ManagementReviewSectionCatalog $catalog,
         private readonly FrameworkCatalog $frameworks,
+        private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
     ) {}
 
     public function index(): Response
@@ -120,6 +122,8 @@ class ManagementReviewController extends Controller
             'framework_options' => $this->frameworks->options('management_review'),
             'judgements' => ManagementReview::JUDGEMENTS,
             'handoff_options' => $canEdit ? $this->decisions->handOffOptions($user) : null,
+            // «Lag kunnskapsartikkel» (WikiKnowledgeHandoffService): only a finalized review hands over.
+            'knowledge_handoff' => $review->isFinalized() ? $this->knowledgeHandoff->panel($user, 'management_review', $review) : null,
         ]);
     }
 

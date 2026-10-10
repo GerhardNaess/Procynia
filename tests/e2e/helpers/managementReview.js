@@ -36,7 +36,7 @@ export function cleanUpManagementReviewE2eData(suffix) {
 
     test.afterAll(async () => {
         expect(await managementReviewFixture(`remaining('${suffix}')`)).toEqual({
-            customers: 0, reviews: 0, decisions: 0, snapshots: 0, events: 0, improvement_cases: 0, risks: 0, business_areas: 0, roles: 0, users: 0,
+            customers: 0, reviews: 0, decisions: 0, snapshots: 0, events: 0, improvement_cases: 0, risks: 0, business_areas: 0, roles: 0, users: 0, wiki_documents: 0,
         });
     });
 }

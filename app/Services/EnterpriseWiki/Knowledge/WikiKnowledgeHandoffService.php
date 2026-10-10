@@ -325,20 +325,30 @@ class WikiKnowledgeHandoffService
         $parts = ['# '.$this->singleLine($title)];
         $learning = trim($learning);
 
+        // The context frames everything below it — the date a review's judgements speak for.
+        if (($context = $draft->includedContext()) !== null) {
+            $parts[] = $this->renderSection($context);
+        }
+
         if ($learning !== '') {
             $parts[] = '## '.__('procynia.knowledge_handoff.learning_heading')."\n\n".$learning;
         }
 
         foreach ($chosen as $section) {
-            $lines = array_map($this->singleLine(...), $section->lines);
-            $body = $section->asList
-                ? implode("\n", array_map(static fn (string $line): string => '- '.$line, $lines))
-                : implode("\n\n", $lines);
-
-            $parts[] = '## '.$this->singleLine($section->heading)."\n\n".$body;
+            $parts[] = $this->renderSection($section);
         }
 
         return implode("\n\n", $parts)."\n";
+    }
+
+    private function renderSection(WikiKnowledgeDraftSection $section): string
+    {
+        $lines = array_map($this->singleLine(...), $section->lines);
+        $body = $section->asList
+            ? implode("\n", array_map(static fn (string $line): string => '- '.$line, $lines))
+            : implode("\n\n", $lines);
+
+        return '## '.$this->singleLine($section->heading)."\n\n".$body;
     }
 
     private function originsFor(string $sourceType, Model $record)

@@ -424,6 +424,7 @@ Route::prefix('app')
             Route::post('/{reviewId}/decisions/{decisionId}/reassign', [ManagementReviewDecisionController::class, 'reassign'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.reassign');
             Route::post('/{reviewId}/decisions/{decisionId}/handoff', [ManagementReviewDecisionController::class, 'handOff'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.handoff');
             Route::post('/{reviewId}/decisions/{decisionId}/link', [ManagementReviewDecisionController::class, 'link'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.link');
+            Route::post('/{sourceId}/knowledge-handoff', [WikiKnowledgeHandoffController::class, 'store'])->whereNumber('sourceId')->defaults('sourceType', 'management_review')->name('knowledge-handoff.store');
         });
         // Avvik og forbedringer. Named under `app.improvements.`, mapped to the `improvements` module.
         // Cases are addressed by a plain id and resolved through ImprovementCaseAccessService, never

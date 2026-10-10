@@ -22,6 +22,7 @@ final class AiExperienceAttribution
         'improvement_case' => 'improvements',
         'objective' => 'objectives',
         'quality_item' => 'quality',
+        'management_review' => 'management_review',
     ];
 
     /**
@@ -29,7 +30,7 @@ final class AiExperienceAttribution
      * sources it handed over. Used to describe a package's direct usage — never to size anything.
      */
     public const PACKAGE_KEYS = [
-        'basis' => ['wiki', 'quality', 'improvements', 'document_analysis', 'wiki.quality', 'wiki.improvements'],
+        'basis' => ['wiki', 'quality', 'improvements', 'document_analysis', 'wiki.quality', 'wiki.improvements', 'wiki.management_review'],
         'risk' => ['risk', 'wiki.risk'],
         'objectives' => ['objectives', 'wiki.objectives'],
         'compliance' => ['compliance', 'wiki.compliance'],

@@ -6,15 +6,25 @@ use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerPackageEntitlement;
 use App\Models\CustomerRole;
+use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiDocumentOrigin;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\ImprovementCase;
 use App\Models\ManagementReview;
 use App\Models\ManagementReviewDecision;
 use App\Models\ManagementReviewEvent;
+use App\Models\ManagementReviewSection;
 use App\Models\ManagementReviewSnapshotSection;
 use App\Models\QualityItem;
 use App\Models\Risk;
 use App\Models\RiskAssessment;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\ManagementReview\ManagementReviewDecisionService;
+use App\Services\ManagementReview\ManagementReviewFinalizationService;
+use App\Services\ManagementReview\ManagementReviewSectionCatalog;
+use App\Services\ManagementReview\ManagementReviewService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog as P;
 use Illuminate\Database\Eloquent\Builder;
@@ -106,6 +116,76 @@ class ManagementReviewE2EFixture
         });
     }
 
+    /**
+     * The journey's customer with a finalized review, and the quality manager allowed to hand it to
+     * the Wiki. NO PROVIDER CALL: AI is suspended for this customer of the run's own, so the Wiki run
+     * the handoff starts is stopped by cost control before anything is sent (the arrangement
+     * KnowledgeHandoffE2EFixture uses); the customer goes away with cleanup().
+     *
+     * @return array{email: string, review_id: int, conclusion: string, participant: string, risk: string}
+     */
+    public static function seedFinalizedForWiki(string $suffix, string $password): array
+    {
+        $people = self::seedJourney($suffix, $password);
+        $manager = User::query()->where('email', $people['email'])->sole();
+        $customer = $manager->customer;
+        $customer->forceFill(['ai_access_status' => Customer::AI_ACCESS_SUSPENDED])->save();
+        self::role($customer, self::PREFIX.' '.strtoupper($suffix).' Wiki', [P::WIKI_VIEW, P::WIKI_SOURCE_MANAGE], $manager);
+
+        $conclusion = 'Styringssystemet er egnet, men avvik må lukkes raskere.';
+        $participant = 'Deltaker '.strtoupper($suffix);
+        auth()->setUser($manager);
+
+        $review = app(ManagementReviewService::class)->create($manager, [
+            'title' => 'LG Wiki '.strtoupper($suffix), 'purpose' => null,
+            'period_start' => now()->subMonths(6)->toDateString(), 'period_end' => now()->subDay()->toDateString(),
+            'meeting_date' => now()->toDateString(), 'all_business_areas' => true, 'business_area_ids' => [],
+            'frameworks' => [], 'owner_user_id' => $manager->id,
+        ]);
+        $review->participants()->create(['customer_id' => $customer->id, 'name' => $participant, 'position' => 1]);
+        $review->forceFill(['conclusion' => $conclusion])->save();
+
+        foreach (app(ManagementReviewSectionCatalog::class)->keysFor($review) as $key) {
+            ManagementReviewSection::query()->create([
+                'customer_id' => $customer->id, 'management_review_id' => $review->id, 'section_key' => $key,
+                'judgement' => ManagementReview::JUDGEMENT_SATISFACTORY,
+                'comment' => $key === 'risks' ? 'Risikobildet følges opp kvartalsvis.' : null,
+            ]);
+        }
+
+        app(ManagementReviewDecisionService::class)->create($manager, $review, [
+            'kind' => ManagementReviewDecision::KIND_DECISION, 'text' => 'Avvik skal lukkes innen 30 dager.', 'section_key' => 'improvements',
+            'owner_user_id' => null, 'due_date' => null,
+        ]);
+        app(ManagementReviewFinalizationService::class)->finalize($manager, $review->fresh());
+
+        return [
+            'email' => $people['email'],
+            'review_id' => (int) $review->id,
+            'conclusion' => $conclusion,
+            'participant' => $participant,
+            'risk' => 'Datatap '.strtoupper($suffix),
+        ];
+    }
+
+    /**
+     * What the review handed over: its origin rows and each Wiki source's text.
+     *
+     * @return array{origins: int, texts: list<string>}
+     */
+    public static function handedOver(int $reviewId): array
+    {
+        $documentIds = EnterpriseWikiDocumentOrigin::query()
+            ->where('source_type', 'management_review')
+            ->where('source_id', $reviewId)
+            ->pluck('enterprise_wiki_document_id');
+
+        return [
+            'origins' => $documentIds->count(),
+            'texts' => EnterpriseWikiDocument::query()->whereIn('id', $documentIds)->pluck('extracted_text')->map(fn ($text): string => (string) $text)->all(),
+        ];
+    }
+
     /** A new deviation after the review is finalized — the module changes, the snapshot must not. */
     public static function addDeviation(string $suffix, string $title): array
     {
@@ -136,6 +216,7 @@ class ManagementReviewE2EFixture
             'business_areas' => BusinessArea::query()->whereIn('customer_id', $customerIds)->count(),
             'roles' => CustomerRole::query()->whereIn('customer_id', $customerIds)->count(),
             'users' => User::query()->where('email', 'like', 'e2e.lg.'.strtolower($suffix).'.%')->count(),
+            'wiki_documents' => EnterpriseWikiDocument::query()->whereIn('customer_id', $customerIds)->count(),
         ];
     }
 
@@ -148,6 +229,8 @@ class ManagementReviewE2EFixture
             ->get();
 
         foreach ($customers as $customer) {
+            self::removeWikiSources($customer);
+
             DB::transaction(function () use ($customer): void {
                 CustomerRole::query()->where('customer_id', $customer->id)->delete();
                 // Deleting the people nulls their ids out of the locked rows and the history, which
@@ -159,6 +242,30 @@ class ManagementReviewE2EFixture
                 // Reviews, their locked rows and history, the cases and the fagområde go with the customer.
                 $customer->delete();
             });
+        }
+    }
+
+    /**
+     * A source handed to the Wiki leaves through the ordinary paths — its run cancelled, the document
+     * deleted with its stored file — before the customer goes.
+     */
+    private static function removeWikiSources(Customer $customer): void
+    {
+        $actor = User::query()->where('customer_id', $customer->id)->orderBy('id')->first();
+
+        if ($actor === null) {
+            return;
+        }
+
+        foreach (EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->get() as $document) {
+            EnterpriseWikiIngestRun::query()
+                ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->where('source_id', $document->id)
+                ->nonTerminal()
+                ->get()
+                ->each(fn (EnterpriseWikiIngestRun $run) => app(EnterpriseWikiDocumentFlowService::class)->cancelRun($run, $actor, 'E2E cleanup'));
+
+            app(EnterpriseWikiDocumentDeletionService::class)->delete($document->fresh(), $actor);
         }
     }
 

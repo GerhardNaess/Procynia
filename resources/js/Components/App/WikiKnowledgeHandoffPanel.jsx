@@ -18,6 +18,9 @@ const LABEL = 'block text-base font-semibold text-slate-700';
  * rebuilds the sections from the record. The result is a Wiki source that goes through the Wiki's
  * own processing and review before anything is published.
  *
+ * A draft may also carry a `context` that always goes with the source (shown, never a choice) and a
+ * `notice` for the person handing over.
+ *
  * `handoff` is WikiKnowledgeHandoffService::panel(): { can_create, entries, submit_url, draft, limits }.
  */
 export default function WikiKnowledgeHandoffPanel({ handoff, idPrefix }) {
@@ -116,6 +119,9 @@ export default function WikiKnowledgeHandoffPanel({ handoff, idPrefix }) {
                             <p className="mt-1 text-base text-amber-900">
                                 {t.help_detail ?? 'Velg hva som kan deles. Ingenting er valgt på forhånd, og ingenting publiseres før det er gjennomgått i Wiki.'}
                             </p>
+                            {draft.notice && (
+                                <p className="mt-2 text-base text-amber-900" data-testid="knowledge-handoff-notice">{draft.notice}</p>
+                            )}
                         </div>
                         <div>
                             <label htmlFor={`${idPrefix}-knowledge-handoff-field-title`} className={LABEL}>{t.field_title ?? 'Tittel'}<RequiredMark /></label>
@@ -147,6 +153,20 @@ export default function WikiKnowledgeHandoffPanel({ handoff, idPrefix }) {
                             />
                             {form.errors.learning && <p className="mt-1 text-base text-rose-700">{form.errors.learning}</p>}
                         </div>
+                        {draft.context && (
+                            <div data-testid="knowledge-handoff-context">
+                                <p className={LABEL}>{t.context_legend ?? 'Tas alltid med'}</p>
+                                <p className="text-base text-slate-600">{t.context_help ?? 'Gir sammenhengen det som deles, skal leses i.'}</p>
+                                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <span className="block text-base font-semibold text-slate-900">{draft.context.heading}</span>
+                                    <span className="mt-1 block space-y-1 text-base text-slate-600">
+                                        {draft.context.lines.map((line, index) => (
+                                            <span key={index} className="block break-words">{line}</span>
+                                        ))}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                         {draft.sections.length > 0 && (
                             <fieldset>
                                 <legend className={LABEL}>{t.sections_legend ?? 'Ta med fra kilden'}</legend>

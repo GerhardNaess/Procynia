@@ -1002,7 +1002,7 @@ Bare målrettede tester kjøres per fase. Hele suiten kjøres bare som sammensl�
 | Rekonstruksjon av tilstand ved periodeslutt | Kildedata støtter det ikke for alle moduler (§2.2). «Status nå» ved ferdigstilling er definert og ærlig |
 | Word-eksport | PDF + utskrift dekker behovet. PhpWord finnes hvis kundene ber om det |
 | Lagret PDF / registrering som kontrollbevis i Kvalitet | Naturlig neste steg: knappen «Registrer som bevis» på en kontroll i Kvalitet. Krever filhåndtering og vurderes separat |
-| Kunnskapsartikkel til Wiki (`WikiKnowledgeHandoffService`) | Registeret støtter det, men behovet er ikke dokumentert |
+| ~~Kunnskapsartikkel til Wiki (`WikiKnowledgeHandoffService`)~~ | **Bygget etter v1 (2026-10-10):** `ManagementReviewKnowledgeSource` i det felles registeret. Bare ferdigstilte gjennomganger, `management_review.edit` + `wiki.source.manage`. Ledelsens egne vurderinger, konklusjon, beslutninger, planlagte forbedringer og rettelser — aldri grunnlaget, personer, levende oppfølging eller rammeverksdekning. Kilden dateres alltid (periode og ferdigstillingsdato); ingen automatisk erstatning ved neste gjennomgåelse |
 | Flere parallelle gjennomgåelser per fagområde med egne frister | Avgrensning per gjennomgåelse dekker behovet. Ingen planlegging per fagområde |
 | Egne seksjoner definert av kunden | Faste seksjoner + manuelle tekstfelt holder v1 enkel. Rammeverk-config kan senere åpnes for kundevalg |
 | Deltakernes oppmøte og fravær, roller i møtet | Deltakerlisten er de som deltok |

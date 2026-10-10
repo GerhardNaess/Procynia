@@ -18,11 +18,14 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\ImprovementCase;
 use App\Models\Language;
+use App\Models\ManagementReview;
 use App\Models\Nationality;
 use App\Models\Objective;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Ai\Usage\AiUsageLedger;
+use App\Services\ManagementReview\ManagementReviewFinalizationService;
+use App\Services\ManagementReview\ManagementReviewService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\OpenAi\OpenAiClient;
 use App\Support\Ai\AiCallContextScope;
@@ -42,7 +45,7 @@ use Tests\TestCase;
 
 /**
  * The shared «Lag kunnskapsartikkel» handoff for Etterlevelse, Leverandøroppfølging, Avvik og
- * forbedringer and Mål (Risiko has its own, older test: RiskWikiKnowledgeTest).
+ * forbedringer, Mål and Ledelsens gjennomgåelse (its own rules: ManagementReviewWikiKnowledgeTest; Risiko has its own, older test: RiskWikiKnowledgeTest).
  *
  * The same matrix for every module: the module's own write permission AND wiki.source.manage, a
  * foreign or hidden record is a 404, the source becomes an ordinary Wiki document with an origin row
@@ -84,6 +87,7 @@ class WikiKnowledgeHandoffTest extends TestCase
             'supplier' => ['supplier'],
             'improvement case' => ['improvement_case'],
             'objective' => ['objective'],
+            'management review' => ['management_review'],
         ];
     }
 
@@ -309,6 +313,33 @@ class WikiKnowledgeHandoffTest extends TestCase
                     'edit' => [CustomerPermissionCatalog::OBJECTIVE_VIEW, CustomerPermissionCatalog::OBJECTIVE_EDIT],
                     'view' => [CustomerPermissionCatalog::OBJECTIVE_VIEW], 'areas' => [$area],
                     'marker' => 'Halvere antall lønnsfeil',
+                ];
+            })(),
+            'management_review' => (function () use ($customer): array {
+                // Only a finalized review hands over; finalizing needs a ready review, built here
+                // directly by the module's own services.
+                $finalizer = $this->member($customer, [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, CustomerPermissionCatalog::MANAGEMENT_REVIEW_EDIT, CustomerPermissionCatalog::MANAGEMENT_REVIEW_FINALIZE]);
+                $review = app(ManagementReviewService::class)->create($finalizer, [
+                    'title' => 'Ledelsens gjennomgåelse 2026', 'purpose' => null, 'period_start' => '2026-01-01', 'period_end' => '2026-06-30',
+                    'meeting_date' => '2026-07-01', 'all_business_areas' => true, 'business_area_ids' => [], 'frameworks' => [], 'owner_user_id' => $finalizer->id,
+                ]);
+                $review->participants()->create(['customer_id' => $customer->id, 'name' => 'Deltaker', 'position' => 1]);
+                $review->forceFill(['conclusion' => 'Styringssystemet er egnet, men oppfølgingen av avvik må bli raskere.'])->save();
+                $this->actingAs($finalizer);
+                foreach ($this->get("/app/management-reviews/{$review->id}")->viewData('page')['props']['sections'] as $section) {
+                    if ($section['can_assess']) {
+                        $review->sections()->updateOrCreate(['section_key' => $section['key']], ['customer_id' => $customer->id, 'judgement' => ManagementReview::JUDGEMENT_SATISFACTORY]);
+                    }
+                }
+                app(ManagementReviewFinalizationService::class)->finalize($finalizer, $review->fresh());
+                auth()->logout();
+
+                return [
+                    'record' => $review->fresh(), 'module' => 'management_review',
+                    'show' => "/app/management-reviews/{$review->id}", 'url' => "/app/management-reviews/{$review->id}/knowledge-handoff",
+                    'edit' => [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, CustomerPermissionCatalog::MANAGEMENT_REVIEW_EDIT],
+                    'view' => [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW], 'areas' => [],
+                    'marker' => 'oppfølgingen av avvik må bli raskere',
                 ];
             })(),
         };

@@ -8,6 +8,7 @@ import RequiredMark from '../Risk/RequiredMark';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import ReviewForm from './ReviewForm';
 import SectionBasis from './SectionBasis';
+import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DecisionList } from './ReviewDecisions';
 import {
     ATTENTION_METRICS, DECISIONS, HISTORY, JUDGEMENT_TONES, MODULE_LINKS, OVERVIEW, REVIEW_STATUS_TONES,
@@ -70,6 +71,7 @@ export default function ManagementReviewShow() {
         area_options: areaOptions = [],
         framework_options: frameworkOptions = [],
         handoff_options: handoffOptions = null,
+        knowledge_handoff: knowledgeHandoff = null,
         errors = {},
     } = props;
 
@@ -189,6 +191,11 @@ export default function ManagementReviewShow() {
                                 onOpen={open}
                                 t={t}
                             />
+                        )}
+
+                        {/* «Lag kunnskapsartikkel»: the shared Wiki handoff, sent only for a finalized review. */}
+                        {pane === OVERVIEW && finalized && (
+                            <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`management-review-${review.id}`} />
                         )}
 
                         {current && (
