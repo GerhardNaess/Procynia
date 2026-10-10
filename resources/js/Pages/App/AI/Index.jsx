@@ -50,51 +50,51 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
     return (
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
-                        {tai.overview ?? 'Oversikt'}
-                    </div>
-                    <div className="flex items-center gap-3">
+                <section className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1.5">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
+                            {tai.overview ?? 'Oversikt'}
+                        </div>
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             {tai.overview ?? 'Oversikt'}
                         </h1>
-                        <PageHelpButton
-                            buttonLabel={tai.help_button ?? 'Hjelp'}
-                            title={tai.help_panel_title ?? 'Om AI-oversikten'}
-                            intro={tai.help_panel_intro ?? 'AI-arbeidsflaten samler sakene som er klare for AI-assistert anbudsarbeid, og gir deg tilgang til krav, kunnskapsgrunnlag og svarutkast.'}
-                            sections={[
-                                {
-                                    title: tai.help_section_cases ?? 'Saker',
-                                    items: [
-                                        {
-                                            title: tai.help_item_cases_ready_title ?? 'Klare saker',
-                                            text: tai.help_item_cases_ready_text ?? 'Saker vises her når de er lagret og har nok struktur for AI-assistert arbeid.',
-                                        },
-                                    ],
-                                },
-                                {
-                                    title: tai.help_section_status ?? 'AI-status',
-                                    items: [
-                                        {
-                                            title: tai.ai_status_not_started ?? 'Ikke startet',
-                                            text: tai.help_item_status_not_started ?? 'Ingen AI-kjøringer er startet for saken ennå.',
-                                        },
-                                        {
-                                            title: tai.ai_status_ready ?? 'Påbegynt',
-                                            text: tai.help_item_status_ready ?? 'AI-arbeid er i gang, men ikke ferdig gjennomgått av teamet.',
-                                        },
-                                        {
-                                            title: tai.ai_status_in_review ?? 'Under vurdering',
-                                            text: tai.help_item_status_in_review ?? 'Saken er under aktiv gjennomgang og kvalitetssikring av teamet.',
-                                        },
-                                    ],
-                                },
-                            ]}
-                        />
+                        <p className="max-w-3xl text-base leading-7 text-slate-600">
+                            {tai.index_subtitle ?? 'Her jobber du med konkrete anbudssaker, krav og kunnskapsgrunnlag.'}
+                        </p>
                     </div>
-                    <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        {tai.index_subtitle ?? 'Her jobber du med konkrete anbudssaker, krav og kunnskapsgrunnlag.'}
-                    </p>
+                    <PageHelpButton
+                        buttonLabel={tai.help_button ?? 'Hjelp'}
+                        title={tai.help_panel_title ?? 'Om AI-oversikten'}
+                        intro={tai.help_panel_intro ?? 'AI-arbeidsflaten samler sakene som er klare for AI-assistert anbudsarbeid, og gir deg tilgang til krav, kunnskapsgrunnlag og svarutkast.'}
+                        sections={[
+                            {
+                                title: tai.help_section_cases ?? 'Saker',
+                                items: [
+                                    {
+                                        title: tai.help_item_cases_ready_title ?? 'Klare saker',
+                                        text: tai.help_item_cases_ready_text ?? 'Saker vises her når de er lagret og har nok struktur for AI-assistert arbeid.',
+                                    },
+                                ],
+                            },
+                            {
+                                title: tai.help_section_status ?? 'AI-status',
+                                items: [
+                                    {
+                                        title: tai.ai_status_not_started ?? 'Ikke startet',
+                                        text: tai.help_item_status_not_started ?? 'Ingen AI-kjøringer er startet for saken ennå.',
+                                    },
+                                    {
+                                        title: tai.ai_status_ready ?? 'Påbegynt',
+                                        text: tai.help_item_status_ready ?? 'AI-arbeid er i gang, men ikke ferdig gjennomgått av teamet.',
+                                    },
+                                    {
+                                        title: tai.ai_status_in_review ?? 'Under vurdering',
+                                        text: tai.help_item_status_in_review ?? 'Saken er under aktiv gjennomgang og kvalitetssikring av teamet.',
+                                    },
+                                ],
+                            },
+                        ]}
+                    />
                 </section>
 
                 {!canUseAiOffer ? (

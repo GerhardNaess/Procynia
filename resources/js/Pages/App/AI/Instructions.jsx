@@ -54,72 +54,72 @@ export default function AiInstructions({
             <div className="mx-auto max-w-4xl">
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-5">
-                        <div className="space-y-1">
-                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
-                                AI instrukser
-                            </div>
-                            <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="min-w-0 space-y-1">
+                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
+                                    AI instrukser
+                                </div>
                                 <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
                                     AI instrukser
                                 </h1>
-                                <PageHelpButton
-                                    buttonLabel={tai.instructions_page_help_button ?? 'Hjelp'}
-                                    title={tai.instructions_page_help_title ?? 'AI instrukser'}
-                                    intro={tai.instructions_page_help_intro}
-                                    sections={[
-                                        {
-                                            title: tai.instructions_page_help_section_wiki ?? 'Forholdet til Enterprise Wiki',
-                                            items: [
-                                                {
-                                                    title: tai.instructions_page_help_item_wiki_title ?? 'Wiki er kunnskapen, instrukser er bruken',
-                                                    text: tai.instructions_page_help_item_wiki_text ?? 'Enterprise Wiki inneholder virksomhetens godkjente kunnskap — begreper, fakta og kildehenvisninger. AI-instrukser endrer aldri dette innholdet og kan ikke overstyre en kilde eller et faktum. De styrer bare hvordan AI-en formulerer seg når den bruker Wiki-kunnskapen i et svar.',
-                                                },
-                                            ],
-                                        },
-                                        {
-                                            title: tai.instructions_page_help_section_what ?? 'Hva er AI-instrukser?',
-                                            items: [
-                                                {
-                                                    title: tai.instructions_page_help_item_scope_title ?? 'Én felles instruks for kunden',
-                                                    text: tai.instructions_page_help_item_scope_text ?? 'AI-instruksen lagres på kunden, ikke på den enkelte saken. Endrer du den her, gjelder den samme instruksen for alle saker hos kunden.',
-                                                },
-                                                {
-                                                    title: tai.instructions_page_help_item_what_title ?? 'Faste føringer for kunden',
-                                                    text: tai.instructions_page_help_item_what_text ?? 'AI-instruksen er faste regler som tas med når AI-en lager forslag til kravsvar, kravvurderinger og andre tekstutkast. Den brukes ikke til kravekstraksjon, dokumentimport eller bygging av Enterprise Wiki.',
-                                                },
-                                            ],
-                                        },
-                                        {
-                                            title: tai.instructions_page_help_section_how ?? 'Hva bør du skrive?',
-                                            items: [
-                                                {
-                                                    title: tai.instructions_page_help_item_write_title ?? 'Korte og konkrete regler',
-                                                    text: tai.instructions_page_help_item_write_text ?? 'Beskriv hvilke ord og begreper som skal brukes, hvilke formuleringer som skal unngås, og hvilken stil svarene skal ha.',
-                                                },
-                                                {
-                                                    title: tai.instructions_page_help_item_avoid_title ?? 'Ikke legg inn sensitive data',
-                                                    text: tai.instructions_page_help_item_avoid_text ?? 'Ikke legg inn passord, hemmeligheter, sensitive personopplysninger eller informasjon som ikke skal brukes i AI-genererte svar.',
-                                                },
-                                            ],
-                                        },
-                                        {
-                                            title: tai.instructions_page_help_section_example ?? 'Eksempel',
-                                            items: [
-                                                {
-                                                    title: tai.instructions_page_help_item_example_title ?? 'Konkret eksempel på instrukser',
-                                                    text: tai.instructions_page_help_item_example_text ?? 'Skriv svar på norsk bokmål i en formell og presis tone. Bruk betegnelsen Kunde om oppdragsgiver og Leverandør om oss. Unngå uforpliktende formuleringer som "kan", "bør" og "vi vil forsøke". Svar skal være konkrete, forpliktende og egnet for offentlige anbud.',
-                                                },
-                                            ],
-                                        },
-                                    ]}
-                                />
+                                <p className="max-w-2xl text-base leading-6 text-slate-600">
+                                    {tai.instructions_page_subtitle ?? 'Enterprise Wiki er hva Procynia vet. AI-instruksen styrer hvordan AI-en formulerer svar — tone, terminologi, stil og kapitalisering, aldri fakta eller kilder.'}
+                                </p>
+                                <p className="max-w-2xl rounded-2xl bg-violet-50 px-3 py-2 text-base font-medium leading-6 text-violet-900">
+                                    {tai.instructions_page_scope_notice ?? 'Denne instruksen gjelder alle saker for kunden.'}
+                                </p>
                             </div>
-                            <p className="max-w-2xl text-base leading-6 text-slate-600">
-                                {tai.instructions_page_subtitle ?? 'Enterprise Wiki er hva Procynia vet. AI-instruksen styrer hvordan AI-en formulerer svar — tone, terminologi, stil og kapitalisering, aldri fakta eller kilder.'}
-                            </p>
-                            <p className="max-w-2xl rounded-2xl bg-violet-50 px-3 py-2 text-base font-medium leading-6 text-violet-900">
-                                {tai.instructions_page_scope_notice ?? 'Denne instruksen gjelder alle saker for kunden.'}
-                            </p>
+                            <PageHelpButton
+                                buttonLabel={tai.instructions_page_help_button ?? 'Hjelp'}
+                                title={tai.instructions_page_help_title ?? 'AI instrukser'}
+                                intro={tai.instructions_page_help_intro}
+                                sections={[
+                                    {
+                                        title: tai.instructions_page_help_section_wiki ?? 'Forholdet til Enterprise Wiki',
+                                        items: [
+                                            {
+                                                title: tai.instructions_page_help_item_wiki_title ?? 'Wiki er kunnskapen, instrukser er bruken',
+                                                text: tai.instructions_page_help_item_wiki_text ?? 'Enterprise Wiki inneholder virksomhetens godkjente kunnskap — begreper, fakta og kildehenvisninger. AI-instrukser endrer aldri dette innholdet og kan ikke overstyre en kilde eller et faktum. De styrer bare hvordan AI-en formulerer seg når den bruker Wiki-kunnskapen i et svar.',
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: tai.instructions_page_help_section_what ?? 'Hva er AI-instrukser?',
+                                        items: [
+                                            {
+                                                title: tai.instructions_page_help_item_scope_title ?? 'Én felles instruks for kunden',
+                                                text: tai.instructions_page_help_item_scope_text ?? 'AI-instruksen lagres på kunden, ikke på den enkelte saken. Endrer du den her, gjelder den samme instruksen for alle saker hos kunden.',
+                                            },
+                                            {
+                                                title: tai.instructions_page_help_item_what_title ?? 'Faste føringer for kunden',
+                                                text: tai.instructions_page_help_item_what_text ?? 'AI-instruksen er faste regler som tas med når AI-en lager forslag til kravsvar, kravvurderinger og andre tekstutkast. Den brukes ikke til kravekstraksjon, dokumentimport eller bygging av Enterprise Wiki.',
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: tai.instructions_page_help_section_how ?? 'Hva bør du skrive?',
+                                        items: [
+                                            {
+                                                title: tai.instructions_page_help_item_write_title ?? 'Korte og konkrete regler',
+                                                text: tai.instructions_page_help_item_write_text ?? 'Beskriv hvilke ord og begreper som skal brukes, hvilke formuleringer som skal unngås, og hvilken stil svarene skal ha.',
+                                            },
+                                            {
+                                                title: tai.instructions_page_help_item_avoid_title ?? 'Ikke legg inn sensitive data',
+                                                text: tai.instructions_page_help_item_avoid_text ?? 'Ikke legg inn passord, hemmeligheter, sensitive personopplysninger eller informasjon som ikke skal brukes i AI-genererte svar.',
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: tai.instructions_page_help_section_example ?? 'Eksempel',
+                                        items: [
+                                            {
+                                                title: tai.instructions_page_help_item_example_title ?? 'Konkret eksempel på instrukser',
+                                                text: tai.instructions_page_help_item_example_text ?? 'Skriv svar på norsk bokmål i en formell og presis tone. Bruk betegnelsen Kunde om oppdragsgiver og Leverandør om oss. Unngå uforpliktende formuleringer som "kan", "bør" og "vi vil forsøke". Svar skal være konkrete, forpliktende og egnet for offentlige anbud.',
+                                            },
+                                        ],
+                                    },
+                                ]}
+                            />
                         </div>
 
                         <form onSubmit={submit} className="space-y-4">

@@ -2597,12 +2597,6 @@ export default function WikiShow({
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             {page.title}
                         </h1>
-                        <PageHelpButton
-                            buttonLabel={tw.page_help_button ?? 'Hjelp'}
-                            title={tw.show_page_help_title ?? 'Slik fungerer Wiki-siden'}
-                            intro={tw.show_page_help_intro ?? 'Forklarer hva du ser på denne Wiki-siden: hva som er publisert, hva som er under arbeid, hvem som har ansvar, og hva som skjer når du sender siden videre.'}
-                            sections={getWikiShowHelpSections(tw)}
-                        />
                         <div className="mt-1 flex flex-wrap gap-2">
                             {page.page_type && (
                                 <Badge
@@ -2615,11 +2609,19 @@ export default function WikiShow({
                                 cls={PAGE_STATUS_STYLES[page.status] ?? 'bg-slate-200 text-slate-600'}
                             />
                         </div>
-                        {canDeletePage && (
-                            <div className="ml-auto mt-1">
-                                <PageActionsMenu tw={tw} page={page} />
-                            </div>
-                        )}
+                        <div className="ml-auto flex flex-wrap items-center gap-2">
+                            <PageHelpButton
+                                buttonLabel={tw.page_help_button ?? 'Hjelp'}
+                                title={tw.show_page_help_title ?? 'Slik fungerer Wiki-siden'}
+                                intro={tw.show_page_help_intro ?? 'Forklarer hva du ser på denne Wiki-siden: hva som er publisert, hva som er under arbeid, hvem som har ansvar, og hva som skjer når du sender siden videre.'}
+                                sections={getWikiShowHelpSections(tw)}
+                            />
+                            {canDeletePage && (
+                                <div className="mt-1">
+                                    <PageActionsMenu tw={tw} page={page} />
+                                </div>
+                            )}
+                        </div>
                     </div>
                     {current_version && (
                         <p className="text-base text-slate-400">

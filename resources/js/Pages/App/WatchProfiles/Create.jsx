@@ -25,19 +25,19 @@ export default function WatchProfilesCreate({ ownerOptions, defaultOwnerScope, d
     return (
         <CustomerAppLayout title="Legg til Watch Profile" showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-3">
+                <section className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1.5">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Legg til Watch Profile</h1>
-                        <PageHelpButton
-                            buttonLabel={wp.page_help_button ?? 'Hjelp'}
-                            title={wp.form_page_help_title ?? 'Om Watch Profile'}
-                            intro={wp.form_page_help_intro ?? 'En Watch Profile bestemmer hvilke kunngjøringer som fanges opp for deg. Kriteriene du setter her avgjør hva som gir treff.'}
-                            sections={getWatchProfileHelpSections(wp)}
-                        />
+                        <p className="max-w-3xl text-base leading-7 text-slate-600">
+                            Opprett en personlig eller avdelingsscopet watch profile som brukes direkte mot Doffin live search.
+                        </p>
                     </div>
-                    <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        Opprett en personlig eller avdelingsscopet watch profile som brukes direkte mot Doffin live search.
-                    </p>
+                    <PageHelpButton
+                        buttonLabel={wp.page_help_button ?? 'Hjelp'}
+                        title={wp.form_page_help_title ?? 'Om Watch Profile'}
+                        intro={wp.form_page_help_intro ?? 'En Watch Profile bestemmer hvilke kunngjøringer som fanges opp for deg. Kriteriene du setter her avgjør hva som gir treff.'}
+                        sections={getWatchProfileHelpSections(wp)}
+                    />
                 </section>
 
                 <WatchProfileForm

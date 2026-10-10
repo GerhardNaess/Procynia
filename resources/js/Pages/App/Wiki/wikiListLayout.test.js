@@ -20,7 +20,8 @@ const pagesTab = index.slice(index.indexOf('function PagesTab'), index.indexOf('
  */
 describe('the page introduces itself without a card', () => {
     test('the header is a header, not a panel', () => {
-        assert.match(index, /<header className="flex flex-col gap-4 overflow-visible/);
+        // Title on the left, the page help at the top right — the layout every page header uses.
+        assert.match(index, /<header className="flex flex-wrap items-start justify-between gap-4 overflow-visible">/);
         assert.ok(! index.includes('rounded-3xl border border-slate-200 bg-white\/80 p-6 shadow-sm'));
     });
 

@@ -128,28 +128,28 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
     return (
         <CustomerAppLayout title="Konkurrenter" showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <div className="flex items-center gap-3">
+                <section className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1.5">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Konkurrenter</h1>
-                        <PageHelpButton
-                            buttonLabel={ts.page_help_button ?? 'Hjelp'}
-                            title={ts.page_help_title ?? 'Konkurrenter'}
-                            intro={ts.page_help_intro}
-                            sections={[
-                                {
-                                    title: ts.page_help_section_about ?? 'Hva vises her?',
-                                    items: [
-                                        { title: ts.page_help_item_harvested_title ?? 'Høstede konkurrenter', text: ts.page_help_item_harvested_text ?? 'Listen viser leverandører registrert som vinnere eller deltakere i kunngjøringer fra Doffin.' },
-                                        { title: ts.page_help_item_notices_title ?? 'Tilknyttede kunngjøringer', text: ts.page_help_item_notices_text ?? 'Klikk på en konkurrent for å se hvilke kunngjøringer de er koblet til.' },
-                                        { title: ts.page_help_item_search_title ?? 'Søk og filtrering', text: ts.page_help_item_search_text ?? 'Søk på leverandørnavn eller organisasjonsnummer for å finne spesifikke konkurrenter raskt.' },
-                                    ],
-                                },
-                            ]}
-                        />
+                        <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                            {ts.page_subtitle ?? 'Oversikt over høstede Doffin-konkurrenter og tilknyttede kunngjøringer.'}
+                        </p>
                     </div>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        {ts.page_subtitle ?? 'Oversikt over høstede Doffin-konkurrenter og tilknyttede kunngjøringer.'}
-                    </p>
+                    <PageHelpButton
+                        buttonLabel={ts.page_help_button ?? 'Hjelp'}
+                        title={ts.page_help_title ?? 'Konkurrenter'}
+                        intro={ts.page_help_intro}
+                        sections={[
+                            {
+                                title: ts.page_help_section_about ?? 'Hva vises her?',
+                                items: [
+                                    { title: ts.page_help_item_harvested_title ?? 'Høstede konkurrenter', text: ts.page_help_item_harvested_text ?? 'Listen viser leverandører registrert som vinnere eller deltakere i kunngjøringer fra Doffin.' },
+                                    { title: ts.page_help_item_notices_title ?? 'Tilknyttede kunngjøringer', text: ts.page_help_item_notices_text ?? 'Klikk på en konkurrent for å se hvilke kunngjøringer de er koblet til.' },
+                                    { title: ts.page_help_item_search_title ?? 'Søk og filtrering', text: ts.page_help_item_search_text ?? 'Søk på leverandørnavn eller organisasjonsnummer for å finne spesifikke konkurrenter raskt.' },
+                                ],
+                            },
+                        ]}
+                    />
                 </section>
 
                 <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">

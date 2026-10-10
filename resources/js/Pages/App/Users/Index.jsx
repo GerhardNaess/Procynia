@@ -43,37 +43,37 @@ export default function UsersIndex({ users }) {
     return (
         <CustomerAppLayout title="Brukere" showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <div className="flex items-center gap-3">
+                <section className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1.5">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Brukere</h1>
-                        <PageHelpButton
-                            buttonLabel={tu.page_help_button ?? 'Hjelp'}
-                            title={tu.page_help_title ?? 'Om Brukere'}
-                            intro={tu.page_help_intro ?? 'Brukersiden brukes til å administrere hvem som har tilgang til kundemiljøet, hvilken rolle de har og hvilken avdeling de tilhører.'}
-                            sections={[
-                                {
-                                    title: tu.page_help_section_roles ?? 'Roller og tilgang',
-                                    items: [
-                                        {
-                                            title: tu.page_help_item_system_owner_title ?? 'System Owner',
-                                            text: tu.page_help_item_system_owner_text ?? 'Har full tilgang: kan administrere brukere, avdelinger, bevakningsprofiler og abonnement.',
-                                        },
-                                        {
-                                            title: tu.page_help_item_bid_manager_title ?? 'Bid-manager',
-                                            text: tu.page_help_item_bid_manager_text ?? 'Administrerer saker i tildelte avdelinger og kan ha utvidet innsyn i porteføljen.',
-                                        },
-                                        {
-                                            title: tu.page_help_item_contributor_title ?? 'Bidragsyter',
-                                            text: tu.page_help_item_contributor_text ?? 'Kan jobbe med saker de er tilknyttet. Tilgangen styres av bid-manager og System Owner.',
-                                        },
-                                    ],
-                                },
-                            ]}
-                        />
+                        <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                            Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.
+                        </p>
                     </div>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.
-                    </p>
+                    <PageHelpButton
+                        buttonLabel={tu.page_help_button ?? 'Hjelp'}
+                        title={tu.page_help_title ?? 'Om Brukere'}
+                        intro={tu.page_help_intro ?? 'Brukersiden brukes til å administrere hvem som har tilgang til kundemiljøet, hvilken rolle de har og hvilken avdeling de tilhører.'}
+                        sections={[
+                            {
+                                title: tu.page_help_section_roles ?? 'Roller og tilgang',
+                                items: [
+                                    {
+                                        title: tu.page_help_item_system_owner_title ?? 'System Owner',
+                                        text: tu.page_help_item_system_owner_text ?? 'Har full tilgang: kan administrere brukere, avdelinger, bevakningsprofiler og abonnement.',
+                                    },
+                                    {
+                                        title: tu.page_help_item_bid_manager_title ?? 'Bid-manager',
+                                        text: tu.page_help_item_bid_manager_text ?? 'Administrerer saker i tildelte avdelinger og kan ha utvidet innsyn i porteføljen.',
+                                    },
+                                    {
+                                        title: tu.page_help_item_contributor_title ?? 'Bidragsyter',
+                                        text: tu.page_help_item_contributor_text ?? 'Kan jobbe med saker de er tilknyttet. Tilgangen styres av bid-manager og System Owner.',
+                                    },
+                                ],
+                            },
+                        ]}
+                    />
                 </section>
 
                 <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">

@@ -484,27 +484,27 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                             <div className="inline-flex items-center rounded-full border border-white/70 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 shadow-sm">
                                 {roleContext.label ?? 'Oppfølging'}
                             </div>
-                            <div className="space-y-2">
-                                <div className="flex items-center gap-3">
+                            <div className="flex flex-wrap items-start justify-between gap-4">
+                                <div className="min-w-0 space-y-2">
                                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{ic.page_help_title ?? 'Oppfølging'}</h1>
-                                    <PageHelpButton
-                                        buttonLabel={ic.page_help_button ?? 'Hjelp'}
-                                        title={ic.page_help_title ?? 'Oppfølging'}
-                                        intro={pageHelp.intro}
-                                        sections={pageHelp.sections}
-                                    />
+                                    <p className="max-w-3xl text-[15px] leading-7 text-slate-600">
+                                        {roleContext.headline ?? 'Opprett og følg opp aksjoner, avklaringer og beslutninger på tvers av saker du har tilgang til.'}
+                                    </p>
+                                    <p className="max-w-3xl text-[14px] leading-7 text-slate-500">
+                                        {roleContext.subheadline ?? 'Følg opp saker, avklaringer og beslutninger uten å åpne hver sak manuelt.'}
+                                    </p>
+                                    {roleContext.is_case_operational ? (
+                                        <div className="inline-flex rounded-full border border-violet-200 bg-white/80 px-3 py-1 text-xs font-semibold text-violet-700 shadow-sm">
+                                            Operativ visning aktivert av aktive saker
+                                        </div>
+                                    ) : null}
                                 </div>
-                                <p className="max-w-3xl text-[15px] leading-7 text-slate-600">
-                                    {roleContext.headline ?? 'Opprett og følg opp aksjoner, avklaringer og beslutninger på tvers av saker du har tilgang til.'}
-                                </p>
-                                <p className="max-w-3xl text-[14px] leading-7 text-slate-500">
-                                    {roleContext.subheadline ?? 'Følg opp saker, avklaringer og beslutninger uten å åpne hver sak manuelt.'}
-                                </p>
-                                {roleContext.is_case_operational ? (
-                                    <div className="inline-flex rounded-full border border-violet-200 bg-white/80 px-3 py-1 text-xs font-semibold text-violet-700 shadow-sm">
-                                        Operativ visning aktivert av aktive saker
-                                    </div>
-                                ) : null}
+                                <PageHelpButton
+                                    buttonLabel={ic.page_help_button ?? 'Hjelp'}
+                                    title={ic.page_help_title ?? 'Oppfølging'}
+                                    intro={pageHelp.intro}
+                                    sections={pageHelp.sections}
+                                />
                             </div>
                         </div>
 

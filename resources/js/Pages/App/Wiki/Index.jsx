@@ -3504,25 +3504,23 @@ export default function WikiIndex({
             <div className="space-y-6">
                 {/* No card. The page title is the page, not an object on it — a border and a
                     shadow around it made the header compete with the content it introduces. */}
-                <header className="flex flex-col gap-4 overflow-visible sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                                {tw.index_title ?? 'Wiki'}
-                            </h1>
-                            {wikiHelpContent && (
-                                <PageHelpButton
-                                    buttonLabel={tw.page_help_button ?? 'Hjelp'}
-                                    title={wikiHelpContent.title}
-                                    intro={wikiHelpContent.intro}
-                                    sections={wikiHelpContent.sections}
-                                />
-                            )}
-                        </div>
+                <header className="flex flex-wrap items-start justify-between gap-4 overflow-visible">
+                    <div className="min-w-0 space-y-2">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                            {tw.index_title ?? 'Wiki'}
+                        </h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
                             {tw.index_description ?? 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.'}
                         </p>
                     </div>
+                    {wikiHelpContent && (
+                        <PageHelpButton
+                            buttonLabel={tw.page_help_button ?? 'Hjelp'}
+                            title={wikiHelpContent.title}
+                            intro={wikiHelpContent.intro}
+                            sections={wikiHelpContent.sections}
+                        />
+                    )}
                 </header>
 
                 {activeTab === 'pages' && (

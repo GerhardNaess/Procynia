@@ -1579,17 +1579,17 @@ export default function NoticeIndex({
     return (
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
-                <section className="space-y-1.5">
-                    <div className="flex items-center gap-3">
+                <section className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1.5">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{pageHeading}</h1>
-                        <PageHelpButton
-                            buttonLabel={nt.page_help_button ?? 'Hjelp'}
-                            title={nt.page_help_title ?? 'Om Kunngjøringer'}
-                            intro={nt.page_help_intro ?? 'Kunngjøringer er inngangen til nye anbudsmuligheter.'}
-                            sections={getNoticesHelpSections(nt)}
-                        />
+                        <p className="text-base leading-6 text-slate-600">{pageSubtitle}</p>
                     </div>
-                    <p className="text-base leading-6 text-slate-600">{pageSubtitle}</p>
+                    <PageHelpButton
+                        buttonLabel={nt.page_help_button ?? 'Hjelp'}
+                        title={nt.page_help_title ?? 'Om Kunngjøringer'}
+                        intro={nt.page_help_intro ?? 'Kunngjøringer er inngangen til nye anbudsmuligheter.'}
+                        sections={getNoticesHelpSections(nt)}
+                    />
                 </section>
 
                 {/* grid-cols-1 at every width, not only from xl: without it the implicit track is `auto`

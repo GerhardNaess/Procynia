@@ -51,20 +51,20 @@ describe('the subscription page uses the shared page layout', () => {
 });
 
 describe('the header block matches the reference', () => {
-    /** The header section: the title row plus the intro paragraphs beneath it. */
+    /** The header section: title and intro on the left, the page help on the right. */
     function header(source) {
-        const start = source.indexOf('<section className="space-y-1.5">');
+        const start = source.indexOf('<section className="flex flex-wrap items-start justify-between gap-4">');
         assert.notEqual(start, -1, 'the header section is no longer recognisable');
 
         return source.slice(start, source.indexOf('</section>', start));
     }
 
-    test('help sits beside the title, not pushed to the far edge', () => {
+    test('title and intro sit on the left, the help at the top right', () => {
         for (const [name, source] of [['billing', billing], ['reference', referenceHeader]]) {
             const row = header(source);
 
-            assert.match(row, /<div className="flex items-center gap-3">/, `${name}: title row`);
-            assert.ok(!row.includes('justify-between'), `${name}: help must not be pushed away from the title`);
+            assert.match(row, /<div className="min-w-0 space-y-1\.5">/, `${name}: left column`);
+            assert.ok(row.indexOf('</h1>') < row.indexOf('<PageHelpButton'), `${name}: help follows the title column`);
         }
     });
 
@@ -74,10 +74,10 @@ describe('the header block matches the reference', () => {
         assert.equal(heading(billing), heading(referenceHeader));
     });
 
-    test('the page help button is part of the title row', () => {
+    test('the page help button is outside the title column', () => {
         const row = header(billing);
 
-        assert.ok(row.indexOf('<PageHelpButton') < row.indexOf('</div>'), 'help belongs inside the title row');
+        assert.ok(row.lastIndexOf('</p>') < row.indexOf('<PageHelpButton'), 'help belongs to the right of the title and intro');
     });
 
     test('the intro text sits directly under the title, in the reference measure', () => {

@@ -30,7 +30,8 @@ const region = (name) => {
  */
 describe('the page introduces itself the way the Wiki list does', () => {
     test('the header is a header, with no card around it', () => {
-        assert.match(source, /<header className="space-y-2">/);
+        // Title on the left, the page help at the top right — the layout every page header uses.
+        assert.match(source, /<header className="flex flex-wrap items-start justify-between gap-4">/);
         assert.match(source, /<h1 className="text-4xl font-semibold tracking-tight text-slate-950">/);
     });
 

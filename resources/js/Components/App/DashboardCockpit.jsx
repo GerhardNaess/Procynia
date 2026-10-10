@@ -582,21 +582,21 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
 
     return (
         <div className="space-y-8">
-            <header className="space-y-2">
-                <div className="flex items-center gap-3">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0 space-y-2">
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                         {pageTitle}
                     </h1>
-                    <PageHelpButton
-                        buttonLabel={texts.page_help_button ?? 'Hjelp'}
-                        title={texts.page_help_title ?? 'Om dashboardet'}
-                        intro={texts.page_help_intro ?? 'Dashboardet svarer på tre spørsmål: hva krever oppfølging nå, hvor ligger sakene, og hva ble resultatet.'}
-                        sections={getDashboardHelpSections(texts)}
-                    />
+                    <p className="max-w-3xl text-base leading-6 text-slate-600">
+                        {pageSubtitle}
+                    </p>
                 </div>
-                <p className="max-w-3xl text-base leading-6 text-slate-600">
-                    {pageSubtitle}
-                </p>
+                <PageHelpButton
+                    buttonLabel={texts.page_help_button ?? 'Hjelp'}
+                    title={texts.page_help_title ?? 'Om dashboardet'}
+                    intro={texts.page_help_intro ?? 'Dashboardet svarer på tre spørsmål: hva krever oppfølging nå, hvor ligger sakene, og hva ble resultatet.'}
+                    sections={getDashboardHelpSections(texts)}
+                />
             </header>
 
             <section className="space-y-4">

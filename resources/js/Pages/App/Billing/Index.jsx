@@ -279,41 +279,41 @@ export default function BillingIndex() {
                     </div>
                 )}
 
-                <section className="space-y-1.5">
-                    <div className="flex items-center gap-3">
+                <section className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1.5">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tb.title ?? 'Abonnement'}</h1>
-                        <PageHelpButton
-                            buttonLabel={tb.page_help_button ?? 'Hjelp'}
-                            title={tb.page_help_title ?? 'Om abonnementet'}
-                            intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og separat AI-kapasitet. Basis er grunnproduktet. Opsjoner gir tilgang til flere moduler. AI-kapasiteten deles av alle funksjoner som bruker AI.'}
-                            sections={[
-                                {
-                                    title: tb.page_help_section_overview ?? 'Hva du finner her',
-                                    items: [
-                                        {
-                                            title: tb.page_help_item_subscription_title ?? 'Basis',
-                                            text: tb.page_help_item_subscription_text ?? 'Grunnproduktet: hvordan abonnementet faktureres og hvor mange brukere som er inkludert. Her kan abonnementet også sies opp.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_modules_title ?? 'Opsjoner',
-                                            text: tb.page_help_item_modules_text ?? 'Moduler som kan bestilles og avbestilles hver for seg. Avbestilling sletter ikke data.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
-                                            text: tb.page_help_item_ai_capacity_text ?? 'AI-kapasiteten beregnes ut fra virksomhetens brukere og aktive moduler. Valgt nivå bestemmer hvor mye ekstra kapasitet virksomheten har. Alle AI-funksjoner bruker den samme kapasiteten.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
-                                            text: tb.page_help_item_invoices_text ?? 'Viser utestående beløp, fakturahistorikk og eventuelle PDF-er.',
-                                        },
-                                    ],
-                                },
-                            ]}
-                        />
+                        <p className="max-w-3xl text-base leading-7 text-slate-600">
+                            {tb.subtitle ?? 'Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer.'}
+                        </p>
                     </div>
-                    <p className="max-w-3xl text-base leading-7 text-slate-600">
-                        {tb.subtitle ?? 'Oversikt over Basis, opsjoner, AI-kapasitet og fakturaer.'}
-                    </p>
+                    <PageHelpButton
+                        buttonLabel={tb.page_help_button ?? 'Hjelp'}
+                        title={tb.page_help_title ?? 'Om abonnementet'}
+                        intro={tb.page_help_intro ?? 'Abonnementet består av Basis, valgfrie opsjoner og separat AI-kapasitet. Basis er grunnproduktet. Opsjoner gir tilgang til flere moduler. AI-kapasiteten deles av alle funksjoner som bruker AI.'}
+                        sections={[
+                            {
+                                title: tb.page_help_section_overview ?? 'Hva du finner her',
+                                items: [
+                                    {
+                                        title: tb.page_help_item_subscription_title ?? 'Basis',
+                                        text: tb.page_help_item_subscription_text ?? 'Grunnproduktet: hvordan abonnementet faktureres og hvor mange brukere som er inkludert. Her kan abonnementet også sies opp.',
+                                    },
+                                    {
+                                        title: tb.page_help_item_modules_title ?? 'Opsjoner',
+                                        text: tb.page_help_item_modules_text ?? 'Moduler som kan bestilles og avbestilles hver for seg. Avbestilling sletter ikke data.',
+                                    },
+                                    {
+                                        title: tb.page_help_item_ai_capacity_title ?? 'AI-kapasitet',
+                                        text: tb.page_help_item_ai_capacity_text ?? 'AI-kapasiteten beregnes ut fra virksomhetens brukere og aktive moduler. Valgt nivå bestemmer hvor mye ekstra kapasitet virksomheten har. Alle AI-funksjoner bruker den samme kapasiteten.',
+                                    },
+                                    {
+                                        title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
+                                        text: tb.page_help_item_invoices_text ?? 'Viser utestående beløp, fakturahistorikk og eventuelle PDF-er.',
+                                    },
+                                ],
+                            },
+                        ]}
+                    />
                 </section>
 
                 {showAddonsWithoutSubscriptionWarning && (

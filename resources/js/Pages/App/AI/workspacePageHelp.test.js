@@ -33,33 +33,33 @@ describe('The help trigger reuses the shared PageHelp concept', () => {
     });
 });
 
-describe('Placement matches Oversikt', () => {
-    test('the trigger sits directly after the page heading', () => {
-        for (const source of [overview, show]) {
-            assert.match(source, /<\/h1>\s*(\{\/\*[\s\S]*?\*\/\}\s*)?<PageHelpButton/);
-        }
-    });
-
-    test('it lives in the title row, not in the case-documents card', () => {
-        const titleRow = show.slice(
-            show.indexOf('<div className="flex flex-wrap items-center gap-3">'),
-            show.indexOf('case_workspace_intro'),
+describe('Placement matches every other page: top right of the header', () => {
+    test('Oversikt: title and intro on the left, the trigger on the right', () => {
+        const header = overview.slice(
+            overview.indexOf('<section className="flex flex-wrap items-start justify-between gap-4">'),
+            overview.indexOf('</section>'),
         );
 
-        assert.ok(titleRow.includes('<PageHelpButton'), 'the trigger belongs to the heading row');
-        // The row already wraps, so narrow screens reflow instead of overlapping.
-        assert.ok(titleRow.includes('flex-wrap') || show.includes('flex flex-wrap items-center gap-3'));
+        assert.ok(header.includes('<div className="min-w-0 space-y-1.5">'), 'title and intro share the left column');
+        assert.ok(header.indexOf('index_subtitle') < header.indexOf('<PageHelpButton'), 'the trigger follows the left column');
+    });
+
+    test('I arbeid: the trigger leads the right-hand group, before the back-link', () => {
+        const right = show.slice(show.indexOf('case_workspace_intro'), show.indexOf('case_workspace_back_to_case'));
+
+        assert.ok(right.includes('<div className="flex flex-wrap items-center gap-2">'), 'the right-hand group wraps on narrow screens');
+        assert.ok(right.includes('<PageHelpButton'), 'the trigger is in the right-hand group');
     });
 
     test('the existing status badge and back-link are left where they were', () => {
         assert.match(show, /aiStatusMeta\.className/);
         assert.match(show, /case_workspace_back_to_case/);
-        assert.ok(show.indexOf('<PageHelpButton') < show.indexOf('case_workspace_back_to_case'));
+        assert.ok(show.indexOf('aiStatusMeta.className') < show.indexOf('<PageHelpButton'), 'the badge stays beside the title');
     });
 });
 
 describe('Help content describes what the page actually does', () => {
-    const sections = show.slice(show.indexOf('<PageHelpButton'), show.indexOf('aiStatusMeta.className'));
+    const sections = show.slice(show.indexOf('<PageHelpButton'), show.indexOf('case_workspace_back_to_case'));
 
     test('all four sections are wired', () => {
         for (const key of [
