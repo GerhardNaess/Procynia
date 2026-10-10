@@ -38,6 +38,8 @@ test('an objective is created, edited, closed, reopened and deleted by someone w
     }
     await page.getByRole('checkbox', { name: areaName, exact: true }).check();
     await page.getByRole('button', { name: 'Lagre rolle' }).click();
+    // Each module's matrix sits in a section that starts closed.
+    await page.getByRole('button', { name: /^Mål og KPI/ }).click();
     await expect(page.locator('tr', { hasText: roleName }).filter({ hasText: areaName }).first()).toBeVisible();
 
     await page.goto('/app/customer-environment?tab=users');

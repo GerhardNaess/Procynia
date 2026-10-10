@@ -40,6 +40,8 @@ test('a role with a fagområde lets its holder register and read risks there', a
     await page.getByRole('button', { name: 'Lagre rolle' }).click();
 
     // The Risiko table shows the role with its area, and the area lists the role.
+    // Each module's matrix sits in a section that starts closed.
+    await page.getByRole('button', { name: /^Risiko/ }).click();
     await expect(page.locator('tr', { hasText: roleName }).filter({ hasText: areaName }).first()).toBeVisible();
 
     // A second role with Fagområder = Alle reads as «Alle» in the Risiko table and is listed on

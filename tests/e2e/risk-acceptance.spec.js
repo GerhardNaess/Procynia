@@ -31,7 +31,7 @@ test('residual risk is accepted, revoked and accepted again', async ({ page }) =
     await page.getByRole('checkbox', { name: 'Akseptere restrisiko', exact: true }).check();
     await page.getByRole('checkbox', { name: areaName, exact: true }).check();
     await page.getByRole('button', { name: 'Lagre rolle' }).click();
-    await expect(page.locator('tr', { hasText: roleName }).first()).toBeVisible();
+    await expect(page.locator('tr', { hasText: roleName }).filter({ visible: true }).first()).toBeVisible();
 
     await page.goto('/app/customer-environment?tab=users');
     await page.locator('tbody tr', { hasText: USER.email }).first().getByRole('link', { name: 'Rediger' }).click();

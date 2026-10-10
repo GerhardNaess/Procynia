@@ -36,7 +36,7 @@ test('system owner goes from the empty register to Tilganger and back with acces
     await page.getByRole('checkbox', { name: 'Se risikoer', exact: true }).check();
     await page.getByRole('checkbox', { name: areaName, exact: true }).check();
     await page.getByRole('button', { name: 'Lagre rolle' }).click();
-    await expect(page.locator('tr', { hasText: roleName }).first()).toBeVisible();
+    await expect(page.locator('tr', { hasText: roleName }).filter({ visible: true }).first()).toBeVisible();
 
     // Give the role to oneself through Rediger bruker.
     const editOwn = async (check) => {
