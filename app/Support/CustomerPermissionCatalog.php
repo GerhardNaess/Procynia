@@ -28,6 +28,8 @@ final class CustomerPermissionCatalog
 
     public const DOMAIN_SUPPLIER = 'supplier';
 
+    public const DOMAIN_MANAGEMENT_REVIEW = 'management_review';
+
     public const QUALITY_VIEW = 'quality.view';
 
     public const QUALITY_CREATE = 'quality.create';
@@ -159,6 +161,23 @@ final class CustomerPermissionCatalog
     /** Deleting a supplier registered by mistake, while nothing has been recorded on it. */
     public const SUPPLIER_DELETE = 'supplier.delete';
 
+    /*
+     * Ledelsens gjennomgåelse (docs/management-review-v1-plan.md §8). Customer-wide — a review is of
+     * the management system as a whole; its fagområde scope is a filter on the basis, never an access
+     * boundary — and not an explicit-grant domain: System Owner reads and runs reviews. What a review
+     * shows from another module is still gated by that module's own permission, on every read.
+     */
+    public const MANAGEMENT_REVIEW_VIEW = 'management_review.view';
+
+    /** Creating and changing draft reviews: participants, assessments, conclusion, decisions and tiltak. */
+    public const MANAGEMENT_REVIEW_EDIT = 'management_review.edit';
+
+    /** Finalizing a review, which freezes it, and registering corrections (rettelser) afterwards. */
+    public const MANAGEMENT_REVIEW_FINALIZE = 'management_review.finalize';
+
+    /** Deleting a draft review, while no tiltak from it has been handed to Avvik og forbedringer. */
+    public const MANAGEMENT_REVIEW_DELETE = 'management_review.delete';
+
     /**
      * Permission keys grouped by the domain they govern, in the order they should be presented.
      *
@@ -215,6 +234,12 @@ final class CustomerPermissionCatalog
                 self::SUPPLIER_ASSESS,
                 self::SUPPLIER_ASSURE,
                 self::SUPPLIER_DELETE,
+            ],
+            self::DOMAIN_MANAGEMENT_REVIEW => [
+                self::MANAGEMENT_REVIEW_VIEW,
+                self::MANAGEMENT_REVIEW_EDIT,
+                self::MANAGEMENT_REVIEW_FINALIZE,
+                self::MANAGEMENT_REVIEW_DELETE,
             ],
         ];
     }

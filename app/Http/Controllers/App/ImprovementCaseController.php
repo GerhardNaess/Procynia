@@ -18,6 +18,7 @@ use App\Services\Improvements\ImprovementCaseAccessService;
 use App\Services\Improvements\ImprovementCaseCreator;
 use App\Services\Improvements\ImprovementCaseLifecycleService;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
+use App\Services\ManagementReview\ManagementReviewDecisionService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
@@ -54,6 +55,7 @@ class ImprovementCaseController extends Controller
         private readonly ComplianceAuditFindingHandoffService $auditFindings,
         private readonly SupplierImprovementHandoffService $supplierHandoff,
         private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
+        private readonly ManagementReviewDecisionService $managementReviewDecisions,
     ) {}
 
     public function index(Request $request): Response
@@ -230,6 +232,9 @@ class ImprovementCaseController extends Controller
             // Leverandøroppfølging *and* the person can read that supplier there. Nothing about the
             // supplier otherwise.
             'supplier_origin' => $this->supplierHandoff->provenanceFor($user, $case),
+            // «Fra Ledelsens gjennomgåelse»: null unless a tiltak from a review is followed up in this
+            // case and the person can read that review.
+            'review_origin' => $this->managementReviewDecisions->provenanceFor($user, $case),
             'today' => now()->toDateString(),
         ]);
     }

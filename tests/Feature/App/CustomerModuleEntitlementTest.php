@@ -60,7 +60,7 @@ class CustomerModuleEntitlementTest extends TestCase
     {
         $service = app(ModuleEntitlementService::class);
 
-        $this->assertSame(['wiki', 'quality', 'improvements'], $service->modulesForPackage('basis'));
+        $this->assertSame(['wiki', 'quality', 'improvements', 'management_review'], $service->modulesForPackage('basis'));
 
         // Each option carries its own module and nothing else.
         foreach (['risk', 'objectives', 'compliance', 'supplier'] as $option) {
@@ -148,7 +148,7 @@ class CustomerModuleEntitlementTest extends TestCase
 
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
-        $this->assertSame(['wiki', 'quality', 'improvements'], $modules);
+        $this->assertSame(['wiki', 'quality', 'improvements', 'management_review'], $modules);
     }
 
     public function test_overlapping_packages_resolve_to_a_union_without_duplicates(): void
@@ -161,7 +161,7 @@ class CustomerModuleEntitlementTest extends TestCase
         // Basis and Anbud both carry Wiki; it is listed once.
         $modules = app(ModuleEntitlementService::class)->modulesFor($customer->fresh());
 
-        $this->assertSame(['wiki', 'tender', 'quality', 'improvements', 'compliance'], $modules);
+        $this->assertSame(['wiki', 'tender', 'quality', 'improvements', 'compliance', 'management_review'], $modules);
     }
 
     public function test_a_package_that_is_not_active_grants_nothing(): void
@@ -260,7 +260,7 @@ class CustomerModuleEntitlementTest extends TestCase
         $this->assertSame('basis', $entitlement?->package_key);
         $this->assertSame(CustomerPackageEntitlement::STATUS_ACTIVE, $entitlement->status);
         $this->assertSame(['basis'], $service->activePackageKeys($customer->fresh()));
-        $this->assertSame(['wiki', 'quality', 'improvements'], $service->modulesFor($customer->fresh()));
+        $this->assertSame(['wiki', 'quality', 'improvements', 'management_review'], $service->modulesFor($customer->fresh()));
 
         foreach (['risk', 'objectives', 'compliance', 'tender', 'supplier'] as $module) {
             $this->assertFalse($service->hasModule($customer->fresh(), $module), $module);

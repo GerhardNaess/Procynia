@@ -77,7 +77,7 @@ class PackageChangeTest extends TestCase
             $this->assertSame(['basis', $option], $this->activeKeys($customer), $option);
             $this->assertSame(
                 [$option],
-                array_values(array_diff(app(ModuleEntitlementService::class)->modulesFor($customer), ['wiki', 'quality', 'improvements'])),
+                array_values(array_diff(app(ModuleEntitlementService::class)->modulesFor($customer), ['wiki', 'quality', 'improvements', 'management_review'])),
                 "{$option} adds its own module and nothing else",
             );
         }

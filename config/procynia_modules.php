@@ -48,6 +48,9 @@ return [
         // Leverandøroppfølging — an option. Its routes are `app.supplier-management.`, never
         // `app.suppliers.`, which is Anbud's.
         'supplier' => ['sort_order' => 50],
+        // Ledelsens gjennomgåelse. Part of Basis: every management system needs one, and it works
+        // with whatever other modules the customer holds (docs/management-review-v1-plan.md §1).
+        'management_review' => ['sort_order' => 55],
         'contracts' => ['sort_order' => 60],
     ],
 
@@ -65,7 +68,7 @@ return [
             'kind' => 'base',
             'orderable' => true,
             'sort_order' => 10,
-            'modules' => ['wiki', 'quality', 'improvements'],
+            'modules' => ['wiki', 'quality', 'improvements', 'management_review'],
         ],
 
         // The options, one module each, in product order.
@@ -145,6 +148,7 @@ return [
         // Leverandøroppfølging. Not `app.suppliers.`: that name, and /app/suppliers, are Anbud's
         // Doffin competitor view (Konkurrenter) above.
         'app.supplier-management.' => 'supplier',
+        'app.management-review.' => 'management_review',
     ],
 
 ];

@@ -145,7 +145,7 @@ class GovernanceControllerTest extends TestCase
         $case = $this->improvementCase($customer, $this->area($customer, 'HR'), 'Avvik ingen rolle');
 
         $modules = $this->governancePage($owner)['props']['modules'];
-        $this->assertSame(['quality', 'risk', 'objectives', 'improvements'], array_column($modules, 'key'));
+        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'management_review'], array_column($modules, 'key'));
 
         foreach ($modules as $module) {
             $this->assertSame(['key', 'href'], array_keys($module));
@@ -160,14 +160,14 @@ class GovernanceControllerTest extends TestCase
         // With a role of their own that grants compliance.view, the card appears like anyone's.
         $this->grantAll($customer, $owner, [CustomerPermissionCatalog::COMPLIANCE_VIEW]);
         $this->assertSame(
-            ['quality', 'risk', 'objectives', 'improvements', 'compliance'],
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'management_review'],
             array_column($this->governancePage($owner->fresh())['props']['modules'], 'key'),
         );
 
         // A customer that holds only Basis: the System Owner's permissions do not conjure Risiko.
         ['owner' => $qualityOwner] = $this->context('basis');
         $this->assertSame(
-            ['quality', 'improvements'],
+            ['quality', 'improvements', 'management_review'],
             array_column($this->governancePage($qualityOwner)['props']['modules'], 'key'),
         );
     }
@@ -192,7 +192,7 @@ class GovernanceControllerTest extends TestCase
     public function test_the_controller_and_the_rail_name_the_same_modules_in_the_same_order(): void
     {
         $rail = file_get_contents(resource_path('js/Support/appModules.js'));
-        preg_match_all("/key: '([a-z]+)',\\n(?:(?!\\n    \\{).)*?workspace: 'governance'/s", $rail, $matches);
+        preg_match_all("/key: '([a-z_]+)',\\n(?:(?!\\n    \\{).)*?workspace: 'governance'/s", $rail, $matches);
 
         $this->assertSame(array_keys(GovernanceController::MODULES), $matches[1]);
 

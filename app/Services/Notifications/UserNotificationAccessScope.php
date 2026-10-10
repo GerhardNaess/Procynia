@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Improvements\ImprovementCaseAccessService;
+use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Permissions\CustomerPermissionService;
@@ -57,13 +58,15 @@ use Illuminate\Database\Eloquent\Model;
  *                     customer that still exists.
  *  - objective.*      Mål og KPI, and metadata.objective_id is visible (ObjectiveAccessService,
  *                     per fagområde).
+ *  - management_review.*  Ledelsens gjennomgåelse and management_review.view, and
+ *                     metadata.management_review_id is visible (ManagementReviewAccessService).
  *
  * The same rules hold for fristpåminnelser, which carry their module's prefix and object.
  */
 class UserNotificationAccessScope
 {
     /** The module prefixes this scope decides; an event outside them is not module data. */
-    private const GATED_PREFIXES = ['bid.', 'watch_profile.', 'wiki.', 'supplier.', 'risk.', 'improvement.', 'compliance.', 'quality.', 'objective.'];
+    private const GATED_PREFIXES = ['bid.', 'watch_profile.', 'wiki.', 'supplier.', 'risk.', 'improvement.', 'compliance.', 'quality.', 'objective.', 'management_review.'];
 
     public function __construct(
         private readonly ModuleEntitlementService $entitlements,
@@ -74,6 +77,7 @@ class UserNotificationAccessScope
         private readonly ImprovementCaseAccessService $improvementAccess,
         private readonly ComplianceAccessService $complianceAccess,
         private readonly ObjectiveAccessService $objectiveAccess,
+        private readonly ManagementReviewAccessService $managementReviewAccess,
     ) {}
 
     /** @param  Builder<UserNotification>  $query */
@@ -94,8 +98,9 @@ class UserNotificationAccessScope
         $compliance = $reads('compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW);
         $quality = $reads('quality', CustomerPermissionCatalog::QUALITY_VIEW);
         $objective = $reads('objectives', CustomerPermissionCatalog::OBJECTIVE_VIEW);
+        $managementReview = $reads('management_review', CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW);
 
-        return $query->where(function (Builder $visible) use ($user, $tender, $wiki, $supplier, $risk, $improvement, $compliance, $quality, $objective): void {
+        return $query->where(function (Builder $visible) use ($user, $tender, $wiki, $supplier, $risk, $improvement, $compliance, $quality, $objective, $managementReview): void {
             $visible
                 ->whereNull('event_type')
                 ->orWhere(function (Builder $ungated): void {
@@ -145,6 +150,10 @@ class UserNotificationAccessScope
 
             if ($objective) {
                 $this->allowObjects($visible, 'objective.', 'objective_id', $this->objectiveAccess->visibleObjectives($user)->selectRaw('CAST(objectives.id AS TEXT)'));
+            }
+
+            if ($managementReview) {
+                $this->allowObjects($visible, 'management_review.', 'management_review_id', $this->managementReviewAccess->visibleReviews($user)->selectRaw('CAST(management_reviews.id AS TEXT)'));
             }
         });
     }

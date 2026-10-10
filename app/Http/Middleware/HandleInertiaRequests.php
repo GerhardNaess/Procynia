@@ -145,6 +145,8 @@ class HandleInertiaRequests extends Middleware
                 // Leverandøroppfølging, shared as a block for the same reason as Kvalitet. Not `suppliers`:
                 // that key is Anbud's Doffin competitor view.
                 'supplier_management' => __('procynia.supplier_management'),
+                // Ledelsens gjennomgåelse, shared as a block for the same reason as Kvalitet.
+                'management_review' => __('procynia.management_review'),
                 // «Lag kunnskapsartikkel», the one Wiki handoff dialog every module shares.
                 'knowledge_handoff' => __('procynia.knowledge_handoff'),
                 'user' => __('procynia.user'),

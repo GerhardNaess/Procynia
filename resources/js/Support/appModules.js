@@ -152,6 +152,18 @@ export const APP_MODULES = [
         // Never `suppliers`: that area is Anbud's Doffin competitor view (/app/suppliers).
         areas: ['supplier-management'],
     },
+    {
+        key: 'management_review',
+        href: '/app/management-reviews',
+        built: true,
+        workspace: 'governance',
+        module: 'management_review',
+        // ManagementReviewController refuses the page without this key. What a review shows from the
+        // other modules is gated again, per section, on the server.
+        permission: 'management_review.view',
+        label: (m) => m.management_review ?? 'Ledelsens gjennomgåelse',
+        areas: ['management-review'],
+    },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },
     { key: 'hse', built: false, module: null, label: (m) => m.hse ?? 'HMS' },
     { key: 'services', built: false, module: null, label: (m) => m.services ?? 'Tjenester & SLA' },

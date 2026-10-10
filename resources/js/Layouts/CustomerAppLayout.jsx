@@ -297,6 +297,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'supplier-management';
         }
 
+        if (pathname.startsWith('/app/management-reviews')) {
+            return 'management-review';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }
@@ -823,6 +827,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                         compliance: translations.info_center_page?.my_tasks?.modules?.compliance,
                                         quality: translations.info_center_page?.my_tasks?.modules?.quality,
                                         objective: translations.info_center_page?.my_tasks?.modules?.objectives,
+                                        management_review: translations.info_center_page?.my_tasks?.modules?.management_review,
                                     }}
                                 />
 

@@ -30,7 +30,7 @@ class BusinessArea extends Model
      *
      * @var list<string>
      */
-    public const SCOPED_CONTENT_TABLES = ['risks', 'objectives', 'improvement_cases'];
+    public const SCOPED_CONTENT_TABLES = ['risks', 'objectives', 'improvement_cases', 'management_review_business_areas'];
 
     protected $fillable = [
         'customer_id',

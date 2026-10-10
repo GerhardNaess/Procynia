@@ -131,7 +131,9 @@ class ImprovementCase extends Model
             && ! ImprovementAction::query()->where('improvement_case_id', $this->id)->exists()
             // Created from a revisjonsfunn: the finding points here, so the case is cancelled, never
             // deleted. The database refuses it as well.
-            && ! ComplianceAuditFinding::query()->where('improvement_case_id', $this->id)->exists();
+            && ! ComplianceAuditFinding::query()->where('improvement_case_id', $this->id)->exists()
+            // A tiltak from Ledelsens gjennomgåelse is followed up here; the decision points at the case.
+            && ! ManagementReviewDecision::query()->where('improvement_case_id', $this->id)->exists();
     }
 
     public function customer(): BelongsTo

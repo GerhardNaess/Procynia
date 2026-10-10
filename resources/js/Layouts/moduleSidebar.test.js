@@ -21,19 +21,19 @@ describe('the rail shows the whole planned product structure', () => {
             APP_MODULES.map((module) => module.key),
             [
                 'home', 'wiki', 'tenders', 'quality',
-                'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'contracts', 'hse', 'services',
+                'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review', 'contracts', 'hse', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
         );
     });
 
-    test('exactly nine are built, and they are the nine that have pages', () => {
+    test('exactly ten are built, and they are the ten that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements', '/app/supplier-management'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements', '/app/supplier-management', '/app/management-reviews'],
         );
     });
 
@@ -299,7 +299,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
     test('the five governance modules sit under Styring, and nothing else does', () => {
         assert.deepEqual(
             APP_MODULES.filter((module) => module.built && module.workspace === 'governance').map((module) => module.key),
-            ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'],
+            ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review'],
         );
         assert.deepEqual(APP_WORKSPACES.map((workspace) => workspace.key), ['governance']);
         assert.equal(APP_WORKSPACES[0].href, '/app/governance');

@@ -22,6 +22,9 @@ use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\KpiContextController;
 use App\Http\Controllers\App\KpiController;
 use App\Http\Controllers\App\KpiMeasurementController;
+use App\Http\Controllers\App\ManagementReviewController;
+use App\Http\Controllers\App\ManagementReviewDecisionController;
+use App\Http\Controllers\App\ManagementReviewReportController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\ObjectiveController;
@@ -386,6 +389,33 @@ Route::prefix('app')
             Route::put('/{objectiveId}/kpis/{kpiId}/processes/{processId}', [KpiContextController::class, 'update'])->whereNumber(['objectiveId', 'kpiId', 'processId'])->name('kpis.context.update');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements', [KpiMeasurementController::class, 'store'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.measurements.store');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements/{measurementId}/withdraw', [KpiMeasurementController::class, 'withdraw'])->whereNumber(['objectiveId', 'kpiId', 'measurementId'])->name('kpis.measurements.withdraw');
+        });
+        // Ledelsens gjennomgåelse. Named under `app.management-review.`, mapped to the `management_review`
+        // module (Basis). Reviews are addressed by a plain id and resolved through
+        // ManagementReviewAccessService, so another customer's review is a 404.
+        Route::prefix('/management-reviews')->name('management-review.')->group(function (): void {
+            Route::get('/', [ManagementReviewController::class, 'index'])->name('index');
+            Route::post('/', [ManagementReviewController::class, 'store'])->name('store');
+            Route::get('/{reviewId}', [ManagementReviewController::class, 'show'])->whereNumber('reviewId')->name('show');
+            Route::patch('/{reviewId}', [ManagementReviewController::class, 'update'])->whereNumber('reviewId')->name('update');
+            Route::delete('/{reviewId}', [ManagementReviewController::class, 'destroy'])->whereNumber('reviewId')->name('destroy');
+            Route::put('/{reviewId}/conclusion', [ManagementReviewController::class, 'conclusion'])->whereNumber('reviewId')->name('conclusion');
+            Route::post('/{reviewId}/participants', [ManagementReviewController::class, 'storeParticipant'])->whereNumber('reviewId')->name('participants.store');
+            Route::delete('/{reviewId}/participants/{participantId}', [ManagementReviewController::class, 'destroyParticipant'])->whereNumber(['reviewId', 'participantId'])->name('participants.destroy');
+            Route::put('/{reviewId}/sections/{sectionKey}', [ManagementReviewController::class, 'updateSection'])->whereNumber('reviewId')->where('sectionKey', '[a-z_]+')->name('sections.update');
+            // Ferdigstill: the one transition, which freezes the review. There is no reopening.
+            Route::post('/{reviewId}/finalize', [ManagementReviewController::class, 'finalize'])->whereNumber('reviewId')->name('finalize');
+            Route::put('/{reviewId}/next-review', [ManagementReviewController::class, 'nextReview'])->whereNumber('reviewId')->name('next-review');
+            Route::post('/{reviewId}/amendments', [ManagementReviewController::class, 'storeAmendment'])->whereNumber('reviewId')->name('amendments.store');
+            Route::get('/{reviewId}/report', [ManagementReviewReportController::class, 'show'])->whereNumber('reviewId')->name('report');
+            Route::get('/{reviewId}/report.pdf', [ManagementReviewReportController::class, 'pdf'])->whereNumber('reviewId')->name('report.pdf');
+            Route::post('/{reviewId}/decisions', [ManagementReviewDecisionController::class, 'store'])->whereNumber('reviewId')->name('decisions.store');
+            Route::patch('/{reviewId}/decisions/{decisionId}', [ManagementReviewDecisionController::class, 'update'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.update');
+            Route::delete('/{reviewId}/decisions/{decisionId}', [ManagementReviewDecisionController::class, 'destroy'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.destroy');
+            Route::post('/{reviewId}/decisions/{decisionId}/status', [ManagementReviewDecisionController::class, 'status'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.status');
+            Route::post('/{reviewId}/decisions/{decisionId}/reassign', [ManagementReviewDecisionController::class, 'reassign'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.reassign');
+            Route::post('/{reviewId}/decisions/{decisionId}/handoff', [ManagementReviewDecisionController::class, 'handOff'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.handoff');
+            Route::post('/{reviewId}/decisions/{decisionId}/link', [ManagementReviewDecisionController::class, 'link'])->whereNumber(['reviewId', 'decisionId'])->name('decisions.link');
         });
         // Avvik og forbedringer. Named under `app.improvements.`, mapped to the `improvements` module.
         // Cases are addressed by a plain id and resolved through ImprovementCaseAccessService, never

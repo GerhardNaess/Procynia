@@ -7,6 +7,8 @@ use App\Models\ComplianceRequirement;
 use App\Models\ImprovementAction;
 use App\Models\ImprovementCase;
 use App\Models\Kpi;
+use App\Models\ManagementReview;
+use App\Models\ManagementReviewDecision;
 use App\Models\Objective;
 use App\Models\QualityItem;
 use App\Models\Risk;
@@ -14,6 +16,7 @@ use App\Models\RiskTreatmentAction;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Improvements\ImprovementCaseAccessService;
+use App\Services\ManagementReview\ManagementReviewAccessService;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Services\Permissions\CustomerPermissionService;
@@ -51,6 +54,7 @@ class AssignmentNotifier
         private readonly ImprovementCaseAccessService $improvementAccess,
         private readonly ComplianceAccessService $complianceAccess,
         private readonly ObjectiveAccessService $objectiveAccess,
+        private readonly ManagementReviewAccessService $managementReviewAccess,
     ) {}
 
     /** The models whose owner field is announced. */
@@ -64,6 +68,8 @@ class AssignmentNotifier
         QualityItem::class,
         Objective::class,
         Kpi::class,
+        ManagementReview::class,
+        ManagementReviewDecision::class,
     ];
 
     /**
@@ -206,6 +212,24 @@ class AssignmentNotifier
                 'context' => (string) $model->objective?->title,
                 'url' => route('app.objectives.kpis.show', ['objectiveId' => $model->objective_id, 'kpiId' => $model->id], false),
                 'metadata' => ['objective_id' => (int) $model->objective_id, 'kpi_id' => (int) $model->id],
+            ],
+            $model instanceof ManagementReview => [
+                'key' => 'management_review', 'event' => 'management_review.owner_assigned', 'field' => 'owner_user_id',
+                'open' => $model->isDraft(),
+                'visible' => fn (User $user): bool => $this->managementReviewAccess->findVisible($user, (int) $model->id) !== null,
+                'title' => (string) $model->title,
+                'url' => route('app.management-review.show', ['reviewId' => $model->id], false),
+                'metadata' => ['management_review_id' => (int) $model->id],
+            ],
+            // A tiltak followed up here. One handed to Avvik og forbedringer is announced by the case.
+            $model instanceof ManagementReviewDecision => [
+                'key' => 'management_review_action', 'event' => 'management_review.action_assigned', 'field' => 'owner_user_id',
+                'open' => $model->isOpen(),
+                'visible' => fn (User $user): bool => $this->managementReviewAccess->findVisible($user, (int) $model->management_review_id) !== null,
+                'title' => (string) $model->text,
+                'context' => (string) $model->review?->title,
+                'url' => route('app.management-review.show', ['reviewId' => $model->management_review_id], false).'#decision-'.$model->id,
+                'metadata' => ['management_review_id' => (int) $model->management_review_id, 'management_review_decision_id' => (int) $model->id],
             ],
             default => null,
         };

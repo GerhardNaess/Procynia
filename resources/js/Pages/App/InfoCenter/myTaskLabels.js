@@ -22,6 +22,7 @@ export const MY_TASK_MODULE_FALLBACKS = {
     compliance: 'Etterlevelse og revisjon',
     quality: 'Kvalitet',
     objectives: 'Mål og KPI',
+    management_review: 'Ledelsens gjennomgåelse',
 };
 
 /**

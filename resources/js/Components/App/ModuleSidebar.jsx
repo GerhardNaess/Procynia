@@ -25,6 +25,8 @@ const MODULE_ICONS = {
     objectives: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z M10 10h.01',
     improvements: 'M16.5 10a6.5 6.5 0 1 1-1.9-4.6 M16.5 3v3h-3 M10 7v3.5 M10 13.5h.01',
     suppliers: 'M3 7.5 10 4l7 3.5-7 3.5-7-3.5Z M3 12.5 10 16l7-3.5',
+    // Ledelsens gjennomgåelse: a clipboard with a tick — reviewed and decided.
+    management_review: 'M7 3.5h6v2H7v-2Z M5.5 4.5h-1a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-11a1 1 0 0 0-1-1h-1 M7 11l2 2 4-4',
     contracts: 'M5.5 2.5h9a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z M7.5 6.5h5 M7.5 9.5h5 M7.5 12.5h3',
     hse: 'M10 3a6 6 0 0 1 6 6v3.5H4V9a6 6 0 0 1 6-6Z M2.5 12.5h15 M10 3v6',
     compliance: 'M10 2.5 16.5 5v5c0 3.5-2.6 6.2-6.5 7.5C6.1 16.2 3.5 13.5 3.5 10V5L10 2.5Z M10 7v3.5 M10 13h.01',

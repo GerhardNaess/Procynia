@@ -50,6 +50,7 @@ class NavigationEntitlementMatrixTest extends TestCase
         CustomerPermissionCatalog::IMPROVEMENT_VIEW,
         CustomerPermissionCatalog::COMPLIANCE_VIEW,
         CustomerPermissionCatalog::SUPPLIER_VIEW,
+        CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW,
     ];
 
     protected function setUp(): void
@@ -78,15 +79,15 @@ class NavigationEntitlementMatrixTest extends TestCase
     public static function packageProvider(): array
     {
         return [
-            'Basis' => [['basis'], ['wiki', 'quality', 'improvements'], ['quality', 'improvements'], false],
-            'Basis + Risiko' => [['basis', 'risk'], ['wiki', 'quality', 'risk', 'improvements'], ['quality', 'risk', 'improvements'], false],
+            'Basis' => [['basis'], ['wiki', 'quality', 'improvements', 'management_review'], ['quality', 'improvements', 'management_review'], false],
+            'Basis + Risiko' => [['basis', 'risk'], ['wiki', 'quality', 'risk', 'improvements', 'management_review'], ['quality', 'risk', 'improvements', 'management_review'], false],
             // Leverandøroppfølging needs neither Etterlevelse og revisjon nor Risiko.
-            'Basis + Leverandøroppfølging' => [['basis', 'supplier'], ['wiki', 'quality', 'improvements', 'supplier'], ['quality', 'improvements', 'suppliers'], false],
-            'Basis + Etterlevelse og revisjon + Anbud' => [['basis', 'compliance', 'tender'], ['wiki', 'tender', 'quality', 'improvements', 'compliance'], ['quality', 'improvements', 'compliance'], true],
-            'Basis + Risiko + Mål og KPI + Leverandøroppfølging' => [['basis', 'risk', 'objectives', 'supplier'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'supplier'], ['quality', 'risk', 'objectives', 'improvements', 'suppliers'], false],
-            'Basis + alle opsjoner' => [['basis', 'risk', 'objectives', 'compliance', 'supplier', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'], true],
+            'Basis + Leverandøroppfølging' => [['basis', 'supplier'], ['wiki', 'quality', 'improvements', 'supplier', 'management_review'], ['quality', 'improvements', 'suppliers', 'management_review'], false],
+            'Basis + Etterlevelse og revisjon + Anbud' => [['basis', 'compliance', 'tender'], ['wiki', 'tender', 'quality', 'improvements', 'compliance', 'management_review'], ['quality', 'improvements', 'compliance', 'management_review'], true],
+            'Basis + Risiko + Mål og KPI + Leverandøroppfølging' => [['basis', 'risk', 'objectives', 'supplier'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'supplier', 'management_review'], ['quality', 'risk', 'objectives', 'improvements', 'suppliers', 'management_review'], false],
+            'Basis + alle opsjoner' => [['basis', 'risk', 'objectives', 'compliance', 'supplier', 'tender'], ['wiki', 'tender', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier', 'management_review'], ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review'], true],
             // A bundle is a shortcut: GRC activates Basis and four options, nothing more.
-            'GRC as a bundle' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier'], ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'], false],
+            'GRC as a bundle' => [['grc'], ['wiki', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier', 'management_review'], ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review'], false],
             // A row-level edge: Anbud without Basis, as a customer created before Basis was mandatory.
             'Anbud alone' => [['tender'], ['wiki', 'tender'], [], true],
         ];
@@ -142,6 +143,7 @@ class NavigationEntitlementMatrixTest extends TestCase
             'Avvik og forbedringer' => [CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'improvements'],
             'Etterlevelse og revisjon' => [CustomerPermissionCatalog::COMPLIANCE_VIEW, 'compliance'],
             'Leverandøroppfølging' => [CustomerPermissionCatalog::SUPPLIER_VIEW, 'suppliers'],
+            'Ledelsens gjennomgåelse' => [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, 'management_review'],
         ];
     }
 
@@ -164,13 +166,13 @@ class NavigationEntitlementMatrixTest extends TestCase
     #[DataProvider('viewPermissionProvider')]
     public function test_a_permission_without_the_module_is_hidden_in_both_places(string $permission, string $key): void
     {
-        // Basis carries Kvalitet and Avvik og forbedringer only.
+        // Basis carries Kvalitet, Avvik og forbedringer and Ledelsens gjennomgåelse only.
         $customer = $this->customerWith(['basis']);
         $user = $this->member($customer);
         $this->grantAll($customer, $user, self::VIEW_ALL);
 
         $props = $this->sharedProps($user);
-        $held = in_array($key, ['quality', 'improvements'], true);
+        $held = in_array($key, ['quality', 'improvements', 'management_review'], true);
 
         $this->assertContains($permission, $props['access']['permissions']);
         $this->assertSame($held, in_array($key, $this->railGovernance($props), true));
@@ -247,8 +249,10 @@ class NavigationEntitlementMatrixTest extends TestCase
 
         $props = $this->sharedProps($owner);
 
-        $this->assertSame(['quality', 'risk', 'objectives', 'improvements'], $this->railGovernance($props));
-        $this->assertSame(['quality', 'risk', 'objectives', 'improvements'], $this->governanceKeys($owner));
+        // Ledelsens gjennomgåelse is not an explicit-grant domain: System Owner reads reviews (and
+        // nothing protected of the other modules through them).
+        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'management_review'], $this->railGovernance($props));
+        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'management_review'], $this->governanceKeys($owner));
         $this->assertNotContains(CustomerPermissionCatalog::COMPLIANCE_VIEW, $props['access']['permissions']);
         $this->assertNotContains(CustomerPermissionCatalog::SUPPLIER_VIEW, $props['access']['permissions']);
         $this->assertContains('supplier', $props['entitlements']['modules'], 'the entitlement alone grants nothing');
@@ -260,7 +264,7 @@ class NavigationEntitlementMatrixTest extends TestCase
         $user = $this->member($customer);
         $this->grantAll($customer, $user, self::VIEW_ALL);
 
-        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'compliance'], $this->governanceKeys($user));
+        $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'compliance', 'management_review'], $this->governanceKeys($user));
 
         // Move Etterlevelse og revisjon first and Kvalitet last: both lists follow, neither keeps
         // an order of its own.
@@ -269,7 +273,7 @@ class NavigationEntitlementMatrixTest extends TestCase
             'procynia_modules.modules.quality.sort_order' => 99,
         ]);
 
-        $expected = ['compliance', 'risk', 'objectives', 'improvements', 'quality'];
+        $expected = ['compliance', 'risk', 'objectives', 'improvements', 'management_review', 'quality'];
         $this->assertSame($expected, $this->governanceKeys($user));
         $this->assertSame($expected, $this->railGovernance($this->sharedProps($user)));
     }

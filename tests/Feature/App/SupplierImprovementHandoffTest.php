@@ -177,7 +177,8 @@ class SupplierImprovementHandoffTest extends TestCase
     {
         ['customer' => $customer] = $this->context('grc');
         $area = $this->area($customer, 'Innkjøp');
-        $hiddenArea = $this->area($customer, 'Ledelse');
+        // A name no translation contains, so finding it on the page can only mean the area leaked.
+        $hiddenArea = $this->area($customer, 'Styrerom Nord');
         $manager = $this->supplierManager($customer, $area);
         $this->grant($customer, $manager, [CustomerPermissionCatalog::IMPROVEMENT_VIEW, CustomerPermissionCatalog::IMPROVEMENT_EDIT], [$hiddenArea]);
         $supplier = $this->supplier($customer, $manager, 'Acme AS');
@@ -193,7 +194,7 @@ class SupplierImprovementHandoffTest extends TestCase
         $response = $this->actingAs($reader)->get("/app/supplier-management/{$supplier->id}")->assertOk();
         $this->assertSame(['Synlig sak'], array_column($response->viewData('page')['props']['improvement_cases'], 'title'));
         $this->assertStringNotContainsString('Skjult sak', $response->getContent());
-        $this->assertStringNotContainsString('Ledelse', $response->getContent());
+        $this->assertStringNotContainsString('Styrerom Nord', $response->getContent());
 
         // A case reader without supplier.view, and a System Owner without a supplier role, see no supplier.
         $visibleCase = ImprovementCase::query()->where('title', 'Synlig sak')->sole();

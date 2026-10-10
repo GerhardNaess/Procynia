@@ -5,6 +5,7 @@ namespace App\Services\MyTasks;
 use App\Models\User;
 use App\Services\MyTasks\Sources\ComplianceTaskSource;
 use App\Services\MyTasks\Sources\ImprovementTaskSource;
+use App\Services\MyTasks\Sources\ManagementReviewTaskSource;
 use App\Services\MyTasks\Sources\ObjectiveTaskSource;
 use App\Services\MyTasks\Sources\QualityTaskSource;
 use App\Services\MyTasks\Sources\RiskTaskSource;
@@ -37,9 +38,10 @@ class MyTasksService
         ComplianceTaskSource $compliance,
         QualityTaskSource $quality,
         ObjectiveTaskSource $objectives,
+        ManagementReviewTaskSource $managementReview,
     ) {
         // Module order for equal dates: the rail's order (config/procynia_modules.php).
-        $this->sources = [$tender, $wiki, $quality, $improvements, $risk, $objectives, $compliance, $suppliers];
+        $this->sources = [$tender, $wiki, $quality, $improvements, $risk, $objectives, $compliance, $suppliers, $managementReview];
     }
 
     /**
