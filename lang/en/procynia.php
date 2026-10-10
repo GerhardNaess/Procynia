@@ -6328,6 +6328,49 @@ return [
     ],
 
     'risk' => [
+        'help' => [
+            'button' => 'Help',
+            'index' => [
+                'title' => 'About the risk register',
+                'intro' => 'This is where you keep the risks the organisation has to manage: what could happen, how serious it is, and what is being done about it. You only see the risks in the business areas your roles give you.',
+                'sections' => [
+                    [
+                        'title' => 'Registering a risk',
+                        'items' => [
+                            ['title' => 'What is a risk?', 'text' => 'Something that could happen and affect the organisation. It is described by its cause (what makes the event possible), event (what could happen) and consequence (what would be affected).'],
+                            ['title' => 'New risk', 'text' => 'Choose «New risk», give it a title, choose a business area and risk owner, and describe the cause, event and consequence. The assessment itself is made afterwards on the risk page.'],
+                            ['title' => 'Business area', 'text' => 'Every risk belongs to one business area. The business area decides who can see and work on the risk.'],
+                            ['title' => 'Risk owner', 'text' => 'The person responsible for following up the risk. Only people who can see risks in the business area can be chosen.'],
+                            ['title' => 'Status', 'text' => 'Where the risk is in its life cycle: Identified, In treatment, Monitored or Closed. Status is set manually and does not say how serious the risk is – the assessment does.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Assessment and follow-up',
+                        'items' => [
+                            ['title' => 'Risk assessment', 'text' => 'On the risk page you assess likelihood and consequence from 1 to 5. The score is likelihood times consequence and gives the level Low, Moderate, High or Very high. Inherent risk is before controls and actions; residual risk is what remains after them.'],
+                            ['title' => 'Assessments are not changed', 'text' => 'A saved assessment cannot be changed. The latest assessment applies, and a mistake is corrected with a new assessment. Earlier assessments remain as history.'],
+                            ['title' => 'Treatment and actions', 'text' => 'The treatment option is the direction: avoid, reduce, share/transfer or accept. Actions are concrete tasks with an owner and a deadline, marked as completed when they are done.'],
+                            ['title' => 'Acceptance of residual risk', 'text' => 'A formal decision that the residual risk in the latest assessment can be accepted, registered by someone allowed to accept risk. The acceptance can have an end date. A new assessment makes the acceptance historical.'],
+                            ['title' => 'Periodic review', 'text' => 'With a review interval (monthly, quarterly, half-yearly or yearly), the next review is calculated from the latest risk assessment. Closed risks are not reviewed periodically.'],
+                            ['title' => 'Processes, activities and controls', 'text' => 'On the risk page the risk can be linked to the processes and activities in Quality where it can arise, and to controls in Quality that help manage it. Take the controls into account when you assess residual risk. Removing a link deletes nothing in Quality.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Needs attention',
+                        'items' => [
+                            ['title' => 'What is shown here?', 'text' => 'Risks in your business areas that should be followed up now. The picture is recalculated every time the page opens, and a risk disappears from it once the matter is fixed. Choose «Show risks» to see which ones and why. Closed risks are not included.'],
+                            ['title' => 'Not assessed', 'text' => 'The risk has no assessment yet. Open the risk and register an assessment.'],
+                            ['title' => 'Residual risk not assessed', 'text' => 'The latest assessment lacks residual risk. Register a new assessment that also assesses residual risk.'],
+                            ['title' => 'High or very high residual risk', 'text' => 'The residual risk in the latest assessment is High or Very high. Consider actions, or whether the residual risk can be accepted.'],
+                            ['title' => 'Review overdue', 'text' => 'The date for the next periodic review has passed. Register a new assessment.'],
+                            ['title' => 'Acceptance expired', 'text' => 'The end date of the residual risk acceptance has passed. Decide on the risk again.'],
+                            ['title' => 'Actions overdue', 'text' => 'One or more open actions are past their deadline. Complete the action or set a new deadline.'],
+                            ['title' => 'How it is counted', 'text' => 'A risk can have several findings at once and then appears in several categories, but it is counted only once in the total.'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'index_title' => 'Risk',
         'index_heading' => 'Risk register',
         'index_subtitle' => 'The risks you are responsible for, with owner, business area and status in one place.',

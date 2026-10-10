@@ -46,4 +46,20 @@ test('the register shows unique risks needing attention, by category, and ignore
     await expect(page.getByText('Skjult')).toHaveCount(0);
 
     await page.screenshot({ path: 'test-results/risk-attention.png', fullPage: true });
+
+    // The register's PageHelp explains the page, Trenger oppmerksomhet included. Only the panel is
+    // checked for 16 px: the register itself still has smaller text, which is not this help's concern.
+    await page.getByRole('button', { name: 'Hjelp', exact: true }).click();
+    const help = page.getByRole('dialog', { name: 'Om risikoregisteret' });
+    await expect(help).toBeVisible();
+    for (const heading of ['Registrere en risiko', 'Vurdering og oppfølging', 'Trenger oppmerksomhet']) {
+        await expect(help.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    }
+    const small = await help.evaluate((panel) => [...panel.querySelectorAll('*')]
+        .filter((element) => [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ''))
+        .filter((element) => parseFloat(getComputedStyle(element).fontSize) < 16)
+        .map((element) => element.textContent.trim().slice(0, 40)));
+    expect(small).toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(help).toHaveCount(0);
 });

@@ -6332,6 +6332,49 @@ return [
     ],
 
     'risk' => [
+        'help' => [
+            'button' => 'Hjelp',
+            'index' => [
+                'title' => 'Om risikoregisteret',
+                'intro' => 'Her samler dere risikoene virksomheten må håndtere: hva som kan skje, hvor alvorlig det er, og hva som gjøres med det. Du ser bare risikoene i fagområdene rollene dine gir deg.',
+                'sections' => [
+                    [
+                        'title' => 'Registrere en risiko',
+                        'items' => [
+                            ['title' => 'Hva er en risiko?', 'text' => 'Noe som kan skje og påvirke virksomheten. Den beskrives med årsak (hva gjør hendelsen mulig), hendelse (hva kan skje) og konsekvens (hva blir påvirket).'],
+                            ['title' => 'Ny risiko', 'text' => 'Velg «Ny risiko», gi den en tittel, velg fagområde og risikoeier, og beskriv årsak, hendelse og konsekvens. Selve vurderingen gjøres etterpå på risikosiden.'],
+                            ['title' => 'Fagområde', 'text' => 'Hver risiko hører til ett fagområde. Fagområdet bestemmer hvem som kan se og arbeide med risikoen.'],
+                            ['title' => 'Risikoeier', 'text' => 'Personen som har ansvaret for å følge opp risikoen. Bare personer som kan se risikoer i fagområdet kan velges.'],
+                            ['title' => 'Status', 'text' => 'Hvor risikoen er i livsløpet: Identifisert, Under behandling, Under oppfølging eller Lukket. Status settes manuelt og sier ikke hvor alvorlig risikoen er – det gjør vurderingen.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Vurdering og oppfølging',
+                        'items' => [
+                            ['title' => 'Risikovurdering', 'text' => 'På risikosiden vurderer du sannsynlighet og konsekvens fra 1 til 5. Score er sannsynlighet ganger konsekvens og gir nivået Lav, Moderat, Høy eller Svært høy. Iboende risiko er før kontroller og tiltak, restrisiko er det som gjenstår etter dem.'],
+                            ['title' => 'Vurderinger endres ikke', 'text' => 'En lagret vurdering kan ikke endres. Siste vurdering gjelder, og en feil rettes med en ny vurdering. Tidligere vurderinger blir stående som historikk.'],
+                            ['title' => 'Behandlingsvalg og tiltak', 'text' => 'Behandlingsvalget er retningen: unngå, redusere, dele/overføre eller akseptere. Tiltak er konkrete oppgaver med ansvarlig og frist, som markeres som fullført når de er gjort.'],
+                            ['title' => 'Aksept av restrisiko', 'text' => 'En formell beslutning om at restrisikoen i siste vurdering kan aksepteres, registrert av en med rett til å akseptere risiko. Aksepten kan ha en sluttdato. En ny vurdering gjør aksepten historisk.'],
+                            ['title' => 'Periodisk vurdering', 'text' => 'Med et vurderingsintervall (månedlig, kvartalsvis, halvårlig eller årlig) beregnes neste vurdering fra siste risikovurdering. Lukkede risikoer følges ikke opp periodisk.'],
+                            ['title' => 'Prosesser, aktiviteter og kontroller', 'text' => 'På risikosiden kan risikoen kobles til prosessene og aktivitetene i Kvalitet der den kan oppstå, og til kontroller i Kvalitet som bidrar til å håndtere den. Ta kontrollene med når du vurderer restrisiko. Å fjerne en kobling sletter ingenting i Kvalitet.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Trenger oppmerksomhet',
+                        'items' => [
+                            ['title' => 'Hva vises her?', 'text' => 'Risikoer i dine fagområder som bør følges opp nå. Bildet regnes ut på nytt hver gang siden åpnes, og en risiko forsvinner herfra når forholdet er rettet. Velg «Vis risikoer» for å se hvilke det gjelder og hvorfor. Lukkede risikoer er ikke med.'],
+                            ['title' => 'Ikke vurdert', 'text' => 'Risikoen har ingen vurdering ennå. Åpne risikoen og registrer en vurdering.'],
+                            ['title' => 'Restrisiko ikke vurdert', 'text' => 'Siste vurdering mangler restrisiko. Registrer en ny vurdering som også vurderer restrisiko.'],
+                            ['title' => 'Høy eller svært høy restrisiko', 'text' => 'Restrisikoen i siste vurdering er Høy eller Svært høy. Vurder tiltak, eller om restrisikoen kan aksepteres.'],
+                            ['title' => 'Vurdering forfalt', 'text' => 'Datoen for neste periodiske vurdering er passert. Registrer en ny vurdering.'],
+                            ['title' => 'Aksept utløpt', 'text' => 'Sluttdatoen for aksepten av restrisikoen er passert. Ta stilling til risikoen på nytt.'],
+                            ['title' => 'Tiltak forfalt', 'text' => 'Ett eller flere åpne tiltak har passert fristen. Fullfør tiltaket eller sett en ny frist.'],
+                            ['title' => 'Slik telles det', 'text' => 'En risiko kan ha flere funn samtidig og vises da i flere kategorier, men telles bare én gang i totalen.'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'index_title' => 'Risiko',
         'index_heading' => 'Risikoregister',
         'index_subtitle' => 'Risikoene dere har ansvar for, samlet med eier, fagområde og status.',
