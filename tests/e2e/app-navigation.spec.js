@@ -370,19 +370,20 @@ test.describe('Styring', () => {
     });
 });
 
-test('System Owner sees all four under Styring, and they keep their own URLs', async ({ page }) => {
+test('System Owner sees the modules under Styring that need no explicit grant, and they keep their own URLs', async ({ page }) => {
     await page.context().clearCookies();
     await loginAs(page, SYSTEM_OWNER.email, SYSTEM_OWNER.password);
     await page.goto('/app/governance');
 
     expect(await labels(page.getByTestId('module-governance-children').locator('a')))
-        .toEqual(['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer']);
+        .toEqual(['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Ledelsens gjennomgåelse']);
 
     for (const [key, url] of [
         ['quality', /\/app\/quality$/],
         ['risk', /\/app\/risk$/],
         ['objectives', /\/app\/objectives$/],
         ['improvements', /\/app\/improvements$/],
+        ['management_review', /\/app\/management-reviews$/],
     ]) {
         await page.goto('/app/governance');
         await page.getByTestId(`governance-module-${key}`).click();
