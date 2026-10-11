@@ -1,9 +1,10 @@
+import { useEffect, useRef } from 'react';
 import { useForm } from '@inertiajs/react';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
 import RequiredMark from '../../Risk/RequiredMark';
 import { formatDay } from '../../Improvements/improvementStatus';
-import { COMPLIANCE_STATUS_TONES, complianceStatusLabel, formatDateTime } from './complianceRequirement';
+import { COMPLIANCE_STATUS_TONES, complianceStatusLabel, documentationLines, formatDateTime } from './complianceRequirement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -12,12 +13,46 @@ const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
 
 /**
- * Vurder etterlevelse: a result and a begrunnelse, nothing else. The date is the server's, and the
- * server checks the permission, the requirement's status and both fields again.
+ * Dokumentasjon on an assessment: one reference per line, as the assessor wrote it. A line that is a
+ * link — to a Wiki article or anywhere else — is shown as one; anything else as plain text.
+ */
+function Documentation({ text, tr, testId }) {
+    const lines = documentationLines(text);
+
+    if (lines.length === 0) {
+        return null;
+    }
+
+    return (
+        <div className="mt-4">
+            <p className={TERM}>{tr.assessment?.documentation ?? 'Dokumentasjon'}</p>
+            <ul className="mt-1 space-y-1" data-testid={testId}>
+                {lines.map((line, index) => (
+                    <li key={`${index}-${line.text}`} className="break-words text-base text-slate-800">
+                        {line.href ? (
+                            <a href={line.href} className="font-semibold text-violet-700 hover:text-violet-900" {...(line.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{line.text}</a>
+                        ) : line.text}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+/**
+ * Vurder etterlevelse: a result, a begrunnelse and — optionally — the documentation it relies on.
+ * The date and the assessor are the server's, and the server checks the permission, the
+ * requirement's status and the fields again.
  */
 function AssessmentForm({ requirementId, results, onDone, tr }) {
     const ta = tr.assessment ?? {};
-    const form = useForm({ result: '', rationale: '' });
+    const form = useForm({ result: '', rationale: '', documentation: '' });
+    const ref = useRef(null);
+
+    // Opened from «Vurder» in the worklist the form is far down the page; bring it into view.
+    useEffect(() => {
+        ref.current?.scrollIntoView?.({ block: 'start' });
+    }, []);
 
     const send = (event) => {
         event.preventDefault();
@@ -25,7 +60,7 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
     };
 
     return (
-        <form onSubmit={send} className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="compliance-assess-heading" data-testid="compliance-assessment-form">
+        <form ref={ref} onSubmit={send} className="mt-4 scroll-mt-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="compliance-assess-heading" data-testid="compliance-assessment-form">
             <div>
                 <h3 id="compliance-assess-heading" className="text-lg font-semibold text-slate-950">{ta.form_heading ?? 'Vurder etterlevelse'}</h3>
                 <p className="mt-1 text-base text-slate-600">{ta.form_intro ?? 'Vurderingen lagres med dagens dato og kan ikke endres etterpå. Er noe feil, registrerer du en ny vurdering.'}</p>
@@ -68,6 +103,21 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
                 />
                 {form.errors.rationale && <p className="mt-1 text-base text-rose-700">{form.errors.rationale}</p>}
             </div>
+            <div>
+                <label htmlFor="compliance-assessment-documentation" className={LABEL}>{ta.field_documentation ?? 'Dokumentasjon (valgfritt)'}</label>
+                <p id="compliance-assessment-documentation-hint" className="mt-1 text-base text-slate-600">
+                    {ta.field_documentation_hint ?? 'Vis til det vurderingen bygger på, for eksempel en Wiki-artikkel, et dokument eller en lenke. Én henvisning per linje. Lenker blir klikkbare.'}
+                </p>
+                <textarea
+                    id="compliance-assessment-documentation"
+                    rows={3}
+                    aria-describedby="compliance-assessment-documentation-hint"
+                    value={form.data.documentation}
+                    onChange={(event) => form.setData('documentation', event.target.value)}
+                    className={`mt-2 ${INPUT}`}
+                />
+                {form.errors.documentation && <p className="mt-1 text-base text-rose-700">{form.errors.documentation}</p>}
+            </div>
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
@@ -93,6 +143,7 @@ function AssessmentEntry({ entry, locale, tr }) {
             </div>
             <p className="text-base font-semibold text-slate-900">{(ta.history_entry ?? 'Vurdert av :name').replace(':name', author)}</p>
             <p className="whitespace-pre-line break-words text-base text-slate-700">{entry.rationale}</p>
+            <Documentation text={entry.documentation} tr={tr} testId="compliance-assessment-history-documentation" />
             <details className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <summary className="cursor-pointer text-base font-semibold text-violet-700">{ta.show_snapshot ?? 'Vis krav slik det var'}</summary>
                 <dl className="mt-3 space-y-2" data-testid="compliance-assessment-snapshot">
@@ -126,10 +177,13 @@ function AssessmentEntry({ entry, locale, tr }) {
  * requirement has changed since, and every assessment, newest first. Nothing here is stored as a
  * status; «Ikke vurdert» is simply no assessment.
  */
-export default function RequirementCompliance({ item, compliance, assessments = [], results = [], canAssess, assessing, onAssess, onDone, locale, tr }) {
+export default function RequirementCompliance({ item, compliance, assessments = [], results = [], canAssess, assessing, onAssess, onDone, locale, tr, control = false }) {
     const ta = tr.assessment ?? {};
     const status = compliance?.status ?? 'not_assessed';
-    const assessed = status !== 'not_assessed';
+    // A library requirement determined Ikke relevant under Relevans reads as such without any
+    // assessment; the details below belong to an actual assessment only.
+    const excludedByRelevance = item.applicability === 'not_applicable';
+    const assessed = Boolean(compliance?.assessment_id) && ! excludedByRelevance;
     const active = item.status === 'active';
 
     return (
@@ -181,9 +235,16 @@ export default function RequirementCompliance({ item, compliance, assessments = 
                         <p className={TERM}>{ta.rationale ?? 'Begrunnelse'}</p>
                         <p className="mt-1 whitespace-pre-line break-words text-base text-slate-800" data-testid="compliance-current-rationale">{compliance.rationale}</p>
                     </div>
+                    <Documentation text={compliance.documentation} tr={tr} testId="compliance-current-documentation" />
                 </>
             ) : (
-                <p className="mt-3 text-base text-slate-700">{ta.not_assessed_text ?? 'Kravet er ikke vurdert ennå.'}</p>
+                <p className="mt-3 text-base text-slate-700">
+                    {excludedByRelevance
+                        ? (control
+                            ? (tr.library?.applicability?.control?.excluded_from_compliance ?? 'Kontrollen er utelatt under Kontrollvalg og vurderes derfor ikke for etterlevelse.')
+                            : (tr.library?.applicability?.excluded_from_compliance ?? 'Kravet er vurdert som ikke relevant under Relevans og vurderes derfor ikke for etterlevelse.'))
+                        : (ta.not_assessed_text ?? 'Kravet er ikke vurdert ennå.')}
+                </p>
             )}
 
             {assessing && <AssessmentForm requirementId={item.id} results={results} onDone={onDone} tr={tr} />}

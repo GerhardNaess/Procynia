@@ -20,7 +20,9 @@ use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
 use App\Models\User;
+use App\Services\Compliance\Library\ComplianceFrameworkLibraryImporter;
 use App\Support\CustomerPermissionCatalog;
+use Database\Seeders\ComplianceFrameworkLibrarySeeder;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -518,7 +520,8 @@ class ComplianceE2EFixture
             return [
                 'name' => $person->name,
                 'email' => $person->email,
-                'requirement_label' => $requirement->reference.' '.$requirement->title,
+                // The requirement as every page names it: its origin, «Kilde (versjon) · referanse · tittel».
+                'requirement_label' => implode(' · ', array_filter([$source->originLabel(), $requirement->reference, $requirement->title])),
                 'requirement_title' => $requirement->title,
                 'process_title' => $process->title,
                 'control_title' => $control->title,
@@ -683,11 +686,89 @@ class ComplianceE2EFixture
      *
      * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, audits: int, audit_status_changes: int, audit_requirements: int, audit_processes: int, audit_findings: int, improvement_cases: int, business_areas: int, quality_items: int, roles: int, users: int}
      */
+    /**
+     * For the Kravbibliotek journey: a fresh person who may read, edit and assess, and the library
+     * itself (imported the way the seeder does it, idempotently). The spec activates ISO 9001
+     * through the page; cleanup removes that activation because the run's person made it.
+     *
+     * @return array{name: string, email: string, framework_id: int}
+     */
+    public static function seedLibraryJourney(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+        $framework = app(ComplianceFrameworkLibraryImporter::class)
+            ->import(ComplianceFrameworkLibraryImporter::definitionFromFile(database_path('data/compliance_frameworks/iso9001_2015.php')))['framework'];
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password, $framework): array {
+            $person = self::person($customerId, $suffix, $password, $name('Kvalitetsleder'), 'bibliotek');
+            self::role($customerId, $name('Kravbibliotek'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_EDIT,
+                CustomerPermissionCatalog::COMPLIANCE_ASSESS,
+            ], $person);
+
+            return ['name' => $person->name, 'email' => $person->email, 'framework_id' => (int) $framework->id];
+        });
+    }
+
+    /**
+     * For the three-standards journey: like seedLibraryJourney, but with the whole library as the
+     * seeder builds it — ISO 9001, ISO/IEC 27001 and ISO 14001. The spec activates through the
+     * pages; cleanup removes those activations because the run's person made them.
+     *
+     * @return array{name: string, email: string, frameworks: array<string, int>}
+     */
+    public static function seedFrameworksJourney(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+        $importer = app(ComplianceFrameworkLibraryImporter::class);
+        $frameworks = [];
+
+        foreach (ComplianceFrameworkLibrarySeeder::DEFINITIONS as $file) {
+            $framework = $importer->import(ComplianceFrameworkLibraryImporter::definitionFromFile(database_path('data/compliance_frameworks/'.$file)))['framework'];
+            $frameworks[$framework->key] = (int) $framework->id;
+        }
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password, $frameworks): array {
+            $person = self::person($customerId, $suffix, $password, $name('Sikkerhetsleder'), 'standarder');
+            self::role($customerId, $name('Standarder'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_EDIT,
+                CustomerPermissionCatalog::COMPLIANCE_ASSESS,
+            ], $person);
+
+            return ['name' => $person->name, 'email' => $person->email, 'frameworks' => $frameworks];
+        });
+    }
+
+    /**
+     * The whole module in one person's hands, for the Etterlevelse og revisjon workflow: the three
+     * standards in the library (nothing activated for the customer), and a role that may activate,
+     * set relevance, assess and audit. The spec does everything else through the pages.
+     *
+     * @return array{name: string, email: string, frameworks: array<string, int>}
+     */
+    public static function seedWorkflowJourney(string $suffix, string $password): array
+    {
+        $journey = self::seedFrameworksJourney($suffix, $password);
+        $person = User::query()->where('email', $journey['email'])->firstOrFail();
+        $name = self::namer($suffix);
+
+        self::role(self::customerId(), $name('Revisor'), [
+            CustomerPermissionCatalog::COMPLIANCE_VIEW,
+            CustomerPermissionCatalog::COMPLIANCE_AUDIT,
+        ], $person);
+
+        return $journey;
+    }
+
     public static function remaining(string $suffix): array
     {
         $customerId = self::customerId();
         $pattern = self::pattern($suffix);
-        $sourceIds = ComplianceSource::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->pluck('id');
+        $sourceIds = self::runSources($customerId, $pattern)->pluck('id');
         $requirementIds = ComplianceRequirement::query()->where('customer_id', $customerId)
             ->where(fn (Builder $query) => $query->where('title', '~', $pattern)->orWhereIn('source_id', $sourceIds))
             ->pluck('id');
@@ -726,7 +807,7 @@ class ComplianceE2EFixture
             : $query;
 
         DB::transaction(function () use ($customerId, $pattern, $sweepOnly): void {
-            $sourceIds = $sweepOnly(ComplianceSource::query()->where('customer_id', $customerId)->where('name', '~', $pattern))->pluck('id');
+            $sourceIds = $sweepOnly(self::runSources($customerId, $pattern))->pluck('id');
 
             // Test-only: the history trigger refuses deletes while the customer exists. Off for this
             // transaction's statements only; a failure rolls the switch back with everything else.
@@ -860,6 +941,21 @@ class ComplianceE2EFixture
     }
 
     /** @return Builder<User> */
+    /**
+     * The run's sources: named by the rule, or — a Kravbibliotek activation, whose name is the
+     * standard's — activated by one of the run's people.
+     */
+    private static function runSources(int $customerId, string $pattern): Builder
+    {
+        return ComplianceSource::query()
+            ->where('customer_id', $customerId)
+            ->where(fn (Builder $query) => $query
+                ->where('name', '~', $pattern)
+                ->orWhere(fn (Builder $activation) => $activation
+                    ->whereNotNull('framework_id')
+                    ->whereIn('created_by', self::runUsers($customerId, $pattern)->select('id'))));
+    }
+
     private static function runUsers(int $customerId, string $pattern): Builder
     {
         return User::query()

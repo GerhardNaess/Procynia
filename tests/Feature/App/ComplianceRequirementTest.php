@@ -102,7 +102,11 @@ class ComplianceRequirementTest extends TestCase
         $source = $this->complianceSource($customer);
         $this->complianceGrant($customer, $owner, [CustomerPermissionCatalog::COMPLIANCE_VIEW, CustomerPermissionCatalog::COMPLIANCE_EDIT]);
 
-        $this->actingAs($owner)->get('/app/compliance')->assertRedirect('/app/compliance/requirements');
+        // The module's entry: Kravbibliotek while the register is empty, Etterlevelsesvurdering after.
+        $this->actingAs($owner)->get('/app/compliance')->assertRedirect('/app/compliance/library');
+        $first = $this->complianceRequirement($source, 'Første krav');
+        $this->actingAs($owner)->get('/app/compliance')->assertRedirect('/app/compliance/assessments');
+        $first->delete();
         $props = $this->actingAs($owner)->get('/app/compliance/requirements')->assertOk()->viewData('page')['props'];
         $this->assertTrue($props['permissions']['can_edit']);
         $this->assertFalse($props['permissions']['can_delete']);
@@ -133,7 +137,7 @@ class ComplianceRequirementTest extends TestCase
 
         $show = $this->actingAs($reader)->get("/app/compliance/requirements/{$requirement->id}")->assertOk()->viewData('page');
         $this->assertSame('App/Compliance/Requirements/Show', $show['component']);
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false, 'can_manage_quality_links' => false], $show['props']['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false, 'can_set_applicability' => false, 'can_manage_quality_links' => false], $show['props']['permissions']);
 
         $this->actingAs($reader)->post('/app/compliance/requirements', $this->requirementPayload($source, $owner))->assertForbidden();
         $this->actingAs($reader)->patch("/app/compliance/requirements/{$requirement->id}", $this->requirementPayload($source, $owner))->assertForbidden();
@@ -314,7 +318,7 @@ class ComplianceRequirementTest extends TestCase
         $this->assertSame('Regler for fysisk og logisk tilgang skal etableres.', $props['requirement']['requirement_text']);
         $this->assertSame('ISO 27001 (2022)', $props['requirement']['source_label']);
         $this->assertSame([], $props['status_history']);
-        $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false, 'can_manage_quality_links' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false, 'can_assess' => false, 'can_set_applicability' => false, 'can_manage_quality_links' => false], $props['permissions']);
 
         // No fixed interval and no reference are both fine.
         $this->actingAs($editor)->post('/app/compliance/requirements', $this->requirementPayload($source, $owner, 'Uten', null, null))->assertSessionHasNoErrors();
@@ -334,8 +338,19 @@ class ComplianceRequirementTest extends TestCase
                 'source_id' => 'Kravkilde må fylles ut.',
                 'title' => 'Tittel må fylles ut.',
                 'requirement_text' => 'Kravtekst må fylles ut.',
-                'owner_user_id' => 'Ansvarlig må fylles ut.',
-            ]);
+            ])
+            // Ansvarlig is optional: responsibility follows the work, not each requirement.
+            ->assertSessionDoesntHaveErrors('owner_user_id');
+
+        $payload = $this->requirementPayload($source, $editor, 'Uten ansvarlig', null, null);
+        unset($payload['owner_user_id']);
+        $this->actingAs($editor)->post('/app/compliance/requirements', $payload)->assertSessionHasNoErrors();
+        $unowned = ComplianceRequirement::query()->where('title', 'Uten ansvarlig')->sole();
+        $this->assertNull($unowned->owner_user_id);
+        // Edited with the field left empty, it stays without one.
+        $this->actingAs($editor)->patch("/app/compliance/requirements/{$unowned->id}", ['owner_user_id' => ''] + $payload)->assertSessionHasNoErrors();
+        $this->assertNull($unowned->fresh()->owner_user_id);
+        $unowned->delete();
 
         foreach ([2, 24, 0] as $interval) {
             $this->actingAs($editor)->post('/app/compliance/requirements', $this->requirementPayload($source, $editor, 'Krav', null, $interval))
@@ -447,7 +462,7 @@ class ComplianceRequirementTest extends TestCase
         $this->assertSame('Krav', $requirement->fresh()->title);
 
         $props = $this->actingAs($editor)->get($url)->viewData('page')['props'];
-        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false, 'can_assess' => false, 'can_manage_quality_links' => false], $props['permissions']);
+        $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false, 'can_assess' => false, 'can_set_applicability' => false, 'can_manage_quality_links' => false], $props['permissions']);
         $this->assertSame([], $props['source_options']);
 
         $this->actingAs($editor)->post("{$url}/reopen", [])->assertSessionHasErrors(['reason' => 'Begrunnelse må fylles ut.']);

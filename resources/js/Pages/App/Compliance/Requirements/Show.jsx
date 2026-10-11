@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { requirementBackTarget, worklistUrl } from '../../../../Support/complianceNavigation';
+import RequirementGuidance from '../Library/RequirementGuidance';
 import { AttentionReasons } from './ComplianceAttention';
+import RequirementApplicability from './RequirementApplicability';
 import RequirementCompliance from './RequirementCompliance';
 import RequirementForm from './RequirementForm';
 import RequirementHistory from './RequirementHistory';
@@ -18,15 +21,22 @@ const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
 
 /**
- * One requirement, read as «Hva kreves? → Hvordan gjør vi det? → Oppfyller vi det?»: what it
- * says, where it comes from, who follows it up and how often it is reassessed; the Kvalitet
- * processes and controls it is met through (only for someone who can read Kvalitet); whether it is
- * met (Etterlevelse); its status, and the status history. Every action
- * is offered only when the server said this person may do it; the controller refuses it
- * otherwise. An active requirement can be edited, assessed and retired; a retired one only
+ * One requirement, read top to bottom as the assessment is done: where it comes from
+ * («ISO 14001:2026 · 6.1.2 · Miljøaspekter»), what it says and the library's guidance, its relevance
+ * or Kontrollvalg, then Etterlevelse — the current result, «Vurder etterlevelse» and the history.
+ * Optional references to Kvalitet come after that: a process description is not in itself evidence
+ * that a requirement is met, so linking one is never asked for.
+ *
+ * The page is shared by Kravregister and Etterlevelsesvurdering. Opened from the worklist
+ * (`from=assessments`), the header keeps Etterlevelsesvurdering and «Tilbake» returns to the
+ * worklist as it was left; `assess=1` opens the assessment form straight away.
+ *
+ * Every action is offered only when the server said this person may do it; the controller refuses
+ * it otherwise. An active requirement can be edited, assessed and retired; a retired one only
  * reopened. Status never moves through Rediger.
  */
 export default function ComplianceRequirementShow() {
+    const page = usePage();
     const {
         translations = {},
         requirement: item,
@@ -42,12 +52,24 @@ export default function ComplianceRequirementShow() {
         source_options: sourceOptions = [],
         owner_options: ownerOptions = [],
         review_intervals: reviewIntervals = [],
-    } = usePage().props;
+        library = null,
+        applicability = null,
+    } = page.props;
 
     const tr = translations?.compliance ?? {};
     const statusLabels = tr.statuses ?? {};
-    // Which panel is open: 'edit', 'assess', 'retire', 'reopen' or none. One at a time.
-    const [panel, setPanel] = useState(null);
+    const query = new URLSearchParams(String(page.url ?? '').split('?')[1] ?? '');
+    const back = requirementBackTarget(query.get('from'));
+    const [backHref, setBackHref] = useState(back.href ?? '/app/compliance/assessments');
+    // Which panel is open: 'edit', 'assess', 'retire', 'reopen' or none. One at a time. «Vurder» in
+    // the worklist arrives with assess=1 and the form open.
+    const [panel, setPanel] = useState(() => (query.get('assess') === '1' && permissions.can_assess ? 'assess' : null));
+
+    useEffect(() => {
+        if (back.href === null) {
+            setBackHref(worklistUrl());
+        }
+    }, [back.href]);
 
     const form = useForm({
         source_id: String(item.source_id ?? ''),
@@ -74,8 +96,8 @@ export default function ComplianceRequirementShow() {
     return (
         <CustomerAppLayout title={item.title} showPageTitle={false}>
             <div className="space-y-6">
-                <Link href="/app/compliance/requirements" className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900">
-                    ← {tr.back ?? 'Til krav'}
+                <Link href={backHref} className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900" data-testid="compliance-back">
+                    ← {back.area === 'compliance-assessments' ? (tr.back_to_assessments ?? 'Tilbake til etterlevelsesvurdering') : (tr.back ?? 'Tilbake til kravregisteret')}
                 </Link>
 
                 <header className="space-y-4">
@@ -83,6 +105,7 @@ export default function ComplianceRequirementShow() {
                         <div className="min-w-0 space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
                                 <StatusBadge tone={REQUIREMENT_STATUS_TONES[item.status] ?? 'slate'}>{statusLabels[item.status] ?? item.status}</StatusBadge>
+                                {item.origin?.source && <span className="break-words text-base font-semibold text-slate-700" data-testid="compliance-origin-source">{item.origin.source}</span>}
                                 {item.reference && <span className="break-words text-base font-semibold text-slate-700" data-testid="compliance-reference">{item.reference}</span>}
                             </div>
                             <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
@@ -109,6 +132,7 @@ export default function ComplianceRequirementShow() {
                             sourceOptions={sourceOptions}
                             ownerOptions={ownerOptions}
                             reviewIntervals={reviewIntervals}
+                            fromLibrary={library !== null}
                             tr={tr}
                         />
                     </section>
@@ -120,15 +144,15 @@ export default function ComplianceRequirementShow() {
                 )}
 
                 <section className={CARD} aria-labelledby="compliance-details-heading">
-                    <h2 id="compliance-details-heading" className="text-xl font-semibold text-slate-950">{tr.details_heading ?? 'Kilde og ansvar'}</h2>
+                    <h2 id="compliance-details-heading" className="text-xl font-semibold text-slate-950">{tr.details_heading ?? 'Opphav og oppfølging'}</h2>
                     <dl className="mt-4 grid gap-4 sm:grid-cols-3" data-testid="compliance-facts">
                         <div>
-                            <dt className={TERM}>{tr.field_source ?? 'Kravkilde'}</dt>
-                            <dd className={VALUE}>{item.source_label}</dd>
+                            <dt className={TERM}>{tr.field_origin ?? 'Opphav'}</dt>
+                            <dd className={VALUE} data-testid="compliance-facts-origin">{item.origin?.source ?? item.source_label}{item.reference ? ` · ${item.reference}` : ''}</dd>
                         </div>
                         <div>
-                            <dt className={TERM}>{tr.field_owner ?? 'Ansvarlig'}</dt>
-                            <dd className={VALUE}>{item.owner_name ?? <span className="text-amber-800">{tr.no_owner ?? 'Mangler ansvarlig'}</span>}</dd>
+                            <dt className={TERM}>{tr.field_owner_optional ?? 'Ansvarlig (valgfritt)'}</dt>
+                            <dd className={VALUE}>{item.owner_name ?? <span className="text-slate-600">{tr.no_owner ?? 'Ingen valgt'}</span>}</dd>
                         </div>
                         <div>
                             <dt className={TERM}>{tr.field_review ?? 'Revurderingsintervall'}</dt>
@@ -137,14 +161,32 @@ export default function ComplianceRequirementShow() {
                     </dl>
                 </section>
 
-                {qualityContext && (
-                    <RequirementQualityContext
-                        item={item}
-                        context={qualityContext}
-                        options={qualityOptions}
-                        canManage={Boolean(permissions.can_manage_quality_links)}
+                {library && (
+                    <section className={CARD} aria-labelledby="compliance-library-context-heading" data-testid="compliance-library-context">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <h2 id="compliance-library-context-heading" className="text-xl font-semibold text-slate-950">{tr.library?.from_library_heading ?? 'Fra kravbiblioteket'}</h2>
+                            {! library.content_verified && <StatusBadge tone="amber">{tr.library?.unverified_badge ?? 'Ikke faglig kvalitetssikret'}</StatusBadge>}
+                        </div>
+                        <p className="mt-2 text-base text-slate-700">
+                            {(tr.library?.from_library_note ?? 'Kravet kommer fra :name.').replace(':name', library.framework_label)}
+                            {' '}
+                            <Link href={library.framework_url} className="font-semibold text-violet-700 hover:text-violet-900">{tr.library?.nav ?? 'Kravbibliotek'} →</Link>
+                        </p>
+                        {library.withdrawn && <p className="mt-2 text-base text-amber-800">{tr.library?.withdrawn_hint ?? ''}</p>}
+                        <div className="mt-4">
+                            <RequirementGuidance details={library} tr={tr} idPrefix="compliance-requirement-library" />
+                        </div>
+                    </section>
+                )}
+
+                {applicability && (
+                    <RequirementApplicability
+                        requirementId={item.id}
+                        applicability={applicability}
+                        rule={library?.applicability_rule}
+                        canChange={Boolean(permissions.can_set_applicability)}
+                        locale={locale}
                         tr={tr}
-                        qualityTr={translations?.quality ?? {}}
                     />
                 )}
 
@@ -159,7 +201,19 @@ export default function ComplianceRequirementShow() {
                     onDone={() => setPanel(null)}
                     locale={locale}
                     tr={tr}
+                    control={library?.applicability_rule === 'control'}
                 />
+
+                {qualityContext && (
+                    <RequirementQualityContext
+                        item={item}
+                        context={qualityContext}
+                        options={qualityOptions}
+                        canManage={Boolean(permissions.can_manage_quality_links)}
+                        tr={tr}
+                        qualityTr={translations?.quality ?? {}}
+                    />
+                )}
 
                 <section className={CARD} aria-labelledby="compliance-status-heading" data-testid="compliance-status">
                     <h2 id="compliance-status-heading" className="text-xl font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h2>

@@ -33,7 +33,7 @@ describe('the rail shows the whole planned product structure', () => {
         assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance/requirements', '/app/supplier-management', '/app/management-reviews'],
+            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance', '/app/supplier-management', '/app/management-reviews'],
         );
     });
 
@@ -131,31 +131,19 @@ describe('the rail does not take navigation away from anyone', () => {
         assert.match(layout, /flex max-w-\[1600px\] flex-col gap-6 .* lg:flex-row/);
     });
 
-    test('the rail picks modules and workspaces; only a module that declares its work areas lists them', () => {
-        // Anbud used to nest its four work areas here, which made one module structurally unlike
-        // every other, and it still does not. Etterlevelse og revisjon is the one exception, chosen on
-        // purpose: Krav and Revisjoner are equal destinations, and the module entry only led to Krav.
+    test('the rail picks modules and workspaces; no module lists its work areas there', () => {
+        // Anbud used to nest its work areas here, and Etterlevelse og revisjon did for a while. Both now
+        // carry them in the header, so every module is one entry in the rail.
         assert.ok(! sidebar.includes('renderSections'), 'the rail must not render a module\'s sections');
         assert.ok(! sidebar.includes('activeSectionKey'), 'the rail takes no section state');
-        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, activeAreaKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null \}\)/);
-        assert.match(sidebar, /\{child\.subAreas && renderSubAreas\(child\)\}/);
-        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}\s*\n\s*activeAreaKey=\{activeSecondaryKey\}\s*\n\s*activeWorkspace=\{activeWorkspace\}/);
-
-        const withAreas = APP_MODULES.filter((module) => module.subAreas);
-        assert.deepEqual(withAreas.map((module) => module.key), ['compliance']);
-        assert.deepEqual(withAreas[0].subAreas.map((area) => [area.key, area.href, area.label({})]), [
-            ['compliance-requirements', '/app/compliance/requirements', 'Krav'],
-            ['compliance-audits', '/app/compliance/audits', 'Revisjoner'],
-        ]);
+        assert.ok(! sidebar.includes('subAreas'), 'the rail renders no work areas');
+        assert.match(sidebar, /function ModuleSidebar\(\{ modules = \{\}, activeModules = \[\], permissions = \[\], activeKey = null, activeWorkspace = null, collapsed = false, onToggleCollapsed = null \}\)/);
+        assert.match(layout, /<ModuleSidebar\s*\n\s*modules=\{modules\}\s*\n\s*activeModules=\{activeModules\}\s*\n\s*permissions=\{userPermissions\}\s*\n\s*activeKey=\{activeModule\}\s*\n\s*activeWorkspace=\{activeWorkspace\}/);
+        assert.deepEqual(APP_MODULES.filter((module) => module.subAreas).map((module) => module.key), []);
     });
 
-    test('one current page: with a work area open, the area carries aria-current, not the module', () => {
-        assert.match(sidebar, /aria-current=\{isActive && ! areaOpen \? 'page' : undefined\}/);
-        assert.match(sidebar, /const isActive = activeAreaKey === area\.key;/);
-    });
-
-    test('the work areas fold away with the rail on desktop, never on a phone', () => {
-        assert.match(sidebar, /collapsed \? 'lg:hidden' : ''/);
+    test('one current page: the module row carries aria-current', () => {
+        assert.match(sidebar, /aria-current=\{isActive \? 'page' : undefined\}/);
     });
 });
 

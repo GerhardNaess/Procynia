@@ -31,13 +31,13 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await loginAs(page, person.email, COMPLIANCE_E2E_PASSWORD);
     await page.setViewportSize(DESKTOP);
 
-    // Level 2: Krav | Revisjoner — and nothing else.
+    // Level 2: the module's four work areas — and nothing else.
     await page.goto('/app/compliance/audits');
     const areas = page.getByTestId('module-navigation');
-    await expect(areas.locator('a')).toHaveText(['Krav', 'Revisjoner']);
-    await expect(areas.locator('[aria-current="page"]')).toHaveText('Revisjoner');
+    await expect(areas.locator('a')).toHaveText(['Kravbibliotek', 'Kravregister', 'Etterlevelsesvurdering', 'Revisjon']);
+    await expect(areas.locator('[aria-current="page"]')).toHaveText('Revisjon');
     await expect(page.getByRole('heading', { name: 'Revisjoner', level: 1 })).toBeVisible();
-    await expectPageHelp(page, 'Om revisjoner', ['Hva en revisjon er', 'Status', 'Registeret']);
+    await expectPageHelp(page, 'Om revisjoner', ['Slik gjør du det', 'Hva en revisjon er', 'Status', 'Registeret']);
     await expectReadable(page, '01-register');
 
     // 1. Opprett revisjon.
@@ -59,7 +59,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await expect(page.getByTestId('compliance-audit-facts')).toContainText('01.11.2026');
     await expect(page.getByTestId('compliance-audit-scope')).toHaveText('Intern revisjon av tilgangsstyring og brukeradministrasjon for IT-avdelingen.');
     await expect(page.getByText('Ingen statusendringer ennå.')).toBeVisible();
-    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Revisjoner');
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Revisjon');
     await expectPageHelp(page, 'Om revisjonen', ['Scope', 'Gjennomføring', 'Statushistorikk']);
 
     // 2. Legg til krav i scope — one by hand, then the rest of the source through the shortcut.
@@ -76,8 +76,9 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await page.getByTestId('compliance-audit-source-form').getByRole('button', { name: 'Legg til fra kilde' }).click();
     await expect(page.getByText('Kravet er lagt til i scope.')).toBeVisible();
     await expect(page.getByTestId('compliance-audit-requirement')).toHaveCount(2);
-    await expect(requirements).toContainText(`A.5.15 ${person.first_requirement}`);
-    await expect(requirements).toContainText(`A.5.18 ${person.second_requirement}`);
+    // Each with its origin: the standard, the clause and the title.
+    await expect(requirements).toContainText(`${person.source_label} · A.5.15 · ${person.first_requirement}`);
+    await expect(requirements).toContainText(`${person.source_label} · A.5.18 · ${person.second_requirement}`);
 
     // 3. Legg til Kvalitet-prosess.
     const processes = page.getByTestId('compliance-audit-processes');
@@ -157,14 +158,14 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await expect(history.nth(0)).toContainText('Konklusjonen må presiseres etter ledelsens gjennomgang.');
     await expectReadable(page, '08-reopened');
 
-    // The register lists it, and Krav is one click away in the same row.
+    // The register lists it, and Kravregister is one click away in the same row.
     await page.getByRole('link', { name: 'Til revisjoner' }).click();
     await expect(page.getByRole('link', { name: title })).toHaveCount(1);
     await expect(page.getByTestId('compliance-audit-table')).toContainText('Under arbeid');
     await expect(page.getByTestId('compliance-audit-table')).toContainText('01.11.2026–15.11.2026');
-    await areas.getByRole('link', { name: 'Krav' }).click();
+    await areas.getByRole('link', { name: 'Kravregister', exact: true }).click();
     await page.waitForURL(/\/app\/compliance\/requirements$/);
-    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Krav');
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kravregister');
 });
 
 /**

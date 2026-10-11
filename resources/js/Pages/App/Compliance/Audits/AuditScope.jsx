@@ -69,7 +69,6 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
                                             />
                                             <span className="min-w-0 break-words">
                                                 <span className="font-semibold">{requirementLabel(option)}</span>
-                                                {option.source_label && <span className="block text-slate-600">{option.source_label}</span>}
                                                 {option.status === 'retired' && (
                                                     <span className="mt-1 block"><StatusBadge tone="slate">{ta.retired_requirement ?? 'Utgått'}</StatusBadge></span>
                                                 )}
@@ -169,7 +168,6 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
                                 <Link href={requirement.url} className="block break-words text-base font-semibold text-violet-700 hover:text-violet-900">
                                     {requirementLabel(requirement)}
                                 </Link>
-                                {requirement.source_label && <p className="break-words text-base text-slate-600">{requirement.source_label}</p>}
                                 {requirement.status === 'retired' && <StatusBadge tone="slate">{ta.retired_requirement ?? 'Utgått'}</StatusBadge>}
                             </div>
                             {canManage && (

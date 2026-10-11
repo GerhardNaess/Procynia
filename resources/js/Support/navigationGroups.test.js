@@ -14,26 +14,26 @@ const VIEW_ALL = ['wiki.view', 'quality.view', 'risk.view', 'objective.view', 'i
 const entries = railEntries(ALL, VIEW_ALL).entries;
 
 /**
- * A rail group is anything with something under it: Styring (its modules) and Etterlevelse og
- * revisjon (Krav and Revisjoner). These guard the rules that make folding safe — the chevron folds
- * and the name navigates, and the page you are on is never hidden under a closed parent.
+ * A rail group is a workspace with modules under it: Styring. Modules carry their work areas in the
+ * header, so none is a group. These guard the rules that make folding safe — the chevron folds and
+ * the name navigates, and the page you are on is never hidden under a closed parent.
  */
 describe('which entries are groups', () => {
-    test('Styring and Etterlevelse og revisjon have chevrons; nothing else does', () => {
+    test('Styring has a chevron; nothing else does — not even Etterlevelse og revisjon', () => {
         const governance = entries.find((entry) => entry.key === 'governance');
         const withChevron = [...entries, ...governance.children].filter(hasChildren).map((entry) => entry.key);
 
-        assert.deepEqual(withChevron, ['governance', 'compliance']);
+        assert.deepEqual(withChevron, ['governance']);
     });
 
     test('a node without children has no chevron', () => {
-        for (const key of ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements']) {
+        for (const key of ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance']) {
             assert.equal(hasChildren(APP_MODULES.find((module) => module.key === key)), false, key);
         }
     });
 
-    test('the sidebar renders a chevron only for an entry with children', () => {
-        assert.match(sidebar, /\{hasChildren\(child\) && renderGroupToggle\(child\.key, childLabel, `module-\$\{child\.key\}-areas`\)\}/);
+    test('the sidebar renders a chevron only for a workspace', () => {
+        assert.ok(! sidebar.includes('renderGroupToggle(child.key'), 'a module row must not get a chevron');
         assert.ok(! /renderLink[\s\S]*?renderGroupToggle\(entry/.test(sidebar), 'a plain module row must not get a chevron');
     });
 });
@@ -71,16 +71,13 @@ describe('folding and unfolding', () => {
 });
 
 describe('the current page opens its parents', () => {
-    test('on Krav or Revisjoner both Styring and Etterlevelse og revisjon are opened', () => {
-        // The layout resolves /app/compliance/requirements and /app/compliance/audits to the module
-        // key `compliance` inside the workspace `governance`.
+    test('inside Etterlevelse og revisjon, Styring is opened', () => {
+        // The layout resolves every /app/compliance page to the module key `compliance` inside the
+        // workspace `governance`.
         const required = requiredOpenGroups(entries, { activeWorkspace: 'governance', activeKey: 'compliance' });
 
-        assert.deepEqual(required, ['governance', 'compliance']);
-
-        const opened = withGroupsOpen({ governance: false, compliance: false }, required);
-        assert.equal(isGroupOpen(opened, 'governance'), true);
-        assert.equal(isGroupOpen(opened, 'compliance'), true);
+        assert.deepEqual(required, ['governance']);
+        assert.equal(isGroupOpen(withGroupsOpen({ governance: false }, required), 'governance'), true);
     });
 
     test('inside another Styring module only Styring is opened', () => {
@@ -108,10 +105,8 @@ describe('the current page opens its parents', () => {
 });
 
 describe('the active state', () => {
-    test('one current page: an open work area carries aria-current, the module keeps its pill', () => {
-        assert.match(sidebar, /aria-current=\{isActive && ! areaOpen \? 'page' : undefined\}/);
-        assert.match(sidebar, /const isActive = activeAreaKey === area\.key;/);
-        assert.match(sidebar, /isActive \? 'font-semibold text-violet-700'/);
+    test('one current page: the module row carries aria-current', () => {
+        assert.match(sidebar, /aria-current=\{isActive \? 'page' : undefined\}/);
     });
 
     test('the chevron says what it will do, and which list it controls', () => {

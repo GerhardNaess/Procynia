@@ -71,7 +71,7 @@ class ComplianceAuditScopeService
                 ->where('audit_id', $audit->id)
                 ->where('customer_id', $audit->customer_id)
                 ->select('requirement_id'))
-            ->with('source:id,name,version')
+            ->with('source:id,name,version,framework_id')
             ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
             ->orderBy('compliance_requirements.source_id')
             ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
@@ -95,7 +95,7 @@ class ComplianceAuditScopeService
 
         $requirements = $this->access->visibleRequirements($user)
             ->whereNotIn('compliance_requirements.id', $linked)
-            ->with('source:id,name,version')
+            ->with('source:id,name,version,framework_id')
             ->orderByRaw('CASE compliance_requirements.status WHEN ? THEN 0 ELSE 1 END', [ComplianceRequirement::STATUS_ACTIVE])
             ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
             ->orderBy('compliance_requirements.source_id')
@@ -153,7 +153,8 @@ class ComplianceAuditScopeService
 
     /**
      * «Legg til krav fra kravkilde»: every active requirement of the source that is not in scope yet,
-     * written as fixed rows now. The source itself is not stored.
+     * written as fixed rows now. The source itself is not stored. A requirement determined Ikke
+     * relevant is outside the register's work and is left out; it can still be added one by one.
      */
     public function addRequirementsFromSource(User $user, ComplianceAudit $audit, int $sourceId): int
     {
@@ -168,6 +169,7 @@ class ComplianceAuditScopeService
         $ids = $this->access->visibleRequirements($user)
             ->where('compliance_requirements.source_id', $source->id)
             ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE)
+            ->where('compliance_requirements.applicability', '<>', ComplianceRequirement::APPLICABILITY_NOT_APPLICABLE)
             ->whereNotIn('compliance_requirements.id', ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->select('requirement_id'))
             ->orderBy('compliance_requirements.id')
             ->pluck('compliance_requirements.id')
@@ -345,12 +347,15 @@ class ComplianceAuditScopeService
             'status' => $requirement->status,
             'source_id' => (int) $requirement->source_id,
             'source_label' => $requirement->source ? $this->sourceLabel($requirement->source) : null,
+            // «ISO 14001:2026 · 6.1.2 · Miljøaspekter» — the same origin as in the register.
+            'origin' => $requirement->origin(),
             'url' => route('app.compliance.requirements.show', ['requirementId' => $requirement->id]),
         ];
     }
 
+    /** «ISO 14001:2026» for an activated standard, «Name (version)» otherwise — as on every page. */
     private function sourceLabel(ComplianceSource $source): string
     {
-        return $source->version !== null && $source->version !== '' ? "{$source->name} ({$source->version})" : $source->name;
+        return $source->originLabel();
     }
 }

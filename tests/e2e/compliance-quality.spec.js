@@ -15,7 +15,7 @@ async function xsrfHeaders(page) {
 }
 
 /**
- * Hvordan kravet oppfylles, end to end: a person who may edit and assess requirements and read
+ * Koblinger til Kvalitet (valgfritt), end to end: a person who may edit and assess requirements and read
  * Kvalitet registers a requirement, links a Kvalitet process and a Kvalitet control, finds the
  * control's evidence read-only, assesses the requirement, sees how it is met and whether it is met
  * side by side, removes a link — and Kvalitet's own items are exactly as they were. Every step is
@@ -51,10 +51,14 @@ test('a requirement is linked to a Kvalitet process and control, shows the evide
     await page.waitForURL(/\/app\/compliance\/requirements\/\d+$/);
 
     const section = page.getByTestId('compliance-quality');
-    await expect(section.getByRole('heading', { name: 'Hvordan kravet oppfylles' })).toBeVisible();
+    await expect(section.getByRole('heading', { name: 'Koblinger til Kvalitet (valgfritt)' })).toBeVisible();
+    // Optional, and after Etterlevelse: a process is never asked for before an assessment.
+    await expect(section).toContainText('En prosessbeskrivelse er ikke i seg selv dokumentasjon');
+    const sectionTop = (await section.boundingBox()).y;
+    expect(sectionTop).toBeGreaterThan((await page.getByTestId('compliance-assessment').boundingBox()).y);
     await expect(section).toContainText('Ingen prosesser er koblet til kravet.');
     await expect(section).toContainText('Ingen kontroller er koblet til kravet.');
-    await expectPageHelp(page, 'Om kravet', ['Hvordan kravet oppfylles', 'Etterlevelse']);
+    await expectPageHelp(page, 'Om kravet', ['Etterlevelse', 'Koblinger til Kvalitet (valgfritt)']);
     await expectReadable(page, '01-empty');
 
     // 2. Koble prosess.
@@ -97,12 +101,13 @@ test('a requirement is linked to a Kvalitet process and control, shows the evide
     await page.getByTestId('compliance-assessment-form').getByRole('button', { name: 'Lagre vurdering' }).click();
     await expect(page.getByText('Etterlevelsesvurderingen er registrert.')).toBeVisible();
 
-    // 6. How it is met and whether it is met, together — in that order.
+    // 6. Whether it is met, and the optional links to Kvalitet below it.
     await expect(page.getByTestId('compliance-current')).toHaveText('Oppfylt');
     await expect(control).toContainText(person.control_title);
     const qualityBox = await section.boundingBox();
     const assessmentBox = await page.getByTestId('compliance-assessment').boundingBox();
-    expect(qualityBox.y).toBeLessThan(assessmentBox.y);
+    // Etterlevelse first; the optional Kvalitet links come after it.
+    expect(qualityBox.y).toBeGreaterThan(assessmentBox.y);
     await expectReadable(page, '04-linked-and-assessed');
 
     // 7. Fjern kobling (the requirement is active).
@@ -133,7 +138,7 @@ test('without Kvalitet the links are invisible and cannot be changed', async ({ 
     await page.goto(`/app/compliance/requirements/${seeded.requirement_id}`);
     await expect(page.getByRole('heading', { name: seeded.requirement_title })).toBeVisible();
     await expect(page.getByTestId('compliance-quality')).toHaveCount(0);
-    await expect(page.getByText('Hvordan kravet oppfylles')).toHaveCount(0);
+    await expect(page.getByText('Koblinger til Kvalitet')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Legg til kontroll' })).toHaveCount(0);
 
     // Not in the page, not in the Inertia props it was drawn from.

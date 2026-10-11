@@ -223,6 +223,10 @@ const tf = translations?.frontend ?? {};   // or translations?.ai, translations?
 
 AI prompts must not hardcode a language. Use `CustomerContext::resolveLanguageCode()` in HTTP controllers and resolve from `$model->customer->language->code` in queue jobs. Pass the resulting `$languageCode` to all AI service methods that produce user-facing text. The `languageName(string $code)` helper (defined locally in each AI service) maps codes to English language names for insertion into prompts.
 
+#### PageHelp
+
+PageHelp teaches the user how the work is done in Procynia, step by step — not just what the page contains. Use `PageHelpButton` (right-aligned in the page header) with: the intro as a 1–3 sentence purpose under `introTitle` «Hva brukes siden til?», then a first section «Slik gjør du det» of numbered items («1. …») naming buttons, fields, statuses and menu paths exactly as the UI shows them. Reference sections explaining terms and statuses come after. Never describe an action the UI does not offer. Norwegian and English keep the same structure. Pattern: `compliance.help.*` and `tests/Unit/CompliancePageHelpTranslationsTest.php`.
+
 #### Status
 
 Infrastructure is complete. Most existing pages still have hardcoded Norwegian — these will be migrated incrementally. Do not retroactively fix pages unless explicitly asked.

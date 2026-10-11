@@ -46,6 +46,11 @@ class ComplianceSourceController extends Controller
         $source = $this->access->findVisibleSource($user, $sourceId) ?? abort(404);
         abort_unless($this->access->canEdit($user), 403);
 
+        // An activated framework's name and version follow Kravbiblioteket.
+        if ($source->isFromLibrary()) {
+            return back()->with('error', __('procynia.compliance.library.validation.source_is_library_edit'));
+        }
+
         $source->fill($this->validated($request) + ['updated_by' => $user->id])->save();
 
         return back()->with('success', __('procynia.compliance.sources.flash.updated'));

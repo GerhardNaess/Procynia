@@ -209,8 +209,15 @@ class ComplianceAssessmentTest extends TestCase
         $page = $this->actingAs($assessor)->get('/app/compliance/requirements')->assertOk()->viewData('page');
         $this->assertSame([(int) $own->id], array_column($page['props']['requirements'], 'id'));
         $this->assertSame(1, $page['props']['visible_count']);
-        $this->assertSame('not_assessed', $page['props']['requirements'][0]['compliance']['status']);
         $this->assertStringNotContainsString('Hemmelig begrunnelse', json_encode($page['props']));
+
+        // Nor does Etterlevelsesvurdering: only the own requirement, not assessed, counted once.
+        $worklist = $this->actingAs($assessor)->get('/app/compliance/assessments')->assertOk()->viewData('page')['props'];
+        $this->assertSame([(int) $own->id], array_column($worklist['requirements'], 'id'));
+        $this->assertSame('not_assessed', $worklist['requirements'][0]['group']);
+        $this->assertSame(1, $worklist['stats']['assessable']);
+        $this->assertSame(0, $worklist['stats']['non_compliant']);
+        $this->assertStringNotContainsString('Hemmelig begrunnelse', json_encode($worklist));
 
         // The resolver only ever sees the ids it is handed, and only within the customer it is given.
         $this->assertCount(0, app(ComplianceStatusResolver::class)->latestForRequirements((int) $customer->id, [(int) $foreign->id]));
@@ -252,7 +259,11 @@ class ComplianceAssessmentTest extends TestCase
 
         $row = $this->actingAs($assessor)->get('/app/compliance/requirements')->viewData('page')['props']['requirements'][0];
         $this->assertSame('retired', $row['status']);
-        $this->assertSame(['status' => 'partially_compliant', 'is_overdue' => false], array_intersect_key($row['compliance'], array_flip(['status', 'is_overdue'])));
+
+        // A retired requirement is no longer part of the work: not in the worklist, not in any figure.
+        $worklist = $this->actingAs($assessor)->get('/app/compliance/assessments')->viewData('page')['props'];
+        $this->assertSame([], $worklist['requirements']);
+        $this->assertSame(0, $worklist['stats']['assessable'] + $worklist['stats']['partially_compliant']);
     }
 
     public function test_a_requirement_that_has_been_assessed_cannot_be_deleted(): void
@@ -342,10 +353,14 @@ class ComplianceAssessmentTest extends TestCase
         $this->insertAssessment($quarterly, 'compliant', '2026-01-15 08:00:00');
         $this->insertAssessment($noInterval, 'non_compliant', '2020-01-15 08:00:00');
 
+        // Etterlevelsesvurdering's worklist, by title: the group and whether the review is overdue.
         $register = function () use ($assessor): array {
-            $rows = $this->actingAs($assessor)->get('/app/compliance/requirements')->viewData('page')['props']['requirements'];
+            $rows = $this->actingAs($assessor)->get('/app/compliance/assessments')->viewData('page')['props']['requirements'];
 
-            return array_combine(array_column($rows, 'title'), array_column($rows, 'compliance'));
+            return array_combine(
+                array_map(fn (array $row): string => $row['origin']['title'], $rows),
+                array_map(fn (array $row): array => ['status' => $row['group'], 'is_overdue' => $row['is_overdue']], $rows),
+            );
         };
 
         $this->travelTo(CarbonImmutable::parse('2026-04-15 22:00:00'));

@@ -311,12 +311,17 @@ describe('one navigation choice is rendered in one place', () => {
         }
     });
 
-    test('Etterlevelse og revisjon has exactly two real areas now that Revisjoner exists — Krav | Revisjoner', () => {
+    test('Etterlevelse og revisjon has four work areas, in the order the work runs — like Anbud, in the header', () => {
         const areas = block('if (activeMainArea === \'compliance\') {\n            // Etterlevelse', '];');
         const keys = [...areas.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
 
-        assert.deepEqual(keys, ['compliance-requirements', 'compliance-audits']);
+        assert.deepEqual(keys, ['compliance-library', 'compliance-requirements', 'compliance-assessments', 'compliance-audits']);
+        assert.match(areas, /href: '\/app\/compliance\/library'/);
         assert.match(areas, /href: '\/app\/compliance\/requirements'/);
+        assert.match(areas, /href: '\/app\/compliance\/assessments'/);
         assert.match(areas, /href: '\/app\/compliance\/audits'/);
+        assert.match(areas, /tc\.nav\?\.assessments \?\? 'Etterlevelsesvurdering'/);
+        // The active area is decided in one place, shared with the pages.
+        assert.match(layout, /return complianceAreaKey\(pathname, searchParams\);/);
     });
 });

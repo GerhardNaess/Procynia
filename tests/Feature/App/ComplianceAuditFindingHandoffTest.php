@@ -347,7 +347,9 @@ class ComplianceAuditFindingHandoffTest extends TestCase
     public function test_the_case_shows_its_audit_origin_only_to_someone_who_can_read_compliance(): void
     {
         ['customer' => $customer, 'area' => $area, 'auditor' => $auditor, 'audit' => $audit] = $this->scenario();
-        $finding = $this->finding($audit);
+        // The finding names the requirement it concerns, so the case can say which standard it answers to.
+        $requirement = $this->complianceRequirement($this->complianceSource($customer, 'ISO 14001', '2026'), 'Miljøaspekter', null, '6.1.2');
+        $finding = $this->finding($audit, ComplianceAuditFinding::TYPE_NONCONFORMITY, ['requirement_id' => $requirement->id]);
         $this->actingAs($auditor)->post($this->url($audit, $finding), $this->handoffPayload($finding, $area, $auditor))->assertSessionHasNoErrors();
         $case = ImprovementCase::query()->findOrFail($finding->fresh()->improvement_case_id);
 
@@ -355,6 +357,7 @@ class ComplianceAuditFindingHandoffTest extends TestCase
             'audit_title' => $audit->title,
             'audit_url' => route('app.compliance.audits.show', ['auditId' => $audit->id]).'#finding-'.$finding->id,
             'finding_title' => $finding->title,
+            'requirement_origin' => ['source' => 'ISO 14001 (2026)', 'reference' => '6.1.2', 'title' => 'Miljøaspekter'],
         ], $this->caseProps($auditor, $case)['audit_origin']);
 
         // Full rights on the case, no compliance access: the case says nothing about the audit.

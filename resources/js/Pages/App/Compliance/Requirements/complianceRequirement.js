@@ -131,20 +131,20 @@ export function formatDateTime(iso, locale = 'no') {
 }
 
 /**
- * The five reasons a requirement needs attention, in the server's display order
+ * The four reasons a requirement needs attention, in the server's display order
  * (ComplianceAttentionService::REASONS). The server decides which apply; this only names them.
+ * A missing ansvarlig is not one: the person is optional.
  */
-export const ATTENTION_REASONS = ['not_assessed', 'non_compliant', 'partially_compliant', 'review_overdue', 'missing_owner'];
+export const ATTENTION_REASONS = ['not_assessed', 'non_compliant', 'partially_compliant', 'review_overdue'];
 
 const ATTENTION_REASON_FALLBACKS = {
     not_assessed: 'Ikke vurdert',
     non_compliant: 'Ikke oppfylt',
     partially_compliant: 'Delvis oppfylt',
     review_overdue: 'Revurdering forfalt',
-    missing_owner: 'Mangler ansvarlig',
 };
 
-/** «Ikke vurdert», «Mangler ansvarlig» … */
+/** «Ikke vurdert», «Revurdering forfalt» … */
 export function attentionReasonLabel(reason, tr = {}) {
     return tr.attention?.reasons?.[reason] ?? ATTENTION_REASON_FALLBACKS[reason] ?? reason;
 }
@@ -185,4 +185,30 @@ export function attentionPanel(attention, expanded = false) {
         hasMore: all.length > ATTENTION_PREVIEW,
         count: all.length,
     };
+}
+
+/**
+ * An assessment's Dokumentasjon as lines to show: one per non-empty line, a link where the line is
+ * one. Only http(s) and Procynia's own paths become links — never javascript: or anything else a
+ * line might start with.
+ *
+ * @param {string|null} text
+ * @returns {Array<{text: string, href: string|null, external: boolean}>}
+ */
+export function documentationLines(text) {
+    return String(text ?? '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line !== '')
+        .map((line) => {
+            if (/^https?:\/\/\S+$/i.test(line)) {
+                return { text: line, href: line, external: true };
+            }
+
+            if (/^\/app\/\S*$/.test(line)) {
+                return { text: line, href: line, external: false };
+            }
+
+            return { text: line, href: null, external: false };
+        });
 }

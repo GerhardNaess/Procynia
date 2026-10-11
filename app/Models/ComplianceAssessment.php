@@ -43,6 +43,7 @@ class ComplianceAssessment extends Model
         'requirement_id',
         'result',
         'rationale',
+        'documentation',
         'assessed_by_user_id',
         'assessed_at',
         'requirement_reference',

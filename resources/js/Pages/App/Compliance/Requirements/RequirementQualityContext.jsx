@@ -146,8 +146,10 @@ function ControlCard({ control, canManage, onUnlink, tq, qualityStatuses, freque
 }
 
 /**
- * Hvordan kravet oppfylles: the Kvalitet processes and controls the requirement is met through,
- * read live from Kvalitet, with each control's evidence read-only.
+ * Koblinger til Kvalitet: optional references from the requirement to Kvalitet processes and
+ * controls, read live from Kvalitet, with each control's evidence read-only. Never asked for, and
+ * below Etterlevelse on the page: a process description is not in itself evidence that a
+ * requirement is met — the assessment's begrunnelse and Dokumentasjon are.
  *
  * Rendered only when the server sent `context` — which it does only to someone who can read
  * Kvalitet. Without it the page has no trace of this section: no names, no count. Linking and
@@ -179,8 +181,8 @@ export default function RequirementQualityContext({ item, context, options, canM
 
     return (
         <section className={CARD} aria-labelledby="compliance-quality-heading" data-testid="compliance-quality">
-            <h2 id="compliance-quality-heading" className="text-xl font-semibold text-slate-950">{tq.heading ?? 'Hvordan kravet oppfylles'}</h2>
-            <p className="mt-1 text-base text-slate-600">{tq.intro ?? 'Prosessene og kontrollene i Kvalitet som kravet oppfylles gjennom.'}</p>
+            <h2 id="compliance-quality-heading" className="text-xl font-semibold text-slate-950">{tq.heading ?? 'Koblinger til Kvalitet (valgfritt)'}</h2>
+            <p className="mt-1 text-base text-slate-600">{tq.intro ?? 'Valgfrie henvisninger til prosesser og kontroller i Kvalitet. En prosessbeskrivelse er ikke i seg selv dokumentasjon på at kravet er oppfylt – begrunn og dokumenter vurderingen under Etterlevelse.'}</p>
             {! active && (
                 <p className="mt-3 text-base text-slate-700">{tq.retired_requirement_note ?? 'Kravet er utgått. Koblingene vises som de var, og kan ikke endres før kravet er gjenåpnet.'}</p>
             )}

@@ -4,7 +4,9 @@ use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\BusinessAreaController;
+use App\Http\Controllers\App\ComplianceAssessmentController;
 use App\Http\Controllers\App\ComplianceAuditController;
+use App\Http\Controllers\App\ComplianceLibraryController;
 use App\Http\Controllers\App\ComplianceRequirementController;
 use App\Http\Controllers\App\ComplianceSourceController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
@@ -471,6 +473,8 @@ Route::prefix('app')
             // Sett som utgått / Gjenåpne: the only ways status changes. Each writes an immutable history row.
             Route::post('/requirements/{requirementId}/retire', [ComplianceRequirementController::class, 'retire'])->whereNumber('requirementId')->name('requirements.retire');
             Route::post('/requirements/{requirementId}/reopen', [ComplianceRequirementController::class, 'reopen'])->whereNumber('requirementId')->name('requirements.reopen');
+            // Etterlevelsesvurdering: the worklist across standards. Read-only; a requirement is assessed on its own page.
+            Route::get('/assessments', [ComplianceAssessmentController::class, 'index'])->name('assessments.index');
             // Vurder etterlevelse: append-only, a correction is a new assessment.
             Route::post('/requirements/{requirementId}/assessments', [ComplianceRequirementController::class, 'assess'])->whereNumber('requirementId')->name('requirements.assess');
             // Hvordan kravet oppfylles: links to existing Kvalitet processes and controls, never copies.
@@ -478,6 +482,13 @@ Route::prefix('app')
             Route::delete('/requirements/{requirementId}/processes/{processId}', [ComplianceRequirementController::class, 'unlinkProcess'])->whereNumber(['requirementId', 'processId'])->name('requirements.processes.destroy');
             Route::post('/requirements/{requirementId}/controls', [ComplianceRequirementController::class, 'linkControl'])->whereNumber('requirementId')->name('requirements.controls.store');
             Route::delete('/requirements/{requirementId}/controls/{controlId}', [ComplianceRequirementController::class, 'unlinkControl'])->whereNumber(['requirementId', 'controlId'])->name('requirements.controls.destroy');
+            // Kravbibliotek: Procynia's standardised requirement packages (ISO 9001 first). Reading needs
+            // compliance.view; «Aktiver for virksomheten» writes into the register and needs compliance.edit.
+            Route::get('/library', [ComplianceLibraryController::class, 'index'])->name('library.index');
+            Route::get('/library/{frameworkId}', [ComplianceLibraryController::class, 'show'])->whereNumber('frameworkId')->name('library.show');
+            Route::post('/library/{frameworkId}/activate', [ComplianceLibraryController::class, 'activate'])->whereNumber('frameworkId')->name('library.activate');
+            // Relevans for a library requirement: Gjelder / Ikke relevant (always justified) / Ikke vurdert.
+            Route::post('/requirements/{requirementId}/applicability', [ComplianceRequirementController::class, 'setApplicability'])->whereNumber('requirementId')->name('requirements.applicability');
             // Revisjoner. Planned and run with compliance.audit; status changes only through the lifecycle
             // actions, each writing an immutable history row.
             Route::get('/audits', [ComplianceAuditController::class, 'index'])->name('audits.index');

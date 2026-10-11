@@ -5,6 +5,7 @@ import ControlHint from '../Components/App/ControlHint';
 import NotificationBell from '../Components/App/NotificationBell';
 import ModuleSidebar from '../Components/App/ModuleSidebar';
 import { activeModuleKey, activeWorkspaceKey } from '../Support/appModules';
+import { complianceAreaKey } from '../Support/complianceNavigation';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
 
@@ -437,11 +438,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
 
         if (activeMainArea === 'compliance') {
-            // Etterlevelse og revisjon has two real work areas and nothing above them: no Oversikt,
-            // no dashboard. Like Kvalitet, they sit in the header under the rail's selection.
+            // Etterlevelse og revisjon: four work areas in the order the work runs — choose standards,
+            // see which requirements apply, assess them, audit them. Like Anbud's areas they sit in
+            // the header, one level under the rail's single entry, and follow the person into every
+            // page of the module. Free to move between, not a locked sequence.
             return [
-                { key: 'compliance-requirements', label: tc.index_heading ?? 'Krav', href: '/app/compliance/requirements' },
-                { key: 'compliance-audits', label: tc.audits?.nav ?? 'Revisjoner', href: '/app/compliance/audits' },
+                { key: 'compliance-library', label: tc.nav?.library ?? 'Kravbibliotek', href: '/app/compliance/library' },
+                { key: 'compliance-requirements', label: tc.nav?.requirements ?? 'Kravregister', href: '/app/compliance/requirements' },
+                { key: 'compliance-assessments', label: tc.nav?.assessments ?? 'Etterlevelsesvurdering', href: '/app/compliance/assessments' },
+                { key: 'compliance-audits', label: tc.nav?.audits ?? 'Revisjon', href: '/app/compliance/audits' },
             ];
         }
 
@@ -500,7 +505,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
 
         if (activeMainArea === 'compliance') {
-            return pathname.startsWith('/app/compliance/audits') ? 'compliance-audits' : 'compliance-requirements';
+            return complianceAreaKey(pathname, searchParams);
         }
 
         if (activeMainArea === 'wiki') {
@@ -978,7 +983,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 activeModules={activeModules}
                                 permissions={userPermissions}
                                 activeKey={activeModule}
-                                activeAreaKey={activeSecondaryKey}
                                 activeWorkspace={activeWorkspace}
                                 collapsed={sidebarCollapsed}
                                 onToggleCollapsed={toggleSidebarCollapsed}

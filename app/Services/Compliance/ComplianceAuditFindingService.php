@@ -72,7 +72,7 @@ class ComplianceAuditFindingService
         $findings = ComplianceAuditFinding::query()
             ->where('audit_id', $audit->id)
             ->where('customer_id', $audit->customer_id)
-            ->with(['requirement.source:id,name,version', 'handedOffBy:id,name'])
+            ->with(['requirement.source:id,name,version,framework_id', 'handedOffBy:id,name'])
             ->orderBy('id')
             ->get();
 
@@ -128,7 +128,7 @@ class ComplianceAuditFindingService
         $scopeRequirementIds = ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->pluck('requirement_id')->map(fn ($id): int => (int) $id)->all();
 
         $requirements = $this->access->visibleRequirements($user)
-            ->with('source:id,name,version')
+            ->with('source:id,name,version,framework_id')
             ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
             ->orderBy('compliance_requirements.source_id')
             ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
@@ -384,7 +384,8 @@ class ComplianceAuditFindingService
             'reference' => $requirement->reference,
             'title' => $requirement->title,
             'status' => $requirement->status,
-            'source_label' => $source !== null ? ($source->version !== null && $source->version !== '' ? "{$source->name} ({$source->version})" : $source->name) : null,
+            'source_label' => $source?->originLabel(),
+            'origin' => $requirement->origin(),
             'url' => route('app.compliance.requirements.show', ['requirementId' => $requirement->id]),
         ];
     }

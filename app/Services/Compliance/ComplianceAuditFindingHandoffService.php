@@ -125,7 +125,10 @@ class ComplianceAuditFindingHandoffService
      * revisjon and the user can read the audit there. Null for everyone else, and for a case no
      * finding was handed off to: no title, no link, no finding or audit id.
      *
-     * @return array{audit_title: string, audit_url: string, finding_title: string}|null
+     * The requirement the finding names comes along as its origin («ISO 14001:2026 · 6.1.2 ·
+     * Miljøaspekter»), so the case says which standard it answers to.
+     *
+     * @return array{audit_title: string, audit_url: string, finding_title: string, requirement_origin: array<string, mixed>|null}|null
      */
     public function provenanceFor(User $user, ImprovementCase $case): ?array
     {
@@ -148,6 +151,9 @@ class ComplianceAuditFindingHandoffService
             'audit_title' => $audit->title,
             'audit_url' => route('app.compliance.audits.show', ['auditId' => $audit->id]).'#finding-'.$finding->id,
             'finding_title' => $finding->title,
+            'requirement_origin' => $finding->requirement_id !== null
+                ? $finding->requirement()->with('source:id,name,version,framework_id')->first()?->origin()
+                : null,
         ];
     }
 }

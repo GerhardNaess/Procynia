@@ -6,12 +6,13 @@ import { useEffect, useState } from 'react';
  *
  * @param {string}            id        HTML id for aria-controls on the paired button.
  * @param {string}            title     Panel heading.
+ * @param {string}            [introTitle] Optional heading above the intro, e.g. «Hva brukes siden til?».
  * @param {string}            [intro]   Optional introductory paragraph.
  * @param {Array}             sections  Array of { title?, items: [{ title?, text }] }.
  * @param {boolean}           isOpen
  * @param {function}          onClose
  */
-export default function PageHelpPanel({ id, title, intro, sections = [], isOpen, onClose }) {
+export default function PageHelpPanel({ id, title, introTitle, intro, sections = [], isOpen, onClose }) {
     const [topOffset, setTopOffset] = useState(0);
 
     useEffect(() => {
@@ -76,7 +77,14 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
 
                 <div className="flex-1 space-y-6 px-6 py-6">
                     {intro ? (
-                        <p className="text-base leading-7 text-slate-600">{intro}</p>
+                        <div className="space-y-2.5">
+                            {introTitle ? (
+                                <h3 className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                    {introTitle}
+                                </h3>
+                            ) : null}
+                            <p className="text-base leading-7 text-slate-600">{intro}</p>
+                        </div>
                     ) : null}
 
                     {sections.map((section, sectionIndex) => (

@@ -10,16 +10,20 @@ use Illuminate\Support\Collection;
 /**
  * «Trenger oppmerksomhet» — which requirements have something concrete to follow up.
  *
- * Five fixed reasons, each read off data that already decides it elsewhere, never stored and never
+ * Four fixed reasons, each read off data that already decides it elsewhere, never stored and never
  * folded into a score:
  *
  *  - Ikke vurdert, Ikke oppfylt, Delvis oppfylt: the current status from ComplianceStatusResolver.
  *    Oppfylt and Ikke relevant raise nothing.
  *  - Revurdering forfalt: ComplianceReviewSchedule — due today is not overdue.
- *  - Mangler ansvarlig: owner_user_id is null.
+ *
+ * A requirement without an ansvarlig is not a reason: the person is optional. Responsibility follows
+ * the work — the assessment records who assessed, the audit and the Avvik case have their own
+ * ansvarlig — so activating a standard never turns hundreds of requirements into follow-up.
  *
  * Only an active requirement can need attention. A retired one raises nothing at all — no status,
- * no review, no owner — though its history stays where it is.
+ * no review — though its history stays where it is. Nor does a library requirement the
+ * customer has determined Ikke relevant: it is outside the register's work.
  *
  * Nothing here looks a requirement up on its own: every requirement handed in must already have been
  * reached through ComplianceAccessService::visibleRequirements(), and the assessments are fetched by
@@ -36,15 +40,12 @@ class ComplianceAttentionService
 
     public const REVIEW_OVERDUE = 'review_overdue';
 
-    public const MISSING_OWNER = 'missing_owner';
-
     /** Display order. */
     public const REASONS = [
         self::NOT_ASSESSED,
         self::NON_COMPLIANT,
         self::PARTIALLY_COMPLIANT,
         self::REVIEW_OVERDUE,
-        self::MISSING_OWNER,
     ];
 
     /** The current statuses that are a reason of their own; the reason carries the status's name. */
@@ -109,7 +110,7 @@ class ComplianceAttentionService
      */
     public function reasonsFor(ComplianceRequirement $requirement, ?ComplianceAssessment $latest, ?CarbonInterface $today = null): array
     {
-        if (! $requirement->isActive()) {
+        if (! $requirement->isActive() || $requirement->isNotApplicable()) {
             return [];
         }
 
@@ -124,10 +125,6 @@ class ComplianceAttentionService
 
         if ($this->schedule->isOverdue($next, $today)) {
             $reasons[] = self::REVIEW_OVERDUE;
-        }
-
-        if ($requirement->owner_user_id === null) {
-            $reasons[] = self::MISSING_OWNER;
         }
 
         return $reasons;

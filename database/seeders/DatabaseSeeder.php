@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             UserNotificationSeeder::class,
             OperatingProcedureSeeder::class,
             OperationalDeviationSeeder::class,
+            ComplianceFrameworkLibrarySeeder::class,
         ]);
     }
 }

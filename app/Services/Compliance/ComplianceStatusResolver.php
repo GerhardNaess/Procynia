@@ -81,7 +81,7 @@ class ComplianceStatusResolver
             return false;
         }
 
-        $requirement->loadMissing('source:id,name,version');
+        $requirement->loadMissing('source:id,name,version,framework_id');
 
         return $latest->requirement_reference !== $requirement->reference
             || $latest->requirement_title !== $requirement->title
@@ -91,7 +91,8 @@ class ComplianceStatusResolver
     }
 
     /**
-     * Everything the pages, and later Attention, need about one requirement's compliance.
+     * Everything the pages, and later Attention, need about one requirement's compliance. A library
+     * requirement determined Ikke relevant reads as not_applicable whatever its history holds.
      *
      * @return array{
      *     status: string,
@@ -99,6 +100,7 @@ class ComplianceStatusResolver
      *     assessed_at: string|null,
      *     assessed_by_name: string|null,
      *     rationale: string|null,
+     *     documentation: string|null,
      *     next_review_on: string|null,
      *     is_overdue: bool,
      *     changed_since_assessment: bool
@@ -106,14 +108,17 @@ class ComplianceStatusResolver
      */
     public function summarize(ComplianceRequirement $requirement, ?ComplianceAssessment $latest, ?CarbonInterface $today = null): array
     {
-        $next = $this->schedule->nextReviewOn((string) $requirement->status, $requirement->review_interval_months, $latest?->assessed_at);
+        // A library requirement determined Ikke relevant shows as such, and is never due.
+        $notApplicable = $requirement->isNotApplicable();
+        $next = $notApplicable ? null : $this->schedule->nextReviewOn((string) $requirement->status, $requirement->review_interval_months, $latest?->assessed_at);
 
         return [
-            'status' => $this->statusOf($latest),
+            'status' => $notApplicable ? ComplianceAssessment::RESULT_NOT_APPLICABLE : $this->statusOf($latest),
             'assessment_id' => $latest !== null ? (int) $latest->id : null,
             'assessed_at' => $latest?->assessed_at?->toIso8601String(),
             'assessed_by_name' => $latest?->assessedBy?->name,
             'rationale' => $latest?->rationale,
+            'documentation' => $latest?->documentation,
             'next_review_on' => $next?->toDateString(),
             'is_overdue' => $this->schedule->isOverdue($next, $today),
             'changed_since_assessment' => $this->changedSince($requirement, $latest),

@@ -7,11 +7,13 @@ const suffix = complianceE2eSuffix();
 cleanUpComplianceE2eData(suffix);
 
 const expectReadable = (page, name) => expectReadableAt(page, 'compliance-assessment', name);
-const registerUrl = () => `/app/compliance/requirements?${new URLSearchParams({ search: `E2E Krav ${suffix}` })}`;
+const worklistUrl = () => `/app/compliance/assessments?${new URLSearchParams({ search: `E2E Krav ${suffix}` })}`;
+const worklistRow = (page, title) => page.getByTestId('compliance-assessments-row').filter({ hasText: title });
 
 /**
- * Etterlevelsesvurderinger, end to end: a person who may edit and assess registers a requirement,
- * assesses it «Oppfylt», reads the current status and the history, edits the requirement text, is
+ * Etterlevelsesvurderinger, end to end: a person who may edit and assess registers a requirement —
+ * without an ansvarlig, which is optional — assesses it «Oppfylt», sees it in Etterlevelsesvurdering,
+ * reads the current status and the history, edits the requirement text, is
  * told the requirement has changed since it was assessed, assesses it again «Delvis oppfylt», and
  * finds both assessments — the newest as today's status, each with the requirement as it was.
  * Every step is checked for text under 16 px and sideways scrolling at desktop and 390 px.
@@ -31,7 +33,7 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
 
     // 1. A source and a requirement, through the pages.
     await page.goto('/app/compliance/requirements');
-    await expectPageHelp(page, 'Om krav', ['Etterlevelse']);
+    await expectPageHelp(page, 'Om kravregisteret', ['Slik gjør du det', 'Etterlevelse og revisjon']);
     await page.getByRole('button', { name: 'Kravkilder', exact: true }).click();
     const sources = page.getByTestId('compliance-sources');
     await sources.getByRole('button', { name: 'Ny kravkilde' }).click();
@@ -46,7 +48,6 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
     await page.locator('#compliance-requirement-reference').fill('A.5.15');
     await page.locator('#compliance-requirement-title').fill(title);
     await page.locator('#compliance-requirement-text').fill(originalText);
-    await page.locator('#compliance-requirement-owner').selectOption({ label: person.name });
     await page.locator('#compliance-requirement-review').selectOption({ label: 'Årlig' });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
 
@@ -56,7 +57,7 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
     await expect(page.getByTestId('compliance-current')).toHaveText('Ikke vurdert');
     await expect(section).toContainText('Kravet er ikke vurdert ennå.');
     await expect(page.getByTestId('compliance-assessment-history')).toHaveCount(0);
-    await expectPageHelp(page, 'Om kravet', ['Etterlevelse', 'Status', 'Statushistorikk']);
+    await expectPageHelp(page, 'Om kravet', ['Slik gjør du det', 'Etterlevelse', 'Eksempel: 9.3 Ledelsens gjennomgåelse', 'Status', 'Statushistorikk']);
     await expectReadable(page, '01-not-assessed');
 
     // 3. Vurder etterlevelse: the server's messages first, then «Oppfylt».
@@ -91,10 +92,12 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
     await expectReadable(page, '03-assessed');
     const requirementUrl = page.url();
 
-    // The register shows the result.
-    await page.goto(registerUrl());
-    await expect(page.locator('tbody tr', { hasText: title }).getByTestId('compliance-cell')).toHaveText('Oppfylt');
-    await expectReadable(page, '04-register-assessed');
+    // Etterlevelsesvurdering shows the result, with who assessed it — the register shows none.
+    await page.goto(worklistUrl());
+    await expect(worklistRow(page, title)).toContainText('Oppfylt');
+    await expect(worklistRow(page, title)).toContainText(`av ${person.name}`);
+    await expect(page.getByTestId('compliance-assessments-stat-compliant')).toContainText('1');
+    await expectReadable(page, '04-worklist-assessed');
 
     // 6. Edit the requirement text.
     await page.goto(requirementUrl);
@@ -108,10 +111,11 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
     await expect(page.getByTestId('compliance-current')).toHaveText('Oppfylt');
     await expectReadable(page, '05-changed-since');
 
-    // 8. Reassess: «Delvis oppfylt».
+    // 8. Reassess: «Delvis oppfylt», this time pointing to the documentation it relies on.
     await section.getByRole('button', { name: 'Vurder etterlevelse' }).click();
     await page.locator('#compliance-assessment-result-partially_compliant').check();
     await page.locator('#compliance-assessment-rationale').fill('Årlig gjennomgang er ikke innført ennå.');
+    await page.locator('#compliance-assessment-documentation').fill('Tilgangsrutine v2 (Wiki)\nhttps://example.no/tilgangsrutine');
     await form.getByRole('button', { name: 'Lagre vurdering' }).click();
     await expect(page.getByText('Etterlevelsesvurderingen er registrert.')).toBeVisible();
 
@@ -123,14 +127,19 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
     await expect(history.nth(1)).toContainText('Tilgangsrutinen er etablert');
     await expect(page.getByTestId('compliance-current')).toHaveText('Delvis oppfylt');
     await expect(page.getByTestId('compliance-changed-since')).toHaveCount(0);
+    const documentation = page.getByTestId('compliance-current-documentation');
+    await expect(documentation.locator('li')).toHaveText(['Tilgangsrutine v2 (Wiki)', 'https://example.no/tilgangsrutine']);
+    await expect(documentation.getByRole('link', { name: 'https://example.no/tilgangsrutine' })).toHaveAttribute('href', 'https://example.no/tilgangsrutine');
+    await expect(history.nth(0).getByTestId('compliance-assessment-history-documentation')).toContainText('Tilgangsrutine v2 (Wiki)');
+    await expect(history.nth(1).getByTestId('compliance-assessment-history-documentation')).toHaveCount(0);
     await history.nth(1).getByText('Vis krav slik det var').click();
     await expect(history.nth(1).getByTestId('compliance-assessment-snapshot')).toContainText(originalText);
     await history.nth(0).getByText('Vis krav slik det var').click();
     await expect(history.nth(0).getByTestId('compliance-assessment-snapshot')).toContainText(changedText);
     await expectReadable(page, '06-reassessed');
 
-    await page.goto(registerUrl());
-    await expect(page.locator('tbody tr', { hasText: title }).getByTestId('compliance-cell')).toHaveText('Delvis oppfylt');
+    await page.goto(worklistUrl());
+    await expect(worklistRow(page, title)).toContainText('Delvis oppfylt');
 });
 
 /**
@@ -146,8 +155,10 @@ test('a reader sees the assessment but cannot assess', async ({ page }) => {
     await loginAs(page, seeded.reader_email, COMPLIANCE_E2E_PASSWORD);
     await page.setViewportSize(DESKTOP);
 
-    await page.goto(registerUrl());
-    await expect(page.locator('tbody tr', { hasText: seeded.active_title }).getByTestId('compliance-cell')).toHaveText('Delvis oppfylt');
+    await page.goto(worklistUrl());
+    await expect(worklistRow(page, seeded.active_title)).toContainText('Delvis oppfylt');
+    // A reader is offered no «Vurder» in the worklist either.
+    await expect(worklistRow(page, seeded.active_title).getByRole('link', { name: /^Vurder/ })).toHaveCount(0);
 
     await page.goto(`/app/compliance/requirements/${seeded.active_id}`);
     await expect(page.getByTestId('compliance-current')).toHaveText('Delvis oppfylt');

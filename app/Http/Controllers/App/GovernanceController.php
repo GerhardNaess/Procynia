@@ -42,7 +42,7 @@ class GovernanceController extends Controller
         'risk' => ['risk', CustomerPermissionCatalog::RISK_VIEW, 'app.risk.index'],
         'objectives' => ['objectives', CustomerPermissionCatalog::OBJECTIVE_VIEW, 'app.objectives.index'],
         'improvements' => ['improvements', CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'app.improvements.index'],
-        'compliance' => ['compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW, 'app.compliance.requirements.index'],
+        'compliance' => ['compliance', CustomerPermissionCatalog::COMPLIANCE_VIEW, 'app.compliance.index'],
         'suppliers' => ['supplier', CustomerPermissionCatalog::SUPPLIER_VIEW, 'app.supplier-management.index'],
         'management_review' => ['management_review', CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, 'app.management-review.index'],
     ];

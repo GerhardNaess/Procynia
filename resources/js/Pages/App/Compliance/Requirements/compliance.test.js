@@ -4,12 +4,12 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { COMPLIANCE_HELP_PAGES, complianceHelp } from './complianceHelp.js';
 import { LINK_FILTER_THRESHOLD, QUALITY_STATUS_TONES, controlFacts, evidenceAddedLabel, filterQualityOptions, qualityItemLabel, qualityOptionLabel } from './complianceQuality.js';
-import { ATTENTION_PREVIEW, ATTENTION_REASONS, COMPLIANCE_STATUS_TONES, REQUIREMENT_STATUS_TONES, attentionPanel, attentionReasonLabel, attentionTotalLabel, complianceStatusLabel, countLabel, describeHistoryEntry, registerCompliance, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
+import { ATTENTION_PREVIEW, ATTENTION_REASONS, COMPLIANCE_STATUS_TONES, REQUIREMENT_STATUS_TONES, attentionPanel, attentionReasonLabel, attentionTotalLabel, complianceStatusLabel, countLabel, describeHistoryEntry, documentationLines, registerCompliance, reviewIntervalLabel, sourceKindLabel } from './complianceRequirement.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
-const PAGE_FILES = { index: './Index.jsx', requirement: './Show.jsx', audit_index: '../Audits/Index.jsx', audit: '../Audits/Show.jsx' };
+const PAGE_FILES = { index: './Index.jsx', requirement: './Show.jsx', assessments: '../Assessments/Index.jsx', audit_index: '../Audits/Index.jsx', audit: '../Audits/Show.jsx', library: '../Library/Index.jsx', framework: '../Library/Show.jsx' };
 
 describe('Every Krav page carries the shared PageHelp', () => {
     test('each help page is rendered by its page through PageHelpButton', () => {
@@ -24,6 +24,15 @@ describe('Every Krav page carries the shared PageHelp', () => {
     });
 });
 
+describe('The register can be narrowed to one standard', () => {
+    test('the Kravkilde filter lists every source, while only hand-made ones take new requirements', () => {
+        const code = source('./Index.jsx');
+
+        assert.match(code, /const sourceOptions = sources\.map/);
+        assert.match(code, /source_id: manualSources\.length === 1/);
+    });
+});
+
 describe('No text below 16 px in the module', () => {
     test('no component uses text-xs or text-sm', () => {
         for (const file of readdirSync(here).filter((name) => name.endsWith('.jsx'))) {
@@ -35,9 +44,9 @@ describe('No text below 16 px in the module', () => {
 describe('complianceHelp', () => {
     test('passes the page\'s sections from the translations through unchanged', () => {
         const sections = [{ title: 'Status', items: [{ title: 'Utgått', text: 'Gjelder ikke lenger.' }] }];
-        const help = complianceHelp({ help: { button: 'Hjelp', requirement: { title: 'Om kravet', intro: 'Intro', sections } } }, 'requirement');
+        const help = complianceHelp({ help: { button: 'Hjelp', purpose_heading: 'Hva brukes siden til?', requirement: { title: 'Om kravet', intro: 'Intro', sections } } }, 'requirement');
 
-        assert.deepEqual(help, { buttonLabel: 'Hjelp', title: 'Om kravet', intro: 'Intro', sections });
+        assert.deepEqual(help, { buttonLabel: 'Hjelp', title: 'Om kravet', introTitle: 'Hva brukes siden til?', intro: 'Intro', sections });
     });
 
     test('falls back to an empty panel rather than breaking the page', () => {
@@ -111,7 +120,9 @@ describe('Etterlevelse in the register and on the page', () => {
 
         assert.match(code, /id=\{`compliance-assessment-result-\$\{value\}`\}/);
         assert.match(code, /id="compliance-assessment-rationale"/);
-        assert.match(code, /useForm\(\{ result: '', rationale: '' \}\)/);
+        // Dokumentasjon is optional and the only field beyond the two.
+        assert.match(code, /useForm\(\{ result: '', rationale: '', documentation: '' \}\)/);
+        assert.match(code, /id="compliance-assessment-documentation"/);
         assert.doesNotMatch(code, /assessed_at'|type="date"|type="datetime-local"/);
     });
 
@@ -122,8 +133,23 @@ describe('Etterlevelse in the register and on the page', () => {
         assert.match(code, /snapshot\.requirement_text/);
     });
 
-    test('the register carries the column on the table and on the phone cards alike', () => {
-        assert.equal(source('./Index.jsx').match(/<ComplianceCell /g).length, 2);
+    test('the register shows no results — whether requirements are met is Etterlevelsesvurdering\'s', () => {
+        const index = source('./Index.jsx');
+        assert.doesNotMatch(index, /ComplianceCell|registerCompliance|ComplianceAttention|AttentionReasons/);
+        // Origin and relevance on the table and on the phone cards alike.
+        assert.equal(index.match(/<RequirementOrigin origin=\{item\.origin\} href=\{item\.url\} \/>/g).length, 2);
+        assert.equal(index.match(/<Relevance item=\{item\} tr=\{tr\} \/>/g).length, 2);
+    });
+
+    test('Dokumentasjon is shown line by line, and only http(s) and Procynia\'s own paths become links', () => {
+        assert.deepEqual(documentationLines('Rutine for sikkerhetskopi v3\n\nhttps://wiki.example.no/backup\n/app/wiki/backup-rutine\njavascript:alert(1)'), [
+            { text: 'Rutine for sikkerhetskopi v3', href: null, external: false },
+            { text: 'https://wiki.example.no/backup', href: 'https://wiki.example.no/backup', external: true },
+            { text: '/app/wiki/backup-rutine', href: '/app/wiki/backup-rutine', external: false },
+            { text: 'javascript:alert(1)', href: null, external: false },
+        ]);
+        assert.deepEqual(documentationLines(null), []);
+        assert.deepEqual(documentationLines('   '), []);
     });
 });
 
@@ -143,9 +169,9 @@ describe('The requirement form and page say what a requirement is, and whether i
         assert.doesNotMatch(code, /setData\('status'|data\.status/);
     });
 
-    test('the requirement page reads «what is required → how we do it → is it met»: text, source and ownership, Hvordan kravet oppfylles, Etterlevelse, status and history', () => {
+    test('the requirement page reads as the assessment is done: text, origin, relevance, Etterlevelse, then the optional Kvalitet links, status and history', () => {
         const code = source('./Show.jsx');
-        const order = ['compliance-text-heading', 'compliance-details-heading', '<RequirementQualityContext', '<RequirementCompliance', 'compliance-status-heading', '<RequirementHistory'].map((needle) => code.indexOf(needle));
+        const order = ['compliance-text-heading', 'compliance-details-heading', '<RequirementApplicability', '<RequirementCompliance', '<RequirementQualityContext', 'compliance-status-heading', '<RequirementHistory'].map((needle) => code.indexOf(needle));
 
         assert.ok(order.every((index) => index > -1));
         for (let i = 1; i < order.length; i += 1) {
@@ -190,7 +216,9 @@ describe('Hvordan kravet oppfylles', () => {
     });
 
     test('evidence is shown, never written, and never turned into a compliance result', () => {
-        assert.doesNotMatch(code(), /type="file"|\/evidence`|compliant|assessment/);
+        // Code only: the doc comment explains why the links are not evidence of compliance.
+        const body = code().replace(/\/\*[\s\S]*?\*\//g, '');
+        assert.doesNotMatch(body, /type="file"|\/evidence`|compliant|assessment/);
         assert.match(code(), /tq\.evidence_note/);
     });
 
@@ -242,10 +270,10 @@ describe('Hvordan kravet oppfylles', () => {
 describe('Trenger oppmerksomhet', () => {
     const entry = (id, reasons) => ({ id, title: `Krav ${id}`, reference: null, url: `/app/compliance/requirements/${id}`, reasons });
 
-    test('the five reasons, in the server\'s order, each with a name', () => {
-        assert.deepEqual(ATTENTION_REASONS, ['not_assessed', 'non_compliant', 'partially_compliant', 'review_overdue', 'missing_owner']);
-        assert.deepEqual(ATTENTION_REASONS.map((reason) => attentionReasonLabel(reason)), ['Ikke vurdert', 'Ikke oppfylt', 'Delvis oppfylt', 'Revurdering forfalt', 'Mangler ansvarlig']);
-        assert.equal(attentionReasonLabel('missing_owner', { attention: { reasons: { missing_owner: 'No owner' } } }), 'No owner');
+    test('the four reasons, in the server\'s order, each with a name — a missing owner is none of them', () => {
+        assert.deepEqual(ATTENTION_REASONS, ['not_assessed', 'non_compliant', 'partially_compliant', 'review_overdue']);
+        assert.deepEqual(ATTENTION_REASONS.map((reason) => attentionReasonLabel(reason)), ['Ikke vurdert', 'Ikke oppfylt', 'Delvis oppfylt', 'Revurdering forfalt']);
+        assert.equal(attentionReasonLabel('review_overdue', { attention: { reasons: { review_overdue: 'Review overdue' } } }), 'Review overdue');
     });
 
     test('the total reads as a sentence, singular and plural', () => {
@@ -260,14 +288,14 @@ describe('Trenger oppmerksomhet', () => {
     });
 
     test('the panel lists every requirement with all its reasons, the first few until expanded', () => {
-        const items = Array.from({ length: ATTENTION_PREVIEW + 2 }, (_, index) => entry(index + 1, ['not_assessed', 'missing_owner']));
+        const items = Array.from({ length: ATTENTION_PREVIEW + 2 }, (_, index) => entry(index + 1, ['not_assessed', 'review_overdue']));
         const collapsed = attentionPanel({ total: items.length, requirements: items });
 
         assert.equal(collapsed.visible, true);
         assert.equal(collapsed.total, ATTENTION_PREVIEW + 2);
         assert.equal(collapsed.items.length, ATTENTION_PREVIEW);
         assert.equal(collapsed.hasMore, true);
-        assert.deepEqual(collapsed.items[0].reasons, ['not_assessed', 'missing_owner']);
+        assert.deepEqual(collapsed.items[0].reasons, ['not_assessed', 'review_overdue']);
         assert.equal(attentionPanel({ total: items.length, requirements: items }, true).items.length, items.length);
 
         const few = attentionPanel({ total: 1, requirements: [entry(1, ['partially_compliant', 'review_overdue'])] });
@@ -275,29 +303,13 @@ describe('Trenger oppmerksomhet', () => {
         assert.deepEqual(few.items[0].reasons, ['partially_compliant', 'review_overdue']);
     });
 
-    test('the panel sits above the register, and the panel draws every reason of an entry', () => {
-        const index = source('./Index.jsx');
-        assert.ok(index.indexOf('<ComplianceAttention ') > -1);
-        assert.ok(index.indexOf('<ComplianceAttention ') < index.indexOf('data-testid="compliance-count"'));
-
+    test('the panel draws every reason of an entry, and the requirement page says why', () => {
         const panel = source('./ComplianceAttention.jsx');
         assert.match(panel, /if \(! panel\.visible\) \{\s*return null;/);
         assert.match(panel, /<Link href=\{item\.url\}/);
         assert.match(panel, /<AttentionReasons reasons=\{item\.reasons\}/);
         assert.match(panel, /reasons\.map\(\(reason\) =>/);
-    });
-
-    test('every register row says why — on the table and on the phone cards alike', () => {
-        assert.equal(source('./Index.jsx').match(/<AttentionReasons reasons=\{item\.attention/g).length, 2);
         assert.match(source('./Show.jsx'), /<AttentionReasons reasons=\{attention\}/);
-    });
-
-    test('one filter, «Bare krav som trenger oppmerksomhet», sent as attention=1 and cleared by Nullstill', () => {
-        const index = source('./Index.jsx');
-        assert.match(index, /data-testid="compliance-attention-filter"/);
-        assert.match(index, /attention: attentionOnly \? 1 : undefined/);
-        assert.match(index, /setAttentionOnly\(false\)/);
-        assert.match(index, /filters\.attention\)/);
     });
 
     test('nothing in the attention UI is a score, a percentage or a chart', () => {
@@ -306,17 +318,9 @@ describe('Trenger oppmerksomhet', () => {
     });
 });
 
-describe('PageHelp explains Trenger oppmerksomhet in both languages', () => {
+describe('The attention reasons are named the same in both languages', () => {
     const lang = (locale) => readFileSync(new URL(`../../../../../../lang/${locale}/procynia.php`, import.meta.url), 'utf8');
     const complianceBlock = (php) => php.slice(php.indexOf("    'compliance' => ["));
-    const helpSection = (php, title) => {
-        const block = complianceBlock(php);
-        const start = block.indexOf(`'title' => '${title}',`);
-        assert.ok(start > -1, title);
-        const items = block.slice(start, block.indexOf('],\n                    ],', start));
-
-        return [...items.matchAll(/\['title' => '((?:[^'\\]|\\.)*)', 'text' => '/g)].map((match) => match[1]);
-    };
     const reasonKeys = (php) => {
         const block = complianceBlock(php);
         const attention = block.slice(block.indexOf("        'attention' => ["));
@@ -324,15 +328,6 @@ describe('PageHelp explains Trenger oppmerksomhet in both languages', () => {
 
         return [...reasons.matchAll(/'([a-z_]+)' => '/g)].map((match) => match[1]);
     };
-
-    test('a section with what it means, the five reasons and that they are computed', () => {
-        assert.deepEqual(helpSection(lang('no'), 'Trenger oppmerksomhet'), [
-            'Hva det betyr', 'Ikke vurdert', 'Ikke oppfylt', 'Delvis oppfylt', 'Revurdering forfalt', 'Mangler ansvarlig', 'Beregnes automatisk',
-        ]);
-        assert.deepEqual(helpSection(lang('en'), 'Needs attention'), [
-            'What it means', 'Not assessed', 'Not compliant', 'Partially compliant', 'Review overdue', 'No owner', 'Calculated automatically',
-        ]);
-    });
 
     test('the reason names have the same keys in Norwegian and English, matching the server', () => {
         assert.deepEqual(reasonKeys(lang('no')), ATTENTION_REASONS);

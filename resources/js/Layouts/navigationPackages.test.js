@@ -25,7 +25,7 @@ function shape(activeModules, permissions = VIEW_ALL) {
     const { entries } = railEntries(activeModules, permissions);
 
     return entries.map((entry) => (entry.children
-        ? { [entry.key]: entry.children.map((child) => (child.subAreas ? { [child.key]: child.subAreas.map((area) => area.key) } : child.key)) }
+        ? { [entry.key]: entry.children.map((child) => child.key) }
         : entry.key));
 }
 
@@ -42,11 +42,11 @@ describe('what each package puts on the rail', () => {
         assert.deepEqual(shape(STYRING), ['home', 'wiki', { governance: ['quality', 'risk', 'objectives', 'improvements'] }]);
     });
 
-    test('ISO: everything in Styring, plus Etterlevelse og revisjon with Krav and Revisjoner', () => {
+    test('ISO: everything in Styring, plus Etterlevelse og revisjon with Krav, Kravbibliotek and Revisjoner', () => {
         assert.deepEqual(shape(ISO), [
             'home',
             'wiki',
-            { governance: ['quality', 'risk', 'objectives', 'improvements', { compliance: ['compliance-requirements', 'compliance-audits'] }] },
+            { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance'] },
         ]);
     });
 
@@ -55,7 +55,7 @@ describe('what each package puts on the rail', () => {
             'home',
             'wiki',
             'tenders',
-            { governance: ['quality', 'risk', 'objectives', 'improvements', { compliance: ['compliance-requirements', 'compliance-audits'] }] },
+            { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance'] },
         ]);
     });
 
@@ -63,7 +63,7 @@ describe('what each package puts on the rail', () => {
         assert.deepEqual(shape(GRC), [
             'home',
             'wiki',
-            { governance: ['quality', 'risk', 'objectives', 'improvements', { compliance: ['compliance-requirements', 'compliance-audits'] }, 'suppliers'] },
+            { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'] },
         ]);
         assert.ok(! railEntries(GRC, VIEW_ALL).planned.some((module) => module.key === 'suppliers'));
         // ISO does not carry it, however the person's permissions read.
@@ -75,7 +75,7 @@ describe('what each package puts on the rail', () => {
             'home',
             'wiki',
             'tenders',
-            { governance: ['quality', 'risk', 'objectives', 'improvements', { compliance: ['compliance-requirements', 'compliance-audits'] }, 'suppliers'] },
+            { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'] },
         ]);
     });
 
@@ -114,7 +114,7 @@ describe('a module the customer holds is still only shown with its view permissi
         assert.deepEqual(shape(ISO, ['wiki.view', 'quality.view']), ['home', 'wiki', { governance: ['quality'] }]);
     });
 
-    test('Krav and Revisjoner are not entitlements of their own: they follow the module', () => {
+    test('Krav, Kravbibliotek and Revisjoner are not entitlements of their own: they follow the module', () => {
         assert.ok(! JSON.stringify(shape(ISO, ['quality.view'])).includes('compliance-'));
         assert.ok(! JSON.stringify(shape(STYRING, VIEW_ALL)).includes('compliance-'));
     });

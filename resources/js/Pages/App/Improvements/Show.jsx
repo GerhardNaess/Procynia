@@ -5,6 +5,7 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { originLine } from '../../../Support/complianceNavigation';
 import KpiContextPanel from '../Objectives/KpiContextPanel';
 import ImprovementActions from './ImprovementActions';
 import { ImprovementAttentionNote } from './ImprovementAttention';
@@ -139,6 +140,11 @@ export default function ImprovementShow() {
                             {tr.audit_origin ?? 'Fra revisjonsfunn i'}{' '}
                             <Link href={auditOrigin.audit_url} className="font-semibold text-violet-700 hover:text-violet-900">{auditOrigin.audit_title}</Link>
                             <span className="block text-slate-600">{(tr.audit_origin_finding ?? 'Funn: :title').replace(':title', auditOrigin.finding_title)}</span>
+                            {auditOrigin.requirement_origin && (
+                                <span className="block text-slate-600" data-testid="improvement-audit-requirement">
+                                    {(tr.audit_origin_requirement ?? 'Krav: :requirement').replace(':requirement', originLine(auditOrigin.requirement_origin))}
+                                </span>
+                            )}
                         </p>
                     )}
                     {reviewOrigin && (

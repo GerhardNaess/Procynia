@@ -33,12 +33,16 @@ test('a requirement is registered under a new source, edited, retired and reopen
     await page.getByTestId('module-governance').click();
     await page.waitForURL(/\/app\/governance$/);
     await page.getByTestId('governance-module-compliance').click();
+    // Nothing in the register yet: the module opens where the work starts, in Kravbibliotek.
+    await page.waitForURL(/\/app\/compliance\/library$/);
+    await page.getByTestId('module-navigation').getByRole('link', { name: 'Kravregister', exact: true }).click();
     await page.waitForURL(/\/app\/compliance\/requirements$/);
-    await expect(page.getByRole('heading', { name: 'Krav', level: 1 })).toBeVisible();
-    // One current page: the work area, under the module that stays marked as the place you are in.
-    await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Krav');
+    await expect(page.getByRole('heading', { name: 'Kravregister', level: 1 })).toBeVisible();
+    // One rail entry for the module; the header marks the work area.
+    await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Etterlevelse og revisjon');
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kravregister');
     await expect(page.getByTestId('module-compliance')).toHaveAttribute('data-active', 'true');
-    await expectPageHelp(page, 'Om krav', ['Krav og kravkilder', 'Etterlevelse og revisjon', 'Registeret']);
+    await expectPageHelp(page, 'Om kravregisteret', ['Krav og kravkilder', 'Relevans og kontrollvalg', 'Etterlevelse og revisjon', 'Registeret']);
     await expectReadable(page, '01-register');
 
     // Kravkilder: a new source, with the server's own messages first.
@@ -64,7 +68,9 @@ test('a requirement is registered under a new source, edited, retired and reopen
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.getByText('Tittel må fylles ut.')).toBeVisible();
     await expect(page.getByText('Kravtekst må fylles ut.')).toBeVisible();
-    await expect(page.getByText('Ansvarlig må fylles ut.')).toBeVisible();
+    // Ansvarlig is optional.
+    await expect(page.getByText('Ansvarlig må fylles ut.')).toHaveCount(0);
+    await expect(page.locator('#compliance-requirement-owner')).not.toHaveAttribute('required', /.*/);
 
     await page.locator('#compliance-requirement-source').selectOption({ label: sourceLabel });
     await page.locator('#compliance-requirement-reference').fill('A.5.15');
@@ -90,12 +96,11 @@ test('a requirement is registered under a new source, edited, retired and reopen
     await expectPageHelp(page, 'Om kravet', ['Ansvar og oppfølging', 'Status', 'Statushistorikk']);
     await expectReadable(page, '04-requirement');
 
-    // The register lists it with every column; open it from there.
+    // The register lists it with its origin and status; open it from there.
     await page.goto(registerUrl());
     const row = page.locator('tbody tr', { hasText: title });
-    for (const text of ['A.5.15', sourceLabel, person.name, 'Årlig', 'Aktiv']) {
-        await expect(row).toContainText(text);
-    }
+    await expect(row.getByTestId('compliance-origin')).toHaveText(`${sourceLabel} · A.5.15 · ${title}`);
+    await expect(row).toContainText('Aktiv');
     await expect(page.getByTestId('compliance-count')).toBeVisible();
     await expectReadable(page, '05-register-with-requirement');
     await row.getByRole('link', { name: title }).click();

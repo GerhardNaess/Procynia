@@ -164,6 +164,7 @@ export default function ComplianceSources({ sources = [], kinds = [], canEdit = 
                                         <p className="break-words text-base font-semibold text-slate-950">{source.label}</p>
                                         <p className="text-base text-slate-600">
                                             {sourceKindLabel(source.kind, tr)}
+                                            {source.from_library && ` · ${tr.library?.source_from_library ?? 'Fra kravbiblioteket'}`}
                                             {' · '}
                                             {countLabel(source.requirement_count, ts.requirement_count_one ?? '1 krav', ts.requirement_count ?? ':count krav')}
                                         </p>
@@ -171,7 +172,8 @@ export default function ComplianceSources({ sources = [], kinds = [], canEdit = 
                                     </div>
                                     {editing === null && (canEdit || source.can_delete) && (
                                         <div className="flex flex-wrap gap-2">
-                                            {canEdit && (
+                                            {/* An activated framework's source follows Kravbiblioteket; the server refuses an edit too. */}
+                                            {canEdit && ! source.from_library && (
                                                 <button type="button" onClick={() => open(source)} className={SECONDARY_ACTION} aria-label={`${ts.edit ?? 'Rediger'} ${source.label}`}>
                                                     {ts.edit ?? 'Rediger'}
                                                 </button>

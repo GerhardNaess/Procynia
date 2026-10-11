@@ -583,7 +583,9 @@ test.describe('the rail follows what the customer bought, and folds', () => {
             expect(await governanceChildren(page), label).toEqual(children);
 
             if (compliance) {
-                await expect(page.getByTestId('module-compliance-areas').locator('a'), label).toHaveText(['Krav', 'Revisjoner']);
+                // One entry in the rail; its four work areas are in the header, never under it.
+                await expect(page.getByTestId('module-compliance'), label).toHaveCount(1);
+                await expect(page.getByTestId('module-compliance-areas'), label).toHaveCount(0);
             } else {
                 await expect(page.getByTestId('module-compliance'), label).toHaveCount(0);
             }
@@ -594,10 +596,10 @@ test.describe('the rail follows what the customer bought, and folds', () => {
                 await expect(page.getByTestId('module-tenders'), label).toHaveCount(0);
             }
 
-            // Only entries with something under them have a chevron.
+            // Only Styring has something under it, so only Styring has a chevron.
             await expect(page.getByTestId('module-governance-toggle'), label).toBeVisible();
-            await expect(page.getByTestId('module-compliance-toggle'), label).toHaveCount(compliance ? 1 : 0);
-            await expect(page.getByTestId('module-sidebar').locator('button[aria-controls]'), label).toHaveCount(compliance ? 2 : 1);
+            await expect(page.getByTestId('module-compliance-toggle'), label).toHaveCount(0);
+            await expect(page.getByTestId('module-sidebar').locator('button[aria-controls]'), label).toHaveCount(1);
         }
     });
 
@@ -649,33 +651,36 @@ test.describe('the rail follows what the customer bought, and folds', () => {
         await expect(page.getByTestId('module-governance-toggle')).toHaveAttribute('aria-expanded', 'false');
         await expect(page.getByTestId('module-governance-children')).toBeHidden();
 
-        // Straight to Revisjoner: both parents open, and the page is the current one.
+        // Straight to Revisjon: Styring opens, the module is the current rail entry and the header
+        // marks the work area.
         await page.goto('/app/compliance/audits');
         await expect(page.getByTestId('module-governance-children')).toBeVisible();
-        await expect(page.getByTestId('module-compliance-areas')).toBeVisible();
-        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Revisjoner');
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Etterlevelse og revisjon');
         await expect(page.getByTestId('module-compliance')).toHaveAttribute('data-active', 'true');
+        await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Revisjon');
         await page.screenshot({ path: 'test-results/navigation-folding-audits.png', fullPage: true });
     });
 
-    test('Etterlevelse og revisjon folds on its own; the name still navigates', async ({ page }) => {
+    test('Etterlevelse og revisjon is one rail entry; its four work areas follow in the header', async ({ page }) => {
         await loginAsSeeded(page, await seed('ISO', ['iso']));
         await page.goto('/app/quality');
 
-        const toggle = page.getByTestId('module-compliance-toggle');
-
-        await toggle.click();
-        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-        await expect(page.getByTestId('module-compliance-areas')).toBeHidden();
-        await expect(page.getByTestId('module-governance-children')).toBeVisible();
-        await expect(page).toHaveURL(/\/app\/quality$/);
-
-        await toggle.click();
-        await expect(page.getByTestId('module-compliance-areas')).toBeVisible();
-
+        await expect(page.getByTestId('module-compliance-toggle')).toHaveCount(0);
         await page.getByTestId('module-compliance').click();
-        await expect(page).toHaveURL(/\/app\/compliance\/requirements$/);
-        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Krav');
+        // Nothing activated yet: the entry starts where the work starts, in Kravbibliotek.
+        await expect(page).toHaveURL(/\/app\/compliance\/library$/);
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Etterlevelse og revisjon');
+
+        const areas = page.getByTestId('module-navigation');
+        await expect(areas.locator('a')).toHaveText(['Kravbibliotek', 'Kravregister', 'Etterlevelsesvurdering', 'Revisjon']);
+        await expect(areas.locator('[aria-current="page"]')).toHaveText('Kravbibliotek');
+
+        for (const [name, url] of [['Kravregister', /\/app\/compliance\/requirements$/], ['Etterlevelsesvurdering', /\/app\/compliance\/assessments$/], ['Revisjon', /\/app\/compliance\/audits$/]]) {
+            await areas.getByRole('link', { name, exact: true }).click();
+            await expect(page).toHaveURL(url);
+            await expect(areas.locator('[aria-current="page"]')).toHaveText(name);
+            await expect(page.getByTestId('module-compliance')).toHaveAttribute('data-active', 'true');
+        }
     });
 
     test('on a phone the folding rail fits without a sideways scrollbar', async ({ page }) => {
@@ -683,7 +688,7 @@ test.describe('the rail follows what the customer bought, and folds', () => {
         await page.setViewportSize(PHONE);
         await page.goto('/app/compliance/requirements');
 
-        await expect(page.getByTestId('module-compliance-areas')).toBeVisible();
+        await expect(page.getByTestId('module-navigation').locator('a')).toHaveCount(4);
         await expect(page.getByTestId('module-governance-toggle')).toBeVisible();
         expect(await sidewaysOverflow(page)).toEqual([]);
 

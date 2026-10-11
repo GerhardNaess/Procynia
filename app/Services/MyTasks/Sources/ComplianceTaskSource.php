@@ -81,7 +81,7 @@ class ComplianceTaskSource implements MyTaskSource
         $canAssess = $this->access->canAssess($user);
 
         return $requirements->toBase()
-            ->filter(fn (ComplianceRequirement $requirement): bool => array_diff($reasons[(int) $requirement->id], [RequirementAttention::MISSING_OWNER]) !== [])
+            ->filter(fn (ComplianceRequirement $requirement): bool => $reasons[(int) $requirement->id] !== [])
             ->map(function (ComplianceRequirement $requirement) use ($reasons, $latest, $canAssess, $user): MyTask {
                 $next = $this->schedule->nextReviewOn((string) $requirement->status, $requirement->review_interval_months, $latest->get((int) $requirement->id)?->assessed_at);
                 $rows = array_map(fn (string $key): array => [

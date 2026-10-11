@@ -1,4 +1,5 @@
 import { formatDay } from '../../Improvements/improvementStatus.js';
+import { originLine } from '../../../../Support/complianceNavigation.js';
 
 /** The four statuses, in the order an audit passes through them, each with its badge tone. */
 export const AUDIT_STATUS_TONES = {
@@ -119,8 +120,15 @@ export function filterRequirementOptions(options, query, selected = []) {
     });
 }
 
-/** A requirement as one line: «A.5.15 Tilgangsstyring», or just the title without a reference. */
+/**
+ * A requirement as one line, with its origin: «ISO/IEC 27001:2022 · A.5.15 · Tilgangsstyring» — the
+ * same as everywhere else in the module. Without an origin (an older payload), «A.5.15 Tilgangsstyring».
+ */
 export function requirementLabel(requirement) {
+    if (requirement.origin) {
+        return originLine(requirement.origin);
+    }
+
     return requirement.reference ? `${requirement.reference} ${requirement.title}` : requirement.title;
 }
 

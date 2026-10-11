@@ -32,10 +32,9 @@
  * `workspace` puts a module under an arbeidsområde on the rail (see APP_WORKSPACES). It changes
  * where the module is listed, never whether it is: all three gates above still decide that.
  *
- * `subAreas` lists a module's work areas under it in the rail. Only Etterlevelse og revisjon has
- * them: its two areas, Krav and Revisjoner, are equal destinations, and the module entry alone only
- * ever led to the first. They are shown exactly when the module is — they are not entitlements or
- * permissions of their own, they inherit the module's.
+ * A module's work areas are never listed in the rail. Etterlevelse og revisjon has four —
+ * Kravbibliotek, Kravregister, Etterlevelsesvurdering and Revisjon — and, like Anbud's, they live in
+ * the header (CustomerAppLayout), so the rail keeps one entry per module.
  *
  * Packages never appear here. A package is product configuration (config/procynia_modules.php)
  * that resolves to technical modules on the server; the rail only ever sees those modules.
@@ -121,7 +120,8 @@ export const APP_MODULES = [
     },
     {
         key: 'compliance',
-        href: '/app/compliance/requirements',
+        // The module's own entry: Etterlevelsesvurdering, or Kravbibliotek while nothing is activated.
+        href: '/app/compliance',
         built: true,
         workspace: 'governance',
         module: 'compliance',
@@ -131,12 +131,6 @@ export const APP_MODULES = [
         permission: 'compliance.view',
         label: (m) => m.compliance ?? 'Etterlevelse og revisjon',
         areas: ['compliance'],
-        // Its two work areas, listed under it in the rail as well as in the header, so Revisjoner is
-        // one click away from anywhere. Keys match the header's (CustomerAppLayout).
-        subAreas: [
-            { key: 'compliance-requirements', href: '/app/compliance/requirements', label: (m) => m.compliance_requirements ?? 'Krav' },
-            { key: 'compliance-audits', href: '/app/compliance/audits', label: (m) => m.compliance_audits ?? 'Revisjoner' },
-        ],
     },
     {
         key: 'suppliers',

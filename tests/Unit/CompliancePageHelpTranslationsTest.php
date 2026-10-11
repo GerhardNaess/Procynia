@@ -11,8 +11,9 @@ use App\Services\Compliance\ComplianceAttentionService;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Purpose: Etterlevelse og revisjon must not ship without PageHelp. The Krav register and the
- * requirement page each have help with sections in both languages, built the same way, and the
+ * Purpose: Etterlevelse og revisjon must not ship without PageHelp. Kravbibliotek, Kravregister,
+ * Etterlevelsesvurdering, Revisjon and the pages under them each have help with sections in both
+ * languages, built the same way and opening with numbered steps, and the
  * help names what the pages actually show — the statuses, the source, the owner, the review
  * interval, the status history and compliance assessments — under the labels the pages use. The
  * Revisjoner register and the audit page likewise explain types, statuses, scope, lifecycle and
@@ -24,7 +25,7 @@ use PHPUnit\Framework\TestCase;
  */
 class CompliancePageHelpTranslationsTest extends TestCase
 {
-    private const PAGES = ['index', 'requirement', 'audit_index', 'audit'];
+    private const PAGES = ['index', 'requirement', 'assessments', 'audit_index', 'audit', 'library', 'framework'];
 
     public function test_every_page_has_help_with_sections_in_both_languages(): void
     {
@@ -96,7 +97,7 @@ class CompliancePageHelpTranslationsTest extends TestCase
             $titles = $this->itemTitles($strings['help']['requirement']);
             $sectionTitles = array_column($strings['help']['requirement']['sections'], 'title');
 
-            foreach (['field_owner', 'field_review', 'no_owner', 'reopen'] as $key) {
+            foreach (['field_owner', 'field_review', 'reopen'] as $key) {
                 $this->assertContains($strings[$key], $titles, "The requirement help in lang/{$locale} does not explain «{$strings[$key]}».");
             }
 
@@ -114,17 +115,25 @@ class CompliancePageHelpTranslationsTest extends TestCase
             $strings = $this->compliance($locale);
             $labels = $strings['assessment']['results'];
 
-            // The register explains every result, «Ikke vurdert» and «Revurdering forfalt» by name.
-            $indexTitles = $this->itemTitles($strings['help']['index']);
-            foreach ([...array_values($labels), $strings['assessment']['overdue']] as $label) {
-                $this->assertContains($label, $indexTitles, "The register help in lang/{$locale} does not explain «{$label}».");
+            // Etterlevelsesvurdering explains every figure on the page by its label — the results,
+            // «Ikke vurdert», «Revurdering forfalt» and what is kept outside the figures.
+            $assessmentTitles = $this->itemTitles($strings['help']['assessments']);
+            foreach ($strings['assessments_page']['stats'] as $label) {
+                $this->assertContains($label, $assessmentTitles, "The assessment help in lang/{$locale} does not explain «{$label}».");
             }
+            foreach (['compliant', 'partially_compliant', 'non_compliant', 'not_assessed'] as $result) {
+                $this->assertContains($labels[$result], $assessmentTitles, "The assessment help in lang/{$locale} does not explain «{$labels[$result]}».");
+            }
+            $this->assertContains($strings['assessment']['overdue'], $assessmentTitles);
+            // «Ikke relevant» is relevance, explained where it is decided: the register.
+            $this->assertContains($labels['not_applicable'], $this->itemTitles($strings['help']['index']));
 
             // The requirement page explains what an assessment is, why «Ikke vurdert» is not stored,
             // that assessments cannot be changed, the interval, and a changed requirement.
             $requirement = $this->allText($strings['help']['requirement']);
             $this->assertContains($strings['assessment']['results']['not_assessed'], $this->itemTitles($strings['help']['requirement']));
             $this->assertContains($strings['field_review'], $this->itemTitles($strings['help']['requirement']));
+            $this->assertContains($strings['assessment']['documentation'], $this->itemTitles($strings['help']['requirement']));
             $this->assertContains($strings['assessment']['heading'], array_column($strings['help']['requirement']['sections'], 'title'));
             foreach (ComplianceAssessment::RESULTS as $result) {
                 $this->assertStringContainsString($labels[$result], $requirement, "The requirement help in lang/{$locale} does not name «{$labels[$result]}».");
@@ -136,6 +145,12 @@ class CompliancePageHelpTranslationsTest extends TestCase
         foreach (['kan verken endres eller slettes', 'registrere en ny', 'ikke et lagret resultat', 'Endres kravet etterpå', 'pluss intervallet'] as $phrase) {
             $this->assertStringContainsString($phrase, $no);
         }
+
+        // Self-assessment and audit are kept apart, and an audit never overwrites an assessment.
+        $assessments = $this->allText($this->compliance('no')['help']['assessments']);
+        foreach (['egen vurdering', 'systematisk kontroll', 'endrer aldri en etterlevelsesvurdering', 'telles bare der', 'ikke mangler'] as $phrase) {
+            $this->assertStringContainsString($phrase, $assessments);
+        }
     }
 
     public function test_the_requirement_help_explains_how_the_requirement_is_met(): void
@@ -145,22 +160,128 @@ class CompliancePageHelpTranslationsTest extends TestCase
             $sections = $strings['help']['requirement']['sections'];
             $titles = array_column($sections, 'title');
 
-            // A section named like the page section, between ownership and etterlevelse — the page's order.
+            // The optional Kvalitet links, named like the page section and after Etterlevelse — the
+            // page's order now that a process is never asked for before an assessment.
             $index = array_search($strings['quality']['heading'], $titles, true);
             $this->assertIsInt($index, "The requirement help in lang/{$locale} has no «{$strings['quality']['heading']}» section.");
-            $this->assertLessThan(array_search($strings['assessment']['heading'], $titles, true), $index);
+            $this->assertGreaterThan(array_search($strings['assessment']['heading'], $titles, true), $index);
             $this->assertCount(6, $sections[$index]['items']);
         }
 
-        // Why link, Kvalitet owns it, evidence read-only, evidence is no verdict, retired controls, access.
+        // Optional, a process is not evidence, Kvalitet owns it, evidence read-only and no verdict,
+        // retired controls, access.
         $no = $this->allText(['sections' => [$this->section('no')]]);
-        foreach (['hvordan virksomheten har tenkt å oppfylle kravet', 'Kvalitet', 'Her lagres bare koblingen', 'kan ikke legges til, endres eller fjernes', 'betyr ikke automatisk at kravet er oppfylt', 'vurderes eksplisitt', 'satt som utgått i Kvalitet', 'gir ikke innsyn i Kvalitet'] as $phrase) {
+        foreach (['Valgfrie henvisninger', 'ikke i seg selv dokumentasjon', 'ber aldri om en kobling', 'Her lagres bare koblingen', 'kan ikke legges til, endres eller fjernes', 'betyr ikke automatisk at kravet er oppfylt', 'vurderes eksplisitt', 'satt som utgått i Kvalitet', 'gir ikke innsyn i Kvalitet'] as $phrase) {
             $this->assertStringContainsString($phrase, $no);
         }
 
-        // The index subtitle now names etterlevelse.
+        // The register's subtitle points to where etterlevelse is assessed.
         $this->assertStringContainsString('etterlevelsesvurdering', $this->compliance('no')['index_subtitle']);
         $this->assertStringContainsString('compliance assessment', $this->compliance('en')['index_subtitle']);
+    }
+
+    public function test_the_iso_pages_open_with_their_purpose_and_numbered_steps(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $help = $this->compliance($locale)['help'];
+            $this->assertNotSame('', trim((string) ($help['purpose_heading'] ?? '')));
+
+            foreach (['library', 'framework', 'index', 'requirement', 'assessments', 'audit_index'] as $page) {
+                $steps = $help[$page]['sections'][0];
+                $this->assertSame($locale === 'no' ? 'Slik gjør du det' : 'How to do it', $steps['title'], "lang/{$locale}: {$page} does not start with the steps.");
+
+                foreach ($steps['items'] as $number => $item) {
+                    $this->assertStringStartsWith(($number + 1).'. ', $item['title'], "lang/{$locale}: step ".($number + 1)." on {$page} is not numbered.");
+                }
+            }
+        }
+    }
+
+    public function test_the_steps_name_the_buttons_and_fields_by_their_labels(): void
+    {
+        foreach (['no', 'en'] as $locale) {
+            $strings = $this->compliance($locale);
+            $library = $strings['library'];
+            $steps = fn (string $page): string => $this->allText(['sections' => [$strings['help'][$page]['sections'][0]]])
+                .' '.implode(' ', array_column($strings['help'][$page]['sections'][0]['items'], 'title'));
+
+            // Every quoted «label» in the steps is a label the page shows: a renamed button fails here.
+            $page = $strings['assessments_page'];
+            $audits = $strings['audits'];
+            $labels = [
+                'library' => [$library['open_framework'], $library['activate'], $library['open_register'], $library['open_assessments'], $library['activated'], $library['not_activated']],
+                'framework' => [$library['show_details'], $library['expand_all'], $library['collapse_all'], $library['search_label'], $library['filter_label'], $library['activate'], $library['open_requirement'], $library['open_register'], $library['open_assessments']],
+                'index' => [$strings['source_filter'], $strings['search'], $strings['applicability_filter'], $library['applicability']['register_filter']['not_assessed'], $strings['to_assessments'], $strings['create'], $strings['sources']['manage'], $library['from_library_cta']],
+                'requirement' => [
+                    $strings['text_heading'], $library['from_library_heading'], $library['modules_heading'],
+                    $library['applicability']['heading'], $library['applicability']['change'], $library['applicability']['submit'], $library['applicability']['field_rationale'],
+                    $library['applicability']['values']['applies'], $library['applicability']['values']['not_applicable'],
+                    $strings['edit'], $strings['field_owner_optional'], $strings['field_review'], $strings['save'],
+                    $strings['quality']['heading'], $strings['quality']['link_process'], $strings['quality']['link_control'],
+                    $strings['assessment']['assess'], $strings['assessment']['field_result'], $strings['assessment']['field_rationale'], $strings['assessment']['field_documentation'], $strings['assessment']['submit'],
+                    $strings['assessment']['results']['compliant'], $strings['assessment']['results']['partially_compliant'], $strings['assessment']['results']['non_compliant'], $strings['assessment']['results']['not_assessed'],
+                    $strings['back_to_assessments'], $strings['back'], $page['assess'],
+                    $library['applicability']['control']['heading'], $library['applicability']['control']['change'], $library['applicability']['control']['submit'],
+                    $library['applicability']['control_values']['applies'], $library['applicability']['control_values']['not_applicable'],
+                ],
+                'assessments' => [
+                    $page['filter_source'], $page['apply'], $page['reset'], $page['filter_status'], $page['filters']['not_assessed'], $page['filters']['gaps'],
+                    $page['stats']['assessable'], $page['stats']['assessed'], $page['stats']['compliant'], $page['stats']['partially_compliant'], $page['stats']['non_compliant'],
+                    $page['assess'], $strings['assessment']['field_result'], $strings['assessment']['field_rationale'], $strings['assessment']['submit'], $strings['back_to_assessments'],
+                ],
+                'audit_index' => [$audits['create'], $audits['requirements_add'], $audits['requirements_from_source'], $audits['start'], $audits['findings']['create'], $audits['findings']['hand_off'], $audits['complete']],
+            ];
+
+            foreach ($labels as $page => $expected) {
+                $text = $steps($page);
+                foreach ($expected as $label) {
+                    $this->assertStringContainsString($label, $text, "lang/{$locale}: the {$page} steps do not name «{$label}».");
+                }
+                preg_match_all('/«([^»]+)»/u', $text, $quoted);
+                foreach ($quoted[1] as $label) {
+                    $this->assertContains($label, $expected, "lang/{$locale}: the {$page} steps quote «{$label}», which is not a label the page shows.");
+                }
+            }
+
+            // Activation happens on the library's cards, not on the framework page.
+            $this->assertStringContainsString($library['activate'], $steps('library'));
+            $this->assertStringContainsString($locale === 'no' ? 'på kortet' : 'card', $steps('library'));
+            $this->assertStringContainsString($locale === 'no' ? 'Kravbibliotek' : 'Requirement library', implode(' ', array_column(array_filter($strings['help']['framework']['sections'][0]['items'], fn (array $item): bool => str_contains($item['text'], $library['activate'])), 'text')));
+
+            // The library is for choosing standards; its help lays out the four work areas by the
+            // names the header shows, and the figures are explained where they are: Etterlevelsesvurdering.
+            $workflow = collect($strings['help']['library']['sections'])->firstWhere('title', $locale === 'no' ? 'Arbeidsflyten' : 'The workflow');
+            $this->assertIsArray($workflow, "lang/{$locale}: the library help does not explain the workflow.");
+            $this->assertSame(array_values($strings['nav']), array_slice(array_column($workflow['items'], 'title'), 0, 4));
+            $this->assertStringNotContainsString($locale === 'no' ? 'Nøkkeltallene' : 'The key figures', implode(' ', array_column($strings['help']['library']['sections'], 'title')));
+
+            // The requirement help has the worked examples: 9.3, an Annex A control and an environmental aspect.
+            $requirementSections = array_column($strings['help']['requirement']['sections'], 'title');
+            foreach ($locale === 'no'
+                ? ['Eksempel: 9.3 Ledelsens gjennomgåelse', 'Eksempel: ISO/IEC 27001 A.8.13 Sikkerhetskopiering', 'Eksempel: ISO 14001 6.1.2 Miljøaspekter']
+                : ['Example: 9.3 Management review', 'Example: ISO/IEC 27001 A.8.13 Backup', 'Example: ISO 14001 6.1.2 Environmental aspects'] as $example) {
+                $this->assertContains($example, $requirementSections, "lang/{$locale}: the requirement help lacks «{$example}».");
+            }
+
+            // The framework help explains Annex A and the SoA, naming the control choices and the split overview.
+            $annex = collect($strings['help']['framework']['sections'])->firstWhere('title', $locale === 'no' ? 'Vedlegg A og SoA (ISO/IEC 27001)' : 'Annex A and the SoA (ISO/IEC 27001)');
+            $this->assertIsArray($annex, "lang/{$locale}: the framework help has no Annex A section.");
+            $annexText = $this->allText(['sections' => [$annex]]);
+            foreach ([$library['applicability']['control_values']['applies'], $library['applicability']['control_values']['not_applicable'], $library['applicability']['control_values']['not_assessed'], 'SoA', '93'] as $label) {
+                $this->assertStringContainsString($label, $annexText, "lang/{$locale}: the Annex A help does not name «{$label}».");
+            }
+            $this->assertContains($library['applicability']['control']['heading'], array_column($annex['items'], 'title'));
+
+            // The library help names all three standards.
+            foreach (['ISO 9001', 'ISO/IEC 27001', 'ISO 14001'] as $standard) {
+                $this->assertStringContainsString($standard, $strings['help']['library']['intro']);
+            }
+        }
+
+        $no = $this->allText($this->compliance('no')['help']['requirement']);
+        foreach (['kan ikke settes til Ikke relevant', 'Ikke vurdert er ikke et valg', 'aldri et krav som oppfylt automatisk', 'Delvis oppfylt', 'både Inkludert og Utelatt begrunnes', 'kontroll i vedlegg A må være Inkludert'] as $phrase) {
+            $this->assertStringContainsString($phrase, $no);
+        }
     }
 
     /** @return array<string, mixed> */
@@ -177,24 +298,12 @@ class CompliancePageHelpTranslationsTest extends TestCase
         $this->fail("No «{$strings['quality']['heading']}» section in lang/{$locale}.");
     }
 
-    public function test_the_register_help_explains_needs_attention_and_each_reason_by_its_label(): void
+    public function test_the_attention_reasons_are_the_services_and_none_is_about_a_missing_owner(): void
     {
         foreach (['no', 'en'] as $locale) {
-            $compliance = $this->compliance($locale);
-            $attention = $compliance['attention'];
+            $attention = $this->compliance($locale)['attention'];
             $this->assertSame(ComplianceAttentionService::REASONS, array_keys($attention['reasons']), $locale);
-
-            $section = collect($compliance['help']['index']['sections'])->firstWhere('title', $attention['heading']);
-            $this->assertIsArray($section, "The register help in {$locale} has no section named «{$attention['heading']}».");
-            $titles = array_column($section['items'], 'title');
-
-            foreach ($attention['reasons'] as $label) {
-                $this->assertContains($label, $titles, "{$locale}: the help does not explain «{$label}».");
-            }
-
-            // It says the signals are computed, not stored.
-            $text = implode(' ', array_column($section['items'], 'text'));
-            $this->assertMatchesRegularExpression($locale === 'no' ? '/automatisk.*ikke egne lagrede statuser/u' : '/automatically.*not statuses of their own/u', $text);
+            $this->assertArrayNotHasKey('missing_owner', $attention['reasons'], $locale);
         }
     }
 
@@ -217,7 +326,11 @@ class CompliancePageHelpTranslationsTest extends TestCase
         $no = $this->compliance('no');
 
         $this->assertSame('Etterlevelse og revisjon', $no['module_name']);
-        $this->assertSame('Krav', $no['index_heading']);
+        $this->assertSame('Kravregister', $no['index_heading']);
+        $this->assertSame(
+            ['library' => 'Kravbibliotek', 'requirements' => 'Kravregister', 'assessments' => 'Etterlevelsesvurdering', 'audits' => 'Revisjon'],
+            $no['nav'],
+        );
         $this->assertSame(['active' => 'Aktiv', 'retired' => 'Utgått'], $no['statuses']);
         $this->assertSame(
             ['standard' => 'Standard', 'law' => 'Lov/forskrift', 'contract' => 'Kontrakt', 'internal' => 'Internt krav', 'other' => 'Annet'],
@@ -232,7 +345,7 @@ class CompliancePageHelpTranslationsTest extends TestCase
             [$no['col_reference'], $no['col_requirement'], $no['col_source'], $no['col_owner'], $no['col_review'], $no['col_status']],
         );
         $this->assertSame(
-            ['Sett som utgått', 'Gjenåpne', 'Statushistorikk', 'Mangler ansvarlig', 'Kravkilder'],
+            ['Sett som utgått', 'Gjenåpne', 'Statushistorikk', 'Ingen valgt', 'Kravkilder'],
             [$no['retire'], $no['reopen'], $no['history_heading'], $no['no_owner'], $no['sources']['heading']],
         );
         $this->assertSame(

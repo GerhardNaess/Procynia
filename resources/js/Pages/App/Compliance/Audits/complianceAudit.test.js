@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { COMPLIANCE_HELP_PAGES, complianceHelp } from '../Requirements/complianceHelp.js';
+import { COMPLIANCE_AREAS, complianceAreaKey } from '../../../../Support/complianceNavigation.js';
 import {
     AUDIT_STATUS_TONES,
     auditStatusLabel,
@@ -32,14 +33,14 @@ const block = (text, start, end) => {
     return text.slice(from, text.indexOf(end, from));
 };
 
-describe('Etterlevelse og revisjon has two Level 2 areas: Krav | Revisjoner', () => {
-    test('exactly Krav and Revisjoner, in that order, with their own routes', () => {
+describe('Etterlevelse og revisjon has four Level 2 areas: Kravbibliotek | Kravregister | Etterlevelsesvurdering | Revisjon', () => {
+    test('exactly the four, in the order the work runs, with their own routes', () => {
         const areas = block(layout, "if (activeMainArea === 'compliance') {\n            // Etterlevelse", '];');
         const keys = [...areas.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
         const hrefs = [...areas.matchAll(/href: '([^']+)'/g)].map((m) => m[1]);
 
-        assert.deepEqual(keys, ['compliance-requirements', 'compliance-audits']);
-        assert.deepEqual(hrefs, ['/app/compliance/requirements', '/app/compliance/audits']);
+        assert.deepEqual(keys, ['compliance-library', 'compliance-requirements', 'compliance-assessments', 'compliance-audits']);
+        assert.deepEqual(hrefs, ['/app/compliance/library', '/app/compliance/requirements', '/app/compliance/assessments', '/app/compliance/audits']);
     });
 
     test('no Oversikt, dashboard or third level is invented for the module', () => {
@@ -50,14 +51,24 @@ describe('Etterlevelse og revisjon has two Level 2 areas: Krav | Revisjoner', ()
         }
     });
 
-    test('an audit page lights Revisjoner, everything else in the module lights Krav', () => {
-        const resolver = block(layout, "if (activeMainArea === 'compliance') {\n            return pathname", '}');
+    test('each page lights its own area; a requirement opened from the worklist keeps Etterlevelsesvurdering', () => {
+        const params = (query = '') => new URLSearchParams(query);
 
-        assert.match(resolver, /pathname\.startsWith\('\/app\/compliance\/audits'\) \? 'compliance-audits' : 'compliance-requirements'/);
+        assert.equal(complianceAreaKey('/app/compliance/library', params()), 'compliance-library');
+        assert.equal(complianceAreaKey('/app/compliance/library/3', params()), 'compliance-library');
+        assert.equal(complianceAreaKey('/app/compliance/requirements', params('source=2')), 'compliance-requirements');
+        assert.equal(complianceAreaKey('/app/compliance/requirements/12', params()), 'compliance-requirements');
+        assert.equal(complianceAreaKey('/app/compliance/requirements/12', params('from=assessments&assess=1')), 'compliance-assessments');
+        assert.equal(complianceAreaKey('/app/compliance/assessments', params('status=gaps')), 'compliance-assessments');
+        assert.equal(complianceAreaKey('/app/compliance/audits', params()), 'compliance-audits');
+        assert.equal(complianceAreaKey('/app/compliance/audits/4', params()), 'compliance-audits');
+        // Only the worklist's own marker moves the area; anything else is the register.
+        assert.equal(complianceAreaKey('/app/compliance/requirements/12', params('from=elsewhere')), 'compliance-requirements');
+        assert.deepEqual(COMPLIANCE_AREAS, ['compliance-library', 'compliance-requirements', 'compliance-assessments', 'compliance-audits']);
     });
 
     test('the pages do not draw their own copy of the areas', () => {
-        for (const file of ['./Index.jsx', './Show.jsx', '../Requirements/Index.jsx', '../Requirements/Show.jsx']) {
+        for (const file of ['./Index.jsx', './Show.jsx', '../Requirements/Index.jsx', '../Requirements/Show.jsx', '../Library/Index.jsx', '../Library/Show.jsx', '../Assessments/Index.jsx']) {
             const code = source(file);
             assert.ok(! code.includes('<nav'), `${file} must not render its own navigation`);
             assert.ok(! code.includes("href=\"/app/compliance/audits\" className=\"rounded"), file);
@@ -67,7 +78,7 @@ describe('Etterlevelse og revisjon has two Level 2 areas: Krav | Revisjoner', ()
 
 describe('PageHelp on both audit pages', () => {
     test('the register and the audit page are help pages, rendered through PageHelpButton', () => {
-        assert.deepEqual(COMPLIANCE_HELP_PAGES.slice(2), ['audit_index', 'audit']);
+        assert.deepEqual(COMPLIANCE_HELP_PAGES.slice(3, 5), ['audit_index', 'audit']);
         assert.match(source('./Index.jsx'), /<PageHelpButton \{\.\.\.complianceHelp\(tr, 'audit_index'\)\} \/>/);
         assert.match(source('./Show.jsx'), /<PageHelpButton \{\.\.\.complianceHelp\(tr, 'audit'\)\} \/>/);
     });
@@ -76,7 +87,7 @@ describe('PageHelp on both audit pages', () => {
         const sections = [{ title: 'Scope', items: [{ title: 'Scope', text: 'Hva revisjonen omfatter.' }] }];
         const help = complianceHelp({ help: { button: 'Hjelp', audit: { title: 'Om revisjonen', intro: 'Intro', sections } } }, 'audit');
 
-        assert.deepEqual(help, { buttonLabel: 'Hjelp', title: 'Om revisjonen', intro: 'Intro', sections });
+        assert.deepEqual(help, { buttonLabel: 'Hjelp', title: 'Om revisjonen', introTitle: undefined, intro: 'Intro', sections });
     });
 
     test('both languages declare the same audit help pages and audit keys', () => {

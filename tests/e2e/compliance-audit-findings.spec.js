@@ -151,6 +151,8 @@ test('a finding is recorded, the audit completed, and the finding followed up in
     const origin = page.getByTestId('improvement-audit-origin');
     await expect(origin).toContainText('Fra revisjonsfunn i');
     await expect(origin).toContainText(`Funn: ${findingTitle}`);
+    // The case says which requirement — and which standard — the finding answers to.
+    await expect(origin.getByTestId('improvement-audit-requirement')).toHaveText(`Krav: ${person.requirement_label}`);
     await expect(page.getByRole('button', { name: 'Slett sak' })).toHaveCount(0);
     await expectReadable(page, '06-case-with-origin');
     await origin.getByRole('link', { name: auditTitle }).click();

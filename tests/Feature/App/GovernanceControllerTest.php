@@ -96,7 +96,7 @@ class GovernanceControllerTest extends TestCase
 
         $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'], array_column($modules, 'key'));
         $this->assertSame(
-            [route('app.quality.index'), route('app.risk.index'), route('app.objectives.index'), route('app.improvements.index'), route('app.compliance.requirements.index'), route('app.supplier-management.index')],
+            [route('app.quality.index'), route('app.risk.index'), route('app.objectives.index'), route('app.improvements.index'), route('app.compliance.index'), route('app.supplier-management.index')],
             array_column($modules, 'href'),
         );
     }

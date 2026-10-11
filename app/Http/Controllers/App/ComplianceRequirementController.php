@@ -14,6 +14,8 @@ use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceQualityContextService;
 use App\Services\Compliance\ComplianceRequirementLifecycleService;
 use App\Services\Compliance\ComplianceStatusResolver;
+use App\Services\Compliance\Library\ComplianceApplicabilityService;
+use App\Services\Compliance\Library\ComplianceFrameworkPresenter;
 use App\Support\Compliance\ComplianceValidationMessages;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -42,8 +44,15 @@ use Inertia\Response;
  * ComplianceQualityContextService's: it decides what may be shown (Kvalitet read access, never
  * implied by compliance.*) and what may be linked.
  *
- * «Trenger oppmerksomhet» is ComplianceAttentionService's, computed on the rows reached here and on
- * nothing else.
+ * The reasons a requirement needs attention are ComplianceAttentionService's, computed on the rows
+ * reached here and on nothing else. Whether requirements are met, across the register, is
+ * Etterlevelsesvurdering's (ComplianceAssessmentController).
+ *
+ * A requirement from Kravbiblioteket (framework_node_id) is the same requirement with three
+ * differences: its reference, title and text belong to the library and are not form fields; its
+ * relevance (Gjelder / Ikke relevant / Ikke vurdert) is set through setApplicability() with
+ * compliance.edit; and it is assessed only while it applies, never as Ikke relevant. No requirement
+ * is registered by hand under an activated framework's source.
  */
 class ComplianceRequirementController extends Controller
 {
@@ -55,16 +64,28 @@ class ComplianceRequirementController extends Controller
         private readonly ComplianceAssessmentService $assessments,
         private readonly ComplianceQualityContextService $qualityContext,
         private readonly ComplianceAttentionService $attention,
+        private readonly ComplianceApplicabilityService $applicability,
+        private readonly ComplianceFrameworkPresenter $library,
     ) {}
 
-    /** /app/compliance: Krav is the module's only main area so far. */
+    /**
+     * /app/compliance, the rail's one entry: Etterlevelsesvurdering, where the ongoing work is — or,
+     * while the register is still empty, Kravbibliotek, where it starts.
+     */
     public function home(): RedirectResponse
     {
-        $this->authorizedUser();
+        $user = $this->authorizedUser();
 
-        return redirect()->route('app.compliance.requirements.index');
+        return $this->access->visibleRequirements($user)->exists()
+            ? redirect()->route('app.compliance.assessments.index')
+            : redirect()->route('app.compliance.library.index');
     }
 
+    /**
+     * Kravregister: which requirements apply to the virksomhet — origin, relevance or Kontrollvalg,
+     * and status. Whether they are met is Etterlevelsesvurdering's (ComplianceAssessmentController),
+     * so the register carries no results and no worklist of its own.
+     */
     public function index(Request $request): Response
     {
         $user = $this->authorizedUser();
@@ -79,7 +100,7 @@ class ComplianceRequirementController extends Controller
 
         $search = trim((string) $request->query('search', ''));
         $status = in_array($request->query('status'), ComplianceRequirement::STATUSES, true) ? (string) $request->query('status') : '';
-        $attentionOnly = $request->boolean('attention');
+        $applicability = in_array($request->query('applicability'), ComplianceRequirement::APPLICABILITIES, true) ? (string) $request->query('applicability') : '';
         // Only a source the user can read is a filter; anything else is ignored rather than answered.
         $sourceId = (int) $request->query('source', 0);
         $sourceId = in_array($sourceId, $sourceIds, true) ? $sourceId : 0;
@@ -99,68 +120,46 @@ class ComplianceRequirementController extends Controller
             $query->where('compliance_requirements.status', $status);
         }
 
+        if ($applicability !== '') {
+            $query->where('compliance_requirements.applicability', $applicability);
+        }
+
         if ($sourceId !== 0) {
             $query->where('compliance_requirements.source_id', $sourceId);
         }
 
-        $requirements = $this->inRegisterOrder($query)->with(['source:id,name,version', 'owner:id,name'])->get();
-
-        // «Trenger oppmerksomhet» is the worklist of the whole register the user can see — every
-        // active requirement, whatever the search above — so the panel does not shrink with a search.
-        $attentionSet = $this->inRegisterOrder($this->access->visibleRequirements($user)
-            ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE))
+        $requirements = $query->inRegisterOrder()
+            ->with(['source:id,name,version,framework_id', 'owner:id,name', 'frameworkNode:id,applicability_rule'])
             ->get();
 
         $canEdit = $this->access->canEdit($user);
         $canDelete = $this->access->canDelete($user);
-        // Only the rows already narrowed above, so no hidden requirement's status is ever read; one
-        // query for both sets.
-        $latest = $this->status->latestForRequirements(
-            (int) $user->customer_id,
-            $requirements->pluck('id')->merge($attentionSet->pluck('id'))->map(fn (mixed $id): int => (int) $id)->unique()->values()->all(),
-        );
-        $rowReasons = $this->attention->reasonsForRequirements($requirements, $latest);
-        $panelReasons = $this->attention->reasonsForRequirements($attentionSet, $latest);
-
-        if ($attentionOnly) {
-            $requirements = $requirements->filter(fn (ComplianceRequirement $requirement): bool => $rowReasons[(int) $requirement->id] !== [])->values();
-        }
-
-        $flagged = $attentionSet->filter(fn (ComplianceRequirement $requirement): bool => $panelReasons[(int) $requirement->id] !== []);
 
         return Inertia::render('App/Compliance/Requirements/Index', [
             'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->row($requirement) + [
-                'compliance' => $this->registerCompliance($requirement, $latest->get((int) $requirement->id)),
-                'attention' => $rowReasons[(int) $requirement->id],
+                'applicability_rule' => $requirement->frameworkNode?->applicability_rule,
             ])->all(),
-            'attention' => [
-                'total' => $flagged->count(),
-                'requirements' => $flagged->map(fn (ComplianceRequirement $requirement): array => [
-                    'id' => (int) $requirement->id,
-                    'reference' => $requirement->reference,
-                    'title' => $requirement->title,
-                    'url' => route('app.compliance.requirements.show', ['requirementId' => $requirement->id]),
-                    'reasons' => $panelReasons[(int) $requirement->id],
-                ])->values()->all(),
-            ],
-            'attention_reasons' => ComplianceAttentionService::REASONS,
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleRequirements($user)->count(),
             'filters' => [
                 'search' => $search,
                 'source' => $sourceId !== 0 ? $sourceId : null,
                 'status' => $status,
-                'attention' => $attentionOnly,
+                'applicability' => $applicability,
             ],
             'statuses' => ComplianceRequirement::STATUSES,
+            'applicabilities' => ComplianceRequirement::APPLICABILITIES,
             'sources' => $sources->map(fn (ComplianceSource $source): array => [
                 'id' => (int) $source->id,
                 'name' => $source->name,
                 'version' => $source->version,
-                'label' => $this->sourceLabel($source),
+                'label' => $source->originLabel(),
                 'kind' => $source->kind,
                 'description' => $source->description,
                 'requirement_count' => (int) $source->requirements_count,
+                // An activated framework's source follows the library: not edited, and nothing is
+                // registered under it by hand.
+                'from_library' => $source->isFromLibrary(),
                 'can_delete' => $canDelete && (int) $source->requirements_count === 0,
             ])->all(),
             'kinds' => ComplianceSource::KINDS,
@@ -177,17 +176,23 @@ class ComplianceRequirementController extends Controller
     {
         $user = $this->authorizedUser();
         $requirement = $this->visibleRequirementOrFail($user, $requirementId);
-        $requirement->loadMissing(['source:id,name,version,kind', 'owner:id,name']);
+        $requirement->loadMissing(['source:id,name,version,kind,framework_id', 'owner:id,name']);
 
         $canEdit = $this->access->canEdit($user);
         $active = $requirement->isActive();
         $assessments = $requirement->assessments()->with('assessedBy:id,name')->get();
         $canManageQualityLinks = $this->qualityContext->canManageLinks($user, $requirement);
+        $fromLibrary = $requirement->isFromLibrary();
+        // A library requirement is assessed only while it applies, and Ikke relevant is relevance,
+        // not a result.
+        $assessable = $active && (! $fromLibrary || $requirement->applicability === ComplianceRequirement::APPLICABILITY_APPLIES);
+        $requirement->loadMissing('applicabilitySetBy:id,name');
 
         return Inertia::render('App/Compliance/Requirements/Show', [
             'requirement' => $this->row($requirement) + [
                 'requirement_text' => $requirement->requirement_text,
                 'source_kind' => $requirement->source?->kind,
+                'origin' => $requirement->origin(),
                 'created_at' => $requirement->created_at?->toIso8601String(),
             ],
             'compliance' => $this->status->summarize($requirement, $assessments->first()),
@@ -197,6 +202,7 @@ class ComplianceRequirementController extends Controller
                 'id' => (int) $assessment->id,
                 'result' => $assessment->result,
                 'rationale' => $assessment->rationale,
+                'documentation' => $assessment->documentation,
                 'assessed_at' => $assessment->assessed_at?->toIso8601String(),
                 'assessed_by_name' => $assessment->assessedBy?->name,
                 'snapshot' => [
@@ -207,7 +213,19 @@ class ComplianceRequirementController extends Controller
                     'source_version' => $assessment->source_version,
                 ],
             ])->all(),
-            'assessment_results' => ComplianceAssessment::RESULTS,
+            'assessment_results' => $fromLibrary
+                ? array_values(array_diff(ComplianceAssessment::RESULTS, [ComplianceAssessment::RESULT_NOT_APPLICABLE]))
+                : ComplianceAssessment::RESULTS,
+            // Fra kravbiblioteket: guidance, documentation, normative character and where in
+            // Procynia the work is done. null for a requirement registered by hand.
+            'library' => $this->library->libraryContext($requirement, $user),
+            'applicability' => $fromLibrary ? [
+                'value' => $requirement->applicability,
+                'rationale' => $requirement->applicability_rationale,
+                'set_at' => $requirement->applicability_set_at?->toIso8601String(),
+                'set_by_name' => $requirement->applicabilitySetBy?->name,
+                'options' => $this->applicabilityOptions($requirement),
+            ] : null,
             // Hvordan kravet oppfylles: null — not empty — without Kvalitet read access, so nothing
             // about the links reaches the page, not even whether there are any.
             'quality_context' => $this->qualityContext->canReadQuality($user) ? $this->qualityContext->linkedContext($requirement) : null,
@@ -230,11 +248,13 @@ class ComplianceRequirementController extends Controller
                 'can_reopen' => $canEdit && ! $active,
                 'can_delete' => $this->access->canDelete($user) && $requirement->isDeletable(),
                 // Only an active requirement is assessed; the server refuses it otherwise too.
-                'can_assess' => $this->access->canAssess($user) && $active,
+                'can_assess' => $this->access->canAssess($user) && $assessable,
+                // Relevans: compliance.edit, on an active library requirement.
+                'can_set_applicability' => $fromLibrary && $canEdit && $active,
                 // compliance.edit and Kvalitet read access, on an active requirement.
                 'can_manage_quality_links' => $canManageQualityLinks,
             ],
-            'source_options' => $canEdit && $active ? $this->sourceOptions($user) : [],
+            'source_options' => $canEdit && $active && ! $fromLibrary ? $this->sourceOptions($user) : [],
             'owner_options' => $canEdit && $active ? $this->access->ownerCandidates($user) : [],
             'review_intervals' => ComplianceRequirement::REVIEW_INTERVALS,
         ]);
@@ -317,11 +337,36 @@ class ComplianceRequirementController extends Controller
         $validated = $request->validate([
             'result' => ['required', 'string', Rule::in(ComplianceAssessment::RESULTS)],
             'rationale' => ['required', 'string', 'max:10000'],
+            // Optional: what the assessment points to — a Wiki article, a document, a link.
+            'documentation' => ['nullable', 'string', 'max:5000'],
         ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
 
-        $this->assessments->assess($requirement, $user, $validated['result'], $validated['rationale']);
+        $this->assessments->assess($requirement, $user, $validated['result'], $validated['rationale'], $validated['documentation'] ?? null);
 
         return back()->with('success', __('procynia.compliance.flash.assessed'));
+    }
+
+    /**
+     * Relevans for a library requirement. Access first (404), then compliance.edit (403). Ikke
+     * relevant only where the standard allows it, and always with a begrunnelse — the service
+     * refuses it otherwise.
+     */
+    public function setApplicability(Request $request, int $requirementId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $requirement = $this->visibleRequirementOrFail($user, $requirementId);
+        abort_unless($this->access->canEdit($user), 403);
+
+        $validated = $request->validate([
+            'applicability' => ['required', 'string', Rule::in(ComplianceRequirement::APPLICABILITIES)],
+            'rationale' => ['nullable', 'string', 'max:10000'],
+        ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
+
+        $saved = $this->applicability->set($requirement, $user, $validated['applicability'], $validated['rationale'] ?? null);
+
+        return back()->with('success', __($saved->frameworkNode?->isControl()
+            ? 'procynia.compliance.library.flash.control_choice_saved'
+            : 'procynia.compliance.library.flash.applicability_saved'));
     }
 
     /** Koble prosess: the requirement is met (in part) through an existing Kvalitet process. */
@@ -407,12 +452,17 @@ class ComplianceRequirementController extends Controller
      */
     private function validatedFields(Request $request, User $user, ?ComplianceRequirement $current): array
     {
+        if ($current !== null && $current->isFromLibrary()) {
+            return $this->validatedLibraryFields($request, $user);
+        }
+
         $validated = $request->validate([
             'source_id' => ['required', 'integer'],
             'reference' => ['nullable', 'string', 'max:100'],
             'title' => ['required', 'string', 'max:255'],
             'requirement_text' => ['required', 'string', 'max:20000'],
-            'owner_user_id' => ['required', 'integer'],
+            // Optional: responsibility follows the work (assessment, audit, Avvik), not each requirement.
+            'owner_user_id' => ['nullable', 'integer'],
             'review_interval_months' => ['nullable', 'integer', Rule::in(ComplianceRequirement::REVIEW_INTERVALS)],
         ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
 
@@ -424,11 +474,11 @@ class ComplianceRequirementController extends Controller
             throw ValidationException::withMessages(['source_id' => __('procynia.compliance.validation.source_not_allowed')]);
         }
 
-        $owner = User::query()->where('customer_id', (int) $user->customer_id)->find((int) $validated['owner_user_id']);
-
-        if (! $this->access->isValidOwner($owner, (int) $user->customer_id)) {
-            throw ValidationException::withMessages(['owner_user_id' => __('procynia.compliance.validation.owner_not_allowed')]);
+        if ($source->isFromLibrary()) {
+            throw ValidationException::withMessages(['source_id' => __('procynia.compliance.library.validation.source_is_library')]);
         }
+
+        $owner = $this->validatedOwner($validated['owner_user_id'] ?? null, $user);
 
         $reference = trim((string) ($validated['reference'] ?? ''));
         $reference = $reference !== '' ? $reference : null;
@@ -444,9 +494,65 @@ class ComplianceRequirementController extends Controller
             'reference' => $reference,
             'title' => trim($validated['title']),
             'requirement_text' => trim($validated['requirement_text']),
-            'owner_user_id' => (int) $owner->id,
+            'owner_user_id' => $owner?->id,
             'review_interval_months' => $interval !== null ? (int) $interval : null,
         ];
+    }
+
+    /**
+     * Rediger on a library requirement: only what the customer owns — the person responsible and the
+     * review interval. Reference, title and text follow the library.
+     *
+     * @return array<string, mixed>
+     */
+    private function validatedLibraryFields(Request $request, User $user): array
+    {
+        $validated = $request->validate([
+            'owner_user_id' => ['nullable', 'integer'],
+            'review_interval_months' => ['nullable', 'integer', Rule::in(ComplianceRequirement::REVIEW_INTERVALS)],
+        ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
+
+        $owner = $this->validatedOwner($validated['owner_user_id'] ?? null, $user);
+        $interval = $validated['review_interval_months'] ?? null;
+
+        return [
+            'owner_user_id' => $owner?->id,
+            'review_interval_months' => $interval !== null ? (int) $interval : null,
+        ];
+    }
+
+    /**
+     * Ansvarlig is optional. Left empty it is null; chosen, it must be someone of the customer who
+     * can work in the module — a 422 otherwise, whoever the id names.
+     */
+    private function validatedOwner(mixed $ownerId, User $user): ?User
+    {
+        if ($ownerId === null || $ownerId === '') {
+            return null;
+        }
+
+        $owner = User::query()->where('customer_id', (int) $user->customer_id)->find((int) $ownerId);
+
+        if (! $this->access->isValidOwner($owner, (int) $user->customer_id)) {
+            throw ValidationException::withMessages(['owner_user_id' => __('procynia.compliance.validation.owner_not_allowed')]);
+        }
+
+        return $owner;
+    }
+
+    /**
+     * The relevance choices a library requirement offers: Ikke relevant only where the standard
+     * allows an organisation to exclude it.
+     *
+     * @return list<string>
+     */
+    private function applicabilityOptions(ComplianceRequirement $requirement): array
+    {
+        $node = $requirement->frameworkNode;
+
+        return $node !== null && $node->mayBeNotApplicable()
+            ? ComplianceRequirement::APPLICABILITIES
+            : [ComplianceRequirement::APPLICABILITY_APPLIES, ComplianceRequirement::APPLICABILITY_NOT_ASSESSED];
     }
 
     /** Within one source, ignoring case — the same rule as the database's unique index. */
@@ -488,48 +594,12 @@ class ComplianceRequirementController extends Controller
     private function sourceOptions(User $user): array
     {
         return $this->access->visibleSources($user)
+            ->whereNull('compliance_sources.framework_id')
             ->orderBy('name')
             ->orderBy('version')
             ->get()
-            ->map(fn (ComplianceSource $source): array => ['id' => (int) $source->id, 'label' => $this->sourceLabel($source)])
+            ->map(fn (ComplianceSource $source): array => ['id' => (int) $source->id, 'label' => $source->originLabel()])
             ->all();
-    }
-
-    private function sourceLabel(ComplianceSource $source): string
-    {
-        return $source->version !== null && $source->version !== '' ? "{$source->name} ({$source->version})" : $source->name;
-    }
-
-    /**
-     * The register's Etterlevelse column. A retired requirement keeps its last result only as
-     * history: no next review date and never overdue (the schedule sees to that).
-     *
-     * @return array{status: string, is_overdue: bool, assessed_at: string|null}
-     */
-    private function registerCompliance(ComplianceRequirement $requirement, ?ComplianceAssessment $latest): array
-    {
-        $summary = $this->status->summarize($requirement, $latest);
-
-        return [
-            'status' => $summary['status'],
-            'is_overdue' => $summary['is_overdue'],
-            'assessed_at' => $summary['assessed_at'],
-        ];
-    }
-
-    /**
-     * The register's order: aktive first; then by source, and within it by reference (unreferenced
-     * last).
-     */
-    private function inRegisterOrder(Builder $query): Builder
-    {
-        return $query
-            ->orderByRaw('CASE compliance_requirements.status WHEN ? THEN 0 ELSE 1 END', [ComplianceRequirement::STATUS_ACTIVE])
-            ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
-            ->orderBy('compliance_requirements.source_id')
-            ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
-            ->orderBy('compliance_requirements.title')
-            ->orderBy('compliance_requirements.id');
     }
 
     /** @return array<string, mixed> */
@@ -541,10 +611,13 @@ class ComplianceRequirementController extends Controller
             'title' => $requirement->title,
             'status' => $requirement->status,
             'source_id' => (int) $requirement->source_id,
-            'source_label' => $requirement->source ? $this->sourceLabel($requirement->source) : null,
+            'source_label' => $requirement->source?->originLabel(),
+            'origin' => $requirement->origin(),
             'owner_user_id' => $requirement->owner_user_id !== null ? (int) $requirement->owner_user_id : null,
             'owner_name' => $requirement->owner?->name,
             'review_interval_months' => $requirement->review_interval_months,
+            'from_library' => $requirement->isFromLibrary(),
+            'applicability' => $requirement->applicability,
             'url' => route('app.compliance.requirements.show', ['requirementId' => $requirement->id]),
         ];
     }

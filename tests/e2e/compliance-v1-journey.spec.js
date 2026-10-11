@@ -38,15 +38,19 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await loginAs(page, person.email, COMPLIANCE_E2E_PASSWORD);
     await page.setViewportSize(DESKTOP);
 
-    // The left menu: Styring → Etterlevelse og revisjon → Krav | Revisjoner.
+    // The left menu: Styring → Etterlevelse og revisjon, one entry; the header carries its four areas.
     await page.goto('/app/dashboard');
     const rail = page.getByTestId('module-sidebar');
+    const areas = page.getByTestId('module-navigation');
     await expect(rail.getByTestId('module-compliance')).toHaveText('Etterlevelse og revisjon');
-    await expect(rail.getByTestId('module-compliance-areas').locator('a')).toHaveText(['Krav', 'Revisjoner']);
-    await rail.getByTestId('module-area-compliance-requirements').click();
+    await expect(rail.getByTestId('module-compliance-areas')).toHaveCount(0);
+    await rail.getByTestId('module-compliance').click();
+    await page.waitForURL(/\/app\/compliance\/(assessments|library)$/);
+    await expect(areas.locator('a')).toHaveText(['Kravbibliotek', 'Kravregister', 'Etterlevelsesvurdering', 'Revisjon']);
+    await areas.getByRole('link', { name: 'Kravregister', exact: true }).click();
     await page.waitForURL(/\/app\/compliance\/requirements$/);
-    await expect(rail.getByTestId('module-area-compliance-requirements')).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByTestId('module-navigation').locator('a')).toHaveText(['Krav', 'Revisjoner']);
+    await expect(areas.locator('[aria-current="page"]')).toHaveText('Kravregister');
+    await expect(rail.getByTestId('module-compliance')).toHaveAttribute('aria-current', 'page');
 
     // 1. Kravkilde.
     await page.getByRole('button', { name: 'Kravkilder', exact: true }).click();
@@ -63,7 +67,6 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await page.locator('#compliance-requirement-reference').fill('A.5.15');
     await page.locator('#compliance-requirement-title').fill(requirementTitle);
     await page.locator('#compliance-requirement-text').fill('Tilganger skal tildeles, gjennomgås og fjernes etter fastsatte regler.');
-    await page.locator('#compliance-requirement-owner').selectOption({ label: person.name });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/compliance\/requirements\/\d+$/);
     await expect(page.getByTestId('compliance-show-attention')).toContainText('Ikke vurdert');
@@ -89,9 +92,9 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await expectReadable(page, '01-requirement-assessed');
 
     // 7. Revisjon — planned to end yesterday, so it is already overdue.
-    await rail.getByTestId('module-area-compliance-audits').click();
+    await areas.getByRole('link', { name: 'Revisjon', exact: true }).click();
     await page.waitForURL(/\/app\/compliance\/audits$/);
-    await expect(rail.getByTestId('module-area-compliance-audits')).toHaveAttribute('aria-current', 'page');
+    await expect(areas.locator('[aria-current="page"]')).toHaveText('Revisjon');
     await page.getByRole('button', { name: 'Ny revisjon' }).click();
     await page.locator('#compliance-audit-title').fill(auditTitle);
     await page.locator('#compliance-audit-responsible').selectOption({ label: person.name });
@@ -135,7 +138,7 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await page.getByTestId('compliance-finding-form').getByRole('radio', { name: /^Avvik/ }).check();
     await page.locator('#compliance-finding-new-title').fill(findingTitle);
     await page.locator('#compliance-finding-new-description').fill('To av ti sluttede brukere hadde fortsatt tilgang.');
-    await page.locator('#compliance-finding-new-requirement').selectOption({ label: `A.5.15 ${requirementTitle}` });
+    await page.locator('#compliance-finding-new-requirement').selectOption({ label: `${sourceName} · A.5.15 · ${requirementTitle}` });
     await page.locator('#compliance-finding-new-process').selectOption({ label: person.process_title });
     await page.getByTestId('compliance-finding-form').getByRole('button', { name: 'Lagre funn' }).click();
     await expect(page.getByTestId('compliance-finding')).toContainText(findingTitle);
@@ -179,6 +182,7 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await expect(page.locator('main')).toContainText(person.process_title);
     const origin = page.getByTestId('improvement-audit-origin');
     await expect(origin).toContainText(`Funn: ${findingTitle}`);
+    await expect(origin.getByTestId('improvement-audit-requirement')).toHaveText(`Krav: ${sourceName} · A.5.15 · ${requirementTitle}`);
     await expect(origin.getByRole('link', { name: auditTitle })).toBeVisible();
     await expectReadable(page, '05-case-provenance');
 });
