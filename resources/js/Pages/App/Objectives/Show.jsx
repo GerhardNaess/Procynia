@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
@@ -75,12 +75,8 @@ export default function ObjectiveShow() {
     };
 
     return (
-        <CustomerAppLayout title={objective.title} showPageTitle={false}>
+        <CustomerAppLayout title={objective.title} showPageTitle={false} workView={editing ? (tr.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
-                <Link href="/app/objectives" className="text-base font-semibold text-violet-700 hover:text-violet-900">
-                    ← {tr.back ?? 'Til målene'}
-                </Link>
-
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{objective.title}</h1>

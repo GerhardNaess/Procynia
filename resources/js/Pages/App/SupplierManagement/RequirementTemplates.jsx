@@ -3,22 +3,37 @@ import { router } from '@inertiajs/react';
 import ActionDialog from '../../../Components/App/ActionDialog';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import { LEVEL_TONES, levelLabel, templatePreview } from './controlRequirements';
+import { LEVEL_TONES, levelLabel, templateItemUse, templatePreview, themeLabel } from './controlRequirements';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const HINT = 'text-base text-slate-600';
 
 const fill = (text, values) => Object.entries(values).reduce((out, [key, value]) => out.replace(`:${key}`, String(value)), text ?? '');
 
-function ItemList({ items, tr, existing = false }) {
+const USE_TONES = { in_use: 'emerald', in_use_retired: 'slate', not_in_use: 'slate' };
+
+/**
+ * The items of a template. In the confirmation it is split into what is added and what is already
+ * there; `browse` is the read-only list on the card, for everyone who can see Kontrollkrav: each item
+ * with its code and theme, and whether the customer already has it.
+ */
+function ItemList({ items, tr, existing = false, browse = false }) {
     const t = tr.templates ?? {};
+    const testId = browse ? 'template-item' : (existing ? 'template-item-existing' : 'template-item-new');
 
     return (
-        <ul className="mt-2 space-y-2">
+        <ul className={browse ? 'divide-y divide-slate-100' : 'mt-2 space-y-2'}>
             {items.map((item) => (
-                <li key={item.key} className="flex min-w-0 flex-wrap items-center gap-2 text-base text-slate-900" data-testid={existing ? 'template-item-existing' : 'template-item-new'}>
+                <li key={item.key} className={`flex min-w-0 flex-wrap items-center gap-2 text-base text-slate-900 ${browse ? 'py-2' : ''}`} data-testid={testId}>
+                    {browse && <span className="font-semibold text-slate-600" data-testid="template-item-code">{item.key}</span>}
                     <span className="min-w-0 break-words">{item.title}</span>
                     <StatusBadge tone={LEVEL_TONES[item.level] ?? 'slate'}>{levelLabel(item.level, tr)}</StatusBadge>
+                    {browse && (
+                        <span data-testid="template-item-use" data-use={templateItemUse(item)}>
+                            <StatusBadge tone={USE_TONES[templateItemUse(item)]}>{t[`item_${templateItemUse(item)}`] ?? templateItemUse(item)}</StatusBadge>
+                        </span>
+                    )}
+                    {browse && <span className="min-w-0 break-words text-slate-600" data-testid="template-item-theme">{themeLabel(item.theme, tr)}</span>}
                     {existing && item.existing?.status === 'retired' && <span className="text-slate-600">({t.dialog_existing_retired ?? 'utgått'})</span>}
                     {existing && item.existing && item.existing.title !== item.title && (
                         <span className="min-w-0 break-words text-slate-600">({fill(t.dialog_existing_renamed ?? 'heter nå «:title»', { title: item.existing.title })})</span>
@@ -37,7 +52,8 @@ function ItemList({ items, tr, existing = false }) {
 /**
  * Kravmaler on Kontrollkrav (docs/supplier-assurance-v2-plan.md §16, §22.2): the templates, and «Ta i
  * bruk kravmal» behind a confirmation that says what is added and what is already there. What
- * exists is the server's answer, matched on the template item. Applying fills the catalogue only —
+ * exists is the server's answer, matched on the template item. «Vis kravene» lists a template's items
+ * on its card for everyone who reads Kontrollkrav — looking is not applying. Applying fills the catalogue only —
  * no supplier is controlled or approved by it. Only supplier.assure is offered the action; the server
  * refuses it otherwise. Until the templates' content is reviewed (plan §19.2), the section and the
  * dialog say so; `reviewed` comes from the server (RequirementTemplates::CONTENT_REVIEWED).
@@ -53,6 +69,9 @@ function Unreviewed({ t }) {
 export default function RequirementTemplates({ templates = [], reviewed = false, canManage = false, tr }) {
     const t = tr.templates ?? {};
     const [open, setOpen] = useState(null);
+    // The templates whose items are listed on the card. Reading changes nothing; it needs supplier.view only.
+    const [shown, setShown] = useState([]);
+    const toggleShown = (key) => setShown((current) => (current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]));
     const [processing, setProcessing] = useState(false);
     const confirmRef = useRef(null);
     const template = templates.find((candidate) => candidate.key === open) ?? null;
@@ -79,9 +98,10 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
             <p className={`mt-1 ${HINT}`}>{t.note}</p>
             {!reviewed && <Unreviewed t={t} />}
 
-            <ul className="mt-4 grid gap-3 lg:grid-cols-3">
+            <ul className="mt-4 grid gap-3 lg:grid-flow-row-dense lg:grid-cols-3">
                 {templates.map((row) => (
-                    <li key={row.key} className="flex min-w-0 flex-col rounded-xl border border-slate-200 p-4" data-testid="requirement-template">
+                    // An open template takes the whole row, so its list has room and the others keep their size.
+                    <li key={row.key} className={`flex min-w-0 flex-col rounded-xl border border-slate-200 p-4 ${shown.includes(row.key) ? 'lg:col-span-3' : ''}`} data-testid="requirement-template">
                         <h3 className="break-words text-lg font-semibold text-slate-950">{row.name}</h3>
                         <p className="mt-1 break-words text-base text-slate-700">{row.purpose}</p>
                         <p className="mt-2 break-words text-base text-slate-700"><span className="font-semibold text-slate-900">{t.suited_for ?? 'Passer for'}:</span> {row.suited_for}</p>
@@ -89,9 +109,24 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
                             {fill(t.item_count ?? ':count krav', { count: row.items.length })} · {fill(t.mandatory_count ?? ':count obligatoriske', { count: row.mandatory_count })}
                         </p>
                         {row.to_create_count === 0 && <p className="mt-1 text-base font-semibold text-slate-900" data-testid="requirement-template-complete">{t.all_present ?? 'Alle kravene er lagt til'}</p>}
-                        {canManage && (
-                            <div className="mt-auto pt-3">
+                        <div className="mt-auto flex flex-wrap gap-2 pt-3">
+                            <button
+                                type="button"
+                                onClick={() => toggleShown(row.key)}
+                                aria-expanded={shown.includes(row.key)}
+                                aria-controls={`requirement-template-items-${row.key}`}
+                                className={SECONDARY_ACTION}
+                                data-testid="requirement-template-toggle"
+                            >
+                                {shown.includes(row.key) ? (t.hide_items ?? 'Skjul kravene') : fill(t.show_items ?? 'Vis kravene (:count)', { count: row.items.length })}
+                            </button>
+                            {canManage && (
                                 <button type="button" onClick={() => setOpen(row.key)} className={SECONDARY_ACTION}>{t.apply ?? 'Ta i bruk kravmal'}</button>
+                            )}
+                        </div>
+                        {shown.includes(row.key) && (
+                            <div id={`requirement-template-items-${row.key}`} className="mt-3 border-t border-slate-200 pt-1" aria-label={fill(t.items_label ?? 'Kravene i :name', { name: row.name })} role="region" data-testid="requirement-template-items">
+                                <ItemList items={row.items} tr={tr} browse />
                             </div>
                         )}
                     </li>

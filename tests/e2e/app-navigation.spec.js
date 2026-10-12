@@ -176,7 +176,7 @@ test('the rail lists the workspaces in product order, with Styring holding what 
     const rail = page.getByTestId('module-sidebar');
 
     expect(await labels(rail.locator(':scope > ul').first().locator(':scope > li > a, :scope > li > div > a')))
-        .toEqual(['Hjem', 'Wiki', 'Anbud', 'Styring']);
+        .toEqual(['Hjem', 'Oppfølging', 'Wiki', 'Anbud', 'Styring']);
     // This user holds quality.view and none of the others, so Styring holds Kvalitet only —
     // no dimmed or empty rows for the modules the virksomhet has but this person was not given.
     expect(await labels(page.getByTestId('module-governance-children').locator('a'))).toEqual(['Kvalitet']);
@@ -458,7 +458,7 @@ test.describe('one choice, one place', () => {
         for (const label of QUALITY_AREAS) {
             await expect(page.getByRole('link', { name: label, exact: true }), label).toHaveCount(1);
         }
-        await expect(page.locator('main nav')).toHaveCount(0);
+        await expect(page.locator('main nav:not([data-testid="breadcrumbs"])')).toHaveCount(0);
         await expect(page.locator('main a[href*="/app/quality?tab="]')).toHaveCount(0);
         await expect(page.getByTestId('page-navigation')).toHaveCount(0);
     };
@@ -470,9 +470,11 @@ test.describe('one choice, one place', () => {
             await expectNoCopyOnThePage(page);
         }
 
-        // The page starts with its own title, not with another row of the same choices.
+        // The page starts with where it sits and then its own title — not with another row of the
+        // same choices.
         await page.goto('/app/quality?tab=processes');
-        await expect(page.locator('main > :not([data-testid="page-navigation"])').first().locator('h1')).toHaveText('Kvalitet');
+        await expect(page.locator('main > :not([data-testid="page-navigation"]):not([data-testid="breadcrumbs"])').first().locator('h1')).toHaveText('Kvalitet');
+        await expect(page.getByTestId('breadcrumbs').getByTestId('breadcrumb-item')).toHaveText(['Styring', 'Kvalitet', 'Prosesser']);
     });
 
     test('a process page stays under Prosesser, and keeps its own Dokument / Flyt level', async ({ page }) => {
@@ -485,7 +487,7 @@ test.describe('one choice, one place', () => {
         }
 
         await page.goto(`/app/quality/items/${id}`);
-        await expect(page.locator('main nav').getByRole('link')).toHaveText(['Dokument', 'Flyt']);
+        await expect(page.locator('main nav:not([data-testid="breadcrumbs"])').getByRole('link')).toHaveText(['Dokument', 'Flyt']);
     });
 
     test('Anbud → Kunngjøringer → Varsler: three levels, each with its own meaning', async ({ page }) => {
@@ -568,11 +570,11 @@ test.describe('the rail follows what the customer bought, and folds', () => {
     test('Basis, ISO, ISO + Anbud and GRC: each its own rail', async ({ page }) => {
         const iso = ['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Etterlevelse og revisjon'];
         const cases = [
-            ['Basis', ['basis'], ['Hjem', 'Wiki', 'Styring'], ['Kvalitet', 'Avvik og forbedringer'], false],
-            ['ISO', ['iso'], ['Hjem', 'Wiki', 'Styring'], iso, true],
-            ['ISO Anbud', ['iso', 'tender'], ['Hjem', 'Wiki', 'Anbud', 'Styring'], iso, true],
+            ['Basis', ['basis'], ['Hjem', 'Oppfølging', 'Wiki', 'Styring'], ['Kvalitet', 'Avvik og forbedringer'], false],
+            ['ISO', ['iso'], ['Hjem', 'Oppfølging', 'Wiki', 'Styring'], iso, true],
+            ['ISO Anbud', ['iso', 'tender'], ['Hjem', 'Oppfølging', 'Wiki', 'Anbud', 'Styring'], iso, true],
             // GRC is ISO plus Leverandører, last under Styring.
-            ['GRC', ['grc'], ['Hjem', 'Wiki', 'Styring'], [...iso, 'Leverandører'], true],
+            ['GRC', ['grc'], ['Hjem', 'Oppfølging', 'Wiki', 'Styring'], [...iso, 'Leverandører'], true],
         ];
 
         for (const [label, packages, top, children, compliance] of cases) {
@@ -613,7 +615,11 @@ test.describe('the rail follows what the customer bought, and folds', () => {
 
         const rail = page.getByTestId('module-sidebar');
         await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
-        await expect(page.getByText('Leverandøroppfølging', { exact: true })).toBeVisible();
+        // Like Kvalitet: the module's tabs in the header, the module's name as the heading, nothing above it.
+        await expect(page.getByTestId('module-navigation').locator('a, span')).toHaveText(['Leverandører', 'Kontrollkrav']);
+        await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Leverandører');
+        await expect(page.getByText('Leverandøroppfølging', { exact: true })).toHaveCount(0);
+        await expect(page.locator('main nav:not([data-testid="breadcrumbs"])')).toHaveCount(0);
         await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
         await expect(rail.locator('[aria-current="page"]')).toHaveCount(1);
         await expect(rail.locator('[aria-current="page"]')).toHaveText('Leverandører');
@@ -623,6 +629,16 @@ test.describe('the rail follows what the customer bought, and folds', () => {
 
         await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Tilgang']);
         await expectReadable(page, 'supplier-management', '01-register');
+
+        // Kontrollkrav is the other tab: the same heading, the tab lit, no second row on the page.
+        await page.getByTestId('module-navigation').getByRole('link', { name: 'Kontrollkrav' }).click();
+        await expect(page).toHaveURL(/\/app\/supplier-management\/control-requirements$/);
+        await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kontrollkrav');
+        await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
+        await expect(page.locator('main nav:not([data-testid="breadcrumbs"])')).toHaveCount(0);
+        await expect(rail.locator('[aria-current="page"]')).toHaveText('Leverandører');
+        await page.getByTestId('module-navigation').getByRole('link', { name: 'Leverandører' }).click();
+        await expect(page).toHaveURL(/\/app\/supplier-management$/);
 
         // A folded Styring opens itself when the page is reached directly.
         await page.getByTestId('module-governance-toggle').click();

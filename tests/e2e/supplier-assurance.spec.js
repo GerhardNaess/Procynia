@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
-import { DESKTOP, expectReadable as expectReadableAt } from './helpers/readability.js';
+import { DESKTOP, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
 import { SUPPLIER_E2E_PASSWORD, cleanUpSupplierE2eData, openSupplierTab, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
 
 const suffix = supplierE2eSuffix();
@@ -189,7 +189,8 @@ test('the profile decides which control requirements apply, and a reasoned overr
 
     // The catalogue says when each requirement applies, in words.
     await page.goto('/app/supplier-management/control-requirements');
-    await expect(page.getByRole('heading', { name: 'Kontrollkrav', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kontrollkrav');
     await expect(page.getByTestId('control-catalogue-row').filter({ hasText: catalogue.dpa_title }).getByTestId('control-rule-text'))
         .toHaveText('Gjelder når leverandøren behandler personopplysninger som databehandler');
     await expectReadable(page, '06-catalogue');
@@ -426,6 +427,77 @@ test('a decision is registered on the control state, and stays as it was when th
  * kvalifikasjoner like any other requirement; one the profile does not trigger is not there.
  * Access, duplicates, provenance and the control chain are PHP's (SupplierRequirementTemplateTest).
  */
+/**
+ * Kontrollkrav for someone who reads but may not change it — the situation a customer is in until it
+ * gives a role «Gjennomføre leverandørkontroll». The page says so once, puts Virksomhetens kontrollkrav
+ * first, and every template can be opened with «Vis kravene» to read what it contains, without being
+ * applied. Once the same person is given supplier.assure, the actions are there and the note is not.
+ */
+test('a reader opens a template with «Vis kravene», is told why nothing can be changed, and the register comes first', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/app/supplier-management/control-requirements');
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kontrollkrav');
+
+    // Why nothing can be changed — once, at the top — and no button that looks as if it could.
+    await expect(page.getByTestId('control-read-only')).toHaveText(/trenger rettigheten «Gjennomføre leverandørkontroll».*Kundemiljø → Tilganger/);
+    await expect(page.getByRole('button', { name: 'Nytt kontrollkrav' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Ta i bruk kravmal' })).toHaveCount(0);
+
+    // Virksomhetens kontrollkrav first, empty, saying who has to register them; then the templates.
+    const register = page.getByTestId('control-register');
+    await expect(register.getByRole('heading', { name: 'Virksomhetens kontrollkrav', level: 2 })).toBeVisible();
+    await expect(register.getByTestId('control-catalogue-start')).toHaveText(/En person med rettigheten «Gjennomføre leverandørkontroll» må registrere kravene/);
+    const order = await page.evaluate(() => {
+        const at = (id) => document.querySelector(`[data-testid="${id}"]`).getBoundingClientRect().top;
+        return at('control-register') < at('requirement-templates');
+    });
+    expect(order, 'the register comes before the templates').toBe(true);
+
+    // «Vis kravene (11)»: the items, as many as the card says, with code, theme, level and use.
+    const itSaas = page.getByTestId('requirement-template').filter({ has: page.getByRole('heading', { name: 'IT/SaaS-leverandør', exact: true }) });
+    await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
+    const toggle = itSaas.getByRole('button', { name: 'Vis kravene (11)' });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    const items = itSaas.getByRole('region', { name: 'Kravene i IT/SaaS-leverandør' }).getByTestId('template-item');
+    await expect(items).toHaveCount(11);
+    await expect(items.getByTestId('template-item-code')).toHaveText(['S1', 'S2', 'S4', 'S5', 'S6', 'S8', 'P1', 'P2', 'P3', 'P4', 'C1']);
+    const mfa = items.filter({ hasText: 'Tilgangsstyring og MFA' });
+    await expect(mfa).toContainText('Obligatorisk');
+    await expect(mfa.getByTestId('template-item-theme')).toHaveText('Informasjonssikkerhet');
+    await expect(items.filter({ hasText: 'Obligatorisk' })).toHaveCount(5);
+    await expect(items.getByTestId('template-item-use').filter({ hasText: 'Ikke tatt i bruk' })).toHaveCount(11);
+    await expect(itSaas.getByRole('button', { name: 'Skjul kravene' })).toHaveAttribute('aria-expanded', 'true');
+    await expectReadable(page, '12a-reader-template-items');
+
+    // Closed again; looking added nothing.
+    await itSaas.getByRole('button', { name: 'Skjul kravene' }).click();
+    await expect(itSaas.getByTestId('template-item')).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByTestId('control-catalogue-empty')).toBeVisible();
+    await expect(page.getByTestId('control-catalogue-row')).toHaveCount(0);
+
+    // PageHelp is the step-by-step guide.
+    await expectPageHelp(page, 'Om kontrollkrav', ['Slik gjør du det', 'Hvilke leverandører kravet gjelder', 'Kravnivå', 'Endre og avslutte', 'Kravmaler']);
+
+    // Given Leverandørkontroll: the actions are offered, the note is gone, and what is in use reads so.
+    await supplierFixture(`seedAssurance('${suffix}')`);
+    await page.reload();
+    await expect(page.getByTestId('control-read-only')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Nytt kontrollkrav' })).toBeVisible();
+    await itSaas.getByRole('button', { name: 'Ta i bruk kravmal' }).click();
+    await page.getByRole('dialog', { name: 'Ta i bruk kravmal: IT/SaaS-leverandør' }).getByRole('button', { name: 'Legg til 11 kontrollkrav' }).click();
+    await expect(page.getByText('11 kontrollkrav ble lagt til.', { exact: true })).toBeVisible();
+    await itSaas.getByRole('button', { name: 'Vis kravene (11)' }).click();
+    await expect(itSaas.locator('[data-testid="template-item-use"][data-use="in_use"]')).toHaveText(Array(11).fill('Tatt i bruk'));
+    await expect(page.getByTestId('control-register').getByTestId('control-catalogue-row')).toHaveCount(13);
+});
+
 test('a requirement template fills Kontrollkrav, and the profile decides which of its requirements apply', async ({ page }) => {
     test.setTimeout(150_000);
 

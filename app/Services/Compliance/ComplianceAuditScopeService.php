@@ -3,6 +3,8 @@
 namespace App\Services\Compliance;
 
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditCheckRequirement;
+use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditProcess;
 use App\Models\ComplianceAuditRequirement;
 use App\Models\ComplianceRequirement;
@@ -12,20 +14,31 @@ use App\Models\User;
 use App\Services\Quality\QualityProcessContextReader;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
  * A revisjon's scope as structure: the requirements and the Kvalitet processes it looks at.
  *
- * The authoritative scope is the audit's scope_description; these links support it. They are fixed
- * rows. «Legg til krav fra kravkilde» is a shortcut that writes one row per active requirement of
- * the source at that moment — a requirement added to the source afterwards never enters the audit
- * by itself.
+ * The omfang is described by the audit's scope_description, by these links, or both. The links are
+ * fixed rows. «Legg til fra kravkilde» is a shortcut that writes one row per requirement of the
+ * source that applies to the virksomhet at that moment — a requirement added to the source
+ * afterwards never enters the audit by itself.
  *
  * REQUIREMENTS. Compliance-global within the customer: any requirement the user can read may be
- * taken into scope, a retired one too (an audit may look at what used to apply). A retired
- * requirement in scope stays there and is shown as utgått.
+ * chosen explicitly, a retired one too (an audit may look at what used to apply), and so may one
+ * determined Ikke relevant, an Annex A control Utelatt, or one whose relevance is still open — an
+ * auditor may deliberately examine those. Each row says where it stands (relevance), so the choice
+ * stays visible. A retired requirement in scope stays there and is shown as utgått.
+ *
+ * AUTOMATIC SELECTION («Legg til fra kravkilde», and the sources chosen when the audit is created)
+ * takes only what applies: active, and in the Gjelder group of Etterlevelsesvurdering
+ * (ComplianceAssessmentOverview::group()). So never Ikke relevant, never relevance not yet
+ * determined, and an Annex A control only when Kontrollvalg is Inkludert. The count each source is
+ * offered with is that same set.
+ *
+ * A requirement a kontrollhandling names stays in scope until the check lets go of it.
  *
  * PROCESSES. Two access questions, neither implying the other — the same as Krav → Kvalitet. The
  * audit through ComplianceAccessService; anything about a process only with Kvalitet read access
@@ -41,7 +54,12 @@ class ComplianceAuditScopeService
     public function __construct(
         private readonly ComplianceAccessService $access,
         private readonly QualityProcessContextReader $quality,
+        private readonly ComplianceStatusResolver $status,
+        private readonly ComplianceAssessmentOverview $overview,
     ) {}
+
+    /** The Gjelder group: what automatic selection takes. */
+    public const RELEVANCE_APPLIES = 'applies';
 
     public function canReadQuality(User $user): bool
     {
@@ -65,47 +83,63 @@ class ComplianceAuditScopeService
      */
     public function requirements(ComplianceAudit $audit): array
     {
-        return ComplianceRequirement::query()
+        $requirements = ComplianceRequirement::query()
             ->where('compliance_requirements.customer_id', (int) $audit->customer_id)
             ->whereIn('compliance_requirements.id', ComplianceAuditRequirement::query()
                 ->where('audit_id', $audit->id)
                 ->where('customer_id', $audit->customer_id)
                 ->select('requirement_id'))
-            ->with('source:id,name,version,framework_id')
+            ->with(['source:id,name,version,framework_id', 'frameworkNode:id,applicability_rule'])
             ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
             ->orderBy('compliance_requirements.source_id')
-            ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
-            ->orderBy('compliance_requirements.title')
-            ->orderBy('compliance_requirements.id')
-            ->get()
-            ->map(fn (ComplianceRequirement $requirement): array => $this->requirementRow($requirement))
-            ->all();
-    }
-
-    /**
-     * What can still be taken into scope: every requirement the user can read that is not in it yet
-     * (retired ones marked), and the sources that still have active requirements to add. Call only
-     * for a user who passes canManageRequirements().
-     *
-     * @return array{requirements: list<array<string, mixed>>, sources: list<array{id: int, label: string, count: int}>}
-     */
-    public function requirementOptions(User $user, ComplianceAudit $audit): array
-    {
-        $linked = ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->select('requirement_id');
-
-        $requirements = $this->access->visibleRequirements($user)
-            ->whereNotIn('compliance_requirements.id', $linked)
-            ->with('source:id,name,version,framework_id')
-            ->orderByRaw('CASE compliance_requirements.status WHEN ? THEN 0 ELSE 1 END', [ComplianceRequirement::STATUS_ACTIVE])
-            ->orderBy(ComplianceSource::query()->select('name')->whereColumn('compliance_sources.id', 'compliance_requirements.source_id'))
-            ->orderBy('compliance_requirements.source_id')
+            ->orderByRaw('(SELECT position FROM compliance_framework_nodes WHERE compliance_framework_nodes.id = compliance_requirements.framework_node_id) ASC NULLS LAST')
             ->orderByRaw('lower(compliance_requirements.reference) ASC NULLS LAST')
             ->orderBy('compliance_requirements.title')
             ->orderBy('compliance_requirements.id')
             ->get();
 
+        $relevance = $this->relevance((int) $audit->customer_id, $requirements);
+        // How much of the omfang is documented: the kontrollhandlinger and findings naming each one.
+        $checks = ComplianceAuditCheckRequirement::query()->where('audit_id', $audit->id)
+            ->selectRaw('requirement_id, count(*) as aggregate')->groupBy('requirement_id')->pluck('aggregate', 'requirement_id');
+        $findings = ComplianceAuditFinding::query()->where('audit_id', $audit->id)->whereNotNull('requirement_id')
+            ->selectRaw('requirement_id, count(*) as aggregate')->groupBy('requirement_id')->pluck('aggregate', 'requirement_id');
+
+        return $requirements
+            ->map(fn (ComplianceRequirement $requirement): array => $this->requirementRow($requirement, $relevance) + [
+                'check_count' => (int) ($checks[$requirement->id] ?? 0),
+                'finding_count' => (int) ($findings[$requirement->id] ?? 0),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * What can still be taken into scope: every requirement the user can read that is not in it yet
+     * (retired ones and where each stands on relevance marked), and the sources that still have
+     * requirements to add automatically, each with exactly how many «Legg til fra kravkilde» would
+     * add. Without an audit — Ny revisjon — nothing is in scope yet. Call only for a user who may
+     * change the scope (or register audits).
+     *
+     * @return array{requirements: list<array<string, mixed>>, sources: list<array{id: int, label: string, count: int}>}
+     */
+    public function requirementOptions(User $user, ?ComplianceAudit $audit): array
+    {
+        $query = $this->access->visibleRequirements($user);
+
+        if ($audit !== null) {
+            $query->whereNotIn('compliance_requirements.id', ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->select('requirement_id'));
+        }
+
+        $requirements = $query
+            ->with(['source:id,name,version,framework_id', 'frameworkNode:id,applicability_rule'])
+            ->inRegisterOrder()
+            ->get();
+
+        $relevance = $this->relevance((int) $user->customer_id, $requirements);
+
         $perSource = $requirements
-            ->filter(fn (ComplianceRequirement $requirement): bool => $requirement->isActive())
+            ->filter(fn (ComplianceRequirement $requirement): bool => $this->isAutoSelectable($requirement, $relevance))
             ->countBy(fn (ComplianceRequirement $requirement): int => (int) $requirement->source_id);
 
         $sources = $this->access->visibleSources($user)
@@ -121,9 +155,42 @@ class ComplianceAuditScopeService
             ->all();
 
         return [
-            'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->requirementRow($requirement))->all(),
+            'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->requirementRow($requirement, $relevance))->values()->all(),
             'sources' => $sources,
         ];
+    }
+
+    /**
+     * The scope Ny revisjon was planned with: the requirements chosen one by one and everything that
+     * applies in each chosen source, together, all or none. Call inside the transaction that creates
+     * the audit.
+     *
+     * @param  list<int>  $requirementIds
+     * @param  list<int>  $sourceIds
+     */
+    public function addInitialRequirements(User $user, ComplianceAudit $audit, array $requirementIds, array $sourceIds): int
+    {
+        $this->authorizeRequirements($user, $audit);
+
+        $ids = array_values(array_unique(array_map('intval', $requirementIds)));
+
+        if ($ids !== [] && $this->access->visibleRequirements($user)->whereKey($ids)->count() !== count($ids)) {
+            throw ValidationException::withMessages(['requirement_ids' => __('procynia.compliance.audits.validation.requirement_not_allowed')]);
+        }
+
+        foreach (array_values(array_unique(array_map('intval', $sourceIds))) as $sourceId) {
+            $fromSource = $this->autoSelectableIds($user, $audit, $sourceId, 'source_ids');
+
+            if ($fromSource === []) {
+                throw ValidationException::withMessages(['source_ids' => __('procynia.compliance.audits.validation.source_nothing_to_add')]);
+            }
+
+            $ids = array_merge($ids, $fromSource);
+        }
+
+        $ids = array_values(array_unique($ids));
+
+        return $ids === [] ? 0 : $this->insertRequirements($user, $audit, $ids, 'requirement_ids', __('procynia.compliance.audits.validation.requirement_already_in_scope'));
     }
 
     /**
@@ -152,29 +219,16 @@ class ComplianceAuditScopeService
     }
 
     /**
-     * «Legg til krav fra kravkilde»: every active requirement of the source that is not in scope yet,
-     * written as fixed rows now. The source itself is not stored. A requirement determined Ikke
-     * relevant is outside the register's work and is left out; it can still be added one by one.
+     * «Legg til fra kravkilde»: every requirement of the source that applies and is not in scope
+     * yet, written as fixed rows now. The source itself is not stored. Ikke relevant, relevance not
+     * yet determined, and an Annex A control not Inkludert are left out; any of them can still be
+     * chosen one by one.
      */
     public function addRequirementsFromSource(User $user, ComplianceAudit $audit, int $sourceId): int
     {
         $this->authorizeRequirements($user, $audit);
 
-        $source = $this->access->findVisibleSource($user, $sourceId);
-
-        if ($source === null) {
-            throw ValidationException::withMessages(['source_id' => __('procynia.compliance.validation.source_not_allowed')]);
-        }
-
-        $ids = $this->access->visibleRequirements($user)
-            ->where('compliance_requirements.source_id', $source->id)
-            ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE)
-            ->where('compliance_requirements.applicability', '<>', ComplianceRequirement::APPLICABILITY_NOT_APPLICABLE)
-            ->whereNotIn('compliance_requirements.id', ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->select('requirement_id'))
-            ->orderBy('compliance_requirements.id')
-            ->pluck('compliance_requirements.id')
-            ->map(fn ($id): int => (int) $id)
-            ->all();
+        $ids = $this->autoSelectableIds($user, $audit, $sourceId, 'source_id');
 
         if ($ids === []) {
             throw ValidationException::withMessages(['source_id' => __('procynia.compliance.audits.validation.source_nothing_to_add')]);
@@ -187,6 +241,11 @@ class ComplianceAuditScopeService
     public function removeRequirement(User $user, ComplianceAudit $audit, int $requirementId): bool
     {
         $this->authorizeRequirements($user, $audit);
+
+        // The database refuses it too: the check's link references the scope row.
+        if (ComplianceAuditCheckRequirement::query()->where('audit_id', $audit->id)->where('requirement_id', $requirementId)->exists()) {
+            throw ValidationException::withMessages(['audit' => __('procynia.compliance.audits.validation.requirement_has_checks')]);
+        }
 
         return ComplianceAuditRequirement::query()
             ->where('audit_id', $audit->id)
@@ -331,20 +390,85 @@ class ComplianceAuditScopeService
         return count($ids);
     }
 
+    /**
+     * The requirements of one source that automatic selection takes for this audit: active, Gjelder,
+     * not in scope yet. A source the user cannot read gets the same answer as one that does not exist.
+     *
+     * @return list<int>
+     */
+    private function autoSelectableIds(User $user, ComplianceAudit $audit, int $sourceId, string $field): array
+    {
+        $source = $this->access->findVisibleSource($user, $sourceId);
+
+        if ($source === null) {
+            throw ValidationException::withMessages([$field => __('procynia.compliance.validation.source_not_allowed')]);
+        }
+
+        $requirements = $this->access->visibleRequirements($user)
+            ->where('compliance_requirements.source_id', $source->id)
+            ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE)
+            ->whereNotIn('compliance_requirements.id', ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->select('requirement_id'))
+            ->orderBy('compliance_requirements.id')
+            ->get();
+
+        $relevance = $this->relevance((int) $audit->customer_id, $requirements);
+
+        return $requirements
+            ->filter(fn (ComplianceRequirement $requirement): bool => $this->isAutoSelectable($requirement, $relevance))
+            ->map(fn (ComplianceRequirement $requirement): int => (int) $requirement->id)
+            ->values()
+            ->all();
+    }
+
+    /** @param  array<int, string>  $relevance */
+    private function isAutoSelectable(ComplianceRequirement $requirement, array $relevance): bool
+    {
+        return $requirement->isActive() && ($relevance[(int) $requirement->id] ?? null) === self::RELEVANCE_APPLIES;
+    }
+
+    /**
+     * Where each requirement stands on relevance, by id — the same grouping as Etterlevelsesvurdering,
+     * so the two pages never disagree: not_applicable (Ikke relevant, Utelatt, or assessed Ikke
+     * relevant), relevance_open (relevance or Kontrollvalg not yet determined) or applies.
+     *
+     * @param  Collection<int, ComplianceRequirement>  $requirements
+     * @return array<int, string>
+     */
+    private function relevance(int $customerId, Collection $requirements): array
+    {
+        if ($requirements->isEmpty()) {
+            return [];
+        }
+
+        $latest = $this->status->latestForRequirements($customerId, $requirements->modelKeys());
+
+        return $requirements->mapWithKeys(function (ComplianceRequirement $requirement) use ($latest): array {
+            $group = $this->overview->group($requirement, $latest->get((int) $requirement->id));
+
+            return [(int) $requirement->id => in_array($group, [ComplianceAssessmentOverview::NOT_APPLICABLE, ComplianceAssessmentOverview::RELEVANCE_OPEN], true) ? $group : self::RELEVANCE_APPLIES];
+        })->all();
+    }
+
     /** @return Builder<QualityItem> */
     private function linkableProcesses(int $customerId): Builder
     {
         return $this->quality->processesQuery($customerId)->where('quality_items.status', '!=', QualityItem::STATUS_RETIRED);
     }
 
-    /** @return array<string, mixed> */
-    private function requirementRow(ComplianceRequirement $requirement): array
+    /**
+     * @param  array<int, string>  $relevance
+     * @return array<string, mixed>
+     */
+    private function requirementRow(ComplianceRequirement $requirement, array $relevance = []): array
     {
         return [
             'id' => (int) $requirement->id,
             'reference' => $requirement->reference,
             'title' => $requirement->title,
             'status' => $requirement->status,
+            // applies, not_applicable or relevance_open; an Annex A control says Inkludert/Utelatt.
+            'relevance' => $relevance[(int) $requirement->id] ?? self::RELEVANCE_APPLIES,
+            'is_control' => (bool) $requirement->frameworkNode?->isControl(),
             'source_id' => (int) $requirement->source_id,
             'source_label' => $requirement->source ? $this->sourceLabel($requirement->source) : null,
             // «ISO 14001:2026 · 6.1.2 · Miljøaspekter» — the same origin as in the register.

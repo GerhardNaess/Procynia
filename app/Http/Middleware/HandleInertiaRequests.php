@@ -121,6 +121,7 @@ class HandleInertiaRequests extends Middleware
                     'live_search' => __('procynia.navigation.live_search'),
                     'registered_notices' => __('procynia.navigation.registered_notices'),
                     'history' => __('procynia.navigation.history'),
+                    'breadcrumbs' => __('procynia.navigation.breadcrumbs'),
                 ],
                 'home' => __('procynia.home'),
                 'governance' => __('procynia.governance'),

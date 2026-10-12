@@ -3,7 +3,7 @@ import { Link, router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
 import { qualityItemLabel } from '../Requirements/complianceQuality';
-import { filterRequirementOptions, requirementLabel } from './complianceAudit';
+import { filterRequirementOptions, relevanceLabel, requirementLabel } from './complianceAudit';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -12,16 +12,150 @@ const HINT = 'mt-1 text-base text-slate-600';
 const ERROR = 'mt-1 text-base text-rose-700';
 
 /**
- * Legg til krav: tick one or more requirements — searchable, retired ones marked — or take every
- * active requirement of one source at once. Both write fixed rows; the source is not remembered.
+ * Retired, and where the requirement stands on relevance when it is not Gjelder: what automatic
+ * selection leaves out, so choosing it is visibly deliberate.
+ */
+function RequirementMarks({ requirement, ta, withHint = false }) {
+    const relevance = relevanceLabel(requirement, ta);
+
+    if (requirement.status !== 'retired' && ! relevance) {
+        return null;
+    }
+
+    return (
+        <span className="mt-1 flex flex-wrap items-center gap-2">
+            {requirement.status === 'retired' && <StatusBadge tone="slate">{ta.retired_requirement ?? 'Utgått'}</StatusBadge>}
+            {relevance && <span data-testid="compliance-audit-requirement-relevance"><StatusBadge tone="amber">{relevance}</StatusBadge></span>}
+            {relevance && withHint && <span className="text-base text-slate-600">{ta.relevance_hint ?? 'Tas ikke med automatisk. Velger du kravet, er det et bevisst valg.'}</span>}
+        </span>
+    );
+}
+
+/** The searchable checkbox list of requirements, shared by Legg til krav and Ny revisjon. */
+function RequirementChecklist({ id, options, selected, onToggle, ta }) {
+    const [query, setQuery] = useState('');
+    const visible = filterRequirementOptions(options, query, selected);
+
+    return (
+        <>
+            <div>
+                <label htmlFor={`${id}-filter`} className={LABEL}>{ta.requirements_filter ?? 'Søk'}</label>
+                <input
+                    id={`${id}-filter`}
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={ta.requirements_filter_placeholder ?? 'Referanse, tittel eller kravkilde'}
+                    className={`mt-1 ${INPUT}`}
+                />
+            </div>
+            {visible.length === 0 ? (
+                <p className="mt-2 text-base text-slate-600">{ta.requirements_filter_none ?? 'Ingen krav passer søket.'}</p>
+            ) : (
+                <ul className="mt-2 max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                    {visible.map((option) => (
+                        <li key={option.id}>
+                            <label className="flex min-h-10 items-start gap-3 px-3 py-2 text-base text-slate-800">
+                                <input
+                                    type="checkbox"
+                                    value={option.id}
+                                    checked={selected.includes(option.id)}
+                                    onChange={() => onToggle(option.id)}
+                                    className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300"
+                                />
+                                <span className="min-w-0 break-words">
+                                    <span className="font-semibold">{requirementLabel(option)}</span>
+                                    <RequirementMarks requirement={option} ta={ta} />
+                                </span>
+                            </label>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </>
+    );
+}
+
+/**
+ * Ny revisjon's part of planning the scope: tick kravkilder — each with the number of requirements
+ * that apply, which is exactly what is taken — and/or single requirements. Nothing here is saved on
+ * its own; the audit and its scope are created in one step.
+ */
+export function PlanningRequirementSelection({ options, form, ta }) {
+    const sources = options?.sources ?? [];
+    const requirements = options?.requirements ?? [];
+    const sourceIds = form.data.source_ids ?? [];
+    const requirementIds = form.data.requirement_ids ?? [];
+
+    if (sources.length === 0 && requirements.length === 0) {
+        return null;
+    }
+
+    const toggle = (field, list, id) => form.setData(field, list.includes(id) ? list.filter((value) => value !== id) : [...list, id]);
+
+    return (
+        <section className="space-y-4 rounded-2xl border border-slate-200 p-4" aria-labelledby="compliance-audit-create-requirements-heading" data-testid="compliance-audit-create-requirements">
+            <div>
+                <h3 id="compliance-audit-create-requirements-heading" className="text-lg font-semibold text-slate-950">{ta.create_requirements_heading ?? 'Krav i omfanget'}</h3>
+                <p className={HINT}>{ta.create_requirements_hint ?? 'Valgfritt. Velg kravkilder for å ta med alle krav som gjelder virksomheten, og eller enkeltkrav.'}</p>
+            </div>
+
+            {sources.length > 0 && (
+                <fieldset>
+                    <legend className={LABEL}>{ta.create_sources_legend ?? 'Legg til fra kravkilde'}</legend>
+                    <p className={HINT}>{ta.requirements_from_source_hint ?? 'Legger til kravene i kilden som gjelder virksomheten.'}</p>
+                    <ul className="mt-2 space-y-1">
+                        {sources.map((source) => (
+                            <li key={source.id}>
+                                <label className="flex min-h-10 items-start gap-3 text-base text-slate-800">
+                                    <input
+                                        type="checkbox"
+                                        checked={sourceIds.includes(source.id)}
+                                        onChange={() => toggle('source_ids', sourceIds, source.id)}
+                                        className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300"
+                                    />
+                                    <span className="min-w-0 break-words">
+                                        {(ta.create_source_option ?? ':source – :count krav som gjelder').replace(':source', source.label).replace(':count', String(source.count))}
+                                    </span>
+                                </label>
+                            </li>
+                        ))}
+                    </ul>
+                    {form.errors.source_ids && <p className={ERROR}>{form.errors.source_ids}</p>}
+                </fieldset>
+            )}
+
+            {requirements.length > 0 && (
+                <fieldset className="space-y-2">
+                    <legend className={LABEL}>{ta.create_pick_legend ?? 'Velg enkeltkrav'}</legend>
+                    <RequirementChecklist
+                        id="compliance-audit-create-requirement"
+                        options={requirements}
+                        selected={requirementIds}
+                        onToggle={(id) => toggle('requirement_ids', requirementIds, id)}
+                        ta={ta}
+                    />
+                    {form.errors.requirement_ids && <p className={ERROR}>{form.errors.requirement_ids}</p>}
+                </fieldset>
+            )}
+
+            <p className="text-base text-slate-700" data-testid="compliance-audit-create-selected">
+                {(ta.create_selected_summary ?? ':sources kravkilder og :count enkeltkrav er valgt.').replace(':sources', String(sourceIds.length)).replace(':count', String(requirementIds.length))}
+            </p>
+        </section>
+    );
+}
+
+/**
+ * Legg til krav: tick one or more requirements — searchable, retired ones and those outside the
+ * automatic selection marked — or take every requirement of one source that applies at once. Both
+ * write fixed rows; the source is not remembered.
  */
 function RequirementPicker({ auditId, options, onDone, ta }) {
-    const [query, setQuery] = useState('');
     const pick = useForm({ requirement_ids: [] });
     const fromSource = useForm({ source_id: '' });
 
     const selected = pick.data.requirement_ids;
-    const visible = filterRequirementOptions(options.requirements ?? [], query, selected);
     const toggle = (id) => pick.setData('requirement_ids', selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
 
     const submitPick = (event) => {
@@ -40,44 +174,9 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
                 <p className="text-base text-slate-700">{ta.requirements_no_options ?? 'Det finnes ingen flere krav å legge til.'}</p>
             ) : (
                 <form onSubmit={submitPick} className="space-y-3" data-testid="compliance-audit-requirement-form">
-                    <div>
-                        <label htmlFor="compliance-audit-requirement-filter" className={LABEL}>{ta.requirements_filter ?? 'Søk'}</label>
-                        <input
-                            id="compliance-audit-requirement-filter"
-                            type="search"
-                            value={query}
-                            onChange={(event) => setQuery(event.target.value)}
-                            placeholder={ta.requirements_filter_placeholder ?? 'Referanse, tittel eller kravkilde'}
-                            className={`mt-1 ${INPUT}`}
-                        />
-                    </div>
-                    <fieldset>
+                    <fieldset className="space-y-2">
                         <legend className={LABEL}>{ta.requirements_choose ?? 'Velg krav'}</legend>
-                        {visible.length === 0 ? (
-                            <p className="mt-2 text-base text-slate-600">{ta.requirements_filter_none ?? 'Ingen krav passer søket.'}</p>
-                        ) : (
-                            <ul className="mt-2 max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
-                                {visible.map((option) => (
-                                    <li key={option.id}>
-                                        <label className="flex min-h-10 items-start gap-3 px-3 py-2 text-base text-slate-800">
-                                            <input
-                                                type="checkbox"
-                                                value={option.id}
-                                                checked={selected.includes(option.id)}
-                                                onChange={() => toggle(option.id)}
-                                                className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300"
-                                            />
-                                            <span className="min-w-0 break-words">
-                                                <span className="font-semibold">{requirementLabel(option)}</span>
-                                                {option.status === 'retired' && (
-                                                    <span className="mt-1 block"><StatusBadge tone="slate">{ta.retired_requirement ?? 'Utgått'}</StatusBadge></span>
-                                                )}
-                                            </span>
-                                        </label>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
+                        <RequirementChecklist id="compliance-audit-requirement" options={options.requirements ?? []} selected={selected} onToggle={toggle} ta={ta} />
                     </fieldset>
                     {pick.errors.requirement_ids && <p className={ERROR}>{pick.errors.requirement_ids}</p>}
                     <div className="flex flex-wrap items-center justify-end gap-3">
@@ -94,7 +193,7 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
                     <div>
                         <label htmlFor="compliance-audit-source" className={LABEL}>{ta.requirements_from_source ?? 'Legg til fra kravkilde'}</label>
                         <p id="compliance-audit-source-hint" className={HINT}>
-                            {ta.requirements_from_source_hint ?? 'Legger til alle aktive krav fra kilden som ikke allerede er i scope.'}
+                            {ta.requirements_from_source_hint ?? 'Legger til kravene i kilden som gjelder virksomheten og ikke allerede er med.'}
                         </p>
                         <select
                             id="compliance-audit-source"
@@ -106,7 +205,7 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
                             <option value="">{ta.choose_source ?? 'Velg kravkilde'}</option>
                             {options.sources.map((source) => (
                                 <option key={source.id} value={source.id}>
-                                    {(ta.requirements_from_source_option ?? ':source (:count aktive krav)').replace(':source', source.label).replace(':count', String(source.count))}
+                                    {(ta.requirements_from_source_option ?? ':source (:count krav som gjelder)').replace(':source', source.label).replace(':count', String(source.count))}
                                 </option>
                             ))}
                         </select>
@@ -128,14 +227,15 @@ function RequirementPicker({ auditId, options, onDone, ta }) {
 }
 
 /**
- * Krav i scope: the requirements the audit checks, read live. A retired requirement stays and says
- * so. Adding and removing is offered only when the server said this person may change the scope.
+ * Krav i omfanget: the requirements the audit checks, read live, each with its origin. A retired
+ * requirement stays and says so, as does one chosen outside the automatic selection. Adding and
+ * removing is offered only when the server said this person may change the scope.
  */
 export function AuditRequirementScope({ audit, requirements = [], options = null, canManage = false, ta }) {
     const [adding, setAdding] = useState(false);
 
     const remove = (requirement) => {
-        if (! window.confirm(ta.remove_requirement_confirm ?? 'Fjerne kravet fra scope? Kravet blir værende i registeret.')) {
+        if (! window.confirm(ta.remove_requirement_confirm ?? 'Fjerne kravet fra omfanget? Kravet blir værende i registeret.')) {
             return;
         }
 
@@ -146,7 +246,7 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
         <section className={CARD} aria-labelledby="compliance-audit-requirements-heading" data-testid="compliance-audit-requirements">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <h2 id="compliance-audit-requirements-heading" className="text-xl font-semibold text-slate-950">{ta.requirements_heading ?? 'Krav i scope'}</h2>
+                    <h2 id="compliance-audit-requirements-heading" className="text-xl font-semibold text-slate-950">{ta.requirements_heading ?? 'Krav i omfanget'}</h2>
                     <p className="mt-1 text-base text-slate-600">{ta.requirements_intro ?? 'Kravene revisjonen skal kontrollere.'}</p>
                 </div>
                 {canManage && ! adding && (
@@ -159,7 +259,7 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
             )}
 
             {requirements.length === 0 ? (
-                <p className="mt-4 text-base text-slate-700">{ta.requirements_empty ?? 'Ingen krav er lagt til i scope.'}</p>
+                <p className="mt-4 text-base text-slate-700">{ta.requirements_empty ?? 'Ingen krav er lagt til i omfanget.'}</p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
                     {requirements.map((requirement) => (
@@ -168,10 +268,10 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
                                 <Link href={requirement.url} className="block break-words text-base font-semibold text-violet-700 hover:text-violet-900">
                                     {requirementLabel(requirement)}
                                 </Link>
-                                {requirement.status === 'retired' && <StatusBadge tone="slate">{ta.retired_requirement ?? 'Utgått'}</StatusBadge>}
+                                <RequirementMarks requirement={requirement} ta={ta} />
                             </div>
                             {canManage && (
-                                <button type="button" onClick={() => remove(requirement)} className={SECONDARY_ACTION}>{ta.remove ?? 'Fjern fra scope'}</button>
+                                <button type="button" onClick={() => remove(requirement)} className={SECONDARY_ACTION}>{ta.remove ?? 'Fjern fra omfanget'}</button>
                             )}
                         </li>
                     ))}
@@ -182,7 +282,7 @@ export function AuditRequirementScope({ audit, requirements = [], options = null
 }
 
 /**
- * Prosesser i scope: the Kvalitet processes the audit looks at, read live. Drawn only when the server
+ * Prosesser i omfanget: the Kvalitet processes the audit looks at, read live. Drawn only when the server
  * sent them — for someone who can read Kvalitet — so without it the page says nothing at all about
  * processes, not even that there are none.
  */
@@ -199,7 +299,7 @@ export function AuditProcessScope({ audit, processes, options = null, canManage 
     };
 
     const remove = (process) => {
-        if (! window.confirm(ta.remove_process_confirm ?? 'Fjerne prosessen fra scope? Prosessen blir værende i Kvalitet.')) {
+        if (! window.confirm(ta.remove_process_confirm ?? 'Fjerne prosessen fra omfanget? Prosessen blir værende i Kvalitet.')) {
             return;
         }
 
@@ -210,7 +310,7 @@ export function AuditProcessScope({ audit, processes, options = null, canManage 
         <section className={CARD} aria-labelledby="compliance-audit-processes-heading" data-testid="compliance-audit-processes">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <h2 id="compliance-audit-processes-heading" className="text-xl font-semibold text-slate-950">{ta.processes_heading ?? 'Prosesser i scope'}</h2>
+                    <h2 id="compliance-audit-processes-heading" className="text-xl font-semibold text-slate-950">{ta.processes_heading ?? 'Prosesser i omfanget'}</h2>
                     <p className="mt-1 text-base text-slate-600">{ta.processes_intro ?? 'Prosessene i Kvalitet som revisjonen ser på.'}</p>
                 </div>
                 {canManage && ! adding && (
@@ -251,7 +351,7 @@ export function AuditProcessScope({ audit, processes, options = null, canManage 
             )}
 
             {processes.length === 0 ? (
-                <p className="mt-4 text-base text-slate-700">{ta.processes_empty ?? 'Ingen prosesser er lagt til i scope.'}</p>
+                <p className="mt-4 text-base text-slate-700">{ta.processes_empty ?? 'Ingen prosesser er lagt til i omfanget.'}</p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
                     {processes.map((process) => (
@@ -263,7 +363,7 @@ export function AuditProcessScope({ audit, processes, options = null, canManage 
                                 {process.status === 'retired' && <StatusBadge tone="slate">{ta.retired_process ?? 'Utgått i Kvalitet'}</StatusBadge>}
                             </div>
                             {canManage && (
-                                <button type="button" onClick={() => remove(process)} className={SECONDARY_ACTION}>{ta.remove ?? 'Fjern fra scope'}</button>
+                                <button type="button" onClick={() => remove(process)} className={SECONDARY_ACTION}>{ta.remove ?? 'Fjern fra omfanget'}</button>
                             )}
                         </li>
                     ))}

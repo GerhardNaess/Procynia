@@ -17,6 +17,8 @@ export function supplierHelp(tr, page) {
     return {
         buttonLabel: help.button ?? 'Hjelp',
         title: content.title ?? 'Om leverandøroppfølging',
+        // «Hva brukes siden til?» — only on the pages whose help has been written as a guide.
+        introTitle: content.intro_title,
         intro: content.intro,
         sections: Array.isArray(content.sections) ? content.sections : [],
     };

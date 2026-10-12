@@ -206,7 +206,7 @@ class ComplianceAssessmentTest extends TestCase
         $this->assertSame(1, ComplianceAssessment::query()->where('requirement_id', $foreign->id)->count());
 
         // The register neither lists nor counts it, and its result reaches no row.
-        $page = $this->actingAs($assessor)->get('/app/compliance/requirements')->assertOk()->viewData('page');
+        $page = $this->actingAs($assessor)->get('/app/compliance/requirements?view=list')->assertOk()->viewData('page');
         $this->assertSame([(int) $own->id], array_column($page['props']['requirements'], 'id'));
         $this->assertSame(1, $page['props']['visible_count']);
         $this->assertStringNotContainsString('Hemmelig begrunnelse', json_encode($page['props']));
@@ -257,7 +257,7 @@ class ComplianceAssessmentTest extends TestCase
         $this->assertFalse($props['compliance']['is_overdue']);
         $this->assertCount(1, $props['assessments']);
 
-        $row = $this->actingAs($assessor)->get('/app/compliance/requirements')->viewData('page')['props']['requirements'][0];
+        $row = $this->actingAs($assessor)->get('/app/compliance/requirements?view=list')->viewData('page')['props']['requirements'][0];
         $this->assertSame('retired', $row['status']);
 
         // A retired requirement is no longer part of the work: not in the worklist, not in any figure.

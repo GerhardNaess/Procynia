@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki\Knowledge\Sources;
 use App\Data\EnterpriseWiki\WikiKnowledgeDraft;
 use App\Data\EnterpriseWiki\WikiKnowledgeDraftSection;
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditCheck;
 use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditRequirement;
 use App\Models\User;
@@ -60,8 +61,15 @@ class ComplianceAuditKnowledgeSource implements WikiKnowledgeSource
 
         $about = array_values(array_filter([
             __("{$t}.type").': '.__("{$t}.types.{$source->audit_type}"),
+            filled($source->purpose) ? __("{$t}.purpose").': '.$source->purpose : null,
             filled($source->scope_description) ? __("{$t}.scope").': '.$source->scope_description : null,
         ]));
+
+        // What was examined, as the auditor wrote it — never a statement that a requirement is met.
+        $checks = $source->checks()->get()
+            ->map(fn (ComplianceAuditCheck $check): string => $check->title.' — '.$check->observation
+                .(filled($check->evidence) ? ' ('.__("{$t}.evidence").': '.$check->evidence.')' : ''))
+            ->all();
 
         $findings = $source->findings()->orderBy('id')->get()
             ->map(fn (ComplianceAuditFinding $finding): string => __("{$t}.finding_types.{$finding->finding_type}").': '.$finding->title
@@ -78,6 +86,7 @@ class ComplianceAuditKnowledgeSource implements WikiKnowledgeSource
         return new WikiKnowledgeDraft($source->title, [
             new WikiKnowledgeDraftSection('about', __("{$t}.about_heading"), $about),
             new WikiKnowledgeDraftSection('conclusion', __("{$t}.conclusion_heading"), filled($source->conclusion) ? [(string) $source->conclusion] : [], asList: false),
+            new WikiKnowledgeDraftSection('checks', __("{$t}.checks_heading"), $checks),
             new WikiKnowledgeDraftSection('findings', __("{$t}.findings_heading"), $findings),
             new WikiKnowledgeDraftSection('requirements', __("{$t}.requirements_heading"), $requirements),
         ]);

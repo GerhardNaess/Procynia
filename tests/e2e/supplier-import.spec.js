@@ -44,6 +44,8 @@ test('suppliers are imported from the downloaded template after the rows are che
     await page.getByTestId('supplier-import-link').click();
     await page.waitForURL(/\/app\/supplier-management\/import$/);
     await expect(page.getByRole('heading', { name: 'Importer leverandører', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Leverandører');
+    await expect(page.getByText('Leverandøroppfølging', { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('import-steps').getByRole('listitem').first()).toHaveAttribute('aria-current', 'step');
     await expectPageHelp(page, 'Om import av leverandører', ['Slik fungerer det', 'Duplikater', 'Eksisterende leverandører', 'Hva som lagres']);
     await expectReadable(page, '01-upload');

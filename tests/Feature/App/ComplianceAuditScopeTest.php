@@ -82,9 +82,9 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame([$first->id, $second->id, $third->id], array_column($props['requirement_options']['requirements'], 'id'));
 
         $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$first->id]])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Kravet er lagt til i scope.');
+            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Kravet er lagt til i omfanget.');
         $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$second->id, $third->id]])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', '2 krav er lagt til i scope.');
+            ->assertSessionHasNoErrors()->assertSessionHas('success', '2 krav er lagt til i omfanget.');
 
         $this->assertDatabaseHas('compliance_audit_requirements', ['customer_id' => $customer->id, 'audit_id' => $audit->id, 'requirement_id' => $first->id, 'created_by' => $auditor->id]);
         // Only ids: nothing about the requirement is copied onto the link, or onto the audit.
@@ -103,7 +103,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame([], $props['requirement_options']['requirements']);
 
         // Out of scope again: the requirement is left as it was.
-        $this->actingAs($auditor)->delete($this->url($audit, "requirements/{$second->id}"))->assertSessionHas('success', 'Kravet er fjernet fra scope.');
+        $this->actingAs($auditor)->delete($this->url($audit, "requirements/{$second->id}"))->assertSessionHas('success', 'Kravet er fjernet fra omfanget.');
         $this->assertSame(2, ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->count());
         $this->assertNotNull($second->fresh());
         $this->actingAs($auditor)->delete($this->url($audit, "requirements/{$second->id}"))->assertNotFound();
@@ -120,7 +120,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$first->id]])->assertSessionHasNoErrors();
 
         $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$second->id, $first->id]])
-            ->assertSessionHasErrors(['requirement_ids' => 'Ett eller flere av kravene er allerede i scope.']);
+            ->assertSessionHasErrors(['requirement_ids' => 'Ett eller flere av kravene er allerede i omfanget.']);
         $this->assertSame([$first->id], ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->pluck('requirement_id')->map(fn ($id): int => (int) $id)->all());
 
         // The same id twice in one request is one row.
@@ -178,7 +178,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame('ISO 27001 (2022)', $sources[$source->id]['label']);
 
         $this->actingAs($auditor)->post($this->url($audit, 'requirements/from-source'), ['source_id' => $source->id])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Kravet er lagt til i scope.');
+            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Kravet er lagt til i omfanget.');
 
         $inScope = fn (): array => ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->orderBy('requirement_id')->pluck('requirement_id')->map(fn ($id): int => (int) $id)->all();
         // The active one; not the retired one, not one of another source.
@@ -187,7 +187,7 @@ class ComplianceAuditScopeTest extends TestCase
 
         // Nothing more to add from it.
         $this->actingAs($auditor)->post($this->url($audit, 'requirements/from-source'), ['source_id' => $source->id])
-            ->assertSessionHasErrors(['source_id' => 'Kravkilden har ingen aktive krav som ikke allerede er i scope.']);
+            ->assertSessionHasErrors(['source_id' => 'Kravkilden har ingen krav som gjelder virksomheten og ikke allerede er i omfanget.']);
 
         // A requirement added to the source later stays out until someone adds it.
         $this->complianceRequirement($source, 'Nytt i kilden', null, 'A.4');
@@ -272,7 +272,7 @@ class ComplianceAuditScopeTest extends TestCase
             $this->assertNull($props['requirement_options']);
             $this->assertNull($props['process_options']);
 
-            $locked = 'Scope kan bare endres mens revisjonen er planlagt eller under arbeid.';
+            $locked = 'Omfanget kan bare endres mens revisjonen er planlagt eller under arbeid.';
             $this->actingAs($auditor)->post($this->url($audit, 'requirements'), ['requirement_ids' => [$candidate->id]])->assertSessionHasErrors(['audit' => $locked]);
             $this->actingAs($auditor)->post($this->url($audit, 'requirements/from-source'), ['source_id' => $source->id])->assertSessionHasErrors(['audit' => $locked]);
             $this->actingAs($auditor)->delete($this->url($audit, "requirements/{$inScope->id}"))->assertSessionHasErrors(['audit' => $locked]);
@@ -306,7 +306,7 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame([$process->id], array_column($props['process_options'], 'id'));
 
         $this->actingAs($auditor)->post($this->url($audit, 'processes'), ['quality_process_id' => $process->id])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Prosessen er lagt til i scope.');
+            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Prosessen er lagt til i omfanget.');
         $this->assertDatabaseHas('compliance_audit_processes', ['customer_id' => $customer->id, 'audit_id' => $audit->id, 'quality_process_id' => $process->id, 'created_by' => $auditor->id]);
         $this->assertEqualsCanonicalizing(
             ['id', 'customer_id', 'audit_id', 'quality_process_id', 'created_by', 'created_at', 'updated_at'],
@@ -321,10 +321,10 @@ class ComplianceAuditScopeTest extends TestCase
         $this->assertSame([], $props['process_options']);
 
         $this->actingAs($auditor)->post($this->url($audit, 'processes'), ['quality_process_id' => $process->id])
-            ->assertSessionHasErrors(['quality_process_id' => 'Prosessen er allerede i scope.']);
+            ->assertSessionHasErrors(['quality_process_id' => 'Prosessen er allerede i omfanget.']);
         $this->assertRefused('a duplicate process row', fn () => ComplianceAuditProcess::query()->create(['customer_id' => $customer->id, 'audit_id' => $audit->id, 'quality_process_id' => $process->id]));
 
-        $this->actingAs($auditor)->delete($this->url($audit, "processes/{$process->id}"))->assertSessionHas('success', 'Prosessen er fjernet fra scope.');
+        $this->actingAs($auditor)->delete($this->url($audit, "processes/{$process->id}"))->assertSessionHas('success', 'Prosessen er fjernet fra omfanget.');
         $this->assertDatabaseMissing('compliance_audit_processes', ['audit_id' => $audit->id]);
         $this->assertDatabaseHas('quality_items', ['id' => $process->id, 'title' => 'Tilgangsprosess v2', 'quality_type' => 'process']);
         $this->actingAs($auditor)->delete($this->url($audit, "processes/{$process->id}"))->assertNotFound();

@@ -31,20 +31,21 @@ function shape(activeModules, permissions = VIEW_ALL) {
 
 describe('what each package puts on the rail', () => {
     test('Basis: Wiki, and Styring with Kvalitet and Avvik og forbedringer — no Anbud', () => {
-        assert.deepEqual(shape(BASIS), ['home', 'wiki', { governance: ['quality', 'improvements'] }]);
+        assert.deepEqual(shape(BASIS), ['home', 'follow_up', 'wiki', { governance: ['quality', 'improvements'] }]);
     });
 
     test('Basis + Anbud: the same, plus Anbud at the top level', () => {
-        assert.deepEqual(shape(withTender(BASIS)), ['home', 'wiki', 'tenders', { governance: ['quality', 'improvements'] }]);
+        assert.deepEqual(shape(withTender(BASIS)), ['home', 'follow_up', 'wiki', 'tenders', { governance: ['quality', 'improvements'] }]);
     });
 
     test('Styring: Kvalitet, Risiko, Mål og KPI, Avvik og forbedringer', () => {
-        assert.deepEqual(shape(STYRING), ['home', 'wiki', { governance: ['quality', 'risk', 'objectives', 'improvements'] }]);
+        assert.deepEqual(shape(STYRING), ['home', 'follow_up', 'wiki', { governance: ['quality', 'risk', 'objectives', 'improvements'] }]);
     });
 
     test('ISO: everything in Styring, plus Etterlevelse og revisjon with Krav, Kravbibliotek and Revisjoner', () => {
         assert.deepEqual(shape(ISO), [
             'home',
+            'follow_up',
             'wiki',
             { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance'] },
         ]);
@@ -53,6 +54,7 @@ describe('what each package puts on the rail', () => {
     test('ISO + Anbud: the same as ISO, plus Anbud', () => {
         assert.deepEqual(shape(withTender(ISO)), [
             'home',
+            'follow_up',
             'wiki',
             'tenders',
             { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance'] },
@@ -62,6 +64,7 @@ describe('what each package puts on the rail', () => {
     test('GRC: everything in ISO, plus Leverandører under Styring', () => {
         assert.deepEqual(shape(GRC), [
             'home',
+            'follow_up',
             'wiki',
             { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'] },
         ]);
@@ -73,6 +76,7 @@ describe('what each package puts on the rail', () => {
     test('GRC + Anbud: the same as GRC, plus Anbud — whose own `suppliers` area stays inside Anbud', () => {
         assert.deepEqual(shape(withTender(GRC)), [
             'home',
+            'follow_up',
             'wiki',
             'tenders',
             { governance: ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers'] },
@@ -107,11 +111,11 @@ describe('a module the customer holds is still only shown with its view permissi
     }
 
     test('with no Styring permission at all, Styring is not shown empty', () => {
-        assert.deepEqual(shape(withTender(ISO), ['wiki.view']), ['home', 'wiki', 'tenders']);
+        assert.deepEqual(shape(withTender(ISO), ['wiki.view']), ['home', 'follow_up', 'wiki', 'tenders']);
     });
 
     test('with only Kvalitet, Styring holds Kvalitet alone', () => {
-        assert.deepEqual(shape(ISO, ['wiki.view', 'quality.view']), ['home', 'wiki', { governance: ['quality'] }]);
+        assert.deepEqual(shape(ISO, ['wiki.view', 'quality.view']), ['home', 'follow_up', 'wiki', { governance: ['quality'] }]);
     });
 
     test('Krav, Kravbibliotek and Revisjoner are not entitlements of their own: they follow the module', () => {

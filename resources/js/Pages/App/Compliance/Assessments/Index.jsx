@@ -232,8 +232,7 @@ export default function ComplianceAssessmentsIndex() {
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <p className="text-base font-semibold text-violet-700">{tr.module_name ?? 'Etterlevelse og revisjon'}</p>
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{ta.title ?? 'Etterlevelsesvurdering'}</h1>
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.module_name ?? 'Etterlevelse og revisjon'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">{ta.subtitle ?? 'Hvilke krav har vi vurdert, hvilke oppfyller vi, og hvor har vi mangler?'}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">

@@ -31,7 +31,7 @@ test('Kravbibliotek: activate ISO 9001, decide relevance and assess', async ({ p
     await expect(areas.locator('[aria-current="page"]')).toHaveText('Kravbibliotek');
 
     // The library says what it is, and how it differs from the register.
-    await expect(page.getByRole('heading', { level: 1, name: 'Kravbibliotek' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Etterlevelse og revisjon' })).toBeVisible();
     await expect(page.getByTestId('compliance-library-explainer')).toContainText('Hvilke standardiserte krav finnes?');
     await expect(page.getByTestId('compliance-library-explainer')).toContainText('Hvilke krav gjelder for oss');
     await expectPageHelp(page, 'Om kravbiblioteket', ['Hva brukes siden til?', 'Slik gjør du det', 'Arbeidsflyten', 'Kravbibliotek og kravregister', 'Innholdet']);

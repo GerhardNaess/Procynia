@@ -45,6 +45,15 @@ test('Kravbibliotek → Kravregister → Etterlevelsesvurdering → Revisjon, an
     await expect(areas.locator('a')).toHaveText(['Kravbibliotek', 'Kravregister', 'Etterlevelsesvurdering', 'Revisjon']);
     await expect(current).toHaveText('Kravbibliotek');
 
+    // The module name is the page heading in every work area, as in Kvalitet; the tab marks the area.
+    for (const [area, path] of [['Kravregister', 'requirements'], ['Etterlevelsesvurdering', 'assessments'], ['Revisjon', 'audits'], ['Kravbibliotek', 'library']]) {
+        await areas.getByRole('link', { name: area, exact: true }).click();
+        await page.waitForURL(new RegExp(`/app/compliance/${path}$`));
+        await expect(current).toHaveText(area);
+        await expect(page.getByRole('heading', { level: 1 })).toHaveText('Etterlevelse og revisjon');
+        await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Etterlevelse og revisjon');
+    }
+
     // 2. ISO 14001 in Kravbibliotek: explore it, then activate it from its card.
     const card14001 = page.getByTestId('compliance-library-framework-iso14001:2026');
     await card14001.getByRole('link', { name: 'Se innholdet' }).click();
@@ -168,7 +177,7 @@ test('Kravbibliotek → Kravregister → Etterlevelsesvurdering → Revisjon, an
     await expect(current).toHaveText('Revisjon');
     const scope = page.getByTestId('compliance-audit-requirements');
     await scope.getByRole('button', { name: 'Legg til krav' }).click();
-    await page.locator('#compliance-audit-source').selectOption({ label: 'ISO 14001:2026 (35 aktive krav)' });
+    await page.locator('#compliance-audit-source').selectOption({ label: 'ISO 14001:2026 (35 krav som gjelder)' });
     await page.getByTestId('compliance-audit-source-form').getByRole('button', { name: 'Legg til fra kilde' }).click();
     await expect(page.getByTestId('compliance-audit-requirement')).toHaveCount(35);
     await expect(scope).toContainText('ISO 14001:2026 · 6.1.2 · Miljøaspekter');

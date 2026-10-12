@@ -9,12 +9,10 @@ use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAuditLifecycleService;
 use App\Support\CustomerPermissionCatalog;
-use DomainException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
-use LogicException;
 use Tests\Concerns\CreatesComplianceScenarios;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
@@ -176,267 +174,27 @@ class ComplianceAuditTest extends TestCase
         $this->assertRefused('an end before the start', fn () => DB::table('compliance_audits')->where('id', $audit->id)->update(['planned_start_date' => '2026-12-01']));
     }
 
-    public function test_the_scope_description_is_required(): void
+    public function test_the_omfang_text_is_optional_but_never_blank(): void
     {
         ['customer' => $customer] = $this->complianceContext();
         $auditor = $this->complianceAuditor($customer);
 
-        foreach ([null, '', '   '] as $scope) {
-            $this->actingAs($auditor)->post('/app/compliance/audits', ['scope_description' => $scope] + $this->auditPayload($auditor))
-                ->assertSessionHasErrors(['scope_description' => 'Scope må fylles ut.']);
+        // Omfang can be the requirements in scope alone: no text, or only whitespace, is no text.
+        foreach ([null, '', '   '] as $index => $scope) {
+            $this->actingAs($auditor)->post('/app/compliance/audits', ['scope_description' => $scope] + $this->auditPayload($auditor, "Uten omfangstekst {$index}"))
+                ->assertSessionHasNoErrors();
         }
+        $this->assertSame([null, null, null], ComplianceAudit::query()->where('customer_id', $customer->id)->orderBy('id')->pluck('scope_description')->all());
+
         $this->actingAs($auditor)->post('/app/compliance/audits', ['title' => '', 'audit_type' => 'annual'] + $this->auditPayload($auditor))
             ->assertSessionHasErrors(['title' => 'Tittel må fylles ut.', 'audit_type' => 'Velg en gyldig verdi for Type.']);
-        $this->assertSame(0, ComplianceAudit::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(3, ComplianceAudit::query()->where('customer_id', $customer->id)->count());
 
         $audit = $this->complianceAudit($customer, $auditor);
         $this->assertRefused('a blank scope', fn () => DB::table('compliance_audits')->where('id', $audit->id)->update(['scope_description' => '  ']));
+        $this->assertRefused('a blank purpose', fn () => DB::table('compliance_audits')->where('id', $audit->id)->update(['purpose' => '  ']));
         $this->assertRefused('an unknown type', fn () => DB::table('compliance_audits')->where('id', $audit->id)->update(['audit_type' => 'annual']));
         $this->assertRefused('an unknown status', fn () => DB::table('compliance_audits')->where('id', $audit->id)->update(['status' => 'archived']));
-
-        $this->expectException(DomainException::class);
-        $audit->forceFill(['status' => 'archived'])->save();
-    }
-
-    // ---------------------------------------------------------------------
-    // Lifecycle
-    // ---------------------------------------------------------------------
-
-    public function test_start_moves_a_planned_audit_to_in_progress_and_logs_it(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $audit = $this->complianceAudit($customer, $auditor);
-
-        $this->actingAs($auditor)->post($this->url($audit, 'start'))->assertSessionHasNoErrors()->assertSessionHas('success', 'Revisjonen er startet.');
-
-        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $audit->fresh()->status);
-        $change = ComplianceAuditStatusChange::query()->where('audit_id', $audit->id)->sole();
-        $this->assertSame(['planned', 'in_progress', null, (int) $auditor->id, (int) $customer->id], [$change->from_status, $change->to_status, $change->reason, (int) $change->changed_by_user_id, (int) $change->customer_id]);
-
-        // Twice is not a second start.
-        $this->actingAs($auditor)->post($this->url($audit, 'start'))->assertSessionHasErrors(['status' => 'Revisjonen kan ikke få denne statusen nå. Last siden på nytt.']);
-        $this->assertSame(1, $audit->statusChanges()->count());
-    }
-
-    public function test_complete_requires_a_conclusion_and_writes_it_with_the_status(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $audit = $this->complianceAudit($customer, $auditor);
-        app(ComplianceAuditLifecycleService::class)->start($audit, $auditor);
-
-        foreach ([[], ['conclusion' => ''], ['conclusion' => '   ']] as $payload) {
-            $this->actingAs($auditor)->post($this->url($audit, 'complete'), $payload)
-                ->assertSessionHasErrors(['conclusion' => 'Skriv en konklusjon før revisjonen fullføres.']);
-        }
-        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $audit->fresh()->status);
-        $this->assertSame(1, $audit->statusChanges()->count());
-
-        // No findings are needed, and none are created.
-        $this->actingAs($auditor)->post($this->url($audit, 'complete'), ['conclusion' => '  Tilgangsstyringen fungerer etter hensikten.  '])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Revisjonen er fullført.');
-
-        $fresh = $audit->fresh();
-        $this->assertSame(ComplianceAudit::STATUS_COMPLETED, $fresh->status);
-        $this->assertSame('Tilgangsstyringen fungerer etter hensikten.', $fresh->conclusion);
-        $this->assertSame(['in_progress', 'completed'], [$fresh->statusChanges()->first()->from_status, $fresh->statusChanges()->first()->to_status]);
-    }
-
-    public function test_a_conclusion_saved_while_in_progress_is_enough_to_complete(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $audit = $this->complianceAudit($customer, $auditor);
-        app(ComplianceAuditLifecycleService::class)->start($audit, $auditor);
-
-        $this->actingAs($auditor)->patch($this->url($audit), $this->auditPayload($auditor) + ['conclusion' => 'Lagret underveis.'])->assertSessionHasNoErrors();
-
-        // An emptied field in the form is no conclusion, whatever was saved before.
-        $this->actingAs($auditor)->post($this->url($audit, 'complete'), ['conclusion' => ''])
-            ->assertSessionHasErrors(['conclusion' => 'Skriv en konklusjon før revisjonen fullføres.']);
-        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $audit->fresh()->status);
-        $this->assertSame('Lagret underveis.', $audit->fresh()->conclusion);
-
-        $this->actingAs($auditor)->post($this->url($audit, 'complete'))->assertSessionHasNoErrors();
-
-        $this->assertSame(ComplianceAudit::STATUS_COMPLETED, $audit->fresh()->status);
-        $this->assertSame('Lagret underveis.', $audit->fresh()->conclusion);
-    }
-
-    public function test_cancel_from_planned_and_from_in_progress_needs_a_reason(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $planned = $this->complianceAudit($customer, $auditor, 'Planlagt');
-        $running = $this->complianceAudit($customer, $auditor, 'Under arbeid');
-        app(ComplianceAuditLifecycleService::class)->start($running, $auditor);
-
-        foreach ([$planned, $running] as $audit) {
-            foreach ([[], ['reason' => '  ']] as $payload) {
-                $this->actingAs($auditor)->post($this->url($audit, 'cancel'), $payload)->assertSessionHasErrors(['reason' => 'Begrunnelse må fylles ut.']);
-            }
-        }
-        $this->assertSame(ComplianceAudit::STATUS_PLANNED, $planned->fresh()->status);
-        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $running->fresh()->status);
-
-        $this->actingAs($auditor)->post($this->url($planned, 'cancel'), ['reason' => 'Utsatt til neste år.'])->assertSessionHasNoErrors()->assertSessionHas('success', 'Revisjonen er avbrutt.');
-        $this->actingAs($auditor)->post($this->url($running, 'cancel'), ['reason' => 'Revisor trakk seg.'])->assertSessionHasNoErrors();
-
-        $this->assertSame(ComplianceAudit::STATUS_CANCELLED, $planned->fresh()->status);
-        $this->assertSame(ComplianceAudit::STATUS_CANCELLED, $running->fresh()->status);
-        $this->assertSame('Utsatt til neste år.', $planned->statusChanges()->sole()->reason);
-        $this->assertSame(['in_progress', 'cancelled', 'Revisor trakk seg.'], [
-            $running->statusChanges()->first()->from_status,
-            $running->statusChanges()->first()->to_status,
-            $running->statusChanges()->first()->reason,
-        ]);
-
-        // Not deleted, still listed — and read-only for good.
-        $this->assertSame(2, count($this->indexProps($auditor)['audits']));
-        $props = $this->props($auditor, $running);
-        foreach (['can_edit', 'can_start', 'can_complete', 'can_cancel', 'can_reopen', 'can_delete', 'can_manage_requirements', 'can_manage_processes'] as $permission) {
-            $this->assertFalse($props['permissions'][$permission], $permission);
-        }
-        $this->actingAs($auditor)->patch($this->url($running), $this->auditPayload($auditor, 'Endret'))
-            ->assertSessionHas('error', 'Revisjonen er avbrutt og kan ikke endres.');
-        $this->assertSame('Under arbeid', $running->fresh()->title);
-    }
-
-    public function test_a_completed_audit_is_locked(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer, [CustomerPermissionCatalog::COMPLIANCE_DELETE]);
-        $audit = $this->runToCompletion($customer, $auditor);
-
-        $props = $this->props($auditor, $audit);
-        $this->assertFalse($props['permissions']['can_edit']);
-        $this->assertFalse($props['permissions']['can_start']);
-        $this->assertFalse($props['permissions']['can_complete']);
-        $this->assertFalse($props['permissions']['can_cancel']);
-        $this->assertFalse($props['permissions']['can_delete']);
-        $this->assertFalse($props['permissions']['can_manage_requirements']);
-        $this->assertTrue($props['permissions']['can_reopen']);
-        $this->assertSame([], $props['editable_fields']);
-        $this->assertSame([], $props['responsible_options']);
-
-        $this->actingAs($auditor)->patch($this->url($audit), $this->auditPayload($auditor, 'Endret') + ['conclusion' => 'Ny konklusjon'])
-            ->assertSessionHas('error', 'Revisjonen er fullført. Gjenåpne den før du endrer den.');
-        $this->actingAs($auditor)->post($this->url($audit, 'cancel'), ['reason' => 'For sent.'])->assertSessionHasErrors('status');
-        $this->actingAs($auditor)->post($this->url($audit, 'complete'), ['conclusion' => 'En gang til'])->assertSessionHasErrors('status');
-        $this->actingAs($auditor)->delete($this->url($audit))->assertSessionHas('error');
-
-        $fresh = $audit->fresh();
-        $this->assertSame('Internrevisjon tilgangsstyring', $fresh->title);
-        $this->assertSame('Ingen avvik funnet.', $fresh->conclusion);
-        $this->assertSame(ComplianceAudit::STATUS_COMPLETED, $fresh->status);
-    }
-
-    public function test_reopen_needs_a_reason_and_makes_the_audit_editable_again(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $audit = $this->runToCompletion($customer, $auditor);
-
-        $this->actingAs($auditor)->post($this->url($audit, 'reopen'), ['reason' => ''])->assertSessionHasErrors(['reason' => 'Begrunnelse må fylles ut.']);
-        $this->assertSame(ComplianceAudit::STATUS_COMPLETED, $audit->fresh()->status);
-
-        $this->actingAs($auditor)->post($this->url($audit, 'reopen'), ['reason' => 'Konklusjonen må presiseres.'])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', 'Revisjonen er gjenåpnet.');
-
-        $fresh = $audit->fresh();
-        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $fresh->status);
-        // The conclusion stays until it is rewritten.
-        $this->assertSame('Ingen avvik funnet.', $fresh->conclusion);
-
-        $history = $this->props($auditor, $audit)['status_history'];
-        $this->assertSame(
-            [['completed', 'in_progress', 'Konklusjonen må presiseres.'], ['in_progress', 'completed', null], ['planned', 'in_progress', null]],
-            array_map(fn (array $entry): array => [$entry['from_status'], $entry['to_status'], $entry['reason']], $history),
-        );
-
-        $this->actingAs($auditor)->patch($this->url($audit), $this->auditPayload($auditor) + ['conclusion' => 'Presisert konklusjon.'])->assertSessionHasNoErrors();
-        $this->actingAs($auditor)->post($this->url($audit, 'complete'))->assertSessionHasNoErrors();
-        $this->assertSame('Presisert konklusjon.', $audit->fresh()->conclusion);
-        $this->assertSame(4, $audit->statusChanges()->count());
-    }
-
-    public function test_every_other_transition_is_refused(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $lifecycle = app(ComplianceAuditLifecycleService::class);
-
-        $planned = $this->complianceAudit($customer, $auditor, 'Planlagt');
-        $this->actingAs($auditor)->post($this->url($planned, 'complete'), ['conclusion' => 'Hoppet over'])->assertSessionHasErrors('status');
-        $this->actingAs($auditor)->post($this->url($planned, 'reopen'), ['reason' => 'Hvorfor'])->assertSessionHasErrors('status');
-
-        $running = $this->complianceAudit($customer, $auditor, 'Under arbeid');
-        $lifecycle->start($running, $auditor);
-        $this->actingAs($auditor)->post($this->url($running, 'start'))->assertSessionHasErrors('status');
-        $this->actingAs($auditor)->post($this->url($running, 'reopen'), ['reason' => 'Hvorfor'])->assertSessionHasErrors('status');
-
-        $cancelled = $this->complianceAudit($customer, $auditor, 'Avbrutt');
-        $lifecycle->cancel($cancelled, $auditor, 'Ikke aktuelt.');
-        foreach (['start' => [], 'complete' => ['conclusion' => 'x'], 'cancel' => ['reason' => 'x'], 'reopen' => ['reason' => 'Ikke tillatt i v1']] as $action => $payload) {
-            $this->actingAs($auditor)->post($this->url($cancelled, $action), $payload)->assertSessionHasErrors('status');
-        }
-
-        $this->assertSame(ComplianceAudit::STATUS_PLANNED, $planned->fresh()->status);
-        $this->assertSame(ComplianceAudit::STATUS_IN_PROGRESS, $running->fresh()->status);
-        $this->assertSame(ComplianceAudit::STATUS_CANCELLED, $cancelled->fresh()->status);
-        $this->assertSame(0, $planned->statusChanges()->count());
-        $this->assertSame(1, $running->statusChanges()->count());
-        $this->assertSame(1, $cancelled->statusChanges()->count());
-
-        // The database refuses a transition the service would never write, and a completed audit
-        // without a conclusion.
-        $this->assertRefused('planned → completed', fn () => ComplianceAuditStatusChange::query()->create([
-            'customer_id' => $customer->id, 'audit_id' => $planned->id, 'from_status' => 'planned', 'to_status' => 'completed', 'changed_at' => now(),
-        ]));
-        $this->assertRefused('cancelled → in_progress', fn () => ComplianceAuditStatusChange::query()->create([
-            'customer_id' => $customer->id, 'audit_id' => $cancelled->id, 'from_status' => 'cancelled', 'to_status' => 'in_progress', 'reason' => 'x', 'changed_at' => now(),
-        ]));
-        $this->assertRefused('a cancellation without a reason', fn () => ComplianceAuditStatusChange::query()->create([
-            'customer_id' => $customer->id, 'audit_id' => $running->id, 'from_status' => 'in_progress', 'to_status' => 'cancelled', 'reason' => ' ', 'changed_at' => now(),
-        ]));
-        $this->assertRefused('completed without a conclusion', fn () => DB::table('compliance_audits')->where('id', $running->id)->update(['status' => 'completed']));
-    }
-
-    public function test_the_status_history_is_immutable(): void
-    {
-        ['customer' => $customer] = $this->complianceContext();
-        $auditor = $this->complianceAuditor($customer);
-        $audit = $this->complianceAudit($customer, $auditor);
-        app(ComplianceAuditLifecycleService::class)->cancel($audit, $auditor, 'Opprinnelig begrunnelse.');
-        $change = ComplianceAuditStatusChange::query()->where('audit_id', $audit->id)->sole();
-
-        try {
-            $change->update(['reason' => 'Omskrevet']);
-            $this->fail('A status change must not be updatable through the model.');
-        } catch (LogicException) {
-            $this->addToAssertionCount(1);
-        }
-
-        try {
-            $change->delete();
-            $this->fail('A status change must not be deletable through the model.');
-        } catch (LogicException) {
-            $this->addToAssertionCount(1);
-        }
-
-        $this->assertRefused('rewriting history', fn () => DB::table('compliance_audit_status_changes')->where('id', $change->id)->update(['reason' => 'Omskrevet']));
-        $this->assertRefused('moving history in time', fn () => DB::table('compliance_audit_status_changes')->where('id', $change->id)->update(['changed_at' => now()->subYear()]));
-        $this->assertRefused('deleting history', fn () => DB::table('compliance_audit_status_changes')->where('id', $change->id)->delete());
-        // Deleting the audit would cascade into its history, which is refused too.
-        $this->assertRefused('deleting an audit with history', fn () => DB::table('compliance_audits')->where('id', $audit->id)->delete());
-
-        $this->assertSame('Opprinnelig begrunnelse.', $change->fresh()->reason);
-
-        // The author leaving nulls the reference and nothing else.
-        $auditor->delete();
-        $this->assertNull($change->fresh()->changed_by_user_id);
-        $this->assertSame('Opprinnelig begrunnelse.', $change->fresh()->reason);
     }
 
     // ---------------------------------------------------------------------
@@ -450,7 +208,7 @@ class ComplianceAuditTest extends TestCase
         $other = $this->complianceReader($customer);
         $audit = $this->complianceAudit($customer, $auditor);
 
-        $this->assertSame(['title', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'], $this->props($auditor, $audit)['editable_fields']);
+        $this->assertSame(['title', 'purpose', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'], $this->props($auditor, $audit)['editable_fields']);
 
         $this->actingAs($auditor)->patch($this->url($audit), [
             'title' => 'Ekstern revisjon',

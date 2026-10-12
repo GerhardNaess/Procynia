@@ -4,7 +4,7 @@ import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import { requirementBackTarget, worklistUrl } from '../../../../Support/complianceNavigation';
+import { registerUrl, requirementBackTarget, worklistUrl } from '../../../../Support/complianceNavigation';
 import RequirementGuidance from '../Library/RequirementGuidance';
 import { AttentionReasons } from './ComplianceAttention';
 import RequirementApplicability from './RequirementApplicability';
@@ -65,10 +65,9 @@ export default function ComplianceRequirementShow() {
     // the worklist arrives with assess=1 and the form open.
     const [panel, setPanel] = useState(() => (query.get('assess') === '1' && permissions.can_assess ? 'assess' : null));
 
+    // Back to the worklist or the register as the person left it — filters, view and open chapters.
     useEffect(() => {
-        if (back.href === null) {
-            setBackHref(worklistUrl());
-        }
+        setBackHref(back.href === null ? worklistUrl() : registerUrl());
     }, [back.href]);
 
     const form = useForm({
@@ -94,7 +93,7 @@ export default function ComplianceRequirementShow() {
     };
 
     return (
-        <CustomerAppLayout title={item.title} showPageTitle={false}>
+        <CustomerAppLayout title={item.title} showPageTitle={false} workView={panel === 'edit' ? (tr.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
                 <Link href={backHref} className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900" data-testid="compliance-back">
                     ← {back.area === 'compliance-assessments' ? (tr.back_to_assessments ?? 'Tilbake til etterlevelsesvurdering') : (tr.back ?? 'Tilbake til kravregisteret')}

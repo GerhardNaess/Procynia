@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
@@ -170,12 +170,8 @@ export default function SupplierManagementShow() {
     const notRegistered = <span className="text-slate-600">{tr.not_registered ?? 'Ikke registrert'}</span>;
 
     return (
-        <CustomerAppLayout title={item.name} showPageTitle={false}>
+        <CustomerAppLayout title={item.name} showPageTitle={false} workView={panel === 'edit' ? (tr.edit ?? 'Rediger') : null}>
             <div className="space-y-6" onClickCapture={followInPageLink}>
-                <Link href="/app/supplier-management" className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900">
-                    ← {tr.back ?? 'Til leverandører'}
-                </Link>
-
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-3">
                         <div className="flex flex-wrap gap-2" data-testid="supplier-badges">

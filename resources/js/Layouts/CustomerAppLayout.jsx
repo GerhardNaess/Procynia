@@ -1,51 +1,15 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import ActionDialog from '../Components/App/ActionDialog';
-import ControlHint from '../Components/App/ControlHint';
 import NotificationBell from '../Components/App/NotificationBell';
 import ModuleSidebar from '../Components/App/ModuleSidebar';
-import { activeModuleKey, activeWorkspaceKey } from '../Support/appModules';
-import { complianceAreaKey } from '../Support/complianceNavigation';
+import Breadcrumbs from '../Components/App/Breadcrumbs';
+import { resolveNavigation } from '../Support/appNavigation';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
-}
-
-function buildHref(path, query = {}) {
-    const params = new URLSearchParams();
-
-    Object.entries(query).forEach(([key, value]) => {
-        if (value === null || value === undefined || value === '') {
-            return;
-        }
-
-        params.set(key, value);
-    });
-
-    const search = params.toString();
-
-    return search === '' ? path : `${path}?${search}`;
-}
-
-function splitUrl(url) {
-    const [pathname, search = ''] = String(url ?? '').split('?');
-
-    return {
-        pathname: pathname || '',
-        searchParams: new URLSearchParams(search),
-    };
-}
-
-function formatMenuCount(value) {
-    const normalized = Number(value ?? 0);
-
-    return Number.isFinite(normalized) ? normalized : 0;
-}
-
-function withMenuCount(label, count) {
-    return `${label} (${formatMenuCount(count)})`;
 }
 
 function emptyNotificationsState() {
@@ -129,9 +93,15 @@ function NavigationRow({ items, activeKey, disabledHint = '' }) {
     );
 }
 
-export default function CustomerAppLayout({ children, title, showPageTitle = true }) {
+/**
+ * `workView` names a work view the page has opened with one of its own buttons — «Registrer
+ * leverandør», «Ny revisjon», «Rediger» — while it is open, and null otherwise. It is the page's
+ * own state handed to the shared navigation, so the trail can end on the view even where the view
+ * has no URL. A permanent form on the page and a dialog over it are not work views.
+ */
+export default function CustomerAppLayout({ children, title, showPageTitle = true, workView = null }) {
     const page = usePage();
-    const { appName, auth, flash, translations, worklist } = page.props;
+    const { appName, auth, flash, translations } = page.props;
     const navigation = translations?.navigation ?? {};
     const modules = navigation.modules ?? {};
     // Which technical modules this customer holds, resolved server-side from their package
@@ -140,9 +110,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     // What the customer's own roles let this person do, shared on every request. The rail uses it
     // to stop offering a module they have no permission in; the routes enforce the same answer.
     const userPermissions = page.props.access?.permissions ?? [];
-    const tw = translations?.wiki ?? {};
-    const tq = translations?.quality ?? {};
-    const tc = translations?.compliance ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -160,154 +127,28 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const userEmail = user?.email ?? '';
     const userBidRoleLabel = user?.bid_role_label ?? '';
     const userInitial = userName.trim().charAt(0).toUpperCase() || 'P';
-    const { pathname, searchParams } = splitUrl(currentUrl);
-    const noticeMode = searchParams.get('mode') ?? 'live';
-    const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
-    const wikiTab = searchParams.get('tab') ?? 'pages';
-    // Which of Kvalitet's main areas the page is in. The index carries it in `?tab=`; an item page
-    // uses `?tab=` for its own level below (Dokument / Flyt), so there the area follows the item's
-    // type — a process belongs under Prosesser, a control under Kontroller, the rest under Oversikt.
-    const qualityTab = (() => {
-        if (pathname.startsWith('/app/quality/items/')) {
-            const type = page.props.item?.quality_type;
-
-            return type === 'process' ? 'processes' : (type === 'control' ? 'controls' : 'overview');
-        }
-
-        return searchParams.get('tab') ?? 'overview';
-    })();
-    const currentAiCaseId = page.props.case?.id ?? null;
-    const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
-        ? String(page.props.analysisCases[0].id)
-        : null;
-    const lastStoredAiCaseId = readLastAiCaseId();
-    const lastStoredIdIsVisible = lastStoredAiCaseId !== null
-        && Array.isArray(page.props.analysisCases)
-        && page.props.analysisCases.some((c) => String(c.id) === lastStoredAiCaseId);
-    const rememberedAiCaseId = currentAiCaseId !== null && currentAiCaseId !== undefined
-        ? String(currentAiCaseId)
-        : lastStoredIdIsVisible
-            ? lastStoredAiCaseId
-            : (firstAvailableAiCaseId ?? lastStoredAiCaseId);
-    const aiWorkHref = currentAiCaseId !== null && currentAiCaseId !== undefined
-        ? `/app/ai/${currentAiCaseId}`
-        : rememberedAiCaseId !== null
-            ? `/app/ai/${rememberedAiCaseId}`
-            : null;
-    const aiInstructionsHref = currentAiCaseId !== null && currentAiCaseId !== undefined
-        ? `/app/ai/${currentAiCaseId}/instructions`
-        : rememberedAiCaseId !== null
-            ? `/app/ai/${rememberedAiCaseId}/instructions`
-            : null;
-    const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
     const billingHref = user?.can_manage_customer_billing ? '/app/billing' : null;
 
-    const activeMainArea = (() => {
-        if (pathname === '/app') {
-            return 'worklist';
-        }
-
-        if (pathname === '/app/dashboard') {
-            return 'overview';
-        }
-
-        // The bid cockpit. It was /app/dashboard until Hjem became cross-module; it is Anbud's
-        // own overview now, so it resolves to a Anbud area rather than to Hjem.
-        if (pathname === '/app/bid-status') {
-            return 'bid-status';
-        }
-
-        if (pathname === '/app/notices' || pathname.startsWith('/app/notices/')) {
-            if (pathname.startsWith('/app/notices/saved/')) {
-                return 'worklist';
-            }
-
-            if (noticeMode === 'saved' || noticeMode === 'history') {
-                return 'worklist';
-            }
-
-            return 'procurements';
-        }
-
-        if (pathname === '/app/suppliers' || pathname.startsWith('/app/suppliers/')) {
-            return 'suppliers';
-        }
-
-        // Watch lists configure which notices reach the customer at all, so the area they belong
-        // to is Kunngjøringer. They keep their own route; only the navigation places them.
-        if (pathname.startsWith('/app/watch-profiles')) {
-            return 'procurements';
-        }
-
-        if (pathname.startsWith('/app/info-center')) {
-            return 'info-center';
-        }
-
-        if (pathname.startsWith('/app/ai')) {
-            return 'ai';
-        }
-
-        if (
-            pathname.startsWith('/app/customer-environment')
-            || pathname.startsWith('/app/departments')
-            || pathname.startsWith('/app/users')
-            || pathname.startsWith('/app/go-no-go-templates')
-        ) {
-            return 'environment';
-        }
-
-        // Checked before the general Wiki area: "Spør Wiki" is its own main-menu action, not a tab
-        // inside the Wiki area, so it must not light up the Wiki nav item or render Wiki sub-tabs.
-        if (pathname.startsWith('/app/wiki/ask')) {
-            return 'wiki-ask';
-        }
-
-        if (pathname.startsWith('/app/wiki')) {
-            return 'wiki';
-        }
-
-        // Styring's own landing page. Its modules keep their own areas below, so a page inside
-        // Kvalitet is still `quality` — and Styring is lit through appModules.activeWorkspaceKey.
-        if (pathname === '/app/governance') {
-            return 'governance';
-        }
-
-        if (pathname.startsWith('/app/quality')) {
-            return 'quality';
-        }
-
-        if (pathname.startsWith('/app/risk')) {
-            return 'risk';
-        }
-
-        if (pathname.startsWith('/app/objectives')) {
-            return 'objectives';
-        }
-
-        if (pathname.startsWith('/app/improvements')) {
-            return 'improvements';
-        }
-
-        if (pathname.startsWith('/app/compliance')) {
-            return 'compliance';
-        }
-
-        // Leverandøroppfølging. Its own area, never `suppliers` — that is Anbud's /app/suppliers.
-        if (pathname.startsWith('/app/supplier-management')) {
-            return 'supplier-management';
-        }
-
-        if (pathname.startsWith('/app/management-reviews')) {
-            return 'management-review';
-        }
-
-        if (pathname.startsWith('/app/billing')) {
-            return 'billing';
-        }
-
-        return 'overview';
-    })();
+    /**
+     * Every navigation level on the page — the rail's module and workspace, the header's module
+     * navigation, the page-level row and the breadcrumb trail — from one resolver
+     * (Support/appNavigation.js), read off the URL and the page's own props. The page's `title` is
+     * what names the object at the end of the trail, so no page describes its own breadcrumb.
+     */
+    const {
+        area: activeMainArea,
+        moduleKey: activeModule,
+        workspaceKey: activeWorkspace,
+        currentAiCaseId,
+        aiWorkHref,
+        aiInstructionsHref,
+        moduleNavigation,
+        activeModuleNavigationKey,
+        pageNavigation,
+        activePageNavigationKey,
+        breadcrumbs,
+    } = resolveNavigation({ url: currentUrl, props: page.props, title, workView, lastStoredAiCaseId: readLastAiCaseId() });
     const aiCaseNavigationHint = activeMainArea === 'ai' && aiWorkHref === null && aiInstructionsHref === null
         ? (String(locale).toLowerCase().startsWith('en')
             ? 'Open a case first to unlock Work in progress and AI instructions.'
@@ -315,15 +156,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : '';
 
     /**
-     * The work areas inside Anbud.
-     *
-     * These four are the stages one bid passes through, plus the competitor view that informs
-     * them. They are the level below the module, not modules themselves — the same relation
-     * Kildedokumenter, Kjøringer, Wiki-sider and Grafvisning have to Wiki. Routes, labels and
-     * permissions are exactly what they were; only the place they are named has moved.
+     * Ask Wiki, in the top bar beside the bell. The magnifying glass is the whole affordance, so
+     * the label is carried by title/aria-label instead.
      */
-    const activeModule = activeMainArea === 'governance' ? 'governance' : activeModuleKey(activeMainArea);
-    const activeWorkspace = activeWorkspaceKey(activeMainArea);
+    const askWikiNavigation = {
+        key: 'wiki-ask',
+        label: translations.wiki?.ask_nav ?? 'Spør Wiki',
+        href: '/app/wiki/ask',
+    };
 
     const toggleSidebarCollapsed = () => {
         setSidebarCollapsed((current) => {
@@ -334,214 +174,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return next;
         });
     };
-
-    const moduleSections = activeModule === 'tenders'
-        ? [
-            // Bid Status is the view across the four stages below it, so it comes first. It is
-            // the only item here that is not itself a stage.
-            { key: 'bid-status', label: navigation.bid_status, href: '/app/bid-status' },
-            { key: 'procurements', label: navigation.notices, href: '/app/notices' },
-            { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
-            { key: 'ai', label: navigation.ai, href: '/app/ai' },
-            { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
-        ]
-        : [];
-
-    /**
-     * Ask Wiki, between the workflow and the follow-up group. The magnifying glass is the whole
-     * affordance, so the label is carried by title/aria-label instead.
-     */
-    const askWikiNavigation = {
-        key: 'wiki-ask',
-        label: translations.wiki?.ask_nav ?? 'Spør Wiki',
-        href: '/app/wiki/ask',
-    };
-
-    /**
-     * Follow-up, kept out of the workflow group on purpose.
-     *
-     * It is not a stage a case passes through — it is everything across every case that is waiting
-     * on somebody. Sitting it inside the workflow made it read as a sixth step; a divider and the
-     * company of the bell and the user menu say what it actually is.
-     */
-    const followUpNavigation = {
-        key: 'info-center',
-        label: translations.frontend.infosenter_nav,
-        href: '/app/info-center',
-        hint: translations.frontend.follow_up_hint
-            ?? 'Oppgaver, beslutninger og avklaringer som krever oppfølging',
-    };
-
-    /**
-     * The tabs inside one area. Where they are rendered depends on the module: inside Anbud they
-     * are a third level and land on the page, while Wiki and Kundemiljø have no area level above
-     * them, so theirs are the module navigation itself. See `hasModuleAreas` below.
-     */
-    const secondaryNavigation = (() => {
-        if (activeMainArea === 'ai') {
-            return [
-                { key: 'ai-overview', label: navigation.overview, href: '/app/ai' },
-                { key: 'ai-work', label: navigation.worklist, href: aiWorkHref },
-                { key: 'ai-instructions', label: navigation.ai_instructions, href: aiInstructionsHref },
-            ];
-        }
-
-        if (activeMainArea === 'procurements') {
-            return [
-                { key: 'live', label: navigation.live_search, href: '/app/notices' },
-                { key: 'alerts', label: translations.frontend.alerts_nav, href: buildHref('/app/notices', { tab: 'alerts' }) },
-                // Same permission gate as before, in a new place: a user who could not reach the
-                // page from the main menu still cannot reach it from here.
-                ...(watchProfilesHref
-                    ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }]
-                    : []),
-            ];
-        }
-
-        if (activeMainArea === 'worklist') {
-            return [
-                {
-                    key: 'saved',
-                    label: withMenuCount(navigation.registered_notices, worklist?.saved_count),
-                    href: buildHref('/app/notices', { mode: 'saved' }),
-                },
-                {
-                    key: 'history',
-                    label: withMenuCount(navigation.history, worklist?.history_count),
-                    href: buildHref('/app/notices', { mode: 'history' }),
-                },
-            ];
-        }
-
-        if (activeMainArea === 'wiki') {
-            return [
-                // Ordered by the actual workflow: the source documents go in first, the runs show
-                // what the system did with them, the pages are the result, and the graph is where
-                // the connections are explored. Display order only — the active item is resolved
-                // from the tab value below, and /app/wiki still opens on Wiki-sider.
-                { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
-                { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
-                { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
-                { key: 'wiki-graph', label: tw.tab_graph ?? 'Grafvisning', href: '/app/wiki/graph' },
-            ];
-        }
-
-        if (activeMainArea === 'quality') {
-            // Same shape as Wiki's tabs: Kvalitet has no work areas of its own, so these sit in
-            // the header directly under the rail's selection.
-            return [
-                { key: 'quality-overview', label: tq.tab_overview ?? 'Oversikt', href: buildHref('/app/quality', { tab: 'overview' }) },
-                { key: 'quality-processes', label: tq.tab_processes ?? 'Prosesser', href: buildHref('/app/quality', { tab: 'processes' }) },
-                { key: 'quality-controls', label: tq.tab_controls ?? 'Kontroller', href: buildHref('/app/quality', { tab: 'controls' }) },
-                { key: 'quality-tools', label: tq.tab_tools ?? 'Verktøy', href: buildHref('/app/quality', { tab: 'tools' }) },
-            ];
-        }
-
-        if (activeMainArea === 'compliance') {
-            // Etterlevelse og revisjon: four work areas in the order the work runs — choose standards,
-            // see which requirements apply, assess them, audit them. Like Anbud's areas they sit in
-            // the header, one level under the rail's single entry, and follow the person into every
-            // page of the module. Free to move between, not a locked sequence.
-            return [
-                { key: 'compliance-library', label: tc.nav?.library ?? 'Kravbibliotek', href: '/app/compliance/library' },
-                { key: 'compliance-requirements', label: tc.nav?.requirements ?? 'Kravregister', href: '/app/compliance/requirements' },
-                { key: 'compliance-assessments', label: tc.nav?.assessments ?? 'Etterlevelsesvurdering', href: '/app/compliance/assessments' },
-                { key: 'compliance-audits', label: tc.nav?.audits ?? 'Revisjon', href: '/app/compliance/audits' },
-            ];
-        }
-
-        if (activeMainArea === 'environment') {
-            const items = [];
-            if (environmentHref) {
-                items.push({ key: 'env-settings', label: navigation.customer_environment ?? 'Kundemiljø', href: environmentHref });
-            }
-            if (user?.is_system_owner) {
-                items.push({ key: 'go-no-go-templates', label: translations.frontend?.go_no_go_templates_nav ?? 'Vurderingsmaler', href: '/app/go-no-go-templates' });
-            }
-            return items;
-        }
-
-        return [];
-    })();
-
-    const activeSecondaryKey = (() => {
-        if (activeMainArea === 'ai') {
-            if (/^\/app\/ai\/[^/]+\/instructions$/.test(pathname)) {
-                return 'ai-instructions';
-            }
-
-            if (pathname === '/app/ai') {
-                return 'ai-overview';
-            }
-
-            return 'ai-work';
-        }
-
-        if (activeMainArea === 'procurements') {
-            if (pathname.startsWith('/app/watch-profiles')) {
-                return 'watch-profiles';
-            }
-
-            if (noticeTab === 'alerts') {
-                return 'alerts';
-            }
-
-            return 'live';
-        }
-
-        if (activeMainArea === 'worklist') {
-            return noticeMode === 'history' ? 'history' : 'saved';
-        }
-
-        if (activeMainArea === 'environment') {
-            if (pathname.startsWith('/app/go-no-go-templates')) {
-                return 'go-no-go-templates';
-            }
-            return 'env-settings';
-        }
-
-        if (activeMainArea === 'quality') {
-            return `quality-${qualityTab}`;
-        }
-
-        if (activeMainArea === 'compliance') {
-            return complianceAreaKey(pathname, searchParams);
-        }
-
-        if (activeMainArea === 'wiki') {
-            if (pathname === '/app/wiki') {
-                return `wiki-${wikiTab}`;
-            }
-
-            if (pathname.startsWith('/app/wiki/graph')) {
-                return 'wiki-graph';
-            }
-
-            return 'wiki-pages';
-        }
-
-        return null;
-    })();
-
-    /**
-     * Two levels, decided by one fact: whether the active module has work areas of its own.
-     *
-     * Wiki has none, so its tabs *are* its module navigation — they sit in the header, directly
-     * below the rail's selection. That is the pattern, and Anbud now follows it: the header carries
-     * Kunngjøringer, Saksliste, Besvarelse and Konkurrenter, and the tabs belonging to whichever of
-     * those is open drop one level further down, onto the page. Kunngjøringer is where the
-     * difference is visible — Live søk, Varsler and Watch lists are a level inside it, not a peer
-     * of it, and the page is where that reads correctly.
-     *
-     * Both lists are the ones that already existed. Nothing here adds, removes or re-gates an item.
-     */
-    const hasModuleAreas = moduleSections.length > 0;
-
-    const moduleNavigation = hasModuleAreas ? moduleSections : secondaryNavigation;
-    const activeModuleNavigationKey = hasModuleAreas ? activeMainArea : activeSecondaryKey;
-
-    const pageNavigation = hasModuleAreas ? secondaryNavigation : [];
-    const activePageNavigationKey = hasModuleAreas ? activeSecondaryKey : null;
 
     useEffect(() => {
         if (!flash?.success) {
@@ -756,9 +388,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                             </div>
 
-                            {/* Search, follow-up, the bell and the user, in that order. Allowed to wrap on a
-                                phone: the group grew by two controls, and on a narrow screen the
-                                user button would otherwise be pushed off the right edge. */}
+                            {/* Search, the bell and the user, in that order. Oppfølging is not here: it is
+                                a place you work, so it is on the rail beside Hjem. Allowed to wrap on
+                                a phone, where the user button would otherwise be pushed off the
+                                right edge. */}
                             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:flex-nowrap lg:justify-end">
                                 {/* Spør Wiki reads the Wiki, so it goes where the Wiki goes: a
                                     person without wiki.view is not offered a search over a Wiki
@@ -782,35 +415,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     </svg>
                                 </Link>
                                 )}
-
-                                {/* The line that says the workflow ends here. Hidden where the
-                                    header wraps, because a divider between two stacked rows
-                                    separates nothing. */}
-                                <span
-                                    aria-hidden="true"
-                                    data-testid="header-follow-up-divider"
-                                    className="hidden h-6 w-px shrink-0 bg-slate-200 lg:block"
-                                />
-
-                                {/* The counterpart to the bell's explanation. These two are the
-                                    only things in the bar that could both be read as "something
-                                    needs me", so each says which it is: the bell holds what has
-                                    happened, this holds what is still to do. */}
-                                <ControlHint text={followUpNavigation.hint}>
-                                    <Link
-                                        href={followUpNavigation.href}
-                                        aria-current={activeMainArea === followUpNavigation.key ? 'page' : undefined}
-                                        data-testid="header-follow-up"
-                                        className={classNames(
-                                            'shrink-0 rounded-xl px-3 py-2 text-base font-medium transition',
-                                            activeMainArea === followUpNavigation.key
-                                                ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                                        )}
-                                    >
-                                        {followUpNavigation.label}
-                                    </Link>
-                                </ControlHint>
 
                                 <NotificationBell
                                     menuRef={notificationsMenuRef}
@@ -991,6 +595,13 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     </aside>
 
                     <main className="min-w-0 flex-1">
+                    {/* Where this page sits — above everything the page draws, its title included. */}
+                    <Breadcrumbs
+                        items={breadcrumbs}
+                        ariaLabel={navigation.breadcrumbs?.aria ?? 'Brødsmulesti'}
+                        showAllLabel={navigation.breadcrumbs?.show_all ?? 'Vis hele stien'}
+                    />
+
                     {/* The level inside an area — Live søk, Varsler and Watch lists inside
                         Kunngjøringer, and the equivalents inside Saksliste and Besvarelse. It sits
                         on the page rather than in the header because it belongs to one area, not

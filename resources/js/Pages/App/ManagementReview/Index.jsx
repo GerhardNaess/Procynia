@@ -54,7 +54,7 @@ export default function ManagementReviewIndex() {
     };
 
     return (
-        <CustomerAppLayout title={t.index_title ?? 'Ledelsens gjennomgang'} showPageTitle={false}>
+        <CustomerAppLayout title={t.index_title ?? 'Ledelsens gjennomgang'} showPageTitle={false} workView={creating ? (t.create ?? 'Ny gjennomgang') : null}>
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">

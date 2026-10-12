@@ -110,12 +110,8 @@ export default function RiskShow() {
     };
 
     return (
-        <CustomerAppLayout title={risk.title} showPageTitle={false}>
+        <CustomerAppLayout title={risk.title} showPageTitle={false} workView={editing ? (tr.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
-                <Link href="/app/risk" className="text-base font-semibold text-violet-700 hover:text-violet-900">
-                    ← {tr.back ?? 'Til risikoregisteret'}
-                </Link>
-
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{risk.title}</h1>

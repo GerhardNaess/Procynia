@@ -107,11 +107,11 @@ export default function ObjectivesIndex() {
     const filtered = Boolean(filters.search || filters.status || filters.area);
 
     return (
-        <CustomerAppLayout title={tr.index_title ?? 'Mål og KPI'} showPageTitle={false}>
+        <CustomerAppLayout title={tr.index_title ?? 'Mål og KPI'} showPageTitle={false} workView={creating ? (tr.create ?? 'Nytt mål') : null}>
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tr.index_heading ?? 'Mål'}</h1>
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tr.index_title ?? 'Mål og KPI'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
                             {tr.index_subtitle ?? 'Det virksomheten skal oppnå, samlet med ansvarlig, fagområde og måldato.'}
                         </p>

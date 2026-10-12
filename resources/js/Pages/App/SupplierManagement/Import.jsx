@@ -6,7 +6,6 @@ import FilePickerField from '../../../Components/App/FilePickerField';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import SupplierTabs from './SupplierTabs';
 import { supplierHelp } from './supplierHelp';
 import { categoryLabel, criticalityLabel, statusLabel as supplierStatusLabel } from './supplierManagement';
 import { formatLongDate } from '../Improvements/improvementStatus';
@@ -406,10 +405,8 @@ export default function SupplierImport() {
     return (
         <CustomerAppLayout title={ti.title ?? 'Importer leverandører'} showPageTitle={false}>
             <div className="space-y-6">
-                <SupplierTabs current="suppliers" tr={tr} />
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <p className="text-base font-semibold text-violet-700">{tr.module_name ?? 'Leverandøroppfølging'}</p>
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{ti.heading ?? 'Importer leverandører'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">{ti.intro}</p>
                     </div>

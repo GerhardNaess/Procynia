@@ -8,6 +8,8 @@ import { APP_MODULES, APP_WORKSPACES, activeModuleKey, activeWorkspaceKey, modul
 const here = dirname(fileURLToPath(import.meta.url));
 const sidebar = readFileSync(join(here, '..', 'Components', 'App', 'ModuleSidebar.jsx'), 'utf8');
 const layout = readFileSync(join(here, 'CustomerAppLayout.jsx'), 'utf8');
+// Where the area, the module and the workspace are resolved from the URL (appNavigation.js).
+const navigationSource = readFileSync(join(here, '..', 'Support', 'appNavigation.js'), 'utf8');
 const state = readFileSync(join(here, '..', 'Support', 'moduleSidebarState.js'), 'utf8');
 
 /**
@@ -20,20 +22,20 @@ describe('the rail shows the whole planned product structure', () => {
         assert.deepEqual(
             APP_MODULES.map((module) => module.key),
             [
-                'home', 'wiki', 'tenders', 'quality',
+                'home', 'follow_up', 'wiki', 'tenders', 'quality',
                 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review', 'contracts', 'hse', 'services',
                 'projects', 'competence', 'assets', 'reports', 'settings',
             ],
         );
     });
 
-    test('exactly ten are built, and they are the ten that have pages', () => {
+    test('exactly eleven are built, and they are the eleven that have pages', () => {
         const available = APP_MODULES.filter((module) => module.built);
 
-        assert.deepEqual(available.map((module) => module.key), ['home', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review']);
+        assert.deepEqual(available.map((module) => module.key), ['home', 'follow_up', 'wiki', 'tenders', 'quality', 'risk', 'objectives', 'improvements', 'compliance', 'suppliers', 'management_review']);
         assert.deepEqual(
             available.map((module) => module.href),
-            ['/app/dashboard', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance', '/app/supplier-management', '/app/management-reviews'],
+            ['/app/dashboard', '/app/info-center', '/app/wiki', '/app/notices', '/app/quality', '/app/risk', '/app/objectives', '/app/improvements', '/app/compliance', '/app/supplier-management', '/app/management-reviews'],
         );
     });
 
@@ -106,22 +108,34 @@ describe('the selected module follows the page', () => {
         assert.equal(activeModuleKey('quality'), 'quality');
     });
 
-    test('administration and follow-up are not modules, so nothing is selected there', () => {
-        for (const area of ['environment', 'billing', 'info-center']) {
+    test('administration is not a module, so nothing is selected there', () => {
+        for (const area of ['environment', 'billing']) {
             assert.equal(activeModuleKey(area), null, area);
         }
+    });
+
+    test('Oppfølging is its own entry on the rail, beside Hjem and outside Styring', () => {
+        const followUp = APP_MODULES.find((module) => module.key === 'follow_up');
+
+        assert.equal(activeModuleKey('info-center'), 'follow_up');
+        assert.equal(activeWorkspaceKey('info-center'), null);
+        assert.equal(followUp.href, '/app/info-center');
+        assert.equal(followUp.module, null, 'nothing to buy: every person who could open it from the top bar still can');
+        assert.equal(followUp.permission, undefined);
+        assert.equal(followUp.workspace, undefined);
+        assert.match(sidebar, /\n    follow_up: 'M/);
     });
 
     test('Hjem is its own page, not the bid cockpit it used to be', () => {
         // The rail still points at /app/dashboard — only what that path renders changed — and the
         // cockpit resolves to an Anbud area so clicking Hjem can never land inside Anbud again.
-        assert.match(layout, /if \(pathname === '\/app\/dashboard'\) \{\s*\n\s*return 'overview';/);
-        assert.match(layout, /if \(pathname === '\/app\/bid-status'\) \{\s*\n\s*return 'bid-status';/);
+        assert.match(navigationSource, /if \(pathname === '\/app\/dashboard'\) \{\s*\n\s*return 'overview';/);
+        assert.match(navigationSource, /if \(pathname === '\/app\/bid-status'\) \{\s*\n\s*return 'bid-status';/);
         assert.deepEqual(APP_MODULES.find((module) => module.key === 'home').areas, ['overview']);
     });
 
     test('/app/quality is what puts the rail on Kvalitet', () => {
-        assert.match(layout, /if \(pathname\.startsWith\('\/app\/quality'\)\) \{\s*\n\s*return 'quality';/);
+        assert.match(navigationSource, /if \(pathname\.startsWith\('\/app\/quality'\)\) \{\s*\n\s*return 'quality';/);
     });
 });
 
@@ -240,7 +254,7 @@ describe('Mål og KPI is on the rail once it has pages', () => {
     });
 
     test('/app/objectives is what puts the rail on Mål og KPI', () => {
-        assert.match(layout, /if \(pathname\.startsWith\('\/app\/objectives'\)\) \{\s*\n\s*return 'objectives';/);
+        assert.match(navigationSource, /if \(pathname\.startsWith\('\/app\/objectives'\)\) \{\s*\n\s*return 'objectives';/);
         assert.equal(activeModuleKey('objectives'), 'objectives');
     });
 });
@@ -266,7 +280,7 @@ describe('Avvik og forbedringer is on the rail once it has pages', () => {
     });
 
     test('/app/improvements is what puts the rail on Avvik og forbedringer', () => {
-        assert.match(layout, /if \(pathname\.startsWith\('\/app\/improvements'\)\) \{\s*\n\s*return 'improvements';/);
+        assert.match(navigationSource, /if \(pathname\.startsWith\('\/app\/improvements'\)\) \{\s*\n\s*return 'improvements';/);
         assert.equal(activeModuleKey('improvements'), 'improvements');
     });
 });
@@ -294,10 +308,10 @@ describe('Styring groups the governance modules, and only the ones the person ca
         assert.equal(APP_WORKSPACES[0].label({}), 'Styring');
     });
 
-    test('the top level reads Hjem, Wiki, Anbud, Styring', () => {
+    test('the top level reads Hjem, Oppfølging, Wiki, Anbud, Styring', () => {
         assert.deepEqual(
             topLevel(ALL_MODULES, ['wiki.view', 'quality.view', 'risk.view', 'objective.view', 'improvement.view']),
-            ['home', 'wiki', 'tenders', 'governance'],
+            ['home', 'follow_up', 'wiki', 'tenders', 'governance'],
         );
     });
 
@@ -324,7 +338,7 @@ describe('Styring groups the governance modules, and only the ones the person ca
 
     test('none of the four permissions shows no Styring at all', () => {
         assert.equal(governance(ALL_MODULES, ['wiki.view', 'wiki.review']), undefined);
-        assert.deepEqual(topLevel(ALL_MODULES, ['wiki.view']), ['home', 'wiki', 'tenders']);
+        assert.deepEqual(topLevel(ALL_MODULES, ['wiki.view']), ['home', 'follow_up', 'wiki', 'tenders']);
     });
 
     test('a module the customer has not ordered is neither under Styring nor anywhere else', () => {
@@ -392,15 +406,15 @@ describe('Styring groups the governance modules, and only the ones the person ca
     });
 
     test('the area comes from the path prefix, so detail, create and edit pages count too', () => {
-        assert.match(layout, /if \(pathname === '\/app\/governance'\) \{\s*\n\s*return 'governance';/);
+        assert.match(navigationSource, /if \(pathname === '\/app\/governance'\) \{\s*\n\s*return 'governance';/);
 
         for (const prefix of ['quality', 'risk', 'objectives', 'improvements', 'compliance', 'supplier-management']) {
-            assert.match(layout, new RegExp(`pathname\\.startsWith\\('/app/${prefix}'\\)`), prefix);
+            assert.match(navigationSource, new RegExp(`pathname\\.startsWith\\('/app/${prefix}'\\)`), prefix);
         }
 
-        assert.match(layout, /pathname\.startsWith\('\/app\/supplier-management'\)\) \{\s*\n\s*return 'supplier-management';/);
+        assert.match(navigationSource, /pathname\.startsWith\('\/app\/supplier-management'\)\) \{\s*\n\s*return 'supplier-management';/);
 
-        assert.match(layout, /const activeWorkspace = activeWorkspaceKey\(activeMainArea\);/);
+        assert.match(navigationSource, /const workspaceKey = activeWorkspaceKey\(area\);/);
     });
 
     test('one current page: the module carries aria-current, Styring is marked as the place you are in', () => {

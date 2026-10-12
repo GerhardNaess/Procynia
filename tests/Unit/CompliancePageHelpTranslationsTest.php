@@ -186,7 +186,7 @@ class CompliancePageHelpTranslationsTest extends TestCase
             $help = $this->compliance($locale)['help'];
             $this->assertNotSame('', trim((string) ($help['purpose_heading'] ?? '')));
 
-            foreach (['library', 'framework', 'index', 'requirement', 'assessments', 'audit_index'] as $page) {
+            foreach (['library', 'framework', 'index', 'requirement', 'assessments', 'audit_index', 'audit'] as $page) {
                 $steps = $help[$page]['sections'][0];
                 $this->assertSame($locale === 'no' ? 'Slik gjør du det' : 'How to do it', $steps['title'], "lang/{$locale}: {$page} does not start with the steps.");
 
@@ -211,7 +211,8 @@ class CompliancePageHelpTranslationsTest extends TestCase
             $labels = [
                 'library' => [$library['open_framework'], $library['activate'], $library['open_register'], $library['open_assessments'], $library['activated'], $library['not_activated']],
                 'framework' => [$library['show_details'], $library['expand_all'], $library['collapse_all'], $library['search_label'], $library['filter_label'], $library['activate'], $library['open_requirement'], $library['open_register'], $library['open_assessments']],
-                'index' => [$strings['source_filter'], $strings['search'], $strings['applicability_filter'], $library['applicability']['register_filter']['not_assessed'], $strings['to_assessments'], $strings['create'], $strings['sources']['manage'], $library['from_library_cta']],
+                'index' => [$strings['source_filter'], $strings['search'], $strings['applicability_filter'], $library['applicability']['register_filter']['not_assessed'], $strings['to_assessments'], $strings['create'], $strings['sources']['manage'], $library['from_library_cta'],
+                    $strings['register_view']['grouped'], $strings['register_view']['list'], $strings['search_label'], $strings['status_filter'], $strings['reset'], $strings['back']],
                 'requirement' => [
                     $strings['text_heading'], $library['from_library_heading'], $library['modules_heading'],
                     $library['applicability']['heading'], $library['applicability']['change'], $library['applicability']['submit'], $library['applicability']['field_rationale'],
@@ -229,7 +230,18 @@ class CompliancePageHelpTranslationsTest extends TestCase
                     $page['stats']['assessable'], $page['stats']['assessed'], $page['stats']['compliant'], $page['stats']['partially_compliant'], $page['stats']['non_compliant'],
                     $page['assess'], $strings['assessment']['field_result'], $strings['assessment']['field_rationale'], $strings['assessment']['submit'], $strings['back_to_assessments'],
                 ],
-                'audit_index' => [$audits['create'], $audits['requirements_add'], $audits['requirements_from_source'], $audits['start'], $audits['findings']['create'], $audits['findings']['hand_off'], $audits['complete']],
+                'audit_index' => $auditSteps = [
+                    $audits['create'], $audits['field_title'], $audits['field_type'], $audits['field_responsible'], $audits['field_auditor'], $audits['field_start'], $audits['field_end'],
+                    $audits['field_purpose'], $audits['field_scope'],
+                    $audits['create_sources_legend'], $audits['requirements_from_source'], $audits['create_pick_legend'], $audits['save'], $audits['requirements_add'], $audits['phases']['planning'],
+                    $audits['start'],
+                    $audits['phases']['execution'], $audits['checks']['create'], $audits['checks']['field_title'], $audits['checks']['field_observation'], $audits['checks']['field_evidence'], $audits['checks']['field_requirements'], $audits['checks']['save'],
+                    $audits['checks']['new_finding'], $audits['findings']['create'],
+                    $audits['complete'], $audits['phases']['report'], $audits['field_conclusion'],
+                    $audits['findings']['hand_off'],
+                ],
+                // Revisjon: the same eight steps, plan to follow-up, on the audit's own page.
+                'audit' => $auditSteps,
             ];
 
             foreach ($labels as $page => $expected) {

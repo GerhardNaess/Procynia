@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Et revisjonsfunn: what a revisjon found — an avvik, an observasjon or a forbedringsmulighet —
- * optionally about a requirement, a Kvalitet process and a Kvalitet control.
+ * optionally about a requirement, a Kvalitet process and a Kvalitet control, and optionally from one
+ * of the audit's kontrollhandlinger.
  *
  * An observation, not a follow-up system: no status, severity, frist, owner or tiltak. It is
  * followed up by handing it off explicitly to one ImprovementCase in Avvik og forbedringer
@@ -46,6 +47,7 @@ class ComplianceAuditFinding extends Model
     protected $fillable = [
         'customer_id',
         'audit_id',
+        'check_id',
         'finding_type',
         'title',
         'description',
@@ -100,6 +102,12 @@ class ComplianceAuditFinding extends Model
     public function audit(): BelongsTo
     {
         return $this->belongsTo(ComplianceAudit::class, 'audit_id');
+    }
+
+    /** The kontrollhandling it came from, if any — always one of the same audit. */
+    public function check(): BelongsTo
+    {
+        return $this->belongsTo(ComplianceAuditCheck::class, 'check_id');
     }
 
     public function requirement(): BelongsTo

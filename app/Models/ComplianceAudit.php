@@ -9,8 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * En revisjon i Etterlevelse og revisjon: a planned review of whether the virksomhet complies —
- * internal or external — with a responsible person, a planned period, an authoritative scope
- * description and, once it is done, a conclusion.
+ * internal or external — with a responsible person, a planned period, a purpose (Formål: why) and
+ * an omfang (what it covers: free text, the requirements in scope, or both), the kontrollhandlinger
+ * that document what was examined and, once it is done, a conclusion.
  *
  * Status is not a form field and not mass assignable: every audit starts planned and moves only
  * through ComplianceAuditLifecycleService (Start, Fullfør, Avbryt, Gjenåpne). How it got there is
@@ -56,6 +57,7 @@ class ComplianceAudit extends Model
     protected $fillable = [
         'customer_id',
         'title',
+        'purpose',
         'audit_type',
         'responsible_user_id',
         'auditor_name',
@@ -102,8 +104,8 @@ class ComplianceAudit extends Model
     public function editableFields(): array
     {
         return match ($this->status) {
-            self::STATUS_PLANNED => ['title', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'],
-            self::STATUS_IN_PROGRESS => ['title', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description', 'conclusion'],
+            self::STATUS_PLANNED => ['title', 'purpose', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'],
+            self::STATUS_IN_PROGRESS => ['title', 'purpose', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description', 'conclusion'],
             default => [],
         };
     }
@@ -129,7 +131,10 @@ class ComplianceAudit extends Model
         return $this->status === self::STATUS_PLANNED && ! $this->statusChanges()->exists();
     }
 
-    /** Findings are recorded, changed and deleted while the audit is under way, and only then. */
+    /**
+     * Findings and kontrollhandlinger are recorded, changed and deleted while the audit is under way,
+     * and only then.
+     */
     public function canRecordFindings(): bool
     {
         return $this->status === self::STATUS_IN_PROGRESS;
@@ -164,6 +169,12 @@ class ComplianceAudit extends Model
     public function findings(): HasMany
     {
         return $this->hasMany(ComplianceAuditFinding::class, 'audit_id')->orderBy('id');
+    }
+
+    /** In the order they were recorded. */
+    public function checks(): HasMany
+    {
+        return $this->hasMany(ComplianceAuditCheck::class, 'audit_id')->orderBy('id');
     }
 
     /** Newest first. */

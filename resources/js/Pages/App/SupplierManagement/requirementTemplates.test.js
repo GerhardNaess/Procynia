@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { requirementFormData, requirementKeepsRule, templatePreview } from './controlRequirements.js';
+import { requirementFormData, requirementKeepsRule, templateItemUse, templatePreview } from './controlRequirements.js';
 
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
@@ -38,8 +38,10 @@ describe('Kravmaler (supplier-assurance-v2-plan §16, §22.2)', () => {
         const page = source('./RequirementTemplates.jsx');
         assert.match(page, /\{item\.recommended_level && \(/);
         assert.match(page, /t\.recommended_level/);
-        // One list for all nine templates: stacked on a phone, three across from lg.
-        assert.match(page, /<ul className="mt-4 grid gap-3 lg:grid-cols-3">/);
+        // One list for all nine templates: stacked on a phone, three across from lg; an open one takes
+        // the whole row, and the closed ones fill the rows around it.
+        assert.match(page, /<ul className="mt-4 grid gap-3 lg:grid-flow-row-dense lg:grid-cols-3">/);
+        assert.match(page, /shown\.includes\(row\.key\) \? .lg:col-span-3. : ..\}/);
     });
 
     test('a template rule the form cannot write is kept on edit, and never offered for a new or own requirement', () => {
@@ -54,15 +56,50 @@ describe('Kravmaler (supplier-assurance-v2-plan §16, §22.2)', () => {
         assert.deepEqual(requirementFormData({ id: 9, rule: { rule_mode: 'conditions', conditions: ['processor'], criticality_scope: '' } }).conditions, ['processor']);
     });
 
-    test('only supplier.assure is offered the action, the confirmation says nothing is changed or approved, and no key is shown', () => {
+    test('only supplier.assure is offered the action, the confirmation says nothing is changed or approved, and no template key is shown', () => {
         const page = source('./RequirementTemplates.jsx');
 
-        assert.match(page, /\{canManage && \(\s*<div className="mt-auto pt-3">/);
+        assert.match(page, /\{canManage && \(\s*<button type="button" onClick=\{\(\) => setOpen\(row\.key\)\}/);
         assert.match(page, /isOpen=\{canManage && template !== null\}/);
         assert.match(page, /t\.dialog_keeps/);
         assert.match(page, /\/app\/supplier-management\/control-requirements\/templates\/\$\{template\.key\}/);
-        // The person reads names and titles — never a template or item key, a rule or a score.
-        assert.doesNotMatch(page, />\s*\{(item|row|template)\.(key|version)\}|applies_when|predicate|score|%/);
+        // The person reads names, titles and the item's code (S1, P1 …) — never a template key, a
+        // version, a rule or a score. The code is shown in the read-only list only.
+        assert.doesNotMatch(page, />\s*\{(row|template)\.(key|version)\}|>\s*\{item\.version\}|applies_when|predicate|score|%/);
+        assert.equal((page.match(/>\{item\.key\}</g) ?? []).length, 1);
+        assert.match(page, /\{browse && <span className="font-semibold text-slate-600" data-testid="template-item-code">\{item\.key\}<\/span>\}/);
+    });
+
+    test('«Vis kravene» lists a template\'s items for everyone who reads Kontrollkrav, and changes nothing', () => {
+        const page = source('./RequirementTemplates.jsx');
+        const toggle = page.slice(page.indexOf('data-testid="requirement-template-toggle"') - 400, page.indexOf('data-testid="requirement-template-toggle"'));
+
+        // Not behind canManage, and a plain toggle: no request is sent to look.
+        assert.doesNotMatch(toggle, /canManage/);
+        assert.match(page, /onClick=\{\(\) => toggleShown\(row\.key\)\}/);
+        assert.match(page, /aria-expanded=\{shown\.includes\(row\.key\)\}/);
+        assert.match(page, /<ItemList items=\{row\.items\} tr=\{tr\} browse \/>/);
+        // The count on the button is the list it opens.
+        assert.match(page, /t\.show_items \?\? 'Vis kravene \(:count\)', \{ count: row\.items\.length \}/);
+        assert.equal((page.match(/router\.post\(/g) ?? []).length, 1, 'applying is the only request');
+    });
+
+    test('whether a template item is in use follows the server\'s match, retired included', () => {
+        assert.equal(templateItemUse({ key: 'P1', existing: null }), 'not_in_use');
+        assert.equal(templateItemUse({ key: 'P1', existing: { title: 'DBA', status: 'active' } }), 'in_use');
+        assert.equal(templateItemUse({ key: 'S4', existing: { title: 'Varsling', status: 'retired' } }), 'in_use_retired');
+        assert.equal(templateItemUse(null), 'not_in_use');
+    });
+
+    test('Virksomhetens kontrollkrav come before the templates, and a reader is told once why nothing can be changed', () => {
+        const page = source('./ControlRequirements.jsx');
+
+        assert.ok(page.indexOf('data-testid="control-register"') < page.indexOf('<RequirementTemplates '), 'the register is the first section');
+        assert.match(page, /k\.register_heading \?\? 'Virksomhetens kontrollkrav'/);
+        assert.match(page, /\{! canManage && \(\s*<p [^>]*data-testid="control-read-only">/);
+        assert.equal((page.match(/k\.read_only/g) ?? []).length, 1);
+        // The empty register says how to start — by what the person may do.
+        assert.match(page, /\{canManage \? k\.none_start_manage : k\.none_start_read\}/);
     });
 
     test('until the content review is signed, the section and the confirmation say the templates are not quality-assured', () => {

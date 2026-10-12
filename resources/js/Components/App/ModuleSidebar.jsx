@@ -16,6 +16,8 @@ function classNames(...values) {
  */
 const MODULE_ICONS = {
     home: 'M3.5 8.5 10 3.5l6.5 5v7a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-7Z M8 16.5v-4.5h4v4.5',
+    // Oppfølging: an inbox tray — what is waiting to be dealt with.
+    follow_up: 'M3 11.5 5.5 4.5h9l2.5 7v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4Z M3 11.5h4l1 2h4l1-2h4',
     tenders: 'M5.5 2.5h6l3.5 3.5v11a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z M11 2.5V6h3.5 M7.5 10.5h5 M7.5 13.5h5',
     // Styring: a grid of areas — the workspace that holds several modules, not any one of them.
     governance: 'M4.5 3.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z M12.5 3.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z M4.5 11.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z M12.5 11.5h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z',

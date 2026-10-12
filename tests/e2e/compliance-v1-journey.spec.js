@@ -154,6 +154,8 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await page.goto('/app/compliance/audits');
     await expect(page.getByTestId('compliance-audit-attention-item').filter({ hasText: auditTitle })).toContainText('Avvik uten oppfølging');
     await page.goto(auditUrl);
+    // A completed audit opens on Rapport og oppfølging; the findings are under Gjennomføring.
+    await page.getByRole('tab', { name: /Gjennomføring/ }).click();
 
     // 13. Følg opp i Avvik og forbedringer.
     const card = page.getByTestId('compliance-finding');
@@ -174,6 +176,7 @@ test('Krav to vurdering to Kvalitet to revisjon to funn to Avvik og forbedringer
     await expect(page.getByTestId('compliance-audit-attention-item').filter({ hasText: auditTitle })).toHaveCount(0);
     await expectReadable(page, '04-register-after-handoff');
     await page.goto(auditUrl);
+    await page.getByRole('tab', { name: /Gjennomføring/ }).click();
 
     // 15–16. The case, and where it came from.
     await page.getByTestId('compliance-finding-case-link').click();

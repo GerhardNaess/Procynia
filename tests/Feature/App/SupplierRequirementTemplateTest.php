@@ -139,6 +139,61 @@ class SupplierRequirementTemplateTest extends TestCase
         $this->assertSame(18, SupplierControlRequirement::query()->where('customer_id', $customer->id)->count());
     }
 
+    /**
+     * «Vis kravene» on Kontrollkrav: a reader — supplier.view only — gets every template's items in
+     * the page, as the card lists them: code, title, theme, level and whether the customer has it,
+     * retired included. Reading writes nothing, the counts are the lists, another customer's
+     * catalogue never shows through, and the reader still changes nothing while the assurer does.
+     */
+    public function test_a_reader_sees_what_each_template_contains_without_supplier_assure_and_reading_changes_nothing(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        ['customer' => $foreignCustomer] = $this->context('grc');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $reader = $this->supplierUser($customer, []);
+        $page = fn (User $user): array => $this->actingAs($user)->get(self::CATALOGUE)->assertOk()->viewData('page')['props'];
+
+        // Another customer has the whole IT/SaaS template; nothing of it reaches this customer.
+        $this->actingAs($this->supplierUser($foreignCustomer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]))->post(self::CATALOGUE.'/templates/it_saas')->assertSessionHas('success');
+
+        $props = $page($reader);
+        $this->assertSame(['can_manage' => false], array_intersect_key($props['permissions'], ['can_manage' => true]));
+        $this->assertNull($props['form']);
+        $itSaas = collect($props['templates'])->firstWhere('key', 'it_saas');
+        $this->assertSame(['S1', 'S2', 'S4', 'S5', 'S6', 'S8', 'P1', 'P2', 'P3', 'P4', 'C1'], array_column($itSaas['items'], 'key'));
+        $this->assertSame(
+            ['key' => 'S2', 'title' => 'Tilgangsstyring og MFA', 'theme' => 'information_security', 'level' => 'mandatory', 'recommended_level' => null, 'existing' => null],
+            collect($itSaas['items'])->firstWhere('key', 'S2'),
+        );
+        // The count on the card and the button is the list it opens, for every template.
+        foreach ($props['templates'] as $template) {
+            $this->assertSame(count($template['items']), $template['to_create_count'], $template['key']);
+            $this->assertSame(count(array_filter($template['items'], fn (array $item): bool => $item['level'] === 'mandatory')), $template['mandatory_count'], $template['key']);
+        }
+        $this->assertSame(0, SupplierControlRequirement::query()->where('customer_id', $customer->id)->count(), 'reading the templates writes nothing');
+
+        // The reader cannot take a template into use, nor create or change a requirement.
+        $this->actingAs($reader)->post(self::CATALOGUE.'/templates/data_processor')->assertForbidden();
+        $this->actingAs($reader)->post(self::CATALOGUE, ['title' => 'Eget', 'theme' => 'privacy', 'level' => 'standard', 'control_point' => 'ongoing', 'rule_mode' => 'all'])->assertForbidden();
+        $this->assertSame(0, SupplierControlRequirement::query()->where('customer_id', $customer->id)->count());
+
+        // The assurer still can; what is in use then reads as in use for the reader, retired included.
+        $this->actingAs($assurer)->post(self::CATALOGUE.'/templates/data_processor')->assertSessionHas('success');
+        $this->actingAs($assurer)->post(self::CATALOGUE, ['title' => 'Eget krav', 'theme' => 'privacy', 'level' => 'standard', 'control_point' => 'ongoing', 'rule_mode' => 'all'])->assertSessionHasNoErrors();
+        $own = SupplierControlRequirement::query()->where('customer_id', $customer->id)->where('title', 'Eget krav')->sole();
+        $this->actingAs($reader)->patch(self::CATALOGUE."/{$own->id}", ['title' => 'Endret', 'theme' => 'privacy', 'level' => 'standard', 'control_point' => 'ongoing', 'rule_mode' => 'all'])->assertForbidden();
+        $this->actingAs($assurer)->patch(self::CATALOGUE."/{$own->id}", ['title' => 'Endret', 'theme' => 'privacy', 'level' => 'standard', 'control_point' => 'ongoing', 'rule_mode' => 'all'])->assertSessionHasNoErrors();
+        $this->assertSame('Endret', $own->fresh()->title);
+        SupplierControlRequirement::query()->where('customer_id', $customer->id)->where('template_item_key', 'S4')->update(['status' => SupplierControlRequirement::STATUS_RETIRED]);
+
+        $items = collect(collect($page($reader)['templates'])->firstWhere('key', 'it_saas')['items'])->keyBy('key');
+        $this->assertSame(['title' => 'Databehandleravtale', 'status' => 'active'], $items['P1']['existing']);
+        $this->assertSame('retired', $items['S4']['existing']['status']);
+        $this->assertNull($items['S1']['existing']);
+        $this->assertSame(9, SupplierControlRequirement::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(11, SupplierControlRequirement::query()->where('customer_id', $foreignCustomer->id)->count());
+    }
+
     public function test_a_requirement_from_a_template_is_the_customers_own_and_runs_through_the_control_chain_without_compliance(): void
     {
         // Leverandøroppfølging alone: no Etterlevelse og revisjon.

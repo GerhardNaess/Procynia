@@ -225,11 +225,6 @@ export default function GoNoGoTemplatesEdit({ template, criteria }) {
             )}
 
             <div className="space-y-6">
-                {/* Back */}
-                <a href="/app/go-no-go-templates" className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-900">
-                    ← Tilbake til maloversikt
-                </a>
-
                 {/* Flash */}
                 {(flash.success || flash.error) && (
                     <div className={classNames(

@@ -118,10 +118,8 @@ export default function ManagementReviewShow() {
     const ready = Boolean(readiness?.ready);
 
     return (
-        <CustomerAppLayout title={review.title} showPageTitle={false}>
+        <CustomerAppLayout title={review.title} showPageTitle={false} workView={panel === 'edit' ? (t.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
-                <Link href="/app/management-reviews" className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900">← {t.back ?? 'Til ledelsens gjennomgang'}</Link>
-
                 <header className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                         <div className="min-w-0 space-y-3">

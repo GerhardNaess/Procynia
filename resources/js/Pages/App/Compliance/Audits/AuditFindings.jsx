@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
@@ -61,9 +61,9 @@ function ContextSelect({ id, label, value, onChange, options, current, error, la
  * frist, owner or tiltak — a finding is an observation; follow-up happens in Avvik og forbedringer.
  * The Kvalitet fields are drawn only when the server sent Kvalitet options.
  */
-function FindingForm({ auditId, finding = null, options, types, onDone, ta }) {
+function FindingForm({ auditId, finding = null, draft = null, options, types, onDone, ta }) {
     const tf = ta.findings ?? {};
-    const form = useForm(findingFormData(finding));
+    const form = useForm(findingFormData(finding, draft));
     const idPrefix = finding ? `compliance-finding-${finding.id}` : 'compliance-finding-new';
     const hasQuality = Array.isArray(options?.processes) && 'quality_process_id' in form.data;
 
@@ -138,6 +138,19 @@ function FindingForm({ auditId, finding = null, options, types, onDone, ta }) {
 
             <div className="space-y-4">
                 <p className="text-base text-slate-600">{tf.context_hint ?? 'Valgfritt. Kobler funnet til kravet, prosessen eller kontrollen det gjelder.'}</p>
+                {(options?.checks ?? []).length > 0 && (
+                    <ContextSelect
+                        id={`${idPrefix}-check`}
+                        label={tf.field_check ?? 'Kontrollhandling'}
+                        value={form.data.check_id}
+                        onChange={(value) => form.setData('check_id', value)}
+                        options={options.checks}
+                        current={finding?.check ?? null}
+                        error={form.errors.check_id}
+                        labelOf={(check) => check.title}
+                        ta={ta}
+                    />
+                )}
                 <ContextSelect
                     id={`${idPrefix}-requirement`}
                     label={tf.field_requirement ?? 'Krav'}
@@ -348,8 +361,16 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
             <h3 className="break-words text-lg font-semibold text-slate-950">{finding.title}</h3>
             <p className="whitespace-pre-line break-words text-base leading-7 text-slate-800">{finding.description}</p>
 
-            {(finding.requirement || finding.quality_process || finding.control) && (
-                <dl className="grid gap-3 sm:grid-cols-3" data-testid="compliance-finding-context">
+            {(finding.check || finding.requirement || finding.quality_process || finding.control) && (
+                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="compliance-finding-context">
+                    {finding.check && (
+                        <div className="min-w-0">
+                            <dt className={TERM}>{tf.check_label ?? 'Fra kontrollhandling'}</dt>
+                            <dd className="mt-1 break-words text-base" data-testid="compliance-finding-check">
+                                <a href={`#check-${finding.check.id}`} className="font-semibold text-violet-700 hover:text-violet-900">{finding.check.title}</a>
+                            </dd>
+                        </div>
+                    )}
                     {finding.requirement && (
                         <div className="min-w-0">
                             <dt className={TERM}>{tf.field_requirement ?? 'Krav'}</dt>
@@ -414,12 +435,22 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
  * Funn: what the audit found, in the order it was recorded. Nytt funn while the audit is in progress
  * and the server allows it; afterwards the findings are read-only, and those not yet handed off can
  * still be followed up in Avvik og forbedringer. One form or hand-off open at a time.
+ *
+ * `draft` is «Registrer funn» on a kontrollhandling: it opens Nytt funn with that check chosen. Each
+ * click is a new draft (its key), so the form starts over.
  */
-export default function AuditFindings({ audit, findings = [], options = null, types = [], canRecord = false, handoff = null, ta }) {
+export default function AuditFindings({ audit, findings = [], options = null, types = [], canRecord = false, handoff = null, draft = null, ta }) {
     const tf = ta.findings ?? {};
     // 'create', 'edit-<id>', 'handoff-<id>' or none.
     const [panel, setPanel] = useState(null);
     const notice = findingsNotice(audit.status, ta);
+
+    useEffect(() => {
+        if (draft && canRecord) {
+            setPanel('create');
+            document.getElementById('compliance-audit-findings-heading')?.scrollIntoView({ block: 'start' });
+        }
+    }, [draft?.key]);
 
     return (
         <section className={CARD} aria-labelledby="compliance-audit-findings-heading" data-testid="compliance-audit-findings">
@@ -436,7 +467,7 @@ export default function AuditFindings({ audit, findings = [], options = null, ty
             {notice && <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" data-testid="compliance-findings-locked">{notice}</p>}
 
             {canRecord && panel === 'create' && (
-                <FindingForm auditId={audit.id} options={options} types={types} onDone={() => setPanel(null)} ta={ta} />
+                <FindingForm key={draft?.key ?? 'new'} auditId={audit.id} draft={draft} options={options} types={types} onDone={() => setPanel(null)} ta={ta} />
             )}
 
             {findings.length === 0 ? (

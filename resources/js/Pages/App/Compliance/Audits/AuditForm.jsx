@@ -7,15 +7,19 @@ const LABEL = 'block text-base font-semibold text-slate-700';
 const HINT = 'mt-1 text-base text-slate-600';
 const ERROR = 'mt-1 text-base text-rose-700';
 
-const ALL_FIELDS = ['title', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'];
+const ALL_FIELDS = ['title', 'purpose', 'audit_type', 'responsible_user_id', 'auditor_name', 'planned_start_date', 'planned_end_date', 'scope_description'];
 
 /**
  * The fields of an audit, shared by Ny revisjon and Rediger. Only the fields the server says the
  * audit's status leaves open are drawn (`fields`); the server reads nothing else either. There is
  * no status field — an audit moves only through Start, Fullfør, Avbryt and Gjenåpne — and the
  * conclusion is offered only once the audit is under way.
+ *
+ * Formål says why, Omfang what the audit covers; both are optional text, since the omfang can be the
+ * requirements in scope alone. Ny revisjon puts its requirement selection (`children`) between the
+ * omfang and the buttons, so planning is one form.
  */
-export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELDS, types = [], responsibleOptions = [], ta }) {
+export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELDS, types = [], responsibleOptions = [], ta, children = null }) {
     const has = (field) => fields.includes(field);
 
     return (
@@ -141,15 +145,29 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                 </div>
             )}
 
+            {has('purpose') && (
+                <div>
+                    <label htmlFor="compliance-audit-purpose" className={LABEL}>{ta.field_purpose ?? 'Formål'}</label>
+                    <p id="compliance-audit-purpose-hint" className={HINT}>{ta.field_purpose_hint ?? 'Valgfritt. Hvorfor revisjonen gjennomføres.'}</p>
+                    <textarea
+                        id="compliance-audit-purpose"
+                        rows={3}
+                        aria-describedby="compliance-audit-purpose-hint"
+                        value={form.data.purpose}
+                        onChange={(event) => form.setData('purpose', event.target.value)}
+                        className={`mt-1 ${INPUT}`}
+                    />
+                    {form.errors.purpose && <p className={ERROR}>{form.errors.purpose}</p>}
+                </div>
+            )}
+
             {has('scope_description') && (
                 <div>
-                    <label htmlFor="compliance-audit-scope" className={LABEL}>{ta.field_scope ?? 'Scope'}<RequiredMark /></label>
-                    <p id="compliance-audit-scope-hint" className={HINT}>{ta.field_scope_hint ?? 'Hva revisjonen omfatter og avgrenses til.'}</p>
+                    <label htmlFor="compliance-audit-scope" className={LABEL}>{ta.field_scope ?? 'Omfang'}</label>
+                    <p id="compliance-audit-scope-hint" className={HINT}>{ta.field_scope_hint ?? 'Valgfritt. Hva revisjonen omfatter. Beskriv med tekst, velg krav, eller begge deler.'}</p>
                     <textarea
                         id="compliance-audit-scope"
                         rows={4}
-                        required
-                        aria-required="true"
                         aria-describedby="compliance-audit-scope-hint"
                         value={form.data.scope_description}
                         onChange={(event) => form.setData('scope_description', event.target.value)}
@@ -174,6 +192,8 @@ export default function AuditForm({ form, onSubmit, onCancel, fields = ALL_FIELD
                     {form.errors.conclusion && <p className={ERROR}>{form.errors.conclusion}</p>}
                 </div>
             )}
+
+            {children}
 
             <p className="text-base text-slate-600">{ta.required_note ?? 'Felt merket med * må fylles ut.'}</p>
 

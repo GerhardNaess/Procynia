@@ -131,7 +131,11 @@ export default function ImprovementsIndex() {
     const count = visibleCount === 1 ? (tr.count_one ?? '1 sak') : (tr.count ?? ':count saker').replace(':count', String(visibleCount));
 
     return (
-        <CustomerAppLayout title={tr.index_title ?? 'Avvik og forbedringer'} showPageTitle={false}>
+        <CustomerAppLayout
+            title={tr.index_title ?? 'Avvik og forbedringer'}
+            showPageTitle={false}
+            workView={creating ? (form.data.type === 'improvement' ? (tr.create_improvement ?? 'Registrer forbedring') : (tr.create_deviation ?? 'Registrer avvik')) : null}
+        >
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">

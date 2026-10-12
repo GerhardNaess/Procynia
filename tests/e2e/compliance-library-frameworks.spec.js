@@ -137,7 +137,10 @@ test('Kravbibliotek: ISO/IEC 27001 with Annex A control selection, and ISO 14001
     await card27001.getByRole('link', { name: 'Åpne i kravregisteret' }).click();
     await page.waitForURL(/\/app\/compliance\/requirements\?source=\d+/);
     await expect(page.locator('#compliance-source-filter option:checked')).toHaveText(/^ISO\/IEC 27001/);
-    await expect(page.locator('tbody tr')).toHaveCount(123);
+    // The register opens in Gruppert, narrowed to the one standard with all its requirements counted.
+    await expect(page.locator('[data-testid^="compliance-register-source-"]')).toHaveCount(1);
+    await expect(page.getByTestId('compliance-source-group-label')).toHaveText(/^ISO\/IEC 27001/);
+    await expect(page.getByTestId('compliance-source-group-count')).toHaveText('123 krav');
 
     // ISO 14001 beside it, activated from its card — a double click activates it once.
     await page.goto('/app/compliance/library');
@@ -150,7 +153,10 @@ test('Kravbibliotek: ISO/IEC 27001 with Annex A control selection, and ISO 14001
     await card14001.getByRole('link', { name: 'Åpne i kravregisteret' }).click();
     await page.waitForURL(/\/app\/compliance\/requirements\?source=\d+/);
     await expect(page.locator('#compliance-source-filter option:checked')).toHaveText(/^ISO 14001/);
-    await expect(page.locator('tbody tr')).toHaveCount(35);
+    // The register opens in Gruppert, narrowed to the one standard with all its requirements counted.
+    await expect(page.locator('[data-testid^="compliance-register-source-"]')).toHaveCount(1);
+    await expect(page.getByTestId('compliance-source-group-label')).toHaveText(/^ISO 14001/);
+    await expect(page.getByTestId('compliance-source-group-count')).toHaveText('35 krav');
 
     // Seven chapters, no Annex A, one overview.
     await page.goto(`/app/compliance/library/${iso14001}`);

@@ -9,6 +9,7 @@ import ComplianceAttention, { AttentionReasons } from '../Requirements/Complianc
 import { complianceHelp } from '../Requirements/complianceHelp';
 import { countLabel } from '../Requirements/complianceRequirement';
 import AuditForm from './AuditForm';
+import { PlanningRequirementSelection } from './AuditScope';
 import { AUDIT_STATUS_TONES, auditStatusLabel, auditTypeLabel, plannedPeriodLabel } from './complianceAudit';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -22,8 +23,9 @@ function Responsible({ item, ta }) {
 /**
  * Etterlevelse og revisjon → Revisjoner: the register. Everything here is already scoped by the
  * server: the rows, the count, the search and the filters are the user's own customer's, and none at
- * all without compliance.view. Ny revisjon is offered only with compliance.audit; the requirements
- * and processes in scope are added on the audit's own page once it exists. «Trenger oppmerksomhet»
+ * all without compliance.view. Ny revisjon is offered only with compliance.audit, and plans the
+ * audit in one form: purpose, omfang and the requirements (kravkilder and single requirements);
+ * processes are added on the audit's own page. «Trenger oppmerksomhet»
  * lists the audits ComplianceAuditAttentionService flagged among those the user can see.
  */
 export default function ComplianceAuditsIndex() {
@@ -37,6 +39,7 @@ export default function ComplianceAuditsIndex() {
         types = [],
         permissions = {},
         responsible_options: responsibleOptions = [],
+        requirement_options: requirementOptions = null,
     } = usePage().props;
 
     const tr = translations?.compliance ?? {};
@@ -51,12 +54,15 @@ export default function ComplianceAuditsIndex() {
 
     const form = useForm({
         title: '',
+        purpose: '',
         audit_type: 'internal',
         responsible_user_id: '',
         auditor_name: '',
         planned_start_date: '',
         planned_end_date: '',
         scope_description: '',
+        requirement_ids: [],
+        source_ids: [],
     });
 
     const submitSearch = (event) => {
@@ -85,12 +91,11 @@ export default function ComplianceAuditsIndex() {
     const filtered = Boolean(filters.search || filters.status || filters.type || filters.attention);
 
     return (
-        <CustomerAppLayout title={ta.index_title ?? 'Revisjoner'} showPageTitle={false}>
+        <CustomerAppLayout title={ta.index_title ?? 'Revisjoner'} showPageTitle={false} workView={creating ? (ta.create ?? 'Ny revisjon') : null}>
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <p className="text-base font-semibold text-violet-700">{tr.module_name ?? 'Etterlevelse og revisjon'}</p>
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{ta.index_heading ?? 'Revisjoner'}</h1>
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.module_name ?? 'Etterlevelse og revisjon'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
                             {ta.index_subtitle ?? 'Planlegg og gjennomfør revisjoner av om virksomheten etterlever kravene – med ansvarlig, scope og konklusjon på ett sted.'}
                         </p>
@@ -108,7 +113,7 @@ export default function ComplianceAuditsIndex() {
                 {creating && (
                     <section className={CARD} aria-labelledby="compliance-audit-create-heading">
                         <h2 id="compliance-audit-create-heading" className="text-xl font-semibold text-slate-950">{ta.create_heading ?? 'Ny revisjon'}</h2>
-                        <p className="mb-4 mt-1 text-base text-slate-600">{ta.create_hint ?? 'Krav og prosesser legges til i scope etter at revisjonen er opprettet.'}</p>
+                        <p className="mb-4 mt-1 text-base text-slate-600">{ta.create_hint ?? 'Beskriv hvorfor revisjonen gjennomføres og hva den omfatter, og velg kravene nå eller senere.'}</p>
                         <AuditForm
                             form={form}
                             onSubmit={submitCreate}
@@ -116,7 +121,9 @@ export default function ComplianceAuditsIndex() {
                             types={types}
                             responsibleOptions={responsibleOptions}
                             ta={ta}
-                        />
+                        >
+                            {requirementOptions && <PlanningRequirementSelection options={requirementOptions} form={form} ta={ta} />}
+                        </AuditForm>
                     </section>
                 )}
 
@@ -131,7 +138,7 @@ export default function ComplianceAuditsIndex() {
                                 type="search"
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                placeholder={ta.search_placeholder ?? 'Søk i tittel, scope og revisor'}
+                                placeholder={ta.search_placeholder ?? 'Søk i tittel, formål, omfang og revisor'}
                                 className={`mt-1 ${INPUT}`}
                             />
                         </div>

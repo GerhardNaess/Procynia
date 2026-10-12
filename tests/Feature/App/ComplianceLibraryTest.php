@@ -522,7 +522,7 @@ class ComplianceLibraryTest extends TestCase
     {
         ['editor' => $editor, 'source' => $source] = $this->activated();
 
-        $rows = $this->actingAs($editor)->get("/app/compliance/requirements?source={$source->id}")->viewData('page')['props']['requirements'];
+        $rows = $this->actingAs($editor)->get("/app/compliance/requirements?view=list&source={$source->id}")->viewData('page')['props']['requirements'];
 
         $this->assertCount(65, $rows);
         $this->assertSame(['4.1', '4.2', '4.3'], array_slice(array_column($rows, 'reference'), 0, 3));

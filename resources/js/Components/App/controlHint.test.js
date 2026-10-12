@@ -115,18 +115,10 @@ describe('the bell says what its badge counts', () => {
     });
 });
 
-describe('follow-up says it is the queue, not the history', () => {
-    test('the link is wrapped and keeps its destination', () => {
-        assert.match(layout, /<ControlHint text=\{followUpNavigation\.hint\}>/);
-        assert.match(layout, /href=\{followUpNavigation\.href\}/);
-        assert.match(layout, /data-testid="header-follow-up"/);
-    });
-
-    test('it still carries no badge', () => {
-        const followUp = layout.slice(layout.indexOf('const followUpNavigation = {'), layout.indexOf('};', layout.indexOf('const followUpNavigation = {')));
-
-        assert.ok(! /count/i.test(followUp), 'no count until one is actually shared');
-        assert.ok(! followUp.includes('unread'), 'and never the bell\'s number, which means something else');
+describe('follow-up is a place on the rail, not a second bell', () => {
+    test('the top bar carries the bell alone, so the two can no longer be confused there', () => {
+        assert.ok(! layout.includes('data-testid="header-follow-up"'));
+        assert.ok(! layout.includes('followUpNavigation'));
     });
 });
 

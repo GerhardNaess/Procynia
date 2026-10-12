@@ -3,6 +3,7 @@
 namespace App\Services\Compliance;
 
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditCheck;
 use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditProcess;
 use App\Models\ComplianceAuditRequirement;
@@ -34,6 +35,8 @@ use Illuminate\Validation\ValidationException;
  *
  *  - Requirement: any requirement the user can read, a retired one too; those in the audit's scope
  *    are offered first. Optional.
+ *  - Kontrollhandling: one of the audit's own checks, the one the finding came from. Optional; one
+ *    check can give rise to several findings.
  *  - Kvalitet process and control: only with Kvalitet read access (QualityProcessContextReader),
  *    which compliance.* never implies. Without it the page carries nothing about a finding's
  *    Kvalitet context — no name, no id, not whether there is any — and a change to the finding
@@ -72,7 +75,7 @@ class ComplianceAuditFindingService
         $findings = ComplianceAuditFinding::query()
             ->where('audit_id', $audit->id)
             ->where('customer_id', $audit->customer_id)
-            ->with(['requirement.source:id,name,version,framework_id', 'handedOffBy:id,name'])
+            ->with(['requirement.source:id,name,version,framework_id', 'handedOffBy:id,name', 'check:id,title'])
             ->orderBy('id')
             ->get();
 
@@ -92,6 +95,7 @@ class ComplianceAuditFindingService
                 'title' => $finding->title,
                 'description' => $finding->description,
                 'requirement' => $finding->requirement !== null ? $this->requirementRow($finding->requirement) : null,
+                'check' => $finding->check !== null ? ['id' => (int) $finding->check->id, 'title' => $finding->check->title] : null,
                 'improvement_type' => $finding->improvementCaseType(),
                 'handed_off' => $handedOff,
                 'handed_off_at' => $finding->handed_off_at?->toIso8601String(),
@@ -120,11 +124,14 @@ class ComplianceAuditFindingService
      * first — and, with Kvalitet read access, the non-retired processes (scope first) and controls.
      * Call only for a user who passes canRecord().
      *
-     * @return array{requirements: list<array<string, mixed>>, processes: ?list<array<string, mixed>>, controls: ?list<array<string, mixed>>}
+     * @return array{requirements: list<array<string, mixed>>, checks: list<array{id: int, title: string}>, processes: ?list<array<string, mixed>>, controls: ?list<array<string, mixed>>}
      */
     public function options(User $user, ComplianceAudit $audit): array
     {
         $customerId = (int) $audit->customer_id;
+        $checks = $this->checksOf($audit)->get(['id', 'title'])
+            ->map(fn (ComplianceAuditCheck $check): array => ['id' => (int) $check->id, 'title' => $check->title])
+            ->all();
         $scopeRequirementIds = ComplianceAuditRequirement::query()->where('audit_id', $audit->id)->pluck('requirement_id')->map(fn ($id): int => (int) $id)->all();
 
         $requirements = $this->access->visibleRequirements($user)
@@ -143,13 +150,14 @@ class ComplianceAuditFindingService
             ->all();
 
         if (! $this->canReadQuality($user)) {
-            return ['requirements' => $requirements, 'processes' => null, 'controls' => null];
+            return ['requirements' => $requirements, 'checks' => $checks, 'processes' => null, 'controls' => null];
         }
 
         $scopeProcessIds = ComplianceAuditProcess::query()->where('audit_id', $audit->id)->pluck('quality_process_id')->map(fn ($id): int => (int) $id)->all();
 
         return [
             'requirements' => $requirements,
+            'checks' => $checks,
             'processes' => $this->linkable($this->quality->processesQuery($customerId))->get()
                 ->map(fn (QualityItem $process): array => $this->qualityRow($process) + ['in_scope' => in_array((int) $process->id, $scopeProcessIds, true)])
                 ->sortBy(fn (array $row): int => $row['in_scope'] ? 0 : 1)
@@ -230,6 +238,7 @@ class ComplianceAuditFindingService
             'title' => trim($input['title']),
             'description' => trim($input['description']),
             'requirement_id' => $this->requirementId($user, $input['requirement_id'] ?? null),
+            'check_id' => $this->checkId($audit, $input['check_id'] ?? null),
         ];
 
         if ($this->canReadQuality($user)) {
@@ -254,6 +263,29 @@ class ComplianceAuditFindingService
         }
 
         return (int) $requirement->id;
+    }
+
+    /** One of the audit's own checks; anything else gets the same answer. */
+    private function checkId(ComplianceAudit $audit, mixed $id): ?int
+    {
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        if (! $this->checksOf($audit)->whereKey((int) $id)->exists()) {
+            throw ValidationException::withMessages(['check_id' => __('procynia.compliance.audits.findings.validation.check_not_allowed')]);
+        }
+
+        return (int) $id;
+    }
+
+    /** @return Builder<ComplianceAuditCheck> */
+    private function checksOf(ComplianceAudit $audit): Builder
+    {
+        return ComplianceAuditCheck::query()
+            ->where('audit_id', $audit->id)
+            ->where('customer_id', $audit->customer_id)
+            ->orderBy('id');
     }
 
     /**

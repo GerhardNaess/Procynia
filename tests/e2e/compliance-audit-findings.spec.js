@@ -49,6 +49,7 @@ test('a finding is recorded, the audit completed, and the finding followed up in
     const auditUrl = page.url();
 
     // A planned audit has no findings yet, and offers no way to record one.
+    await page.getByRole('tab', { name: /Gjennomføring/ }).click();
     const findings = page.getByTestId('compliance-audit-findings');
     await expect(findings).toContainText('Funn registreres når revisjonen er startet.');
     await expect(findings.getByRole('button', { name: 'Nytt funn' })).toHaveCount(0);
@@ -58,7 +59,7 @@ test('a finding is recorded, the audit completed, and the finding followed up in
     await page.getByTestId('compliance-audit-start').getByRole('button', { name: 'Start revisjon' }).click();
     await expect(page.getByTestId('compliance-audit-status')).toHaveText('Under arbeid');
     await expect(findings).toContainText('Ingen funn er registrert.');
-    await expectPageHelp(page, 'Om revisjonen', ['Scope', 'Funn', 'Gjennomføring', 'Statushistorikk']);
+    await expectPageHelp(page, 'Om revisjonen', ['Slik gjør du det', 'Omfang', 'Kontrollhandlinger', 'Funn', 'Gjennomføring', 'Statushistorikk']);
 
     // 3–4. Nytt funn: Avvik, linked to requirement, process and control.
     await findings.getByRole('button', { name: 'Nytt funn' }).click();
@@ -96,6 +97,7 @@ test('a finding is recorded, the audit completed, and the finding followed up in
     await page.locator('#compliance-audit-complete-conclusion').fill('Ett avvik i tilgangsstyringen.');
     await page.getByTestId('compliance-audit-complete').getByRole('button', { name: 'Fullfør revisjon' }).click();
     await expect(page.getByTestId('compliance-audit-status')).toHaveText('Fullført');
+    await page.getByRole('tab', { name: /Gjennomføring/ }).click();
     await expect(page.getByTestId('compliance-findings-locked')).toContainText('funnene kan ikke endres');
     await expect(findings.getByRole('button', { name: 'Nytt funn' })).toHaveCount(0);
     await expect(card.getByRole('button', { name: 'Rediger' })).toHaveCount(0);

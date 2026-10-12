@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { useEffect, useRef, useState } from 'react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
@@ -8,22 +8,78 @@ import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } 
 import { formatDay } from '../../Improvements/improvementStatus';
 import { AttentionReasons } from '../Requirements/ComplianceAttention';
 import { complianceHelp } from '../Requirements/complianceHelp';
+import AuditChecks, { AuditCoverage } from './AuditChecks';
 import AuditFindings from './AuditFindings';
 import AuditForm from './AuditForm';
 import AuditHistory from './AuditHistory';
 import { AuditCancelForm, AuditCompleteForm, AuditReopenForm, AuditStartForm } from './AuditLifecycleForms';
+import AuditReport from './AuditReport';
 import { AuditProcessScope, AuditRequirementScope } from './AuditScope';
-import { AUDIT_STATUS_TONES, auditStatusLabel, auditTypeLabel, lockedNotice } from './complianceAudit';
+import { AUDIT_PHASES, AUDIT_STATUS_TONES, auditPhase, auditPhaseLabel, auditStatusLabel, auditTypeLabel, lockedNotice } from './complianceAudit';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
 
 /**
- * One audit, read top to bottom: title and status with the actions the status allows; who is
- * responsible, who audits and when; the scope — the description that governs it, then the
- * requirements and (for someone who can read Kvalitet) the processes it covers; the findings and
- * their follow-up in Avvik og forbedringer; the conclusion; and the status history.
+ * The three phases as tabs. The phase the audit is in is read off its status and marked; any tab can
+ * be opened, so a completed audit still shows how it was planned and carried out.
+ */
+function PhaseTabs({ tab, setTab, current, ta }) {
+    const move = (event, index) => {
+        const next = { ArrowRight: index + 1, ArrowLeft: index - 1 }[event.key];
+
+        if (next === undefined) {
+            return;
+        }
+
+        event.preventDefault();
+        const phase = AUDIT_PHASES[(next + AUDIT_PHASES.length) % AUDIT_PHASES.length];
+        setTab(phase);
+        document.getElementById(`compliance-audit-tab-${phase}`)?.focus();
+    };
+
+    return (
+        <div role="tablist" aria-label={ta.phases_label ?? 'Revisjonens faser'} className="grid gap-2 sm:grid-cols-3" data-testid="compliance-audit-phases">
+            {AUDIT_PHASES.map((phase, index) => {
+                const selected = tab === phase;
+
+                return (
+                    <button
+                        key={phase}
+                        id={`compliance-audit-tab-${phase}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        aria-controls={`compliance-audit-panel-${phase}`}
+                        tabIndex={selected ? 0 : -1}
+                        onClick={() => setTab(phase)}
+                        onKeyDown={(event) => move(event, index)}
+                        className={`flex min-h-12 flex-col items-start rounded-2xl border px-4 py-2 text-left text-base ${selected ? 'border-violet-600 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'}`}
+                    >
+                        <span className="font-semibold">{index + 1}. {auditPhaseLabel(phase, ta)}</span>
+                        {current === phase && <span className="text-base text-slate-700" data-testid="compliance-audit-current-phase">{ta.phase_current ?? 'Nåværende fase'}</span>}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+/** The finding or check the address points at (#finding-12, #check-3), if any. */
+function linkedItem() {
+    const hash = typeof window === 'undefined' ? '' : window.location.hash;
+
+    return /^#(finding|check)-\d+$/.test(hash) ? hash : null;
+}
+
+/**
+ * One audit, as the work runs: Planlegging (purpose, omfang, who and when, the requirements and —
+ * for someone who can read Kvalitet — processes in scope), Gjennomføring (what is to be checked,
+ * the kontrollhandlinger and the findings), and Rapport og oppfølging (the overview, the conclusion
+ * and Fullfør). The phases are tabs over the existing status — never a status of their own — and
+ * the page opens in the one the audit is in. The header keeps the status and the lifecycle actions;
+ * the status history and the Wiki hand-off sit below every phase.
  *
  * Every action is offered only when the server said this person may take it now; the controller
  * refuses it otherwise. Status never moves through Rediger, and Rediger shows only the fields the
@@ -38,6 +94,7 @@ export default function ComplianceAuditShow() {
         requirement_options: requirementOptions = null,
         processes = null,
         process_options: processOptions = null,
+        checks = [],
         findings = [],
         finding_options: findingOptions = null,
         finding_types: findingTypes = [],
@@ -54,12 +111,39 @@ export default function ComplianceAuditShow() {
 
     const tr = translations?.compliance ?? {};
     const ta = tr.audits ?? {};
+    const current = auditPhase(audit.status);
+    const [tab, setTab] = useState(current ?? 'planning');
     // Which panel is open: 'edit', 'start', 'complete', 'cancel', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
     const closePanel = () => setPanel(null);
+    // «Registrer funn» on a kontrollhandling: opens Nytt funn with that check chosen.
+    const [findingDraft, setFindingDraft] = useState(null);
+
+    // A link to one finding or check (#finding-12, as the case page's provenance sends) opens
+    // Gjennomføring, where it is, whatever phase the audit is in.
+    useEffect(() => {
+        const hash = linkedItem();
+
+        if (hash) {
+            setTab('execution');
+            window.requestAnimationFrame(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' }));
+        }
+    }, []);
+
+    // A lifecycle step moves the page along to the phase the audit is now in — only when the status
+    // actually changes, never on the first render.
+    const shownStatus = useRef(audit.status);
+    useEffect(() => {
+        if (shownStatus.current !== audit.status && current) {
+            setTab(current);
+        }
+
+        shownStatus.current = audit.status;
+    }, [audit.status]);
 
     const form = useForm({
         title: audit.title ?? '',
+        purpose: audit.purpose ?? '',
         audit_type: audit.audit_type ?? '',
         responsible_user_id: audit.responsible_user_id ? String(audit.responsible_user_id) : '',
         auditor_name: audit.auditor_name ?? '',
@@ -82,16 +166,26 @@ export default function ComplianceAuditShow() {
         router.delete(`/app/compliance/audits/${audit.id}`);
     };
 
+    const openPanel = (name, phase = null) => {
+        if (phase) {
+            setTab(phase);
+        }
+
+        setPanel(name);
+    };
+
+    const newFindingFrom = (check) => setFindingDraft({
+        key: `${check.id}-${Date.now()}`,
+        check_id: check.id,
+        requirement_id: check.requirements.length === 1 ? check.requirements[0].id : null,
+    });
+
     const locked = lockedNotice(audit.status, ta);
     const hasLifecycleAction = permissions.can_start || permissions.can_complete || permissions.can_cancel || permissions.can_reopen;
 
     return (
-        <CustomerAppLayout title={audit.title} showPageTitle={false}>
+        <CustomerAppLayout title={audit.title} showPageTitle={false} workView={panel === 'edit' ? (ta.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
-                <Link href="/app/compliance/audits" className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900">
-                    ← {ta.back ?? 'Til revisjoner'}
-                </Link>
-
                 <header className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                         <div className="min-w-0 space-y-3">
@@ -107,7 +201,7 @@ export default function ComplianceAuditShow() {
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...complianceHelp(tr, 'audit')} />
                             {permissions.can_edit && panel === null && (
-                                <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{ta.edit ?? 'Rediger'}</button>
+                                <button type="button" onClick={() => openPanel('edit', 'planning')} className={SECONDARY_ACTION}>{ta.edit ?? 'Rediger'}</button>
                             )}
                             {permissions.can_delete && (
                                 <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{ta.delete ?? 'Slett revisjon'}</button>
@@ -115,7 +209,7 @@ export default function ComplianceAuditShow() {
                         </div>
                     </div>
 
-                    {/* A step the audit's status no longer allows — scope, findings — answers on
+                    {/* A step the audit's status no longer allows — scope, checks, findings — answers on
                         `audit`; shown once here, whichever form or button sent it. */}
                     {errors.audit && (
                         <p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800" data-testid="compliance-audit-error">{errors.audit}</p>
@@ -128,107 +222,149 @@ export default function ComplianceAuditShow() {
                     {panel === null && hasLifecycleAction && (
                         <div className="flex flex-wrap gap-2" data-testid="compliance-audit-actions">
                             {permissions.can_start && (
-                                <button type="button" onClick={() => setPanel('start')} className={PRIMARY_ACTION}>{ta.start ?? 'Start revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('start')} className={PRIMARY_ACTION}>{ta.start ?? 'Start revisjon'}</button>
                             )}
                             {permissions.can_complete && (
-                                <button type="button" onClick={() => setPanel('complete')} className={PRIMARY_ACTION}>{ta.complete ?? 'Fullfør revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('complete', 'report')} className={PRIMARY_ACTION}>{ta.complete ?? 'Fullfør revisjon'}</button>
                             )}
                             {permissions.can_reopen && (
-                                <button type="button" onClick={() => setPanel('reopen')} className={SECONDARY_ACTION}>{ta.reopen ?? 'Gjenåpne revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('reopen')} className={SECONDARY_ACTION}>{ta.reopen ?? 'Gjenåpne revisjon'}</button>
                             )}
                             {permissions.can_cancel && (
-                                <button type="button" onClick={() => setPanel('cancel')} className={WARNING_ACTION}>{ta.cancel_audit ?? 'Avbryt revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('cancel')} className={WARNING_ACTION}>{ta.cancel_audit ?? 'Avbryt revisjon'}</button>
                             )}
                         </div>
                     )}
                 </header>
 
                 {panel === 'start' && <AuditStartForm auditId={audit.id} onDone={closePanel} ta={ta} />}
-                {panel === 'complete' && <AuditCompleteForm audit={audit} onDone={closePanel} ta={ta} />}
                 {panel === 'cancel' && <AuditCancelForm auditId={audit.id} onDone={closePanel} ta={ta} />}
                 {panel === 'reopen' && <AuditReopenForm auditId={audit.id} onDone={closePanel} ta={ta} />}
 
-                {panel === 'edit' ? (
-                    <section className={CARD} aria-label={ta.edit ?? 'Rediger'}>
-                        <AuditForm
-                            form={form}
-                            onSubmit={submit}
-                            onCancel={() => { closePanel(); form.reset(); form.clearErrors(); }}
-                            fields={editableFields}
-                            types={types}
-                            responsibleOptions={responsibleOptions}
-                            ta={ta}
-                        />
-                    </section>
-                ) : (
-                    <>
-                        <section className={CARD} aria-labelledby="compliance-audit-info-heading">
-                            <h2 id="compliance-audit-info-heading" className="text-xl font-semibold text-slate-950">{ta.info_heading ?? 'Revisjonsinformasjon'}</h2>
-                            <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="compliance-audit-facts">
-                                <div>
-                                    <dt className={TERM}>{ta.field_responsible ?? 'Ansvarlig'}</dt>
-                                    <dd className={VALUE}>{audit.responsible_name ?? <span className="text-amber-800">{ta.no_responsible ?? 'Mangler ansvarlig'}</span>}</dd>
-                                </div>
-                                <div>
-                                    <dt className={TERM}>{ta.field_auditor ?? 'Revisor'}</dt>
-                                    <dd className={VALUE}>{audit.auditor_name ?? <span className="text-slate-600">{ta.no_auditor ?? 'Ikke angitt'}</span>}</dd>
-                                </div>
-                                <div>
-                                    <dt className={TERM}>{ta.field_start ?? 'Planlagt start'}</dt>
-                                    <dd className={VALUE}>{formatDay(audit.planned_start_date, ta.no_start ?? 'Ikke angitt')}</dd>
-                                </div>
-                                <div>
-                                    <dt className={TERM}>{ta.field_end ?? 'Planlagt slutt'}</dt>
-                                    <dd className={VALUE}>{formatDay(audit.planned_end_date)}</dd>
-                                </div>
-                            </dl>
-                        </section>
-
-                        <section className={CARD} aria-labelledby="compliance-audit-scope-heading">
-                            <h2 id="compliance-audit-scope-heading" className="text-xl font-semibold text-slate-950">{ta.scope_heading ?? 'Scope'}</h2>
-                            <p className="mt-3 whitespace-pre-line break-words text-base leading-7 text-slate-800" data-testid="compliance-audit-scope">{audit.scope_description}</p>
-                        </section>
-                    </>
+                <PhaseTabs tab={tab} setTab={setTab} current={current} ta={ta} />
+                {audit.status === 'cancelled' && (
+                    <p className="text-base text-slate-700">{ta.phase_cancelled ?? 'Revisjonen er avbrutt. Fasene vises som de var da den ble avbrutt.'}</p>
                 )}
 
-                <AuditRequirementScope
-                    audit={audit}
-                    requirements={requirements}
-                    options={requirementOptions}
-                    canManage={Boolean(permissions.can_manage_requirements)}
-                    ta={ta}
-                />
+                <div
+                    role="tabpanel"
+                    id={`compliance-audit-panel-${tab}`}
+                    aria-labelledby={`compliance-audit-tab-${tab}`}
+                    className="space-y-6"
+                    data-testid={`compliance-audit-phase-${tab}`}
+                >
+                    <p className="text-base text-slate-600">{ta.phase_intros?.[tab] ?? ''}</p>
 
-                {processes !== null && (
-                    <AuditProcessScope
-                        audit={audit}
-                        processes={processes}
-                        options={processOptions}
-                        canManage={Boolean(permissions.can_manage_processes)}
-                        ta={ta}
-                    />
-                )}
+                    {tab === 'planning' && (
+                        <>
+                            {panel === 'edit' ? (
+                                <section className={CARD} aria-label={ta.edit ?? 'Rediger'}>
+                                    <AuditForm
+                                        form={form}
+                                        onSubmit={submit}
+                                        onCancel={() => { closePanel(); form.reset(); form.clearErrors(); }}
+                                        fields={editableFields}
+                                        types={types}
+                                        responsibleOptions={responsibleOptions}
+                                        ta={ta}
+                                    />
+                                </section>
+                            ) : (
+                                <section className={CARD} aria-labelledby="compliance-audit-info-heading">
+                                    <h2 id="compliance-audit-info-heading" className="text-xl font-semibold text-slate-950">{ta.info_heading ?? 'Revisjonsinformasjon'}</h2>
+                                    <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="compliance-audit-facts">
+                                        <div>
+                                            <dt className={TERM}>{ta.field_responsible ?? 'Ansvarlig'}</dt>
+                                            <dd className={VALUE}>{audit.responsible_name ?? <span className="text-amber-800">{ta.no_responsible ?? 'Mangler ansvarlig'}</span>}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className={TERM}>{ta.field_auditor ?? 'Revisor'}</dt>
+                                            <dd className={VALUE}>{audit.auditor_name ?? <span className="text-slate-600">{ta.no_auditor ?? 'Ikke angitt'}</span>}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className={TERM}>{ta.field_start ?? 'Planlagt start'}</dt>
+                                            <dd className={VALUE}>{formatDay(audit.planned_start_date, ta.no_start ?? 'Ikke angitt')}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className={TERM}>{ta.field_end ?? 'Planlagt slutt'}</dt>
+                                            <dd className={VALUE}>{formatDay(audit.planned_end_date)}</dd>
+                                        </div>
+                                    </dl>
+                                    <dl className="mt-6 grid gap-4 md:grid-cols-2">
+                                        <div className="min-w-0">
+                                            <dt className={TERM}>{ta.field_purpose ?? 'Formål'}</dt>
+                                            <dd className="mt-1 whitespace-pre-line break-words text-base leading-7 text-slate-800" data-testid="compliance-audit-purpose">
+                                                {audit.purpose ?? <span className="text-slate-600">{ta.no_purpose ?? 'Ikke angitt'}</span>}
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <dt className={TERM}>{ta.scope_heading ?? 'Omfang'}</dt>
+                                            <dd className="mt-1 whitespace-pre-line break-words text-base leading-7 text-slate-800" data-testid="compliance-audit-scope">
+                                                {audit.scope_description ?? <span className="text-slate-600">{ta.no_scope_text ?? 'Ingen beskrivelse. Omfanget er kravene og prosessene nedenfor.'}</span>}
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                </section>
+                            )}
 
-                <AuditFindings
-                    audit={audit}
-                    findings={findings}
-                    options={findingOptions}
-                    types={findingTypes}
-                    canRecord={Boolean(permissions.can_record_findings)}
-                    handoff={handoff}
-                    ta={ta}
-                />
+                            <AuditRequirementScope
+                                audit={audit}
+                                requirements={requirements}
+                                options={requirementOptions}
+                                canManage={Boolean(permissions.can_manage_requirements)}
+                                ta={ta}
+                            />
 
-                <section className={CARD} aria-labelledby="compliance-audit-conclusion-heading">
-                    <h2 id="compliance-audit-conclusion-heading" className="text-xl font-semibold text-slate-950">{ta.conclusion_heading ?? 'Konklusjon'}</h2>
-                    {audit.conclusion ? (
-                        <p className="mt-3 whitespace-pre-line break-words text-base leading-7 text-slate-800" data-testid="compliance-audit-conclusion">{audit.conclusion}</p>
-                    ) : (
-                        <p className="mt-3 text-base text-slate-700" data-testid="compliance-audit-conclusion">
-                            {audit.status === 'planned' ? (ta.conclusion_planned ?? 'Konklusjonen skrives når revisjonen er startet.') : (ta.conclusion_empty ?? 'Ingen konklusjon er skrevet ennå.')}
-                        </p>
+                            {processes !== null && (
+                                <AuditProcessScope
+                                    audit={audit}
+                                    processes={processes}
+                                    options={processOptions}
+                                    canManage={Boolean(permissions.can_manage_processes)}
+                                    ta={ta}
+                                />
+                            )}
+
+                            {permissions.can_start && panel === null && (
+                                <section className={`${CARD} flex flex-wrap items-center justify-between gap-3`} data-testid="compliance-audit-start-hint">
+                                    <p className="min-w-0 text-base text-slate-800">{ta.start_hint ?? 'Når planleggingen er klar, velger du «Start revisjon».'}</p>
+                                    <button type="button" onClick={() => openPanel('start')} className={PRIMARY_ACTION}>{ta.start ?? 'Start revisjon'}</button>
+                                </section>
+                            )}
+                        </>
                     )}
-                </section>
+
+                    {tab === 'execution' && (
+                        <>
+                            <AuditCoverage requirements={requirements} ta={ta} />
+                            <AuditChecks
+                                audit={audit}
+                                checks={checks}
+                                scopeRequirements={requirements}
+                                canRecord={Boolean(permissions.can_record_checks)}
+                                canRecordFindings={Boolean(permissions.can_record_findings)}
+                                onNewFinding={newFindingFrom}
+                                ta={ta}
+                            />
+                            <AuditFindings
+                                audit={audit}
+                                findings={findings}
+                                options={findingOptions}
+                                types={findingTypes}
+                                canRecord={Boolean(permissions.can_record_findings)}
+                                handoff={handoff}
+                                draft={findingDraft}
+                                ta={ta}
+                            />
+                        </>
+                    )}
+
+                    {tab === 'report' && (
+                        <AuditReport audit={audit} checks={checks} requirements={requirements} findings={findings} ta={ta}>
+                            {panel === 'complete' && <AuditCompleteForm audit={audit} onDone={closePanel} ta={ta} />}
+                        </AuditReport>
+                    )}
+                </div>
 
                 <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`compliance-audit-${audit.id}`} />
 

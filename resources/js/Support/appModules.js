@@ -49,6 +49,18 @@ export const APP_MODULES = [
         areas: ['overview'],
     },
     {
+        // Oppfølging: everything waiting on somebody, across every module. It is a workspace of its
+        // own rather than a module — nothing to buy, no permission of its own, no data it owns — so
+        // it sits beside Hjem and is never placed under Styring or any one module. It used to be a
+        // button in the top bar, the one destination the rail did not name.
+        key: 'follow_up',
+        href: '/app/info-center',
+        built: true,
+        module: null,
+        label: (m) => m.follow_up ?? 'Oppfølging',
+        areas: ['info-center'],
+    },
+    {
         key: 'wiki',
         href: '/app/wiki',
         built: true,
@@ -299,9 +311,9 @@ export function activeWorkspaceKey(activeMainArea) {
 /**
  * Which module the current area belongs to.
  *
- * Administration (Kundemiljø, Abonnement) and Oppfølging are reached from the top bar and are not
- * modules, so being in one leaves the rail with nothing selected rather than lighting up a module
- * the person is not in.
+ * Administration (Kundemiljø, Abonnement) is reached from the user menu and is not a module, so
+ * being in it leaves the rail with nothing selected rather than lighting up a module the person is
+ * not in. Oppfølging is on the rail (`follow_up`) and lights itself.
  */
 export function activeModuleKey(activeMainArea) {
     const match = APP_MODULES.find((module) => (module.areas ?? []).includes(activeMainArea));

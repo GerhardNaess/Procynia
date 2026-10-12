@@ -70,6 +70,10 @@ test('a new intern ansvarlig is told in the bell and finds the supplier under Mi
     await message.click();
     await page.waitForURL((url) => url.pathname === supplierPath);
     await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+    // Arriving from the bell is arriving at the supplier: the trail and the rail name the page that
+    // opened, not the bell or Oppfølging the person came from.
+    await expect(page.getByTestId('breadcrumbs').getByTestId('breadcrumb-item')).toHaveText(['Styring', 'Leverandører', name]);
+    await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Leverandører');
 
     await page.goto('/app/info-center');
     await expect(page.getByTestId('info-center-supplier-task').filter({ hasText: name })).toHaveCount(1);

@@ -37,7 +37,7 @@ test('a requirement is registered under a new source, edited, retired and reopen
     await page.waitForURL(/\/app\/compliance\/library$/);
     await page.getByTestId('module-navigation').getByRole('link', { name: 'Kravregister', exact: true }).click();
     await page.waitForURL(/\/app\/compliance\/requirements$/);
-    await expect(page.getByRole('heading', { name: 'Kravregister', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Etterlevelse og revisjon', level: 1 })).toBeVisible();
     // One rail entry for the module; the header marks the work area.
     await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Etterlevelse og revisjon');
     await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kravregister');

@@ -36,7 +36,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     const areas = page.getByTestId('module-navigation');
     await expect(areas.locator('a')).toHaveText(['Kravbibliotek', 'Kravregister', 'Etterlevelsesvurdering', 'Revisjon']);
     await expect(areas.locator('[aria-current="page"]')).toHaveText('Revisjon');
-    await expect(page.getByRole('heading', { name: 'Revisjoner', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Etterlevelse og revisjon', level: 1 })).toBeVisible();
     await expectPageHelp(page, 'Om revisjoner', ['Slik gjør du det', 'Hva en revisjon er', 'Status', 'Registeret']);
     await expectReadable(page, '01-register');
 
@@ -60,7 +60,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await expect(page.getByTestId('compliance-audit-scope')).toHaveText('Intern revisjon av tilgangsstyring og brukeradministrasjon for IT-avdelingen.');
     await expect(page.getByText('Ingen statusendringer ennå.')).toBeVisible();
     await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Revisjon');
-    await expectPageHelp(page, 'Om revisjonen', ['Scope', 'Gjennomføring', 'Statushistorikk']);
+    await expectPageHelp(page, 'Om revisjonen', ['Slik gjør du det', 'Faser', 'Omfang', 'Kontrollhandlinger', 'Funn', 'Gjennomføring', 'Statushistorikk']);
 
     // 2. Legg til krav i scope — one by hand, then the rest of the source through the shortcut.
     const requirements = page.getByTestId('compliance-audit-requirements');
@@ -68,13 +68,13 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await page.getByRole('checkbox', { name: person.first_requirement }).check();
     await expectReadable(page, '03-requirement-picker');
     await page.getByTestId('compliance-audit-requirement-form').getByRole('button', { name: 'Legg til valgte krav' }).click();
-    await expect(page.getByText('Kravet er lagt til i scope.')).toBeVisible();
+    await expect(page.getByText('Kravet er lagt til i omfanget.')).toBeVisible();
     await expect(page.getByTestId('compliance-audit-requirement')).toHaveCount(1);
 
     await requirements.getByRole('button', { name: 'Legg til krav' }).click();
-    await page.locator('#compliance-audit-source').selectOption({ label: `${person.source_label} (1 aktive krav)` });
+    await page.locator('#compliance-audit-source').selectOption({ label: `${person.source_label} (1 krav som gjelder)` });
     await page.getByTestId('compliance-audit-source-form').getByRole('button', { name: 'Legg til fra kilde' }).click();
-    await expect(page.getByText('Kravet er lagt til i scope.')).toBeVisible();
+    await expect(page.getByText('Kravet er lagt til i omfanget.')).toBeVisible();
     await expect(page.getByTestId('compliance-audit-requirement')).toHaveCount(2);
     // Each with its origin: the standard, the clause and the title.
     await expect(requirements).toContainText(`${person.source_label} · A.5.15 · ${person.first_requirement}`);
@@ -85,7 +85,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await processes.getByRole('button', { name: 'Legg til prosess' }).click();
     await page.locator('#compliance-audit-process').selectOption({ label: person.process_title });
     await page.getByTestId('compliance-audit-process-form').getByRole('button', { name: 'Legg til', exact: true }).click();
-    await expect(page.getByText('Prosessen er lagt til i scope.')).toBeVisible();
+    await expect(page.getByText('Prosessen er lagt til i omfanget.')).toBeVisible();
     await expect(page.getByTestId('compliance-audit-process')).toHaveCount(1);
     await expect(page.getByTestId('compliance-audit-process')).toContainText(person.process_title);
     await expectReadable(page, '04-scoped');
@@ -103,6 +103,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await expectReadable(page, '05-edit-in-progress');
     await page.getByTestId('compliance-audit-form').getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.getByText('Revisjonen er oppdatert.')).toBeVisible();
+    await page.getByRole('tab', { name: /Rapport og oppfølging/ }).click();
     await expect(page.getByTestId('compliance-audit-conclusion')).toHaveText('Tilgangsstyringen fungerer etter hensikten. Ingen vesentlige avvik.');
 
     // 6. Fullfør revisjon — not without a conclusion, then with it.
@@ -122,10 +123,11 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await expect(page.getByTestId('compliance-audit-status')).toHaveText('Fullført');
     await expect(page.getByTestId('compliance-audit-locked')).toHaveText('Revisjonen er fullført og låst. Gjenåpne den for å gjøre endringer.');
     await expect(page.getByTestId('compliance-audit-conclusion')).toHaveText('Tilgangsstyringen fungerer etter hensikten. Revisjonen avsluttes uten funn.');
-    for (const name of ['Rediger', 'Legg til krav', 'Legg til prosess', 'Fjern fra scope', 'Avbryt revisjon', 'Fullfør revisjon', 'Start revisjon', 'Slett revisjon']) {
+    for (const name of ['Rediger', 'Legg til krav', 'Legg til prosess', 'Fjern fra omfanget', 'Avbryt revisjon', 'Fullfør revisjon', 'Start revisjon', 'Slett revisjon']) {
         await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
     }
     await expect(page.getByRole('button', { name: 'Gjenåpne revisjon' })).toBeVisible();
+    await page.getByRole('tab', { name: /Planlegging/ }).click();
     await expect(page.getByTestId('compliance-audit-requirement')).toHaveCount(2);
 
     // Sent anyway, with a valid session: refused, nothing changes.
@@ -159,7 +161,7 @@ test('an audit is planned, scoped, run, completed, locked and reopened', async (
     await expectReadable(page, '08-reopened');
 
     // The register lists it, and Kravregister is one click away in the same row.
-    await page.getByRole('link', { name: 'Til revisjoner' }).click();
+    await page.getByTestId('breadcrumbs').getByRole('link', { name: 'Revisjon', exact: true }).click();
     await expect(page.getByRole('link', { name: title })).toHaveCount(1);
     await expect(page.getByTestId('compliance-audit-table')).toContainText('Under arbeid');
     await expect(page.getByTestId('compliance-audit-table')).toContainText('01.11.2026–15.11.2026');
@@ -189,18 +191,24 @@ test('a reader reads an audit, cannot change it, and sees no Kvalitet process', 
     await page.getByRole('link', { name: seeded.audit_title }).click();
     await page.waitForURL(new RegExp(`/app/compliance/audits/${seeded.audit_id}$`));
     await expect(page.getByTestId('compliance-audit-status')).toHaveText('Under arbeid');
+    // An audit under way opens on Gjennomføring; who and what are under Planlegging.
+    await expect(page.getByRole('tab', { name: /Gjennomføring/ })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('tab', { name: /Planlegging/ }).click();
     await expect(page.getByTestId('compliance-audit-facts')).toContainText('Sertifiseringsorganet AS');
     await expect(page.getByTestId('compliance-audit-requirement')).toContainText(seeded.requirement_title);
     await expect(page.getByTestId('compliance-audit-actions')).toHaveCount(0);
-    for (const name of ['Rediger', 'Legg til krav', 'Fjern fra scope', 'Start revisjon', 'Fullfør revisjon', 'Avbryt revisjon', 'Gjenåpne revisjon', 'Slett revisjon']) {
+    for (const name of ['Rediger', 'Legg til krav', 'Fjern fra omfanget', 'Start revisjon', 'Fullfør revisjon', 'Avbryt revisjon', 'Gjenåpne revisjon', 'Slett revisjon']) {
         await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
     }
 
     // No Kvalitet: no section, no name, no id — not in the page, not in the props. Loaded fresh, so
     // the page data is this page's and not the register's it was reached from.
     await page.reload();
+    // On Planlegging, where the processes in scope would be.
+    await page.getByRole('tab', { name: /Planlegging/ }).click();
+    await expect(page.getByTestId('compliance-audit-requirements')).toBeVisible();
     await expect(page.getByTestId('compliance-audit-processes')).toHaveCount(0);
-    await expect(page.getByText('Prosesser i scope')).toHaveCount(0);
+    await expect(page.getByText('Prosesser i omfanget')).toHaveCount(0);
     const html = await page.content();
     expect(html).not.toContain(seeded.process_title);
     expect(html).not.toContain(`/app/quality/items/${seeded.process_id}`);

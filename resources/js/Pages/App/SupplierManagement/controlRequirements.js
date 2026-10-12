@@ -129,6 +129,18 @@ export function templatePreview(template) {
     };
 }
 
+/**
+ * Whether the customer has a template item in its Kontrollkrav, from the server's `existing` on the
+ * item: 'not_in_use', 'in_use', or 'in_use_retired' when the requirement it became is retired.
+ */
+export function templateItemUse(item) {
+    if (! item?.existing) {
+        return 'not_in_use';
+    }
+
+    return item.existing.status === 'retired' ? 'in_use_retired' : 'in_use';
+}
+
 /** Adds or removes one code, keeping at most `max`. */
 export function toggleCode(list, code, max = Infinity) {
     const current = Array.isArray(list) ? list : [];

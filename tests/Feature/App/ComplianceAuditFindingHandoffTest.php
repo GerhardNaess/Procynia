@@ -316,7 +316,7 @@ class ComplianceAuditFindingHandoffTest extends TestCase
         $this->assertSame($auditor->name, $row['handed_off_by_name']);
         // Only whether it was handed off — no case status, tiltak, verification or frist.
         $this->assertSame(
-            ['id', 'finding_type', 'title', 'description', 'requirement', 'improvement_type', 'handed_off', 'handed_off_at', 'handed_off_by_name', 'case_link', 'permissions'],
+            ['id', 'finding_type', 'title', 'description', 'requirement', 'check', 'improvement_type', 'handed_off', 'handed_off_at', 'handed_off_by_name', 'case_link', 'permissions'],
             array_keys($row),
         );
     }

@@ -203,16 +203,20 @@ export function splitByScope(options = []) {
 
 /**
  * A finding's form values: its own fields, and its Kvalitet context only when the server sent it —
- * for someone who cannot read Kvalitet the form carries no such fields, so nothing is changed.
+ * for someone who cannot read Kvalitet the form carries no such fields, so nothing is changed. A new
+ * finding recorded from a kontrollhandling («Registrer funn») starts with that check, and with its
+ * requirement when the check names exactly one.
  *
  * @param {object|null} finding  a finding row, or null for a new one
+ * @param {{check_id?: number, requirement_id?: number}|null} draft  where a new finding comes from
  */
-export function findingFormData(finding = null) {
+export function findingFormData(finding = null, draft = null) {
     const data = {
         finding_type: finding?.finding_type ?? '',
         title: finding?.title ?? '',
         description: finding?.description ?? '',
-        requirement_id: finding?.requirement ? String(finding.requirement.id) : '',
+        requirement_id: finding?.requirement ? String(finding.requirement.id) : (draft?.requirement_id ? String(draft.requirement_id) : ''),
+        check_id: finding?.check ? String(finding.check.id) : (draft?.check_id ? String(draft.check_id) : ''),
     };
 
     if (finding === null || 'quality_process' in finding) {
@@ -221,4 +225,97 @@ export function findingFormData(finding = null) {
     }
 
     return data;
+}
+
+/** The three phases of an audit's page, in the order the work passes through them. */
+export const AUDIT_PHASES = ['planning', 'execution', 'report'];
+
+const PHASE_FALLBACKS = {
+    planning: 'Planlegging',
+    execution: 'Gjennomføring',
+    report: 'Rapport og oppfølging',
+};
+
+/**
+ * The phase the audit is in, read off its status — never a status of its own: Planlagt is
+ * planning, Under arbeid execution, Fullført report. A cancelled audit is in no phase.
+ *
+ * @param {string} status
+ * @returns {'planning'|'execution'|'report'|null}
+ */
+export function auditPhase(status) {
+    return { planned: 'planning', in_progress: 'execution', completed: 'report' }[status] ?? null;
+}
+
+/**
+ * @param {string} phase  one of AUDIT_PHASES
+ * @param {object} ta     translations.compliance.audits
+ */
+export function auditPhaseLabel(phase, ta = {}) {
+    return ta.phases?.[phase] ?? PHASE_FALLBACKS[phase] ?? phase;
+}
+
+const RELEVANCE_FALLBACKS = {
+    not_applicable: 'Ikke relevant',
+    relevance_open: 'Relevans ikke avklart',
+    control_not_applicable: 'Kontroll utelatt',
+    control_relevance_open: 'Kontrollvalg ikke gjort',
+};
+
+/**
+ * Where a requirement stands on relevance, when it is not simply Gjelder: what automatic selection
+ * leaves out, so an explicit choice of it stays visible. An Annex A control says so in its own
+ * words (Utelatt, Kontrollvalg ikke gjort). Null for a requirement that applies.
+ *
+ * @param {{relevance?: string, is_control?: boolean}} requirement
+ * @param {object} ta  translations.compliance.audits
+ */
+export function relevanceLabel(requirement, ta = {}) {
+    const relevance = requirement?.relevance;
+
+    if (relevance !== 'not_applicable' && relevance !== 'relevance_open') {
+        return null;
+    }
+
+    const key = requirement.is_control ? `control_${relevance}` : relevance;
+
+    return ta.relevance?.[key] ?? RELEVANCE_FALLBACKS[key];
+}
+
+/**
+ * The requirements in scope split by whether a kontrollhandling names them — what the report puts
+ * before the auditor ahead of Fullfør. Examined says nothing about being met.
+ *
+ * @param {Array<{check_count?: number}>} requirements
+ */
+export function scopeCoverage(requirements = []) {
+    return {
+        examined: requirements.filter((requirement) => (requirement.check_count ?? 0) > 0),
+        unexamined: requirements.filter((requirement) => (requirement.check_count ?? 0) === 0),
+    };
+}
+
+/**
+ * «1 kontrollhandling», «3 kontrollhandlinger»: a count with the one/many texts given.
+ *
+ * @param {number} count
+ * @param {string} one   the text for exactly one
+ * @param {string} many  the text for any other count, with :count
+ */
+export function countText(count, one, many) {
+    return count === 1 ? one : many.replace(':count', String(count));
+}
+
+/**
+ * A check's form values: its own text and the requirements it names, as ids.
+ *
+ * @param {object|null} check  a check row, or null for a new one
+ */
+export function checkFormData(check = null) {
+    return {
+        title: check?.title ?? '',
+        observation: check?.observation ?? '',
+        evidence: check?.evidence ?? '',
+        requirement_ids: (check?.requirements ?? []).map((requirement) => requirement.id),
+    };
 }

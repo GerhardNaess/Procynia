@@ -507,6 +507,9 @@ Route::prefix('app')
             Route::delete('/audits/{auditId}/requirements/{requirementId}', [ComplianceAuditController::class, 'removeRequirement'])->whereNumber(['auditId', 'requirementId'])->name('audits.requirements.destroy');
             Route::post('/audits/{auditId}/processes', [ComplianceAuditController::class, 'addProcess'])->whereNumber('auditId')->name('audits.processes.store');
             Route::delete('/audits/{auditId}/processes/{processId}', [ComplianceAuditController::class, 'removeProcess'])->whereNumber(['auditId', 'processId'])->name('audits.processes.destroy');
+            Route::post('/audits/{auditId}/checks', [ComplianceAuditController::class, 'storeCheck'])->whereNumber('auditId')->name('audits.checks.store');
+            Route::patch('/audits/{auditId}/checks/{checkId}', [ComplianceAuditController::class, 'updateCheck'])->whereNumber(['auditId', 'checkId'])->name('audits.checks.update');
+            Route::delete('/audits/{auditId}/checks/{checkId}', [ComplianceAuditController::class, 'destroyCheck'])->whereNumber(['auditId', 'checkId'])->name('audits.checks.destroy');
             Route::post('/audits/{auditId}/findings', [ComplianceAuditController::class, 'storeFinding'])->whereNumber('auditId')->name('audits.findings.store');
             Route::patch('/audits/{auditId}/findings/{findingId}', [ComplianceAuditController::class, 'updateFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.update');
             Route::delete('/audits/{auditId}/findings/{findingId}', [ComplianceAuditController::class, 'destroyFinding'])->whereNumber(['auditId', 'findingId'])->name('audits.findings.destroy');

@@ -182,7 +182,7 @@ class ComplianceLibraryFrameworksTest extends TestCase
         $index = $this->actingAs($editor)->get('/app/compliance/library')->assertOk()->viewData('page')['props'];
         $this->assertSame([true, true, true], collect($index['frameworks'])->whereIn('key', array_keys(self::FILES))->pluck('activated')->values()->all());
 
-        $register = $this->actingAs($editor)->get('/app/compliance/requirements?source='.$sources['ISO 14001']->id)->assertOk()->viewData('page')['props'];
+        $register = $this->actingAs($editor)->get('/app/compliance/requirements?view=list&source='.$sources['ISO 14001']->id)->assertOk()->viewData('page')['props'];
         $this->assertCount(35, $register['requirements']);
         foreach ($register['requirements'] as $row) {
             $this->assertStringStartsWith('ISO 14001', $row['source_label']);
@@ -248,7 +248,9 @@ class ComplianceLibraryFrameworksTest extends TestCase
             $this->assertSame(route('app.compliance.requirements.index', ['source' => $source->id]), $card['register_url'], $key);
 
             $register = $this->actingAs($editor)->get($card['register_url'])->assertOk()->viewData('page')['props'];
-            $this->assertCount($expected[$key][0], $register['requirements'], $key);
+            // It opens in Gruppert, narrowed to the one standard with all its requirements counted.
+            $this->assertSame([(int) $source->id], array_column($register['register']['sources'], 'id'), $key);
+            $this->assertSame($expected[$key][0], $register['matching_count'], $key);
         }
     }
 

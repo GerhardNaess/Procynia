@@ -63,6 +63,34 @@ export function worklistUrl() {
     return '/app/compliance/assessments';
 }
 
+const REGISTER_KEY = 'procynia.compliance.register';
+
+/**
+ * The Kravregister URL — search, filters, view and open chapters — the person last left, so
+ * «Tilbake til kravregisteret» returns to the same place. Per browser tab, a convenience only.
+ */
+export function rememberRegister(url) {
+    try {
+        window.sessionStorage.setItem(REGISTER_KEY, String(url));
+    } catch {
+        // Storage can be unavailable; the plain link still works.
+    }
+}
+
+export function registerUrl() {
+    try {
+        const stored = window.sessionStorage.getItem(REGISTER_KEY);
+
+        if (stored && /^\/app\/compliance\/requirements(\?|$)/.test(stored)) {
+            return stored;
+        }
+    } catch {
+        // Fall through to the plain register.
+    }
+
+    return '/app/compliance/requirements';
+}
+
 /**
  * Where «Tilbake» on a requirement leads, from the area it was opened in.
  *

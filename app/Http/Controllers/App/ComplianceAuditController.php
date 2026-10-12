@@ -9,6 +9,7 @@ use App\Models\ComplianceAuditStatusChange;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAuditAttentionService;
+use App\Services\Compliance\ComplianceAuditCheckService;
 use App\Services\Compliance\ComplianceAuditFindingHandoffService;
 use App\Services\Compliance\ComplianceAuditFindingService;
 use App\Services\Compliance\ComplianceAuditLifecycleService;
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -40,7 +42,11 @@ use Inertia\Response;
  *
  * The scope's requirements and Kvalitet processes are ComplianceAuditScopeService's: it decides what
  * may be shown about processes (Kvalitet read access, never implied by compliance.*) and what may be
- * linked.
+ * linked. Ny revisjon may take requirements into scope in the same step (requirement_ids, and
+ * source_ids for everything that applies in a source), so planning is one piece of work.
+ *
+ * Kontrollhandlinger — what was examined, how, on what evidence — are ComplianceAuditCheckService's:
+ * recorded, changed and deleted with compliance.audit while the audit is in progress, like findings.
  *
  * Funn are ComplianceAuditFindingService's: recorded, changed and deleted with compliance.audit
  * while the audit is in progress. «Følg opp i Avvik og forbedringer» is
@@ -56,6 +62,7 @@ class ComplianceAuditController extends Controller
         private readonly ComplianceAuditLifecycleService $lifecycle,
         private readonly ComplianceAuditScopeService $scope,
         private readonly ComplianceAuditFindingService $findings,
+        private readonly ComplianceAuditCheckService $checks,
         private readonly ComplianceAuditFindingHandoffService $handoff,
         private readonly ComplianceAuditAttentionService $attention,
         private readonly WikiKnowledgeHandoffService $knowledgeHandoff,
@@ -76,7 +83,8 @@ class ComplianceAuditController extends Controller
             $needle = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
             $query->where(function (Builder $inner) use ($needle): void {
                 $inner->whereRaw('lower(compliance_audits.title) like ?', [$needle])
-                    ->orWhereRaw('lower(compliance_audits.scope_description) like ?', [$needle])
+                    ->orWhereRaw("lower(coalesce(compliance_audits.purpose, '')) like ?", [$needle])
+                    ->orWhereRaw("lower(coalesce(compliance_audits.scope_description, '')) like ?", [$needle])
                     ->orWhereRaw("lower(coalesce(compliance_audits.auditor_name, '')) like ?", [$needle]);
             });
         }
@@ -144,6 +152,8 @@ class ComplianceAuditController extends Controller
                 'can_audit' => $canAudit,
             ],
             'responsible_options' => $canAudit ? $this->access->ownerCandidates($user) : [],
+            // Ny revisjon: the requirements and sources that may be taken into scope while planning.
+            'requirement_options' => $canAudit ? $this->scope->requirementOptions($user, null) : null,
         ]);
     }
 
@@ -158,6 +168,7 @@ class ComplianceAuditController extends Controller
         $canManageRequirements = $this->scope->canManageRequirements($user, $audit);
         $canManageProcesses = $this->scope->canManageProcesses($user, $audit);
         $canRecordFindings = $this->findings->canRecord($user, $audit);
+        $canRecordChecks = $this->checks->canRecord($user, $audit);
         $canHandOff = $this->handoff->canHandOff($user, $audit);
         $findings = $this->findings->rows($user, $audit, $canHandOff);
         $awaitingHandoff = $canHandOff && collect($findings)->contains(fn (array $finding): bool => ! $finding['handed_off']);
@@ -166,6 +177,7 @@ class ComplianceAuditController extends Controller
             // «Lag kunnskapsartikkel»: the shared Wiki handoff (WikiKnowledgeHandoffService).
             'knowledge_handoff' => $this->knowledgeHandoff->panel($user, 'compliance_audit', $audit),
             'audit' => $this->row($audit) + [
+                'purpose' => $audit->purpose,
                 'scope_description' => $audit->scope_description,
                 'conclusion' => $audit->conclusion,
                 'created_at' => $audit->created_at?->toIso8601String(),
@@ -173,6 +185,8 @@ class ComplianceAuditController extends Controller
             'attention' => $this->attention->reasonsForAudit($audit),
             'requirements' => $this->scope->requirements($audit),
             'requirement_options' => $canManageRequirements ? $this->scope->requirementOptions($user, $audit) : null,
+            // What was examined: every check, with the requirements it was relevant for.
+            'checks' => $this->checks->rows($user, $audit),
             // Prosesser i scope: null — not empty — without Kvalitet read access, so nothing about
             // them reaches the page, not even whether there are any.
             'processes' => $canReadQuality ? $this->scope->processes($audit) : null,
@@ -205,6 +219,7 @@ class ComplianceAuditController extends Controller
                 // compliance.audit and Kvalitet read access, on a planned or running audit.
                 'can_manage_processes' => $canManageProcesses,
                 'can_record_findings' => $canRecordFindings,
+                'can_record_checks' => $canRecordChecks,
             ],
             'editable_fields' => $canAudit ? $audit->editableFields() : [],
             'types' => ComplianceAudit::TYPES,
@@ -218,12 +233,25 @@ class ComplianceAuditController extends Controller
         abort_unless($this->access->canAudit($user), 403);
 
         $fields = $this->validatedFields($request, $user, (new ComplianceAudit)->editableFields());
+        $scope = $request->validate([
+            'requirement_ids' => ['nullable', 'array', 'max:500'],
+            'requirement_ids.*' => ['integer'],
+            'source_ids' => ['nullable', 'array', 'max:50'],
+            'source_ids.*' => ['integer'],
+        ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
 
-        $audit = ComplianceAudit::query()->create($fields + [
-            'customer_id' => (int) $user->customer_id,
-            'created_by' => $user->id,
-            'updated_by' => $user->id,
-        ]);
+        // One step: the audit and the scope it was planned with, or neither.
+        $audit = DB::transaction(function () use ($user, $fields, $scope): ComplianceAudit {
+            $audit = ComplianceAudit::query()->create($fields + [
+                'customer_id' => (int) $user->customer_id,
+                'created_by' => $user->id,
+                'updated_by' => $user->id,
+            ]);
+
+            $this->scope->addInitialRequirements($user, $audit, $scope['requirement_ids'] ?? [], $scope['source_ids'] ?? []);
+
+            return $audit;
+        });
 
         return redirect()
             ->route('app.compliance.audits.show', ['auditId' => $audit->id])
@@ -413,6 +441,44 @@ class ComplianceAuditController extends Controller
         return back()->with('success', __('procynia.compliance.audits.findings.flash.deleted'));
     }
 
+    /** Ny kontrollhandling: compliance.audit, audit in progress. */
+    public function storeCheck(Request $request, int $auditId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+
+        $this->checks->create($user, $audit, $this->validatedCheck($request));
+
+        return back()->with('success', __('procynia.compliance.audits.checks.flash.created'));
+    }
+
+    /** Rediger kontrollhandling: while the audit is in progress. */
+    public function updateCheck(Request $request, int $auditId, int $checkId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+        $check = $this->checks->find($audit, $checkId) ?? abort(404);
+
+        $this->checks->update($user, $audit, $check, $this->validatedCheck($request));
+
+        return back()->with('success', __('procynia.compliance.audits.checks.flash.updated'));
+    }
+
+    /** Slett kontrollhandling: the same window, and only when no finding came from it. */
+    public function destroyCheck(int $auditId, int $checkId): RedirectResponse
+    {
+        $user = $this->authorizedUser();
+        $audit = $this->visibleAuditOrFail($user, $auditId);
+        abort_unless($this->access->canAudit($user), 403);
+        $check = $this->checks->find($audit, $checkId) ?? abort(404);
+
+        $this->checks->delete($user, $audit, $check);
+
+        return back()->with('success', __('procynia.compliance.audits.checks.flash.deleted'));
+    }
+
     /**
      * Følg opp i Avvik og forbedringer. The case's fields follow ImprovementCaseCreator::rules(),
      * except the type — set by the finding — and Hendelsesdato, which a finding does not have.
@@ -474,12 +540,13 @@ class ComplianceAuditController extends Controller
     {
         $rules = array_intersect_key([
             'title' => ['required', 'string', 'max:255'],
+            'purpose' => ['nullable', 'string', 'max:20000'],
             'audit_type' => ['required', 'string', Rule::in(ComplianceAudit::TYPES)],
             'responsible_user_id' => ['required', 'integer'],
             'auditor_name' => ['nullable', 'string', 'max:255'],
             'planned_start_date' => ['nullable', 'date_format:Y-m-d'],
             'planned_end_date' => ['required', 'date_format:Y-m-d'],
-            'scope_description' => ['required', 'string', 'max:20000'],
+            'scope_description' => ['nullable', 'string', 'max:20000'],
             'conclusion' => ['nullable', 'string', 'max:20000'],
         ], array_flip($editable));
 
@@ -498,15 +565,15 @@ class ComplianceAuditController extends Controller
             throw ValidationException::withMessages(['planned_end_date' => __('procynia.compliance.audits.validation.end_before_start')]);
         }
 
-        $auditor = trim((string) ($validated['auditor_name'] ?? ''));
-
         $fields = [
             'title' => trim($validated['title']),
+            'purpose' => $this->optionalText($validated['purpose'] ?? null),
             'responsible_user_id' => (int) $owner->id,
-            'auditor_name' => $auditor !== '' ? $auditor : null,
+            'auditor_name' => $this->optionalText($validated['auditor_name'] ?? null),
             'planned_start_date' => $start,
             'planned_end_date' => $end,
-            'scope_description' => trim($validated['scope_description']),
+            // Omfang: free text, the requirements in scope, or both — the text is optional.
+            'scope_description' => $this->optionalText($validated['scope_description'] ?? null),
         ];
 
         if (array_key_exists('audit_type', $rules)) {
@@ -514,11 +581,29 @@ class ComplianceAuditController extends Controller
         }
 
         if (array_key_exists('conclusion', $rules)) {
-            $conclusion = trim((string) ($validated['conclusion'] ?? ''));
-            $fields['conclusion'] = $conclusion !== '' ? $conclusion : null;
+            $fields['conclusion'] = $this->optionalText($validated['conclusion'] ?? null);
         }
 
         return $fields;
+    }
+
+    private function optionalText(mixed $value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+
+        return $text !== '' ? $text : null;
+    }
+
+    /** @return array<string, mixed> */
+    private function validatedCheck(Request $request): array
+    {
+        return $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'observation' => ['required', 'string', 'max:20000'],
+            'evidence' => ['nullable', 'string', 'max:10000'],
+            'requirement_ids' => ['nullable', 'array', 'max:500'],
+            'requirement_ids.*' => ['integer'],
+        ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());
     }
 
     /** @return array<string, mixed> */
@@ -529,6 +614,7 @@ class ComplianceAuditController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'max:10000'],
             'requirement_id' => ['nullable', 'integer'],
+            'check_id' => ['nullable', 'integer'],
             'quality_process_id' => ['nullable', 'integer'],
             'control_item_id' => ['nullable', 'integer'],
         ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes());

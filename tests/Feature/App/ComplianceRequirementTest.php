@@ -128,7 +128,7 @@ class ComplianceRequirementTest extends TestCase
         $requirement = $this->complianceRequirement($source, 'Lesbart krav', $owner, 'A.1');
         $reader = $this->complianceReader($customer);
 
-        $index = $this->actingAs($reader)->get('/app/compliance/requirements')->assertOk()->viewData('page');
+        $index = $this->actingAs($reader)->get('/app/compliance/requirements?view=list')->assertOk()->viewData('page');
         $this->assertSame('App/Compliance/Requirements/Index', $index['component']);
         $this->assertSame(['Lesbart krav'], array_column($index['props']['requirements'], 'title'));
         $this->assertSame(['can_edit' => false, 'can_delete' => false], $index['props']['permissions']);
@@ -175,14 +175,14 @@ class ComplianceRequirementTest extends TestCase
         $foreignOwner = $this->complianceReader($other);
         $foreign = $this->complianceRequirement($foreignSource, 'Fremmed krav', $foreignOwner, 'X.1');
 
-        $props = $this->actingAs($manager)->get('/app/compliance/requirements')->viewData('page')['props'];
+        $props = $this->actingAs($manager)->get('/app/compliance/requirements?view=list')->viewData('page')['props'];
         $this->assertSame(['Eget krav'], array_column($props['requirements'], 'title'));
         $this->assertSame(1, $props['visible_count']);
         $this->assertSame(['Egen kilde'], array_column($props['sources'], 'name'));
         $this->assertNotContains((int) $foreignOwner->id, array_column($props['owner_options'], 'id'));
 
         // A foreign source as filter is ignored, not answered; a search never reaches across.
-        $filtered = $this->actingAs($manager)->get("/app/compliance/requirements?source={$foreignSource->id}")->viewData('page')['props'];
+        $filtered = $this->actingAs($manager)->get("/app/compliance/requirements?view=list&source={$foreignSource->id}")->viewData('page')['props'];
         $this->assertNull($filtered['filters']['source']);
         $this->assertSame(['Eget krav'], array_column($filtered['requirements'], 'title'));
         $searched = $this->actingAs($manager)->get('/app/compliance/requirements?search=Fremmed')->viewData('page')['props'];
@@ -251,7 +251,7 @@ class ComplianceRequirementTest extends TestCase
         $this->complianceRequirement($iso, 'Uten referanse', null);
         $this->complianceRequirement($law, 'Arbeidstid', $owner, '§ 10-4', 3);
 
-        $props = $this->actingAs($manager)->get('/app/compliance/requirements')->viewData('page')['props'];
+        $props = $this->actingAs($manager)->get('/app/compliance/requirements?view=list')->viewData('page')['props'];
 
         // Active first; then by source name, reference (none last) and title.
         $this->assertSame(['Arbeidstid', 'Tilgangsstyring', 'Uten referanse', 'Gammel kontroll'], array_column($props['requirements'], 'title'));
@@ -267,12 +267,12 @@ class ComplianceRequirementTest extends TestCase
         $this->assertSame([1, 3, 6, 12], $props['review_intervals']);
         $this->assertSame(['standard', 'law', 'contract', 'internal', 'other'], $props['kinds']);
 
-        $byStatus = $this->actingAs($manager)->get('/app/compliance/requirements?status=retired')->viewData('page')['props'];
+        $byStatus = $this->actingAs($manager)->get('/app/compliance/requirements?view=list&status=retired')->viewData('page')['props'];
         $this->assertSame(['Gammel kontroll'], array_column($byStatus['requirements'], 'title'));
         // The count is the whole register, not the filtered list.
         $this->assertSame(4, $byStatus['visible_count']);
 
-        $bySource = $this->actingAs($manager)->get("/app/compliance/requirements?source={$law->id}")->viewData('page')['props'];
+        $bySource = $this->actingAs($manager)->get("/app/compliance/requirements?view=list&source={$law->id}")->viewData('page')['props'];
         $this->assertSame(['Arbeidstid'], array_column($bySource['requirements'], 'title'));
 
         foreach (['a.5.15' => 'Tilgangsstyring', 'TILGANG' => 'Tilgangsstyring', 'kravtekst for arbeidstid' => 'Arbeidstid'] as $needle => $title) {

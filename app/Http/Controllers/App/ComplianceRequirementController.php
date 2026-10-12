@@ -12,6 +12,7 @@ use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Compliance\ComplianceAssessmentService;
 use App\Services\Compliance\ComplianceAttentionService;
 use App\Services\Compliance\ComplianceQualityContextService;
+use App\Services\Compliance\ComplianceRegisterGroups;
 use App\Services\Compliance\ComplianceRequirementLifecycleService;
 use App\Services\Compliance\ComplianceStatusResolver;
 use App\Services\Compliance\Library\ComplianceApplicabilityService;
@@ -56,6 +57,13 @@ use Inertia\Response;
  */
 class ComplianceRequirementController extends Controller
 {
+    private const VIEW_GROUPED = 'grouped';
+
+    private const VIEW_LIST = 'list';
+
+    /** At most this many open sources and groups are read from the URL. */
+    private const MAX_OPEN_KEYS = 200;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly ComplianceAccessService $access,
@@ -66,6 +74,7 @@ class ComplianceRequirementController extends Controller
         private readonly ComplianceAttentionService $attention,
         private readonly ComplianceApplicabilityService $applicability,
         private readonly ComplianceFrameworkPresenter $library,
+        private readonly ComplianceRegisterGroups $registerGroups,
     ) {}
 
     /**
@@ -128,17 +137,39 @@ class ComplianceRequirementController extends Controller
             $query->where('compliance_requirements.source_id', $sourceId);
         }
 
-        $requirements = $query->inRegisterOrder()
-            ->with(['source:id,name,version,framework_id', 'owner:id,name', 'frameworkNode:id,applicability_rule'])
-            ->get();
+        // Gruppert (the default) or Liste: the same filtered query either way. A search is answered
+        // as a list across every source, so no group has to be opened to find a hit; the chosen view
+        // stays in the URL and comes back when the search is cleared.
+        $view = $request->query('view') === self::VIEW_LIST ? self::VIEW_LIST : self::VIEW_GROUPED;
+        $shownAs = $view === self::VIEW_LIST || $search !== '' ? self::VIEW_LIST : self::VIEW_GROUPED;
+        $open = $this->openKeys($request);
+        $rowFor = fn (ComplianceRequirement $requirement): array => $this->row($requirement) + [
+            'applicability_rule' => $requirement->frameworkNode?->applicability_rule,
+        ];
+
+        $requirements = [];
+        $register = null;
+        if ($shownAs === self::VIEW_LIST) {
+            $requirements = $query->inRegisterOrder()
+                ->with(['source:id,name,version,framework_id', 'owner:id,name', 'frameworkNode:id,applicability_rule'])
+                ->get()
+                ->map($rowFor)
+                ->all();
+        } else {
+            // Counts per source and chapter for everything; rows only for the groups that are open.
+            $register = $this->registerGroups->tree($query, $sources, $open, $rowFor);
+        }
 
         $canEdit = $this->access->canEdit($user);
         $canDelete = $this->access->canDelete($user);
 
         return Inertia::render('App/Compliance/Requirements/Index', [
-            'requirements' => $requirements->map(fn (ComplianceRequirement $requirement): array => $this->row($requirement) + [
-                'applicability_rule' => $requirement->frameworkNode?->applicability_rule,
-            ])->all(),
+            'requirements' => $requirements,
+            'register' => $register,
+            'view' => $view,
+            'shown_as' => $shownAs,
+            // How many match the search and filters, against visible_count, the whole register.
+            'matching_count' => $register !== null ? $register['total'] : count($requirements),
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleRequirements($user)->count(),
             'filters' => [
@@ -146,6 +177,7 @@ class ComplianceRequirementController extends Controller
                 'source' => $sourceId !== 0 ? $sourceId : null,
                 'status' => $status,
                 'applicability' => $applicability,
+                'open' => $open,
             ],
             'statuses' => ComplianceRequirement::STATUSES,
             'applicabilities' => ComplianceRequirement::APPLICABILITIES,
@@ -588,6 +620,24 @@ class ComplianceRequirementController extends Controller
         return $request->validate([
             'reason' => ['required', 'string', 'max:5000'],
         ], ComplianceValidationMessages::messages(), ComplianceValidationMessages::attributes())['reason'];
+    }
+
+    /**
+     * The open sources and groups of Gruppert, from `open=12,12:345`: a source id, or a source id
+     * and the node id of a chapter in it. Anything else is dropped. Whether a key is one the user may
+     * see is decided where it is used — against the counts of the user's own register.
+     *
+     * @return list<string>
+     */
+    private function openKeys(Request $request): array
+    {
+        $raw = $request->query('open', '');
+        $tokens = is_string($raw) ? explode(',', $raw) : [];
+
+        return array_slice(array_values(array_unique(array_filter(
+            array_map('trim', $tokens),
+            fn (string $token): bool => preg_match('/^\d{1,10}(:\d{1,10})?$/', $token) === 1,
+        ))), 0, self::MAX_OPEN_KEYS);
     }
 
     /** @return list<array{id: int, label: string}> */

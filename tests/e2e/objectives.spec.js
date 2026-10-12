@@ -22,7 +22,9 @@ test('an objective is created, edited, closed, reopened and deleted by someone w
 
     // System Owner reaches Mål og KPI but reads nothing there without a role.
     await page.goto('/app/objectives');
-    await expect(page.getByRole('heading', { name: 'Mål', exact: true })).toBeVisible();
+    // The module name is the page heading, as in Kvalitet.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Mål og KPI');
+    await expect(page.getByTestId('module-sidebar').locator('[aria-current="page"]')).toHaveText('Mål og KPI');
     await expect(page.getByText(/^(Ingen fagområder er opprettet ennå|Du har ikke tilgang til noen fagområder i Mål og KPI ennå)$/)).toBeVisible();
 
     await page.goto('/app/customer-environment?tab=permissions');

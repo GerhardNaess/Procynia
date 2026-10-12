@@ -5,10 +5,12 @@ namespace Tests\Support;
 use App\Models\BusinessArea;
 use App\Models\ComplianceAssessment;
 use App\Models\ComplianceAudit;
+use App\Models\ComplianceAuditCheck;
 use App\Models\ComplianceAuditFinding;
 use App\Models\ComplianceAuditProcess;
 use App\Models\ComplianceAuditRequirement;
 use App\Models\ComplianceAuditStatusChange;
+use App\Models\ComplianceFramework;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceRequirementControl;
 use App\Models\ComplianceRequirementProcess;
@@ -20,6 +22,7 @@ use App\Models\QualityControlDetail;
 use App\Models\QualityItem;
 use App\Models\QualityItemDocument;
 use App\Models\User;
+use App\Services\Compliance\Library\ComplianceFrameworkActivationService;
 use App\Services\Compliance\Library\ComplianceFrameworkLibraryImporter;
 use App\Support\CustomerPermissionCatalog;
 use Database\Seeders\ComplianceFrameworkLibrarySeeder;
@@ -531,6 +534,56 @@ class ComplianceE2EFixture
     }
 
     /**
+     * For the Revisjon 2.0 journey («Internrevisjon av leverandørstyring»): a fresh person who may run
+     * audits and register cases in one fagområde, and two standards as registered sources — ISO 9001
+     * with 8.4 and 8.5, ISO/IEC 27001 with A.5.19. The spec plans, runs and completes the audit through
+     * the pages; 8.5 stays in scope without a kontrollhandling, so the report has something to show.
+     *
+     * @return array{name: string, email: string, area_name: string, iso9001_label: string, iso27001_label: string, requirement_8_4: string, requirement_8_5: string, requirement_a_5_19: string}
+     */
+    public static function seedAuditPlanningJourney(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password): array {
+            $person = self::person($customerId, $suffix, $password, $name('Internrevisor'), 'leverandorrevisor');
+            self::role($customerId, $name('Internrevisor'), [
+                CustomerPermissionCatalog::COMPLIANCE_VIEW,
+                CustomerPermissionCatalog::COMPLIANCE_AUDIT,
+            ], $person);
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('Innkjøp')]);
+            self::areaRole($customerId, $name('Avviksbehandler'), [CustomerPermissionCatalog::IMPROVEMENT_VIEW, CustomerPermissionCatalog::IMPROVEMENT_EDIT], $area, $person);
+
+            $source = fn (string $standard, string $version) => ComplianceSource::query()->create([
+                'customer_id' => $customerId, 'name' => $name($standard), 'version' => $version, 'kind' => ComplianceSource::KIND_STANDARD,
+            ]);
+            $iso9001 = $source('ISO 9001', '2015');
+            $iso27001 = $source('ISO/IEC 27001', '2022');
+            $requirement = fn (ComplianceSource $in, string $reference, string $title) => ComplianceRequirement::query()->create([
+                'customer_id' => $customerId, 'source_id' => $in->id, 'reference' => $reference, 'title' => $name($title),
+                'requirement_text' => 'Registrert av E2E-fixturen.', 'owner_user_id' => $person->id,
+            ]);
+            $r84 = $requirement($iso9001, '8.4', 'Styring av eksternt leverte prosesser');
+            $r85 = $requirement($iso9001, '8.5', 'Produksjon og tjenesteyting');
+            $a519 = $requirement($iso27001, 'A.5.19', 'Informasjonssikkerhet i leverandørforhold');
+
+            $label = fn (ComplianceRequirement $requirement, ComplianceSource $in): string => implode(' · ', [$in->originLabel(), $requirement->reference, $requirement->title]);
+
+            return [
+                'name' => $person->name,
+                'email' => $person->email,
+                'area_name' => $area->name,
+                'iso9001_label' => $iso9001->originLabel(),
+                'iso27001_label' => $iso27001->originLabel(),
+                'requirement_8_4' => $label($r84, $iso9001),
+                'requirement_8_5' => $label($r85, $iso9001),
+                'requirement_a_5_19' => $label($a519, $iso27001),
+            ];
+        });
+    }
+
+    /**
      * For the Funn access spec: a fresh person who may run audits but only *read* cases in one
      * fagområde, and an audit in progress with two findings — an avvik not yet followed up, and one
      * already handed off to a case in a fagområde the person cannot reach.
@@ -684,7 +737,7 @@ class ComplianceE2EFixture
     /**
      * What is left of one run, for checking that cleanup really emptied it.
      *
-     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, audits: int, audit_status_changes: int, audit_requirements: int, audit_processes: int, audit_findings: int, improvement_cases: int, business_areas: int, quality_items: int, roles: int, users: int}
+     * @return array{sources: int, requirements: int, status_changes: int, assessments: int, requirement_processes: int, requirement_controls: int, audits: int, audit_status_changes: int, audit_requirements: int, audit_processes: int, audit_findings: int, audit_checks: int, improvement_cases: int, business_areas: int, quality_items: int, roles: int, users: int}
      */
     /**
      * For the Kravbibliotek journey: a fresh person who may read, edit and assess, and the library
@@ -764,6 +817,43 @@ class ComplianceE2EFixture
         return $journey;
     }
 
+    /**
+     * Kravregister with several kinds of source, for Gruppert and Liste: ISO 9001, ISO/IEC 27001 and
+     * ISO 14001 activated by the run's person, and an internal source of the run's own with two
+     * requirements and no chapters. Library requirements carry no marker; they go with the
+     * activation, which cleanup() finds through the person.
+     *
+     * @return array{name: string, email: string, internal_label: string, internal_titles: list<string>}
+     */
+    public static function seedRegisterJourney(string $suffix, string $password): array
+    {
+        $journey = self::seedFrameworksJourney($suffix, $password);
+        $person = User::query()->where('email', $journey['email'])->firstOrFail();
+        $name = self::namer($suffix);
+
+        foreach ($journey['frameworks'] as $frameworkId) {
+            app(ComplianceFrameworkActivationService::class)->activate(ComplianceFramework::query()->findOrFail($frameworkId), $person);
+        }
+
+        $internal = ComplianceSource::query()->create([
+            'customer_id' => $person->customer_id,
+            'name' => $name('Interne leverandørkrav'),
+            'kind' => ComplianceSource::KIND_INTERNAL,
+        ]);
+        $titles = [];
+        foreach (['L-1' => 'Godkjenning av ny leverandør', 'L-2' => 'Årlig leverandørevaluering'] as $reference => $title) {
+            $titles[] = ComplianceRequirement::query()->create([
+                'customer_id' => $person->customer_id,
+                'source_id' => $internal->id,
+                'reference' => $reference,
+                'title' => $name($title),
+                'requirement_text' => 'Internt krav til oppfølging av leverandører.',
+            ])->title;
+        }
+
+        return ['name' => $journey['name'], 'email' => $journey['email'], 'internal_label' => $internal->originLabel(), 'internal_titles' => $titles];
+    }
+
     public static function remaining(string $suffix): array
     {
         $customerId = self::customerId();
@@ -786,6 +876,7 @@ class ComplianceE2EFixture
             'audit_requirements' => ComplianceAuditRequirement::query()->whereIn('audit_id', $auditIds)->orWhereIn('requirement_id', $requirementIds)->count(),
             'audit_processes' => ComplianceAuditProcess::query()->whereIn('audit_id', $auditIds)->count(),
             'audit_findings' => ComplianceAuditFinding::query()->whereIn('audit_id', $auditIds)->count(),
+            'audit_checks' => ComplianceAuditCheck::query()->whereIn('audit_id', $auditIds)->count(),
             'improvement_cases' => ImprovementCase::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->count(),
             'business_areas' => BusinessArea::query()->where('customer_id', $customerId)->where('name', '~', $pattern)->count(),
             'quality_items' => QualityItem::query()->where('customer_id', $customerId)->where('title', '~', $pattern)->count(),

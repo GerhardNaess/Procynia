@@ -19,11 +19,19 @@ import {
     splitByScope,
     plannedPeriodLabel,
     requirementLabel,
+    AUDIT_PHASES,
+    auditPhase,
+    auditPhaseLabel,
+    checkFormData,
+    countText,
+    relevanceLabel,
+    scopeCoverage,
 } from './complianceAudit.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
-const layout = source('../../../../Layouts/CustomerAppLayout.jsx');
+// The header's areas are declared in the central navigation resolver the layout renders from.
+const navigationSource = source('../../../../Support/appNavigation.js');
 const lang = (locale) => readFileSync(new URL(`../../../../../../lang/${locale}/procynia.php`, import.meta.url), 'utf8');
 
 const block = (text, start, end) => {
@@ -35,7 +43,7 @@ const block = (text, start, end) => {
 
 describe('Etterlevelse og revisjon has four Level 2 areas: Kravbibliotek | Kravregister | Etterlevelsesvurdering | Revisjon', () => {
     test('exactly the four, in the order the work runs, with their own routes', () => {
-        const areas = block(layout, "if (activeMainArea === 'compliance') {\n            // Etterlevelse", '];');
+        const areas = block(navigationSource, "if (area === 'compliance') {\n        // Etterlevelse", '];');
         const keys = [...areas.matchAll(/key: '([^']+)'/g)].map((m) => m[1]);
         const hrefs = [...areas.matchAll(/href: '([^']+)'/g)].map((m) => m[1]);
 
@@ -44,7 +52,7 @@ describe('Etterlevelse og revisjon has four Level 2 areas: Kravbibliotek | Kravr
     });
 
     test('no Oversikt, dashboard or third level is invented for the module', () => {
-        const items = block(layout, "if (activeMainArea === 'compliance') {\n            // Etterlevelse", '];').split('return [')[1];
+        const items = block(navigationSource, "if (area === 'compliance') {\n        // Etterlevelse", '];').split('return [')[1];
 
         for (const word of ['overview', 'dashboard', 'Oversikt', 'findings']) {
             assert.ok(! items.includes(word), `${word} must not be an area`);
@@ -165,8 +173,8 @@ describe('The register', () => {
 describe('The audit page', () => {
     const show = source('./Show.jsx');
 
-    test('reads top to bottom: status, information, scope, requirements, processes, findings, conclusion, history', () => {
-        const order = ['data-testid="compliance-audit-status"', 'compliance-audit-info-heading', 'compliance-audit-scope-heading', '<AuditRequirementScope', '<AuditProcessScope', '<AuditFindings', 'compliance-audit-conclusion-heading', '<AuditHistory'];
+    test('three phases over the status: planning, execution, report — then the history', () => {
+        const order = ['data-testid="compliance-audit-status"', '<PhaseTabs', "tab === 'planning'", 'compliance-audit-info-heading', 'data-testid="compliance-audit-purpose"', 'data-testid="compliance-audit-scope"', '<AuditRequirementScope', '<AuditProcessScope', "tab === 'execution'", '<AuditCoverage', '<AuditChecks', '<AuditFindings', "tab === 'report'", '<AuditReport', '<AuditHistory'];
         const positions = order.map((needle) => show.indexOf(needle));
 
         positions.forEach((position, i) => assert.ok(position > -1, `${order[i]} must exist`));
@@ -175,7 +183,7 @@ describe('The audit page', () => {
 
     test('every lifecycle action waits for the server\'s permission', () => {
         for (const [permission, action] of [['can_start', 'start'], ['can_complete', 'complete'], ['can_reopen', 'reopen'], ['can_cancel', 'cancel']]) {
-            assert.match(show, new RegExp(`\\{permissions\\.${permission} && \\(\\n\\s+<button type="button" onClick=\\{\\(\\) => setPanel\\('${action}'\\)\\}`), permission);
+            assert.match(show, new RegExp(`\\{permissions\\.${permission} && \\(\\n\\s+<button type="button" onClick=\\{\\(\\) => openPanel\\('${action}'`), permission);
         }
         assert.match(show, /\{permissions\.can_edit && panel === null && \(/);
         assert.match(show, /\{permissions\.can_delete && \(/);
@@ -222,7 +230,9 @@ describe('The audit page', () => {
 
     test('a retired requirement in scope says so, in the list and in the picker', () => {
         const scope = source('./AuditScope.jsx');
-        assert.equal((scope.match(/status === 'retired' && /g) ?? []).length, 3);
+        assert.equal((scope.match(/status === 'retired' && /g) ?? []).length, 2);
+        // The same marks in the scope list and in every requirement checklist.
+        assert.equal((scope.match(/<RequirementMarks requirement=/g) ?? []).length, 2);
     });
 
     test('scope lists stack as rows that wrap, so they read on a phone', () => {
@@ -342,7 +352,7 @@ describe('Funn on the audit page', () => {
     test('cards stack and wrap on a phone; nothing below 16 px', () => {
         assert.ok(findings.includes('divide-y divide-slate-100'));
         assert.ok((findings.match(/break-words/g) ?? []).length >= 5);
-        assert.match(card, /className="grid gap-3 sm:grid-cols-3"/);
+        assert.match(card, /className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"/);
         assert.match(handoff, /className="grid gap-4 sm:grid-cols-2"/);
         assert.match(findings, /className="flex flex-wrap gap-2" data-testid="compliance-finding-actions"/);
         assert.doesNotMatch(findings, /\btext-(xs|sm)\b/);
@@ -404,16 +414,82 @@ describe('finding helpers', () => {
     });
 
     test('a new finding\'s form starts empty, with the Kvalitet fields', () => {
-        assert.deepEqual(findingFormData(), { finding_type: '', title: '', description: '', requirement_id: '', quality_process_id: '', control_item_id: '' });
+        assert.deepEqual(findingFormData(), { finding_type: '', title: '', description: '', requirement_id: '', check_id: '', quality_process_id: '', control_item_id: '' });
     });
 
     test('an edited finding\'s form carries Kvalitet fields only when the server sent its Kvalitet context', () => {
         const base = { finding_type: 'observation', title: 'T', description: 'D', requirement: { id: 7 } };
 
-        assert.deepEqual(findingFormData(base), { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7' });
+        assert.deepEqual(findingFormData(base), { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7', check_id: '' });
         assert.deepEqual(
-            findingFormData({ ...base, quality_process: { id: 3 }, control: null }),
-            { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7', quality_process_id: '3', control_item_id: '' },
+            findingFormData({ ...base, check: { id: 4 }, quality_process: { id: 3 }, control: null }),
+            { finding_type: 'observation', title: 'T', description: 'D', requirement_id: '7', check_id: '4', quality_process_id: '3', control_item_id: '' },
         );
+    });
+
+    test('«Registrer funn» starts a new finding with its check, and its requirement when there is exactly one', () => {
+        assert.equal(findingFormData(null, { check_id: 9, requirement_id: 7 }).check_id, '9');
+        assert.equal(findingFormData(null, { check_id: 9, requirement_id: 7 }).requirement_id, '7');
+        assert.equal(findingFormData(null, { check_id: 9, requirement_id: null }).requirement_id, '');
+        // An existing finding keeps its own.
+        assert.equal(findingFormData({ check: { id: 2 }, requirement: { id: 3 } }, { check_id: 9, requirement_id: 7 }).check_id, '2');
+    });
+});
+
+describe('Revisjon 2.0: phases, relevance and kontrollhandlinger', () => {
+    test('the phase is read off the status, never stored', () => {
+        assert.deepEqual(AUDIT_PHASES, ['planning', 'execution', 'report']);
+        assert.equal(auditPhase('planned'), 'planning');
+        assert.equal(auditPhase('in_progress'), 'execution');
+        assert.equal(auditPhase('completed'), 'report');
+        assert.equal(auditPhase('cancelled'), null);
+        assert.equal(auditPhaseLabel('report'), 'Rapport og oppfølging');
+        assert.equal(auditPhaseLabel('report', { phases: { report: 'Report and follow-up' } }), 'Report and follow-up');
+    });
+
+    test('only what automatic selection leaves out is marked, a control in its own words', () => {
+        assert.equal(relevanceLabel({ relevance: 'applies' }), null);
+        assert.equal(relevanceLabel({}), null);
+        assert.equal(relevanceLabel({ relevance: 'not_applicable', is_control: false }), 'Ikke relevant');
+        assert.equal(relevanceLabel({ relevance: 'relevance_open', is_control: false }), 'Relevans ikke avklart');
+        assert.equal(relevanceLabel({ relevance: 'not_applicable', is_control: true }), 'Kontroll utelatt');
+        assert.equal(relevanceLabel({ relevance: 'relevance_open', is_control: true }), 'Kontrollvalg ikke gjort');
+    });
+
+    test('coverage splits the scope by documented examination; counts read naturally', () => {
+        const { examined, unexamined } = scopeCoverage([{ id: 1, check_count: 2 }, { id: 2, check_count: 0 }, { id: 3 }]);
+        assert.deepEqual(examined.map((r) => r.id), [1]);
+        assert.deepEqual(unexamined.map((r) => r.id), [2, 3]);
+        assert.equal(countText(1, 'én', ':count mange'), 'én');
+        assert.equal(countText(3, 'én', ':count mange'), '3 mange');
+    });
+
+    test('a check carries its requirements as ids and has no result field', () => {
+        assert.deepEqual(checkFormData(), { title: '', observation: '', evidence: '', requirement_ids: [] });
+        assert.deepEqual(checkFormData({ title: 'T', observation: 'O', evidence: null, requirements: [{ id: 4 }, { id: 5 }] }), { title: 'T', observation: 'O', evidence: '', requirement_ids: [4, 5] });
+        const checks = source('./AuditChecks.jsx');
+        for (const word of ['result', 'compliant', 'oppfylt\'']) {
+            assert.ok(! checks.includes(`setData('${word}`), word);
+        }
+        assert.match(checks, /\{canRecord && panel === null && \(/);
+        assert.match(checks, /\{perms\.can_delete && \(/);
+    });
+
+    test('Ny revisjon plans purpose, omfang and requirements in one form', () => {
+        const index = source('./Index.jsx');
+        assert.match(index, /purpose: '',/);
+        assert.match(index, /requirement_ids: \[\],\n\s+source_ids: \[\],/);
+        assert.match(index, /<PlanningRequirementSelection options=\{requirementOptions\} form=\{form\} ta=\{ta\} \/>/);
+        const form = source('./AuditForm.jsx');
+        assert.ok(form.includes("setData('purpose'"));
+        // Omfang is optional text: the requirements may be the omfang.
+        assert.doesNotMatch(block(form, "{has('scope_description')", '</textarea>'), /\n\s+required\n|aria-required|<RequiredMark/);
+    });
+
+    test('the report never calls an examined requirement met', () => {
+        const report = source('./AuditReport.jsx');
+        assert.match(report, /report_conformity_note/);
+        assert.match(report, /report_unexamined/);
+        assert.match(report, /\{children\}/);
     });
 });

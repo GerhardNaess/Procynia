@@ -16,7 +16,8 @@ const WIKI_NAV_ITEMS = [
 function secondaryNav(page) {
     // The shared secondary navigation sits directly under the main navigation,
     // above the page content — same container used by the AI area.
-    return page.locator('nav').filter({ hasText: 'Wiki-sider' });
+    // Scoped to the module navigation: the breadcrumb is a nav too, and names Wiki-sider as well.
+    return page.getByTestId('module-navigation').locator('nav');
 }
 
 test('Wiki secondary navigation shows all four items in the shared nav pattern', async ({ page }) => {
@@ -89,7 +90,7 @@ test('AI secondary navigation is unchanged by the Wiki navigation alignment', as
     const response = await page.goto('/app/ai');
     expect(response?.status()).toBe(200);
 
-    const nav = page.locator('nav').filter({ hasText: 'Oversikt' });
+    const nav = page.getByTestId('page-navigation').locator('nav');
     await expect(nav.getByRole('link', { name: 'Oversikt', exact: true })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Oversikt', exact: true })).toHaveAttribute('aria-current', 'page');
 });

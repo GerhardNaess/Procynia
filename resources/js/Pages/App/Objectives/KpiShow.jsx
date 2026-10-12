@@ -211,12 +211,8 @@ export default function KpiShow() {
         : (tr.history_retired ?? 'Avsluttet av :name')).replace(':name', who);
 
     return (
-        <CustomerAppLayout title={kpi.title} showPageTitle={false}>
+        <CustomerAppLayout title={kpi.title} showPageTitle={false} workView={panel === 'edit' ? (tr.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
-                <Link href={objective.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">
-                    ← {tr.back ?? 'Til målet'}
-                </Link>
-
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
                         <p className="text-base font-semibold uppercase tracking-wide text-slate-500">{tr.col_title ?? 'KPI'}</p>

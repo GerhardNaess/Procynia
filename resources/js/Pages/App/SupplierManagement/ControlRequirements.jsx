@@ -6,7 +6,6 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import ControlRequirementForm from './ControlRequirementForm';
 import RequirementTemplates from './RequirementTemplates';
-import SupplierTabs from './SupplierTabs';
 import WikiGuidance from './WikiGuidance';
 import { LEVEL_TONES, anchorLabel, appliesToText, controlPointLabel, groupByTheme, intervalLabel, levelLabel } from './controlRequirements';
 import { supplierHelp } from './supplierHelp';
@@ -20,6 +19,10 @@ const HINT = 'text-base text-slate-600';
  * now. Everyone with supplier.view reads it; only supplier.assure is offered changes, and the server
  * refuses them otherwise. A requirement for one supplier is on that supplier's page, not here.
  * Kravmaler add requirements here; once added they are ordinary requirements, edited like any other.
+ *
+ * Virksomhetens kontrollkrav come first — they are the work; the templates below are a way to start.
+ * Someone without supplier.assure is told once, here, why nothing can be changed, instead of finding
+ * the buttons simply missing.
  */
 export default function SupplierControlRequirementsIndex() {
     const { translations = {}, requirements = [], templates = [], templates_reviewed: templatesReviewed = false, form: formOptions = null, permissions = {}, errors = {} } = usePage().props;
@@ -50,13 +53,11 @@ export default function SupplierControlRequirementsIndex() {
     };
 
     return (
-        <CustomerAppLayout title={k.heading ?? 'Kontrollkrav'} showPageTitle={false}>
+        <CustomerAppLayout title={k.heading ?? 'Kontrollkrav'} showPageTitle={false} workView={editing === 'new' ? (k.create ?? 'Nytt kontrollkrav') : null}>
             <div className="space-y-6">
-                <SupplierTabs current="control_requirements" tr={tr} />
-
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{k.heading ?? 'Kontrollkrav'}</h1>
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.index_heading ?? 'Leverandører'}</h1>
                         <p className={HINT}>{k.intro}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -67,6 +68,12 @@ export default function SupplierControlRequirementsIndex() {
                     </div>
                 </header>
 
+                {! canManage && (
+                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" role="note" data-testid="control-read-only">
+                        {k.read_only ?? 'Du kan se kontrollkravene, men trenger rettigheten «Gjennomføre leverandørkontroll» for å opprette, endre eller ta i bruk kravmaler. Rettigheten administreres under Kundemiljø → Tilganger.'}
+                    </p>
+                )}
+
                 {errors.requirement && <p className="text-base text-rose-700">{errors.requirement}</p>}
 
                 {editing === 'new' && (
@@ -76,67 +83,75 @@ export default function SupplierControlRequirementsIndex() {
                     </section>
                 )}
 
-                <RequirementTemplates templates={templates} reviewed={templatesReviewed} canManage={canManage} tr={tr} />
+                <section className="space-y-4" aria-labelledby="control-register-heading" data-testid="control-register">
+                    <div className="space-y-1">
+                        <h2 id="control-register-heading" className="text-2xl font-semibold text-slate-950">{k.register_heading ?? 'Virksomhetens kontrollkrav'}</h2>
+                        <p className={HINT}>{k.register_intro}</p>
+                    </div>
 
-                {groups.length === 0 ? (
-                    <section className={CARD} data-testid="control-catalogue-empty">
-                        <p className="text-base text-slate-900">{k.none ?? 'Ingen kontrollkrav er registrert ennå.'}</p>
-                        <p className={`mt-1 ${HINT}`}>{k.none_hint}</p>
-                    </section>
-                ) : groups.map((group) => (
-                    <section key={group.theme} className={CARD} aria-labelledby={`control-theme-${group.theme}`}>
-                        <h2 id={`control-theme-${group.theme}`} className="text-xl font-semibold text-slate-950">{group.label}</h2>
-                        <ul className="mt-3 space-y-3">
-                            {group.rows.map((row) => (
-                                <li key={row.id} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-catalogue-row">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
-                                        <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
-                                        {row.status === 'retired' && <StatusBadge tone="slate">{k.retired ?? 'Utgått'}</StatusBadge>}
-                                    </div>
-                                    <p className="mt-2 break-words text-base font-semibold text-slate-900" data-testid="control-rule-text">{row.rule_text}</p>
-                                    {row.status !== 'retired' && <p className="text-base text-slate-700">{appliesToText(row.applies_to_count, tr)}</p>}
-                                    <p className="mt-1 break-words text-base text-slate-700">
-                                        {controlPointLabel(row.control_point, tr)} · {intervalLabel(row.control_interval_months, tr)}
-                                    </p>
-                                    {row.template && (
-                                        <p className="mt-1 break-words text-base text-slate-600" data-testid="control-template-origin">
-                                            {(tr.templates?.from_template ?? 'Fra kravmal: :name').replace(':name', row.template.name)}
-                                        </p>
-                                    )}
-                                    {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
-                                    {row.basis_text && <p className="mt-1 break-words text-base text-slate-700">{c.basis ?? 'Grunnlag'}: {row.basis_text}</p>}
-                                    {row.anchor && (
-                                        <p className="mt-1 break-words text-base text-slate-700">
-                                            {c.anchor ?? 'Forankret i'}:{' '}
-                                            <a href={row.anchor.url} className="font-semibold text-violet-700 hover:text-violet-900">{anchorLabel(row.anchor)}</a>
-                                            {row.anchor.retired && ` (${c.anchor_retired ?? 'utgått i Etterlevelse og revisjon'})`}
-                                        </p>
-                                    )}
-                                    <WikiGuidance requirementId={row.id} guidance={row.wiki_guidance} canManage={canManageGuidance} tr={tr} />
-
-                                    {canManage && editing === null && (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            <button type="button" onClick={() => setEditing(row.id)} className={SECONDARY_ACTION}>{k.edit ?? 'Rediger'}</button>
-                                            {row.status === 'active' ? (
-                                                <button type="button" onClick={() => post(`${base}/${row.id}/retire`, k.retire_confirm)} className={WARNING_ACTION}>{k.retire ?? 'Sett som utgått'}</button>
-                                            ) : (
-                                                <button type="button" onClick={() => post(`${base}/${row.id}/reactivate`)} className={SECONDARY_ACTION}>{k.reactivate ?? 'Ta i bruk igjen'}</button>
-                                            )}
-                                            {row.deletable && <button type="button" onClick={() => destroy(row)} className={DESTRUCTIVE_ACTION}>{k.delete ?? 'Slett'}</button>}
+                    {groups.length === 0 ? (
+                        <div className={CARD} data-testid="control-catalogue-empty">
+                            <p className="text-base text-slate-900">{k.none ?? 'Ingen kontrollkrav er registrert ennå.'}</p>
+                            <p className={`mt-1 ${HINT}`}>{k.none_hint}</p>
+                            <p className="mt-2 text-base text-slate-900" data-testid="control-catalogue-start">{canManage ? k.none_start_manage : k.none_start_read}</p>
+                        </div>
+                    ) : groups.map((group) => (
+                        <section key={group.theme} className={CARD} aria-labelledby={`control-theme-${group.theme}`}>
+                            <h3 id={`control-theme-${group.theme}`} className="text-xl font-semibold text-slate-950">{group.label}</h3>
+                            <ul className="mt-3 space-y-3">
+                                {group.rows.map((row) => (
+                                    <li key={row.id} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-catalogue-row">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
+                                            <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
+                                            {row.status === 'retired' && <StatusBadge tone="slate">{k.retired ?? 'Utgått'}</StatusBadge>}
                                         </div>
-                                    )}
-                                    {editing === row.id && (
-                                        <>
-                                            <h3 className="mt-4 text-lg font-semibold text-slate-950">{k.edit_heading ?? 'Rediger kontrollkrav'}</h3>
-                                            <ControlRequirementForm requirement={row} options={formOptions ?? {}} onDone={close} tr={tr} />
-                                        </>
-                                    )}
-                                </li>
-                            ))}
-                        </ul>
-                    </section>
-                ))}
+                                        <p className="mt-2 break-words text-base font-semibold text-slate-900" data-testid="control-rule-text">{row.rule_text}</p>
+                                        {row.status !== 'retired' && <p className="text-base text-slate-700">{appliesToText(row.applies_to_count, tr)}</p>}
+                                        <p className="mt-1 break-words text-base text-slate-700">
+                                            {controlPointLabel(row.control_point, tr)} · {intervalLabel(row.control_interval_months, tr)}
+                                        </p>
+                                        {row.template && (
+                                            <p className="mt-1 break-words text-base text-slate-600" data-testid="control-template-origin">
+                                                {(tr.templates?.from_template ?? 'Fra kravmal: :name').replace(':name', row.template.name)}
+                                            </p>
+                                        )}
+                                        {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
+                                        {row.basis_text && <p className="mt-1 break-words text-base text-slate-700">{c.basis ?? 'Grunnlag'}: {row.basis_text}</p>}
+                                        {row.anchor && (
+                                            <p className="mt-1 break-words text-base text-slate-700">
+                                                {c.anchor ?? 'Forankret i'}:{' '}
+                                                <a href={row.anchor.url} className="font-semibold text-violet-700 hover:text-violet-900">{anchorLabel(row.anchor)}</a>
+                                                {row.anchor.retired && ` (${c.anchor_retired ?? 'utgått i Etterlevelse og revisjon'})`}
+                                            </p>
+                                        )}
+                                        <WikiGuidance requirementId={row.id} guidance={row.wiki_guidance} canManage={canManageGuidance} tr={tr} />
+
+                                        {canManage && editing === null && (
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                <button type="button" onClick={() => setEditing(row.id)} className={SECONDARY_ACTION}>{k.edit ?? 'Rediger'}</button>
+                                                {row.status === 'active' ? (
+                                                    <button type="button" onClick={() => post(`${base}/${row.id}/retire`, k.retire_confirm)} className={WARNING_ACTION}>{k.retire ?? 'Sett som utgått'}</button>
+                                                ) : (
+                                                    <button type="button" onClick={() => post(`${base}/${row.id}/reactivate`)} className={SECONDARY_ACTION}>{k.reactivate ?? 'Ta i bruk igjen'}</button>
+                                                )}
+                                                {row.deletable && <button type="button" onClick={() => destroy(row)} className={DESTRUCTIVE_ACTION}>{k.delete ?? 'Slett'}</button>}
+                                            </div>
+                                        )}
+                                        {editing === row.id && (
+                                            <>
+                                                <h4 className="mt-4 text-lg font-semibold text-slate-950">{k.edit_heading ?? 'Rediger kontrollkrav'}</h4>
+                                                <ControlRequirementForm requirement={row} options={formOptions ?? {}} onDone={close} tr={tr} />
+                                            </>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    ))}
+                </section>
+
+                <RequirementTemplates templates={templates} reviewed={templatesReviewed} canManage={canManage} tr={tr} />
             </div>
         </CustomerAppLayout>
     );

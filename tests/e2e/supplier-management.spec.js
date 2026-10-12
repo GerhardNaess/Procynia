@@ -59,6 +59,8 @@ test('a supplier is registered, edited, taken into use, ended and reopened, with
     const supplierUrl = page.url();
     await expect(page.getByText('Leverandøren er registrert.', { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+    // A supplier's own page stays under the Leverandører tab.
+    await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Leverandører');
     const facts = page.getByTestId('supplier-facts');
     for (const text of ['IT og skytjenester', '987654321', person.colleague_name]) {
         await expect(facts).toContainText(text);
