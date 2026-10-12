@@ -16,7 +16,7 @@ use App\Services\ManagementReview\ManagementReviewSectionCatalog as Catalog;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Ledelsens gjennomgåelse → Wiki. What carries over is the management's own word on how the
+ * Ledelsens gjennomgang → Wiki. What carries over is the management's own word on how the
  * organisation is run: its judgement and comment per section, its texts, its overall conclusion, what
  * it decided and which improvements it planned. Never the basis — the figures and lists another module
  * owns stay in that module, so the Wiki does not get a second, ageing copy of the registers.

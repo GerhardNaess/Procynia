@@ -22,7 +22,7 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Ledelsens gjennomgåelse, from database to page: the review itself, who may do what, and the
+ * Ledelsens gjennomgang, from database to page: the review itself, who may do what, and the
  * lifecycle Utkast → Ferdigstilt (docs/management-review-v1-plan.md §6, §8).
  *
  * What these tests defend:
@@ -298,7 +298,7 @@ class ManagementReviewTest extends TestCase
             ->assertSessionHasNoErrors();
         $this->actingAs($manager)->patch("/app/management-reviews/{$review->id}", $this->mrPayload($manager, ['title' => 'Endret', 'participant_user_ids' => [$ola->id, $foreigner->id]]))
             ->assertSessionHasErrors('participant_user_ids');
-        $this->assertSame('Ledelsens gjennomgåelse 2026', $review->fresh()->title);
+        $this->assertSame('Ledelsens gjennomgang 2026', $review->fresh()->title);
         $this->assertSame(3, $review->participants()->count());
 
         // A form without the field leaves the participants alone.
@@ -455,7 +455,7 @@ class ManagementReviewTest extends TestCase
         $this->actingAs($manager)->post("/app/management-reviews/{$review->id}/participants", ['name' => 'Etternøler'])
             ->assertSessionHasErrors('review');
         $this->actingAs($manager)->delete("/app/management-reviews/{$review->id}")->assertSessionHasErrors('review');
-        $this->assertSame('Ledelsens gjennomgåelse 2026', $review->fresh()->title);
+        $this->assertSame('Ledelsens gjennomgang 2026', $review->fresh()->title);
 
         $this->assertDatabaseRefuses(fn () => DB::table('management_reviews')->where('id', $review->id)->update(['title' => 'Endret']));
         $this->assertDatabaseRefuses(fn () => DB::table('management_reviews')->where('id', $review->id)->update(['status' => 'draft']));
@@ -528,7 +528,7 @@ class ManagementReviewTest extends TestCase
         $this->assertNull(ManagementReview::query()->find($review->id));
         $deleted = ManagementReviewEvent::query()->where('customer_id', $customer->id)->where('event', ManagementReviewEvent::DELETED)->sole();
         $this->assertNull($deleted->management_review_id);
-        $this->assertSame('Ledelsens gjennomgåelse 2026', $deleted->metadata['title']);
+        $this->assertSame('Ledelsens gjennomgang 2026', $deleted->metadata['title']);
     }
 
     public function test_deleting_a_customer_still_cascades_through_the_locked_rows(): void

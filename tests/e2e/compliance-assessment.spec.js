@@ -57,7 +57,7 @@ test('a requirement is assessed, changed and reassessed, with every assessment a
     await expect(page.getByTestId('compliance-current')).toHaveText('Ikke vurdert');
     await expect(section).toContainText('Kravet er ikke vurdert ennå.');
     await expect(page.getByTestId('compliance-assessment-history')).toHaveCount(0);
-    await expectPageHelp(page, 'Om kravet', ['Slik gjør du det', 'Etterlevelse', 'Eksempel: 9.3 Ledelsens gjennomgåelse', 'Status', 'Statushistorikk']);
+    await expectPageHelp(page, 'Om kravet', ['Slik gjør du det', 'Etterlevelse', 'Eksempel: 9.3 Ledelsens gjennomgang', 'Status', 'Statushistorikk']);
     await expectReadable(page, '01-not-assessed');
 
     // 3. Vurder etterlevelse: the server's messages first, then «Oppfylt».

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { tinker } from './risk.js';
 
-/** The password every person the Ledelsens gjennomgåelse fixture seeds logs in with. */
+/** The password every person the Ledelsens gjennomgang fixture seeds logs in with. */
 export const MANAGEMENT_REVIEW_E2E_PASSWORD = 'E2eLg123!';
 
 /** The six-character suffix the spec puts on what it creates. */

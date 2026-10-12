@@ -48,7 +48,7 @@ return [
         // Leverandøroppfølging — an option. Its routes are `app.supplier-management.`, never
         // `app.suppliers.`, which is Anbud's.
         'supplier' => ['sort_order' => 50],
-        // Ledelsens gjennomgåelse. Part of Basis: every management system needs one, and it works
+        // Ledelsens gjennomgang. Part of Basis: every management system needs one, and it works
         // with whatever other modules the customer holds (docs/management-review-v1-plan.md §1).
         'management_review' => ['sort_order' => 55],
         'contracts' => ['sort_order' => 60],

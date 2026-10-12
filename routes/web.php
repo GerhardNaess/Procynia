@@ -400,7 +400,7 @@ Route::prefix('app')
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements', [KpiMeasurementController::class, 'store'])->whereNumber(['objectiveId', 'kpiId'])->name('kpis.measurements.store');
             Route::post('/{objectiveId}/kpis/{kpiId}/measurements/{measurementId}/withdraw', [KpiMeasurementController::class, 'withdraw'])->whereNumber(['objectiveId', 'kpiId', 'measurementId'])->name('kpis.measurements.withdraw');
         });
-        // Ledelsens gjennomgåelse. Named under `app.management-review.`, mapped to the `management_review`
+        // Ledelsens gjennomgang. Named under `app.management-review.`, mapped to the `management_review`
         // module (Basis). Reviews are addressed by a plain id and resolved through
         // ManagementReviewAccessService, so another customer's review is a 404.
         Route::prefix('/management-reviews')->name('management-review.')->group(function (): void {

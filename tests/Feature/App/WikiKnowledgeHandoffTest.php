@@ -45,7 +45,7 @@ use Tests\TestCase;
 
 /**
  * The shared «Lag kunnskapsartikkel» handoff for Etterlevelse, Leverandøroppfølging, Avvik og
- * forbedringer, Mål and Ledelsens gjennomgåelse (its own rules: ManagementReviewWikiKnowledgeTest; Risiko has its own, older test: RiskWikiKnowledgeTest).
+ * forbedringer, Mål and Ledelsens gjennomgang (its own rules: ManagementReviewWikiKnowledgeTest; Risiko has its own, older test: RiskWikiKnowledgeTest).
  *
  * The same matrix for every module: the module's own write permission AND wiki.source.manage, a
  * foreign or hidden record is a 404, the source becomes an ordinary Wiki document with an origin row
@@ -320,7 +320,7 @@ class WikiKnowledgeHandoffTest extends TestCase
                 // directly by the module's own services.
                 $finalizer = $this->member($customer, [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, CustomerPermissionCatalog::MANAGEMENT_REVIEW_EDIT, CustomerPermissionCatalog::MANAGEMENT_REVIEW_FINALIZE]);
                 $review = app(ManagementReviewService::class)->create($finalizer, [
-                    'title' => 'Ledelsens gjennomgåelse 2026', 'purpose' => null, 'period_start' => '2026-01-01', 'period_end' => '2026-06-30',
+                    'title' => 'Ledelsens gjennomgang 2026', 'purpose' => null, 'period_start' => '2026-01-01', 'period_end' => '2026-06-30',
                     'meeting_date' => '2026-07-01', 'all_business_areas' => true, 'business_area_ids' => [], 'frameworks' => [], 'owner_user_id' => $finalizer->id,
                 ]);
                 $review->participants()->create(['customer_id' => $customer->id, 'name' => 'Deltaker', 'position' => 1]);

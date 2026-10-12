@@ -16,7 +16,7 @@ const MODULES = [
     'Avvik og forbedringer',
     'Etterlevelse og revisjon',
     'Leverandøroppfølging',
-    'Ledelsens gjennomgåelse',
+    'Ledelsens gjennomgang',
 ];
 
 const sectionButton = (page, name) => page.locator('section[data-testid^="permission-section-"] h3 button', { hasText: name }).first();

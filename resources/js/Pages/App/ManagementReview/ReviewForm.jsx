@@ -8,7 +8,7 @@ const HINT = 'mt-1 text-base text-slate-600';
 const ERROR = 'mt-1 text-base text-rose-700';
 
 /**
- * The fields of a review, for Ny gjennomgåelse and Rediger. Five that matter — title, period, scope,
+ * The fields of a review, for Ny gjennomgang and Rediger. Five that matter — title, period, scope,
  * responsible, frameworks — plus the optional meeting date, participants and purpose. Frameworks and
  * participants are searchable pickers, never the whole list on screen. The participants chosen here
  * are people in Procynia; someone outside it is added by name on Oversikt. Status is never a field.

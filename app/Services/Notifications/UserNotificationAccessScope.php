@@ -58,7 +58,7 @@ use Illuminate\Database\Eloquent\Model;
  *                     customer that still exists.
  *  - objective.*      Mål og KPI, and metadata.objective_id is visible (ObjectiveAccessService,
  *                     per fagområde).
- *  - management_review.*  Ledelsens gjennomgåelse and management_review.view, and
+ *  - management_review.*  Ledelsens gjennomgang and management_review.view, and
  *                     metadata.management_review_id is visible (ManagementReviewAccessService).
  *
  * The same rules hold for fristpåminnelser, which carry their module's prefix and object.

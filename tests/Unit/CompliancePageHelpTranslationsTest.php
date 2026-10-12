@@ -258,7 +258,7 @@ class CompliancePageHelpTranslationsTest extends TestCase
             // The requirement help has the worked examples: 9.3, an Annex A control and an environmental aspect.
             $requirementSections = array_column($strings['help']['requirement']['sections'], 'title');
             foreach ($locale === 'no'
-                ? ['Eksempel: 9.3 Ledelsens gjennomgåelse', 'Eksempel: ISO/IEC 27001 A.8.13 Sikkerhetskopiering', 'Eksempel: ISO 14001 6.1.2 Miljøaspekter']
+                ? ['Eksempel: 9.3 Ledelsens gjennomgang', 'Eksempel: ISO/IEC 27001 A.8.13 Sikkerhetskopiering', 'Eksempel: ISO 14001 6.1.2 Miljøaspekter']
                 : ['Example: 9.3 Management review', 'Example: ISO/IEC 27001 A.8.13 Backup', 'Example: ISO 14001 6.1.2 Environmental aspects'] as $example) {
                 $this->assertContains($example, $requirementSections, "lang/{$locale}: the requirement help lacks «{$example}».");
             }

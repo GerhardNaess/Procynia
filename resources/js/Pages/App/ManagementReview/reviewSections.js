@@ -1,5 +1,5 @@
 /**
- * Ledelsens gjennomgåelse, the part that is pure: status tones, what each section marker means, which
+ * Ledelsens gjennomgang, the part that is pure: status tones, what each section marker means, which
  * numbers count as needing attention, and where «Se nåsituasjonen» leads. The server decides what
  * the person may see; this only turns it into words and order.
  */
@@ -228,7 +228,7 @@ export function reviewHelp(t, page) {
 
     return {
         buttonLabel: help.button ?? 'Hjelp',
-        title: content.title ?? 'Om ledelsens gjennomgåelse',
+        title: content.title ?? 'Om ledelsens gjennomgang',
         intro: content.intro,
         sections: Array.isArray(content.sections) ? content.sections : [],
     };

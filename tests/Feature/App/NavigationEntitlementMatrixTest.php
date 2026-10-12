@@ -143,7 +143,7 @@ class NavigationEntitlementMatrixTest extends TestCase
             'Avvik og forbedringer' => [CustomerPermissionCatalog::IMPROVEMENT_VIEW, 'improvements'],
             'Etterlevelse og revisjon' => [CustomerPermissionCatalog::COMPLIANCE_VIEW, 'compliance'],
             'Leverandøroppfølging' => [CustomerPermissionCatalog::SUPPLIER_VIEW, 'suppliers'],
-            'Ledelsens gjennomgåelse' => [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, 'management_review'],
+            'Ledelsens gjennomgang' => [CustomerPermissionCatalog::MANAGEMENT_REVIEW_VIEW, 'management_review'],
         ];
     }
 
@@ -166,7 +166,7 @@ class NavigationEntitlementMatrixTest extends TestCase
     #[DataProvider('viewPermissionProvider')]
     public function test_a_permission_without_the_module_is_hidden_in_both_places(string $permission, string $key): void
     {
-        // Basis carries Kvalitet, Avvik og forbedringer and Ledelsens gjennomgåelse only.
+        // Basis carries Kvalitet, Avvik og forbedringer and Ledelsens gjennomgang only.
         $customer = $this->customerWith(['basis']);
         $user = $this->member($customer);
         $this->grantAll($customer, $user, self::VIEW_ALL);
@@ -249,7 +249,7 @@ class NavigationEntitlementMatrixTest extends TestCase
 
         $props = $this->sharedProps($owner);
 
-        // Ledelsens gjennomgåelse is not an explicit-grant domain: System Owner reads reviews (and
+        // Ledelsens gjennomgang is not an explicit-grant domain: System Owner reads reviews (and
         // nothing protected of the other modules through them).
         $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'management_review'], $this->railGovernance($props));
         $this->assertSame(['quality', 'risk', 'objectives', 'improvements', 'management_review'], $this->governanceKeys($owner));

@@ -53,7 +53,7 @@ const EVENT_DOMAIN_LABELS = {
     compliance: 'Etterlevelse og revisjon',
     quality: 'Kvalitet',
     objective: 'Mål og KPI',
-    management_review: 'Ledelsens gjennomgåelse',
+    management_review: 'Ledelsens gjennomgang',
 };
 
 /**

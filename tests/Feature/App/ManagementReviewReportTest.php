@@ -80,12 +80,12 @@ class ManagementReviewReportTest extends TestCase
         $this->assertSame('application/pdf', $response->headers->get('Content-Type'));
         $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
         $full = $this->pdfText($response->streamedContent());
-        $this->assertStringContainsString('Ledelsens gjennomgåelse 2026', $full);
+        $this->assertStringContainsString('Ledelsens gjennomgang 2026', $full);
         $this->assertStringContainsString('Hemmelig Leverandør AS', $full);
         $this->assertStringContainsString('Tilfredsstillende', $full);
 
         $restricted = $this->pdfText($this->actingAs($plainReader)->get("/app/management-reviews/{$review->id}/report.pdf")->assertOk()->streamedContent());
-        $this->assertStringContainsString('Ledelsens gjennomgåelse 2026', $restricted);
+        $this->assertStringContainsString('Ledelsens gjennomgang 2026', $restricted);
         $this->assertStringNotContainsString('Hemmelig Leverandør AS', $restricted);
         $this->assertStringNotContainsString('Kritisk avtale mangler', $restricted);
 

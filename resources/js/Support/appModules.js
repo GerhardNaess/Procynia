@@ -155,7 +155,7 @@ export const APP_MODULES = [
         // ManagementReviewController refuses the page without this key. What a review shows from the
         // other modules is gated again, per section, on the server.
         permission: 'management_review.view',
-        label: (m) => m.management_review ?? 'Ledelsens gjennomgåelse',
+        label: (m) => m.management_review ?? 'Ledelsens gjennomgang',
         areas: ['management-review'],
     },
     { key: 'contracts', built: false, module: 'contracts', label: (m) => m.contracts ?? 'Kontrakter' },

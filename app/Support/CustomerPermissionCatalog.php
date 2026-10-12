@@ -162,7 +162,7 @@ final class CustomerPermissionCatalog
     public const SUPPLIER_DELETE = 'supplier.delete';
 
     /*
-     * Ledelsens gjennomgåelse (docs/management-review-v1-plan.md §8). Customer-wide — a review is of
+     * Ledelsens gjennomgang (docs/management-review-v1-plan.md §8). Customer-wide — a review is of
      * the management system as a whole; its fagområde scope is a filter on the basis, never an access
      * boundary — and not an explicit-grant domain: System Owner reads and runs reviews. What a review
      * shows from another module is still gated by that module's own permission, on every read.

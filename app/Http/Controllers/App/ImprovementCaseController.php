@@ -232,7 +232,7 @@ class ImprovementCaseController extends Controller
             // Leverandøroppfølging *and* the person can read that supplier there. Nothing about the
             // supplier otherwise.
             'supplier_origin' => $this->supplierHandoff->provenanceFor($user, $case),
-            // «Fra Ledelsens gjennomgåelse»: null unless a tiltak from a review is followed up in this
+            // «Fra Ledelsens gjennomgang»: null unless a tiltak from a review is followed up in this
             // case and the person can read that review.
             'review_origin' => $this->managementReviewDecisions->provenanceFor($user, $case),
             'today' => now()->toDateString(),

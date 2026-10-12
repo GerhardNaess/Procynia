@@ -28,7 +28,7 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Ledelsens gjennomgåelse (docs/management-review-v1-plan.md).
+ * Ledelsens gjennomgang (docs/management-review-v1-plan.md).
  *
  * Every read starts from ManagementReviewAccessService::visibleReviews(); another customer's review is
  * a 404 like an id that does not exist. Without management_review.view (or without the module) every
@@ -335,7 +335,7 @@ class ManagementReviewController extends Controller
     }
 
     /**
-     * «Åpne tiltak fra ledelsens gjennomgåelser»: every tiltak still open, whichever review it came
+     * «Åpne tiltak fra ledelsens gjennomganger»: every tiltak still open, whichever review it came
      * from. A tiltak in Avvik og forbedringer shows its case only to someone who can read it there.
      *
      * @return list<array<string, mixed>>

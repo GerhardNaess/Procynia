@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Ledelsens gjennomgåelse (docs/management-review-v1-plan.md §3.4).
+ * Ledelsens gjennomgang (docs/management-review-v1-plan.md §3.4).
  *
  * The sections themselves are code (ManagementReviewSectionCatalog): each has a builder. What lives
  * here is configuration that may grow without code — the frameworks' coverage mappings and the limits.
@@ -27,7 +27,7 @@ return [
     // Rows per list kept in a snapshot section, per fagområde; and shown on screen.
     'list_limit' => 50,
 
-    // «Planlegg neste ledelsens gjennomgåelse» appears in Mine oppgaver this many days ahead.
+    // «Planlegg neste ledelsens gjennomgang» appears in Mine oppgaver this many days ahead.
     'next_review_task_days' => 30,
 
     'framework_coverage' => [

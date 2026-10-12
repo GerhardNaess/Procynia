@@ -3,7 +3,7 @@
 namespace App\Support\ManagementReview;
 
 /**
- * Validation messages and field names for the Ledelsens gjennomgåelse forms, in the user's language
+ * Validation messages and field names for the Ledelsens gjennomgang forms, in the user's language
  * — the same arrangement as ObjectiveValidationMessages: the app ships no validation language file.
  */
 final class ManagementReviewValidationMessages

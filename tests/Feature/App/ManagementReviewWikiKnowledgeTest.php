@@ -22,7 +22,7 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * «Lag kunnskapsartikkel» from Ledelsens gjennomgåelse. The shared matrix (permissions, 404 for a
+ * «Lag kunnskapsartikkel» from Ledelsens gjennomgang. The shared matrix (permissions, 404 for a
  * foreign review, ordinary source + origin + run, AI attribution) runs in WikiKnowledgeHandoffTest;
  * this file pins what is particular to a review:
  *

@@ -17,7 +17,7 @@ export default function ManagementReviewReport() {
             <Head title={document.title} />
             <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 print:hidden">
                 <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-2">
-                    <Link href={backUrl} className="text-base font-semibold text-violet-700 hover:text-violet-900">← {t.back ?? 'Til ledelsens gjennomgåelse'}</Link>
+                    <Link href={backUrl} className="text-base font-semibold text-violet-700 hover:text-violet-900">← {t.back ?? 'Til ledelsens gjennomgang'}</Link>
                     <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => window.print()} className={SECONDARY_ACTION} data-testid="mr-print">{t.print ?? 'Skriv ut'}</button>
                         <a href={pdfUrl} className={PRIMARY_ACTION} data-testid="mr-download-pdf">{t.download_pdf ?? 'Last ned PDF'}</a>

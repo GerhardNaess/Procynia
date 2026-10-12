@@ -156,7 +156,7 @@ class ManagementReviewDecisionTest extends TestCase
 
         $this->actingAs($manager)->post("/app/management-reviews/{$review->id}/decisions/{$action->id}/handoff", [
             'title' => 'Forbedre opplæring',
-            'description' => 'Besluttet i ledelsens gjennomgåelse.',
+            'description' => 'Besluttet i ledelsens gjennomgang.',
             'business_area_id' => $area->id,
             'owner_user_id' => $caseOwner->id,
             'due_date' => '2026-12-01',
@@ -177,7 +177,7 @@ class ManagementReviewDecisionTest extends TestCase
         $this->assertDatabaseRefuses(fn () => DB::table('management_review_decisions')->where('id', $action->id)->update(['text' => 'Endret']));
         $this->assertDatabaseRefuses(fn () => DB::table('management_review_decisions')->where('id', $action->id)->delete());
 
-        // «Fra ledelsens gjennomgåelse» on the case — only to someone who can read reviews.
+        // «Fra ledelsens gjennomgang» on the case — only to someone who can read reviews.
         $this->actingAs($caseOwner)->get("/app/improvements/{$case->id}")->assertOk()->assertInertia(fn ($page) => $page->where('review_origin.review_title', $review->title));
         $plainHandler = $this->mrMember($customer);
         $this->mrGrant($customer, $plainHandler, [P::IMPROVEMENT_VIEW], [$area]);
@@ -233,7 +233,7 @@ class ManagementReviewDecisionTest extends TestCase
         $own = $this->action($manager, $first, $manager, 'Eget tiltak', '2026-03-01');
         $handed = $this->action($manager, $first, $manager, 'Tiltak i Avvik', '2026-03-01');
         $this->actingAs($manager)->post("/app/management-reviews/{$first->id}/decisions/{$handed->id}/handoff", [
-            'title' => 'Sak fra LG', 'description' => 'Fra ledelsens gjennomgåelse.', 'business_area_id' => $area->id, 'owner_user_id' => $manager->id, 'due_date' => '2026-03-01',
+            'title' => 'Sak fra LG', 'description' => 'Fra ledelsens gjennomgang.', 'business_area_id' => $area->id, 'owner_user_id' => $manager->id, 'due_date' => '2026-03-01',
         ])->assertSessionHasNoErrors();
         $this->finalize($manager, $first);
 

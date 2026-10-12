@@ -15,7 +15,7 @@ use App\Support\CustomerPermissionCatalog;
 use Illuminate\Support\Str;
 
 /**
- * The customers, fagområder, roles, people and reviews the Ledelsens gjennomgåelse tests build on.
+ * The customers, fagområder, roles, people and reviews the Ledelsens gjennomgang tests build on.
  * Every grant goes through a real customer role, so the tests exercise the same (permission, area)
  * pairing — and the same System Owner rules — the product does.
  */
@@ -120,7 +120,7 @@ trait CreatesManagementReviewScenarios
     private function mrPayload(User $owner, array $overrides = []): array
     {
         return $overrides + [
-            'title' => 'Ledelsens gjennomgåelse 2026',
+            'title' => 'Ledelsens gjennomgang 2026',
             'purpose' => null,
             'period_start' => '2026-01-01',
             'period_end' => '2026-06-30',

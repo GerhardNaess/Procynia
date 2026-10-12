@@ -15,7 +15,7 @@ cleanUpManagementReviewE2eData(suffix);
 const expectReadable = (page, name) => expectReadableAt(page, 'management-review', name);
 
 /**
- * Ledelsens gjennomgåelse, end to end, in a GRC customer of the run's own. Access, tenant isolation,
+ * Ledelsens gjennomgang, end to end, in a GRC customer of the run's own. Access, tenant isolation,
  * the locks and the snapshot rules are PHP's (ManagementReview*Test); this is the journey a quality
  * manager takes: open the module from Styring, create a review, read the basis, judge every section,
  * record a tiltak, write the conclusion, finalize — and then see that the basis stays as it was while
@@ -32,16 +32,16 @@ test('a management review is created, assessed, decided, finalized and reported'
     await loginAs(page, people.email, MANAGEMENT_REVIEW_E2E_PASSWORD);
     await page.setViewportSize(DESKTOP);
 
-    // Styring → Ledelsens gjennomgåelse: an empty register that says how to begin.
+    // Styring → Ledelsens gjennomgang: an empty register that says how to begin.
     await page.goto('/app/governance');
     await page.getByTestId('governance-module-management_review').click();
     await page.waitForURL(/\/app\/management-reviews$/);
-    await expect(page.getByRole('heading', { name: 'Ledelsens gjennomgåelse', level: 1 })).toBeVisible();
-    await expect(page.getByText('Ingen gjennomgåelser ennå')).toBeVisible();
-    await expectPageHelp(page, 'Om ledelsens gjennomgåelse', ['Slik fungerer det', 'Oppfølging']);
+    await expect(page.getByRole('heading', { name: 'Ledelsens gjennomgang', level: 1 })).toBeVisible();
+    await expect(page.getByText('Ingen gjennomganger ennå')).toBeVisible();
+    await expectPageHelp(page, 'Om ledelsens gjennomgang', ['Slik fungerer det', 'Oppfølging']);
     await expectReadable(page, '01-empty');
 
-    // Ny gjennomgåelse: the period is filled in; a participant, ISO 9001 and NIS2 are chosen from
+    // Ny gjennomgang: the period is filled in; a participant, ISO 9001 and NIS2 are chosen from
     // searchable pickers — the lists are not on screen until a field is used.
     await page.getByTestId('mr-create').click();
     await page.locator('#mr-title').fill(title);
@@ -66,7 +66,7 @@ test('a management review is created, assessed, decided, finalized and reported'
     await expect(page.getByTestId('mr-frameworks-option-dora')).toContainText('Regulatorisk rammeverk');
     await expectReadable(page, '02-create-form');
     await page.locator('#mr-title').click();
-    await page.getByRole('button', { name: 'Opprett gjennomgåelse' }).click();
+    await page.getByRole('button', { name: 'Opprett gjennomgang' }).click();
     await page.waitForURL(/\/app\/management-reviews\/\d+$/);
     const reviewUrl = page.url();
     await expect(page.getByTestId('mr-status')).toContainText('Utkast');
@@ -85,7 +85,7 @@ test('a management review is created, assessed, decided, finalized and reported'
     await expect(page.getByRole('button', { name: `Fjern ${people.colleague_name}` })).toBeVisible();
     await expect(page.getByTestId('mr-frameworks-chosen')).toContainText('NIS2 Cybersikkerhet og regulatoriske krav');
     await page.getByRole('button', { name: 'Avbryt', exact: true }).click();
-    await expectPageHelp(page, 'Om denne gjennomgåelsen', ['Grunnlaget', 'Etter ferdigstilling']);
+    await expectPageHelp(page, 'Om denne gjennomgangen', ['Grunnlaget', 'Etter ferdigstilling']);
     await expectReadable(page, '03-overview');
 
     // Risiko: the basis is there, read with the manager's own fagområde.
@@ -229,7 +229,7 @@ test('each section shows exactly one marker — grey, orange or green — explai
     await page.goto('/app/management-reviews');
     await page.getByTestId('mr-create').click();
     await page.locator('#mr-title').fill(`LG status ${suffix}`);
-    await page.getByRole('button', { name: 'Opprett gjennomgåelse' }).click();
+    await page.getByRole('button', { name: 'Opprett gjennomgang' }).click();
     await page.waitForURL(/\/app\/management-reviews\/\d+$/);
     const reviewUrl = page.url();
 
@@ -268,7 +268,7 @@ test('each section shows exactly one marker — grey, orange or green — explai
     await quality.click();
     expect((await markerOf(quality)).marker).toBe('attention');
     await expect(page.getByTestId('mr-section-status')).toHaveAttribute('data-marker', 'attention');
-    await page.screenshot({ path: `test-results/mr-markers-1-before-${suffix}.png`, clip: await page.getByRole('navigation', { name: 'Seksjoner i gjennomgåelsen' }).locator('ul').boundingBox() });
+    await page.screenshot({ path: `test-results/mr-markers-1-before-${suffix}.png`, clip: await page.getByRole('navigation', { name: 'Seksjoner i gjennomgangen' }).locator('ul').boundingBox() });
 
     // Saved: one green circle with a tick — and the attention is still told in the section.
     await page.getByTestId('mr-judgement-satisfactory').check();
@@ -280,7 +280,7 @@ test('each section shows exactly one marker — grey, orange or green — explai
     expect(await quality.evaluate((element) => element.getBoundingClientRect().height)).toBe(height);
     await quality.hover();
     await expect(page.getByRole('tooltip')).toContainText('Vurdering gjennomført – forhold krever fortsatt oppmerksomhet:');
-    await page.screenshot({ path: `test-results/mr-markers-2-judged-${suffix}.png`, clip: await page.getByRole('navigation', { name: 'Seksjoner i gjennomgåelsen' }).locator('ul').boundingBox() });
+    await page.screenshot({ path: `test-results/mr-markers-2-judged-${suffix}.png`, clip: await page.getByRole('navigation', { name: 'Seksjoner i gjennomgangen' }).locator('ul').boundingBox() });
     await page.getByTestId('mr-nav-overview').click();
     await expect(missing.getByRole('button', { name: 'Kvalitetsarbeid' })).toHaveCount(0);
 
@@ -333,7 +333,7 @@ test('on a phone the sections are one select and nothing scrolls sideways', asyn
     await page.locator('#mr-title').click();
     await expect(page.getByTestId('mr-frameworks-list')).toHaveCount(0);
     expect(await sidewaysOverflow(page), 'chosen frameworks scroll sideways').toEqual([]);
-    await page.getByRole('button', { name: 'Opprett gjennomgåelse' }).click();
+    await page.getByRole('button', { name: 'Opprett gjennomgang' }).click();
     await page.waitForURL(/\/app\/management-reviews\/\d+$/);
 
     await page.getByTestId('mr-nav-select').selectOption('risks');
@@ -363,7 +363,7 @@ test('a finalized review hands the management’s own, dated word over to the Wi
     await expect(dialog).toBeVisible();
     // Always dated, and the person is told the Wiki will not follow a later review by itself.
     await expect(dialog.getByTestId('knowledge-handoff-notice')).toContainText('det skjer ikke automatisk');
-    await expect(dialog.getByTestId('knowledge-handoff-context')).toContainText('Ledelsens gjennomgåelse for perioden');
+    await expect(dialog.getByTestId('knowledge-handoff-context')).toContainText('Ledelsens gjennomgang for perioden');
     // Nothing chosen in advance; the management's own word is offered, the people are not.
     const conclusion = dialog.getByRole('checkbox', { name: /Ledelsens samlede konklusjon/ });
     await expect(conclusion).not.toBeChecked();
@@ -384,7 +384,7 @@ test('a finalized review hands the management’s own, dated word over to the Wi
     const handed = await managementReviewFixture(`handedOver(${seeded.review_id})`);
     expect(handed.origins).toBe(1);
     expect(handed.texts).toHaveLength(1);
-    expect(handed.texts[0]).toContain('Ledelsens gjennomgåelse for perioden');
+    expect(handed.texts[0]).toContain('Ledelsens gjennomgang for perioden');
     expect(handed.texts[0]).toContain(seeded.conclusion);
     expect(handed.texts[0]).toContain('Risikobildet følges opp kvartalsvis.');
     expect(handed.texts[0]).not.toContain('Avvik skal lukkes innen 30 dager.');

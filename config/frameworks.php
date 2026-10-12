@@ -11,12 +11,12 @@
  *
  * 'reference' is the framework's own designation and is shown as is in every language; the readable
  * name, the domain and the type are translated (lang: framework_catalog.*). 'version' is the edition a
- * module's own mapping was written against; a module that records it (Ledelsens gjennomgåelse does when
+ * module's own mapping was written against; a module that records it (Ledelsens gjennomgang does when
  * a review is finalized) keeps what an old record was checked against.
  *
  * Being in the catalog says nothing about requirement coverage. Whether a module can say which of a
  * framework's requirements a piece of work covers is that module's own mapping (for Ledelsens
- * gjennomgåelse: config/management_review.php 'framework_coverage'), and whether that mapping is
+ * gjennomgang: config/management_review.php 'framework_coverage'), and whether that mapping is
  * professionally verified is stated there.
  */
 return [

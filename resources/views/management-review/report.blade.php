@@ -1,4 +1,4 @@
-{{-- Ledelsens gjennomgåelse as a PDF (ManagementReviewReportController::pdf). Rendered by dompdf from
+{{-- Ledelsens gjennomgang as a PDF (ManagementReviewReportController::pdf). Rendered by dompdf from
      ManagementReviewReportBuilder::document() — the same document as the print view, already narrowed
      to what the reader may see. DejaVu Sans carries æ, ø and å. --}}
 @php($labels = $document['labels'])

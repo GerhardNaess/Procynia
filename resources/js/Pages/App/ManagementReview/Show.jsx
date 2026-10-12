@@ -46,7 +46,7 @@ function StatusIcon({ marker }) {
 }
 
 /**
- * Ledelsens gjennomgåelse — one review, worked section by section (plan §4.2).
+ * Ledelsens gjennomgang — one review, worked section by section (plan §4.2).
  *
  * Oversikt carries the checklist, participants, what needs attention, the conclusion and the next
  * review. Each section carries its basis (as the server narrowed it for this reader), the
@@ -120,7 +120,7 @@ export default function ManagementReviewShow() {
     return (
         <CustomerAppLayout title={review.title} showPageTitle={false}>
             <div className="space-y-6">
-                <Link href="/app/management-reviews" className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900">← {t.back ?? 'Til ledelsens gjennomgåelse'}</Link>
+                <Link href="/app/management-reviews" className="inline-block text-base font-semibold text-violet-700 hover:text-violet-900">← {t.back ?? 'Til ledelsens gjennomgang'}</Link>
 
                 <header className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -164,7 +164,7 @@ export default function ManagementReviewShow() {
 
                     {finalized && (
                         <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-base text-emerald-900" data-testid="mr-locked">
-                            {fill(t.finalize?.locked ?? 'Gjennomgåelsen ble ferdigstilt :date av :name.', { date: formatMoment(review.finalized_at), name: review.finalized_by_name })}
+                            {fill(t.finalize?.locked ?? 'Gjennomgangen ble ferdigstilt :date av :name.', { date: formatMoment(review.finalized_at), name: review.finalized_by_name })}
                         </p>
                     )}
                 </header>
@@ -279,7 +279,7 @@ function SectionNav({ sections, decisions, readiness, pane, onOpen, t }) {
     };
 
     return (
-        <nav aria-label={ts.nav_label ?? 'Seksjoner i gjennomgåelsen'}>
+        <nav aria-label={ts.nav_label ?? 'Seksjoner i gjennomgangen'}>
             {/* Phones: one select, so nothing has to scroll sideways. */}
             <label className="block lg:hidden">
                 <span className={LABEL}>{ts.nav_select ?? 'Gå til seksjon'}</span>
@@ -605,12 +605,12 @@ function NextReview({ review, canPlan, ownerOptions, t }) {
 
     return (
         <section className={CARD} aria-labelledby="mr-next-heading">
-            <h2 id="mr-next-heading" className="text-xl font-semibold text-slate-950">{to.next_heading ?? 'Neste gjennomgåelse'}</h2>
+            <h2 id="mr-next-heading" className="text-xl font-semibold text-slate-950">{to.next_heading ?? 'Neste gjennomgang'}</h2>
             <p className="mt-1 text-base text-slate-600">{to.next_hint}</p>
             {canPlan ? (
                 <form onSubmit={submit} className="mt-3 grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
                     <div>
-                        <label htmlFor="mr-next-date" className={LABEL}>{t.fields?.next_review_due_on ?? 'Neste gjennomgåelse innen'}</label>
+                        <label htmlFor="mr-next-date" className={LABEL}>{t.fields?.next_review_due_on ?? 'Neste gjennomgang innen'}</label>
                         <input id="mr-next-date" type="date" value={form.data.next_review_due_on} onChange={(event) => form.setData('next_review_due_on', event.target.value)} className={`mt-1 ${INPUT}`} />
                     </div>
                     <div>
@@ -642,7 +642,7 @@ function Frameworks({ frameworks, t }) {
             {frameworks.map((framework) => (
                 <div key={framework.key} className="mt-4" data-testid={`mr-framework-${framework.key}`} data-coverage={framework.coverage}>
                     <h3 className="break-words text-lg font-semibold text-slate-900">{framework.label}{framework.version && ` (${framework.version})`}</h3>
-                    {framework.coverage === 'none' && <p className="mt-1 text-base text-slate-600">{tf.no_coverage ?? 'Valgt i gjennomgåelsens omfang. Automatisk dekningsanalyse er ikke tilgjengelig for dette rammeverket.'}</p>}
+                    {framework.coverage === 'none' && <p className="mt-1 text-base text-slate-600">{tf.no_coverage ?? 'Valgt i gjennomgangens omfang. Automatisk dekningsanalyse er ikke tilgjengelig for dette rammeverket.'}</p>}
                     {framework.inputs.length > 0 && <ul className="mt-2 divide-y divide-slate-100">
                         {framework.inputs.map((input) => (
                             <li key={`${framework.key}-${input.key}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
@@ -749,7 +749,7 @@ function FinalizePanel({ review, readiness, t, onDone }) {
 
     return (
         <section className="rounded-[24px] border border-violet-200 bg-violet-50 p-6" aria-labelledby="mr-finalize-heading" data-testid="mr-finalize-panel">
-            <h2 id="mr-finalize-heading" className="text-xl font-semibold text-slate-950">{tf.heading ?? 'Ferdigstill gjennomgåelsen'}</h2>
+            <h2 id="mr-finalize-heading" className="text-xl font-semibold text-slate-950">{tf.heading ?? 'Ferdigstill gjennomgangen'}</h2>
             <p className="mt-2 text-base text-slate-800">{tf.intro}</p>
             {readiness?.unavailable?.length > 0 && (
                 <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900">

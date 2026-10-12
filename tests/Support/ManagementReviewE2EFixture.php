@@ -31,7 +31,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Test-only setup and cleanup for the Ledelsens gjennomgåelse E2E spec
+ * Test-only setup and cleanup for the Ledelsens gjennomgang E2E spec
  * (tests/e2e/management-review.spec.js). Not autoloaded in production (autoload-dev only) — invoked
  * via `php artisan tinker --execute=...`.
  *

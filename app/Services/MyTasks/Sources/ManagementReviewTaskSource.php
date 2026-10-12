@@ -12,14 +12,14 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
- * Ledelsens gjennomgåelse (docs/management-review-v1-plan.md §9.4):
+ * Ledelsens gjennomgang (docs/management-review-v1-plan.md §9.4):
  *
  *  - review_action: a tiltak followed up here, open, whose owner is the person. Due on its frist. A
  *    tiltak handed to Avvik og forbedringer is not here — it is that module's case, and
  *    ImprovementTaskSource shows it. One tiltak, one task.
  *  - review_complete: a draft review the person is responsible for. Due on the meeting date; overdue
  *    once the meeting has passed without the review being finalized.
- *  - review_due: «Planlegg neste ledelsens gjennomgåelse» for the person responsible for the latest
+ *  - review_due: «Planlegg neste ledelsens gjennomgang» for the person responsible for the latest
  *    finalized review, from config('management_review.next_review_task_days') before the date it set,
  *    until a newer review exists.
  *

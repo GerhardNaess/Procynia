@@ -149,7 +149,7 @@ export default function ImprovementShow() {
                     )}
                     {reviewOrigin && (
                         <p className="break-words rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800" data-testid="improvement-review-origin">
-                            {tr.review_origin ?? 'Fra ledelsens gjennomgåelse'}{' '}
+                            {tr.review_origin ?? 'Fra ledelsens gjennomgang'}{' '}
                             <Link href={reviewOrigin.review_url} className="font-semibold text-violet-700 hover:text-violet-900">{reviewOrigin.review_title}</Link>
                             <span className="block text-slate-600">{(tr.review_origin_decision ?? 'Besluttet tiltak: :text').replace(':text', reviewOrigin.decision)}</span>
                         </p>

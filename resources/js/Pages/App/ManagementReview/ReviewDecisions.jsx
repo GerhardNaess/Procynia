@@ -278,7 +278,7 @@ export function DecisionCard({ review, decision, sections, ownerOptions, handoff
                     <div className="flex min-w-0 gap-1">
                         <dt className="text-slate-600">{td.follow_up ?? 'Oppfølging'}:</dt>
                         <dd className="min-w-0 break-words text-slate-900">
-                            {decision.follow_up === 'own' && (td.followed_here ?? 'Følges opp i Ledelsens gjennomgåelse')}
+                            {decision.follow_up === 'own' && (td.followed_here ?? 'Følges opp i Ledelsens gjennomgang')}
                             {decision.case && ! decision.case.hidden && (
                                 <>
                                     <Link href={decision.case.url} className="font-semibold text-violet-700 hover:text-violet-900">{fill(td.in_case ?? 'Følges opp i saken «:title»', { title: decision.case.title })}</Link>

@@ -110,7 +110,7 @@ class QualityAttentionService
      * A process no styrende dokument in force governs — a policy, procedure, work instruction or
      * checklist alike. `governs` is the one relation that names a process's governing document, and
      * its type matrix says which kinds may stand at its start — see QualityItemRelation::TYPE_GOVERNS.
-     * The finding keeps its original key, which Ledelsens gjennomgåelse snapshots by name.
+     * The finding keeps its original key, which Ledelsens gjennomgang snapshots by name.
      *
      * @return Collection<int, QualityItem>
      */

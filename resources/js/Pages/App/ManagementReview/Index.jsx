@@ -11,7 +11,7 @@ import { JUDGEMENT_TONES, REVIEW_STATUS_TONES, fill, formatDay, judgementLabel, 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
 /**
- * Ledelsens gjennomgåelse → the register: when the next review is due, the tiltak still open from
+ * Ledelsens gjennomgang → the register: when the next review is due, the tiltak still open from
  * earlier reviews, every review with its status, and the management's judgements over time. Every
  * row and number is already narrowed by the server to what this person may see.
  */
@@ -54,24 +54,24 @@ export default function ManagementReviewIndex() {
     };
 
     return (
-        <CustomerAppLayout title={t.index_title ?? 'Ledelsens gjennomgåelse'} showPageTitle={false}>
+        <CustomerAppLayout title={t.index_title ?? 'Ledelsens gjennomgang'} showPageTitle={false}>
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{t.index_heading ?? 'Ledelsens gjennomgåelse'}</h1>
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{t.index_heading ?? 'Ledelsens gjennomgang'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">{t.index_subtitle}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...reviewHelp(t, 'index')} />
                         {permissions.can_create && ! creating && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION} data-testid="mr-create">{t.create ?? 'Ny gjennomgåelse'}</button>
+                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION} data-testid="mr-create">{t.create ?? 'Ny gjennomgang'}</button>
                         )}
                     </div>
                 </header>
 
                 {creating && (
                     <section className={CARD} aria-labelledby="mr-create-heading">
-                        <h2 id="mr-create-heading" className="text-xl font-semibold text-slate-950">{t.create_heading ?? 'Ny ledelsens gjennomgåelse'}</h2>
+                        <h2 id="mr-create-heading" className="text-xl font-semibold text-slate-950">{t.create_heading ?? 'Ny ledelsens gjennomgang'}</h2>
                         <p className="mb-4 mt-1 text-base text-slate-600">{t.create_hint}</p>
                         <ReviewForm
                             form={form}
@@ -82,14 +82,14 @@ export default function ManagementReviewIndex() {
                             areaOptions={areaOptions}
                             frameworkOptions={frameworkOptions}
                             participantOptions={participantOptions}
-                            submitLabel={t.create_submit ?? 'Opprett gjennomgåelse'}
+                            submitLabel={t.create_submit ?? 'Opprett gjennomgang'}
                         />
                     </section>
                 )}
 
                 {nextReview && (
                     <section className={`${CARD} ${nextReview.overdue && ! nextReview.has_draft ? 'border-amber-200 bg-amber-50' : ''}`} aria-labelledby="mr-next-heading" data-testid="mr-next-review">
-                        <h2 id="mr-next-heading" className="text-xl font-semibold text-slate-950">{ti.next_heading ?? 'Neste gjennomgåelse'}</h2>
+                        <h2 id="mr-next-heading" className="text-xl font-semibold text-slate-950">{ti.next_heading ?? 'Neste gjennomgang'}</h2>
                         <p className="mt-1 text-base text-slate-800">
                             {fill(ti.next_due, { date: formatDay(nextReview.due_on) })}. {fill(ti.next_decided_in, { title: nextReview.decided_in })}
                             {nextReview.has_draft ? ` ${ti.next_has_draft}` : (nextReview.overdue ? ` ${ti.next_overdue}` : '')}
@@ -98,7 +98,7 @@ export default function ManagementReviewIndex() {
                 )}
 
                 <section className={CARD} aria-labelledby="mr-open-actions-heading" data-testid="mr-open-actions">
-                    <h2 id="mr-open-actions-heading" className="text-xl font-semibold text-slate-950">{ti.open_actions_heading ?? 'Åpne tiltak fra ledelsens gjennomgåelser'}</h2>
+                    <h2 id="mr-open-actions-heading" className="text-xl font-semibold text-slate-950">{ti.open_actions_heading ?? 'Åpne tiltak fra ledelsens gjennomganger'}</h2>
                     {openActions.length === 0 ? (
                         <p className="mt-2 text-base text-slate-600">{ti.open_actions_empty ?? 'Ingen åpne tiltak.'}</p>
                     ) : (
@@ -123,9 +123,9 @@ export default function ManagementReviewIndex() {
                 </section>
 
                 <section className={CARD} aria-labelledby="mr-reviews-heading">
-                    <h2 id="mr-reviews-heading" className="text-xl font-semibold text-slate-950">{ti.reviews_heading ?? 'Gjennomgåelser'}</h2>
+                    <h2 id="mr-reviews-heading" className="text-xl font-semibold text-slate-950">{ti.reviews_heading ?? 'Gjennomganger'}</h2>
                     {reviews.length === 0 ? (
-                        <EmptyStateBox className="mt-4" title={t.empty_title ?? 'Ingen gjennomgåelser ennå'} description={permissions.can_create ? t.empty_hint : null} />
+                        <EmptyStateBox className="mt-4" title={t.empty_title ?? 'Ingen gjennomganger ennå'} description={permissions.can_create ? t.empty_hint : null} />
                     ) : (
                         <>
                             <ul className="mt-4 divide-y divide-slate-100 md:hidden" data-testid="mr-review-list">
@@ -150,7 +150,7 @@ export default function ManagementReviewIndex() {
                                 <table className="w-full text-base" data-testid="mr-review-table">
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left font-semibold text-slate-600">
-                                            <th className="pb-3 pr-4">{tf.list_title ?? 'Gjennomgåelse'}</th>
+                                            <th className="pb-3 pr-4">{tf.list_title ?? 'Gjennomgang'}</th>
                                             <th className="px-4 pb-3">{tf.period ?? 'Periode'}</th>
                                             <th className="px-4 pb-3">{tf.meeting_date ?? 'Møtedato'}</th>
                                             <th className="px-4 pb-3">{tf.owner ?? 'Ansvarlig'}</th>

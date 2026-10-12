@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Ledelsens gjennomgåelse (docs/management-review-v1-plan.md).
+ * Ledelsens gjennomgang (docs/management-review-v1-plan.md).
  *
  * Two stored statuses: draft and finalized. «Klar for ferdigstilling» is computed
  * (ManagementReviewReadiness) and never stored. A finalized review is frozen by the database

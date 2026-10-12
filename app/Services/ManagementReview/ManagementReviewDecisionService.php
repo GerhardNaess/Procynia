@@ -237,7 +237,7 @@ final class ManagementReviewDecisionService
     }
 
     /**
-     * «Fra Ledelsens gjennomgåelse …» on the case page — only for someone who can read reviews. Null
+     * «Fra Ledelsens gjennomgang …» on the case page — only for someone who can read reviews. Null
      * for everyone else and for a case no review led to.
      *
      * @return array{review_title: string, review_url: string, decision: string}|null

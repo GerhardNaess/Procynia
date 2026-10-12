@@ -376,7 +376,7 @@ test('System Owner sees the modules under Styring that need no explicit grant, a
     await page.goto('/app/governance');
 
     expect(await labels(page.getByTestId('module-governance-children').locator('a')))
-        .toEqual(['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Ledelsens gjennomgåelse']);
+        .toEqual(['Kvalitet', 'Risiko', 'Mål og KPI', 'Avvik og forbedringer', 'Ledelsens gjennomgang']);
 
     for (const [key, url] of [
         ['quality', /\/app\/quality$/],
