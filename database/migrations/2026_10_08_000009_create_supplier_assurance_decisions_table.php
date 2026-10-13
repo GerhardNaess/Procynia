@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Never «Krever beslutning»: that is computed from the control state, not decided. Nothing but
  * SupplierAssuranceDecisionService writes here, and only for a person with supplier.assure.
+ * (Retired 2026-10-12: nothing writes here any more; the rows are kept as history.)
  *
  * state_snapshot is the control state the person saw when deciding — the state, how many
  * requirements applied, how many per visningsstatus, and the mandatory and important requirements

@@ -140,6 +140,8 @@ class SupplierImportTest extends TestCase
                 'criticality' => 'Kritisk', 'review_interval_months' => '12 måneder',
                 'processes_personal_data' => 'Ja', 'has_system_access' => 'ja', 'supports_critical_delivery' => 'Nei', 'hard_to_replace' => 'yes',
                 'data_role' => 'Databehandler', 'stores_our_data' => 'Ikke avklart', 'sectors' => 'IKT og digitale tjenester; Renhold',
+                // «Ikke avklart» on the high-risk list is its own answer, never «Ingen».
+                'high_risk_categories' => 'Ikke avklart',
             ],
             [
                 // The bare minimum: Aktiv, Ikke vurdert, the person importing as intern ansvarlig.
@@ -152,7 +154,7 @@ class SupplierImportTest extends TestCase
         $this->assertSame(0, Supplier::query()->where('customer_id', $customer->id)->count());
         $this->assertSame(['total' => 2, 'new' => 2, 'existing' => 0, 'updatable' => 0, 'error' => 0, 'file_duplicate' => 0, 'possible_duplicate' => 0], $page['import']['summary']);
         [$first, $second] = $page['import']['rows'];
-        $this->assertSame([2, 'new', 'Drift AS', self::ORG_A, 'it_cloud', 'critical', 12, $colleague->name, false, 3], [
+        $this->assertSame([2, 'new', 'Drift AS', self::ORG_A, 'it_cloud', 'critical', 12, $colleague->name, false, 4], [
             $first['row'], $first['status'], $first['values']['name'], $first['values']['organization_number'], $first['values']['category'],
             $first['values']['criticality'], $first['values']['review_interval_months'], $first['values']['owner']['name'], $first['values']['owner']['is_default'], $first['values']['profile_answers'],
         ]);
@@ -173,7 +175,7 @@ class SupplierImportTest extends TestCase
         $this->assertFalse($drift->criticalityChanges()->exists());
         // The profile, through SupplierProfileService: with its history row.
         $profile = SupplierProfile::query()->whereKey($drift->id)->sole();
-        $this->assertSame(['processor', 'unknown', ['ict', 'cleaning']], [$profile->data_role, $profile->stores_our_data, $profile->sectors]);
+        $this->assertSame(['processor', 'unknown', ['ict', 'cleaning'], ['unknown']], [$profile->data_role, $profile->stores_our_data, $profile->sectors, $profile->high_risk_categories]);
         $this->assertSame(1, $drift->profileChanges()->count());
 
         $renhold = Supplier::query()->where('customer_id', $customer->id)->where('name', 'Renhold Vest')->sole();

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
 import ActionDialog from '../../../Components/App/ActionDialog';
 import StatusBadge from '../../../Components/App/StatusBadge';
@@ -57,6 +57,11 @@ function ItemList({ items, tr, existing = false, browse = false }) {
  * no supplier is controlled or approved by it. Only supplier.assure is offered the action; the server
  * refuses it otherwise. Until the templates' content is reviewed (plan §19.2), the section and the
  * dialog say so; `reviewed` comes from the server (RequirementTemplates::CONTENT_REVIEWED).
+ *
+ * The section is closed when the page opens — the templates are optional suggestions, the catalogue
+ * above is the work. Its heading is a native button (aria-expanded); a closed section keeps its
+ * content mounted behind `hidden`, so nothing opened in it is lost. A link to
+ * #requirement-templates-heading («Bruk kravmal» on a supplier) opens it.
  */
 function Unreviewed({ t }) {
     return (
@@ -68,6 +73,7 @@ function Unreviewed({ t }) {
 
 export default function RequirementTemplates({ templates = [], reviewed = false, canManage = false, tr }) {
     const t = tr.templates ?? {};
+    const [expanded, setExpanded] = useState(false);
     const [open, setOpen] = useState(null);
     // The templates whose items are listed on the card. Reading changes nothing; it needs supplier.view only.
     const [shown, setShown] = useState([]);
@@ -81,57 +87,86 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
     const apply = () => {
         router.post(`/app/supplier-management/control-requirements/templates/${template.key}`, {}, {
             preserveScroll: true,
+            // The section stays open on the template just applied.
+            preserveState: true,
             onStart: () => setProcessing(true),
             onFinish: () => setProcessing(false),
             onSuccess: close,
         });
     };
 
+    useEffect(() => {
+        if (window.location.hash === '#requirement-templates-heading') {
+            setExpanded(true);
+            document.getElementById('requirement-templates-heading')?.scrollIntoView?.({ block: 'start' });
+        }
+    }, []);
+
     if (templates.length === 0) {
         return null;
     }
 
     return (
-        <section className={CARD} aria-labelledby="requirement-templates-heading" data-testid="requirement-templates">
-            <h2 id="requirement-templates-heading" className="text-xl font-semibold text-slate-950">{t.heading ?? 'Kravmaler'}</h2>
-            <p className={`mt-1 ${HINT}`}>{t.intro}</p>
-            <p className={`mt-1 ${HINT}`}>{t.note}</p>
-            {!reviewed && <Unreviewed t={t} />}
+        <section className={CARD} aria-labelledby="requirement-templates-heading" data-testid="requirement-templates" data-open={expanded ? '1' : '0'}>
+            <h2 id="requirement-templates-heading" className="scroll-mt-4">
+                <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls="requirement-templates-panel"
+                    onClick={() => setExpanded((value) => ! value)}
+                    className="flex min-h-12 w-full min-w-0 items-start gap-3 rounded-xl py-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                    data-testid="requirement-templates-toggle"
+                >
+                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className={`mt-1 h-5 w-5 shrink-0 text-slate-500 transition-transform ${expanded ? 'rotate-90' : ''}`}>
+                        <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.17 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z" clipRule="evenodd" />
+                    </svg>
+                    <span className="min-w-0 flex-1">
+                        <span className="block text-xl font-semibold text-slate-950">{t.heading ?? 'Kravmaler'}</span>
+                        <span className="mt-0.5 block text-base font-normal text-slate-600" data-testid="requirement-templates-summary">{t.summary ?? 'Ferdige forslag til kontrollkrav som kan legges til virksomhetens kravbibliotek. Gjennomgå og tilpass kravene før bruk.'}</span>
+                    </span>
+                </button>
+            </h2>
 
-            <ul className="mt-4 grid gap-3 lg:grid-flow-row-dense lg:grid-cols-3">
-                {templates.map((row) => (
-                    // An open template takes the whole row, so its list has room and the others keep their size.
-                    <li key={row.key} className={`flex min-w-0 flex-col rounded-xl border border-slate-200 p-4 ${shown.includes(row.key) ? 'lg:col-span-3' : ''}`} data-testid="requirement-template">
-                        <h3 className="break-words text-lg font-semibold text-slate-950">{row.name}</h3>
-                        <p className="mt-1 break-words text-base text-slate-700">{row.purpose}</p>
-                        <p className="mt-2 break-words text-base text-slate-700"><span className="font-semibold text-slate-900">{t.suited_for ?? 'Passer for'}:</span> {row.suited_for}</p>
-                        <p className="mt-2 text-base text-slate-700">
-                            {fill(t.item_count ?? ':count krav', { count: row.items.length })} · {fill(t.mandatory_count ?? ':count obligatoriske', { count: row.mandatory_count })}
-                        </p>
-                        {row.to_create_count === 0 && <p className="mt-1 text-base font-semibold text-slate-900" data-testid="requirement-template-complete">{t.all_present ?? 'Alle kravene er lagt til'}</p>}
-                        <div className="mt-auto flex flex-wrap gap-2 pt-3">
-                            <button
-                                type="button"
-                                onClick={() => toggleShown(row.key)}
-                                aria-expanded={shown.includes(row.key)}
-                                aria-controls={`requirement-template-items-${row.key}`}
-                                className={SECONDARY_ACTION}
-                                data-testid="requirement-template-toggle"
-                            >
-                                {shown.includes(row.key) ? (t.hide_items ?? 'Skjul kravene') : fill(t.show_items ?? 'Vis kravene (:count)', { count: row.items.length })}
-                            </button>
-                            {canManage && (
-                                <button type="button" onClick={() => setOpen(row.key)} className={SECONDARY_ACTION}>{t.apply ?? 'Ta i bruk kravmal'}</button>
-                            )}
-                        </div>
-                        {shown.includes(row.key) && (
-                            <div id={`requirement-template-items-${row.key}`} className="mt-3 border-t border-slate-200 pt-1" aria-label={fill(t.items_label ?? 'Kravene i :name', { name: row.name })} role="region" data-testid="requirement-template-items">
-                                <ItemList items={row.items} tr={tr} browse />
+            <div id="requirement-templates-panel" hidden={! expanded}>
+                <p className={`mt-3 ${HINT}`}>{t.intro}</p>
+                <p className={`mt-1 ${HINT}`}>{t.note}</p>
+                {!reviewed && <Unreviewed t={t} />}
+
+                <ul className="mt-4 grid gap-3 lg:grid-flow-row-dense lg:grid-cols-3">
+                    {templates.map((row) => (
+                        // An open template takes the whole row, so its list has room and the others keep their size.
+                        <li key={row.key} className={`flex min-w-0 flex-col rounded-xl border border-slate-200 p-4 ${shown.includes(row.key) ? 'lg:col-span-3' : ''}`} data-testid="requirement-template">
+                            <h3 className="break-words text-lg font-semibold text-slate-950">{row.name}</h3>
+                            <p className="mt-1 break-words text-base text-slate-700">{row.purpose}</p>
+                            <p className="mt-2 break-words text-base text-slate-700"><span className="font-semibold text-slate-900">{t.suited_for ?? 'Passer for'}:</span> {row.suited_for}</p>
+                            <p className="mt-2 text-base text-slate-700">
+                                {fill(t.item_count ?? ':count krav', { count: row.items.length })} · {fill(t.mandatory_count ?? ':count obligatoriske', { count: row.mandatory_count })}
+                            </p>
+                            {row.to_create_count === 0 && <p className="mt-1 text-base font-semibold text-slate-900" data-testid="requirement-template-complete">{t.all_present ?? 'Alle kravene er lagt til'}</p>}
+                            <div className="mt-auto flex flex-wrap gap-2 pt-3">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleShown(row.key)}
+                                    aria-expanded={shown.includes(row.key)}
+                                    aria-controls={`requirement-template-items-${row.key}`}
+                                    className={SECONDARY_ACTION}
+                                    data-testid="requirement-template-toggle"
+                                >
+                                    {shown.includes(row.key) ? (t.hide_items ?? 'Skjul kravene') : fill(t.show_items ?? 'Vis kravene (:count)', { count: row.items.length })}
+                                </button>
+                                {canManage && (
+                                    <button type="button" onClick={() => setOpen(row.key)} className={SECONDARY_ACTION}>{t.apply ?? 'Ta i bruk kravmal'}</button>
+                                )}
                             </div>
-                        )}
-                    </li>
-                ))}
-            </ul>
+                            {shown.includes(row.key) && (
+                                <div id={`requirement-template-items-${row.key}`} className="mt-3 border-t border-slate-200 pt-1" aria-label={fill(t.items_label ?? 'Kravene i :name', { name: row.name })} role="region" data-testid="requirement-template-items">
+                                    <ItemList items={row.items} tr={tr} browse />
+                                </div>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            </div>
 
             <ActionDialog isOpen={canManage && template !== null} onClose={close} closeDisabled={processing} titleId="requirement-template-dialog-heading" initialFocusRef={confirmRef}>
                 {template && (

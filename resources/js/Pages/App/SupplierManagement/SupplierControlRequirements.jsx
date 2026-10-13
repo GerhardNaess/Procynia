@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Link, useForm } from '@inertiajs/react';
+import { Link, router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
-import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import RequiredMark from '../Risk/RequiredMark';
 import ControlRequirementForm from './ControlRequirementForm';
@@ -15,6 +15,42 @@ const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
 const INPUT = 'mt-1 min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const CHOICE_CARD = 'min-w-0 rounded-xl border border-slate-200 bg-white p-4 text-left hover:border-violet-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:hover:border-slate-200';
+
+/**
+ * Legg til krav: one action, two choices — an existing control requirement that does not apply
+ * automatically (an include override), or a requirement for this supplier only. Neither is a new
+ * register: the first is the catalogue, the second a supplier-specific control requirement.
+ */
+function AddChoice({ includable, onChoose, onCancel, tr }) {
+    const c = tr.control ?? {};
+    const noneToInclude = includable.length === 0;
+
+    return (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="add-requirement-choice">
+            <h3 className="text-lg font-semibold text-slate-950">{c.add_heading ?? 'Legg til krav'}</h3>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <button type="button" onClick={() => onChoose('include')} disabled={noneToInclude} className={CHOICE_CARD} data-testid="add-requirement-existing">
+                    <span className="block break-words text-base font-semibold text-slate-950">{c.add_existing ?? 'Velg eksisterende kontrollkrav'}</span>
+                    <span className="mt-1 block break-words text-base text-slate-700">
+                        {c.add_existing_text ?? 'Velg et kontrollkrav som allerede finnes i virksomhetens kravregister, men som ikke gjelder denne leverandøren automatisk.'}
+                    </span>
+                    {noneToInclude && <span className="mt-1 block break-words text-base text-slate-600">{c.include_none ?? 'Alle aktive kontrollkrav gjelder allerede denne leverandøren.'}</span>}
+                </button>
+                <button type="button" onClick={() => onChoose('own')} className={CHOICE_CARD} data-testid="add-requirement-own">
+                    <span className="block break-words text-base font-semibold text-slate-950">{c.add_own ?? 'Opprett krav for denne leverandøren'}</span>
+                    <span className="mt-1 block break-words text-base text-slate-700">
+                        {c.add_own_text ?? 'Opprett et krav som bare skal gjelde denne leverandøren, for eksempel et særskilt kontraktsvilkår.'}
+                    </span>
+                    <span className="mt-1 block break-words text-base text-slate-600">{c.add_own_hint ?? 'Hvis kravet skal gjelde flere leverandører, opprett det under Kontrollkrav i stedet.'}</span>
+                </button>
+            </div>
+            <div className="mt-3">
+                <button type="button" onClick={onCancel} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+            </div>
+        </div>
+    );
+}
 
 /**
  * Legg til krav / Gjelder ikke denne leverandøren / Tilbake til automatisk vurdering: one begrunnelse,
@@ -129,26 +165,57 @@ function Basis({ row, tr }) {
  * may (supplier.assure, supplier not ended); «Gjelder ikke denne leverandøren» is never offered for a mandatory requirement. The
  * requirements that do not apply are listed only for someone who can include them; the excluded ones
  * and the history are folded away.
+ *
+ * One «Legg til krav» (AddChoice). A requirement for this supplier only is maintained on its row —
+ * Rediger krav and Sett som utgått, never Slett — since Kontrollkrav lists the catalogue alone.
+ * Its controls stay after it is retired, under «Kontroller av krav som ikke gjelder nå».
  */
 export default function SupplierControlRequirements({ supplierId, data, onFollowUp = null, locale = 'no', tr }) {
     const c = tr.control ?? {};
-    // One open form at a time: { kind: 'evaluate' | 'include' | 'exclude' | 'clear' | 'own', requirement }.
+    // One open form at a time: { kind: 'evaluate' | 'include' | 'exclude' | 'clear' | 'add' | 'own' | 'edit', requirement }.
     const [panel, setPanel] = useState(null);
+    // Why Sett som utgått was refused, e.g. the supplier was ended meanwhile.
+    const [retireError, setRetireError] = useState(null);
     const close = () => setPanel(null);
+    const retire = (row) => {
+        if (! window.confirm(c.retire_own_confirm ?? 'Sette kravet som utgått? Det gjelder da ikke leverandøren lenger. Kontrollene av kravet blir stående i historikken.')) {
+            return;
+        }
+
+        setRetireError(null);
+        router.post(`/app/supplier-management/control-requirements/${row.id}/retire`, {}, {
+            preserveScroll: true,
+            onError: (errors) => setRetireError({ id: row.id, message: errors.requirement ?? Object.values(errors)[0] }),
+        });
+    };
     const canOverride = data.permissions?.can_override ?? false;
     const groups = groupByTheme(data.applicable, tr);
 
-    const panelFor = (row) => panel?.requirement?.id === row.id && (panel.kind === 'evaluate'
-        ? <EvaluationForm key={`evaluate-${row.id}`} supplierId={supplierId} row={row} options={data.evaluation_form ?? {}} onDone={close} locale={locale} tr={tr} />
-        : <OverrideForm key={`${panel.kind}-${row.id}`} supplierId={supplierId} action={panel.kind} requirement={row} onDone={close} tr={tr} />
-    );
+    const panelFor = (row) => {
+        if (panel?.requirement?.id !== row.id) {
+            return null;
+        }
+
+        if (panel.kind === 'evaluate') {
+            return <EvaluationForm key={`evaluate-${row.id}`} supplierId={supplierId} row={row} options={data.evaluation_form ?? {}} onDone={close} locale={locale} tr={tr} />;
+        }
+
+        if (panel.kind === 'edit') {
+            return (
+                <div key={`edit-${row.id}`} className="mt-4" data-testid="own-requirement-edit">
+                    <h4 className="text-lg font-semibold text-slate-950">{c.edit_own_heading ?? 'Rediger krav'}</h4>
+                    <ControlRequirementForm requirement={row} options={data.form ?? {}} onDone={close} tr={tr} />
+                </div>
+            );
+        }
+
+        return <OverrideForm key={`${panel.kind}-${row.id}`} supplierId={supplierId} action={panel.kind} requirement={row} onDone={close} tr={tr} />;
+    };
 
     return (
         <section className={CARD} aria-labelledby="supplier-control-heading" data-testid="supplier-control-requirements">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <h2 id="supplier-control-heading" className="text-xl font-semibold text-slate-950">{c.heading ?? 'Krav og kvalifikasjoner'}</h2>
-                <Link href="/app/supplier-management/control-requirements" className="text-base font-semibold text-violet-700 hover:text-violet-900">{c.go_to_catalogue ?? 'Se alle kontrollkrav'}</Link>
-            </div>
+            {/* Every requirement that applies to the supplier is listed here; the catalogue is under Kontrollkrav. */}
+            <h2 id="supplier-control-heading" className="text-xl font-semibold text-slate-950">{c.heading ?? 'Kontrollkrav for leverandøren'}</h2>
             <p className={`mt-2 ${HINT}`}>{c.intro}</p>
 
             {groups.length === 0 ? (
@@ -193,7 +260,7 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                                     {/* Guidance for the work at hand; a catalogue requirement's is managed under Kontrollkrav. */}
                                     <WikiGuidance requirementId={row.id} guidance={row.wiki_guidance} canManage={(data.permissions?.can_manage_wiki_guidance ?? false) && row.supplier_specific} tr={tr} />
 
-                                    {panel === null && (row.can_evaluate || actions.exclude || actions.clear) && (
+                                    {panel === null && (row.can_evaluate || actions.exclude || actions.clear || row.can_manage) && (
                                         <div className="mt-3 flex flex-wrap gap-2">
                                             {row.can_evaluate && <button type="button" onClick={() => setPanel({ kind: 'evaluate', requirement: row })} className={PRIMARY_ACTION}>{c.evaluate ?? 'Kontroller krav'}</button>}
                                             {row.can_follow_up && onFollowUp && (
@@ -203,8 +270,12 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                                             )}
                                             {actions.exclude && <button type="button" onClick={() => setPanel({ kind: 'exclude', requirement: row })} className={SECONDARY_ACTION}>{c.exclude ?? 'Gjelder ikke denne leverandøren'}</button>}
                                             {actions.clear && <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={SECONDARY_ACTION}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>}
+                                            {/* This supplier's own requirement: maintained here, never deleted. */}
+                                            {row.can_manage && <button type="button" onClick={() => setPanel({ kind: 'edit', requirement: row })} className={SECONDARY_ACTION}>{c.edit_own ?? 'Rediger krav'}</button>}
+                                            {row.can_manage && <button type="button" onClick={() => retire(row)} className={WARNING_ACTION}>{c.retire_own ?? 'Sett som utgått'}</button>}
                                         </div>
                                     )}
+                                    {retireError?.id === row.id && <p className={`mt-2 ${ERROR}`} role="alert">{retireError.message}</p>}
                                     {panelFor(row)}
                                     <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} />
                                 </li>
@@ -214,17 +285,18 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                 </div>
             ))}
 
+            {/* One action for the exceptions; the requirements themselves come from the profile. */}
             {canOverride && panel === null && (
                 <div className="mt-5 flex flex-wrap gap-2">
-                    {data.includable.length > 0 && <button type="button" onClick={() => setPanel({ kind: 'include' })} className={PRIMARY_ACTION}>{c.include ?? 'Legg til krav'}</button>}
-                    <button type="button" onClick={() => setPanel({ kind: 'own' })} className={SECONDARY_ACTION}>{c.add_for_supplier ?? 'Nytt krav for denne leverandøren'}</button>
+                    <button type="button" onClick={() => setPanel({ kind: 'add' })} className={PRIMARY_ACTION} data-testid="add-requirement">{c.include ?? 'Legg til krav'}</button>
                 </div>
             )}
+            {panel?.kind === 'add' && <AddChoice includable={data.includable} onChoose={(kind) => setPanel({ kind })} onCancel={close} tr={tr} />}
             {panel?.kind === 'include' && <OverrideForm supplierId={supplierId} action="include" includable={data.includable} onDone={close} tr={tr} />}
             {panel?.kind === 'own' && (
-                <div className="mt-4">
-                    <h3 className="text-lg font-semibold text-slate-950">{c.add_for_supplier_heading ?? 'Nytt krav for denne leverandøren'}</h3>
-                    <p className={HINT}>{c.add_for_supplier_intro}</p>
+                <div className="mt-4" data-testid="own-requirement-create">
+                    <h3 className="text-lg font-semibold text-slate-950">{c.add_for_supplier_heading ?? 'Opprett krav for denne leverandøren'}</h3>
+                    <p className={HINT}>{c.add_for_supplier_intro ?? 'Et krav som bare gjelder denne leverandøren, for eksempel et særskilt kontraktsvilkår. Det gjelder alltid leverandøren.'}</p>
                     <ControlRequirementForm supplierId={supplierId} options={data.form ?? {}} onDone={close} tr={tr} />
                 </div>
             )}

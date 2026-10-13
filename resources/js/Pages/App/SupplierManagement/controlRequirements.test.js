@@ -47,6 +47,26 @@ describe('Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2, §5.5)', ()
         // An override always carries a begrunnelse.
         assert.match(code, /name="?reason|'reason'|data\.reason/);
     });
+
+    test('one «Legg til krav» opens two choices; this supplier’s own requirement is edited and retired on its row, never deleted', () => {
+        const code = source('./SupplierControlRequirements.jsx');
+
+        // One main action, not two side by side; the choices are the existing include and own-requirement flows.
+        assert.equal((code.match(/data-testid="add-requirement"/g) ?? []).length, 1);
+        assert.match(code, /onClick=\{\(\) => setPanel\(\{ kind: 'add' \}\)\}/);
+        assert.match(code, /onChoose\('include'\)[\s\S]*disabled=\{noneToInclude\}/);
+        assert.match(code, /onChoose\('own'\)/);
+        assert.doesNotMatch(code, /add_for_supplier \?\?/, 'the old second button is gone');
+        assert.match(code, /panel\?\.kind === 'include' && <OverrideForm supplierId=\{supplierId\} action="include"/);
+        assert.match(code, /<ControlRequirementForm supplierId=\{supplierId\}/);
+
+        // Rediger krav / Sett som utgått only where the server says so, the retire behind a confirm; no Slett.
+        assert.match(code, /row\.can_manage && <button type="button" onClick=\{\(\) => setPanel\(\{ kind: 'edit', requirement: row \}\)\}/);
+        assert.match(code, /row\.can_manage && <button type="button" onClick=\{\(\) => retire\(row\)\}/);
+        assert.match(code, /window\.confirm\([\s\S]*control-requirements\/\$\{row\.id\}\/retire/);
+        assert.doesNotMatch(code, /router\.delete|\/destroy|k\.delete/);
+        assert.match(code, /<ControlRequirementForm requirement=\{row\}/);
+    });
 });
 
 describe('Kontrollkrav (supplier-assurance-v2-plan §5.1, §5.3)', () => {

@@ -2,8 +2,12 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-    documentationSummary,
-    documentationSummaryText,
+    OVERVIEW_DETAILS,
+    criticalitySummary,
+    detailForAnchor,
+    linkedCountSummary,
+    nextControl,
+    profileSummary,
     securityPrivacyFacts,
     securityPrivacySummary,
     supplierPageTabs,
@@ -26,8 +30,8 @@ describe('The supplier page tabs (supplier-assurance-v2-plan §22.1)', () => {
     test('Krav og kvalifikasjoner and Aktsomhet are there only when the server sent something for them', () => {
         assert.deepEqual(supplierPageTabs(), ['overview', 'documents', 'assessments', 'history']);
         assert.deepEqual(supplierPageTabs({ controlRequirements: { applicable: [] }, dueDiligence: {} }), ['overview', 'requirements', 'documents', 'assessments', 'due_diligence', 'history']);
-        // Requirements from Etterlevelse og revisjon alone also give the tab.
-        assert.ok(supplierPageTabs({ requirements: [] }).includes('requirements'));
+        // Earlier links to Etterlevelse og revisjon are under Historikk and never give the tab.
+        assert.ok(! supplierPageTabs({ requirements: [] }).includes('requirements'));
     });
 
     test('?tab= opens a tab the page has, and Oversikt otherwise; Oversikt has no ?tab=', () => {
@@ -47,8 +51,16 @@ describe('The supplier page tabs (supplier-assurance-v2-plan §22.1)', () => {
         assert.equal(tabForAnchor('supplier-assessment-heading'), 'assessments');
         assert.equal(tabForAnchor('supplier-due-diligence-heading'), 'due_diligence');
         assert.equal(tabForAnchor('supplier-profile-heading'), 'overview');
+        assert.equal(tabForAnchor('supplier-risks-heading'), 'overview');
+        // Sikkerhet og personvern sits beside the requirements; the history of criticality and profile under Historikk.
+        assert.equal(tabForAnchor('supplier-security-privacy-heading'), 'requirements');
+        assert.equal(tabForAnchor('supplier-criticality-history-heading'), 'history');
+        assert.equal(tabForAnchor('supplier-profile-history-heading'), 'history');
+        assert.equal(tabForAnchor('supplier-earlier-compliance-links-heading'), 'history');
         // Kontrollstatus is above the tabs, on every one of them.
         assert.equal(tabForAnchor('supplier-assurance-heading'), null);
+        assert.equal(tabForAnchor('supplier-requirement-status-heading'), 'requirements');
+        assert.equal(tabForAnchor('supplier-decision-history-heading'), 'history');
     });
 });
 
@@ -101,28 +113,69 @@ describe('Sikkerhet og personvern (supplier-assurance-v2-plan §12)', () => {
     });
 });
 
-describe('Dokumentasjon on Oversikt', () => {
-    test('counts current rows by how they stand today; replaced rows are history', () => {
-        const summary = documentationSummary([
-            { status: 'valid', valid_until: '2027-06-01' },
-            { status: 'valid', valid_until: '2026-11-01' },
-            { status: 'no_expiry', valid_until: null },
-            { status: 'expired', valid_until: '2026-01-01' },
-            { status: 'replaced', valid_until: '2025-01-01' },
-        ], '2026-10-08');
+describe('Oversikt (redesign 2026-10-12)', () => {
+    test('a link to a section under Detaljer names the section to open; other anchors none', () => {
+        assert.equal(detailForAnchor('#supplier-profile-heading'), 'profile');
+        assert.equal(detailForAnchor('supplier-criticality-heading'), 'criticality');
+        assert.equal(detailForAnchor('supplier-cases-heading'), 'cases');
+        assert.equal(detailForAnchor('supplier-control-heading'), null);
+        assert.equal(detailForAnchor('supplier-details-heading'), null);
+        assert.deepEqual(Object.keys(OVERVIEW_DETAILS), ['info', 'criticality', 'profile', 'risks', 'cases']);
+    });
 
-        assert.deepEqual(summary, { total: 4, valid: 2, expiringSoon: 1, expired: 1 });
-        assert.equal(documentationSummaryText(summary), '2 gyldige · 1 utløper snart · 1 utløpt');
-        assert.equal(documentationSummaryText(documentationSummary([], '2026-10-08')), 'Ingen dokumentasjon registrert');
+    test('Neste kontroll is the first entry of the server\'s plan, with the count; without a plan the next assessment', () => {
+        const entries = [
+            { kind: 'acceptance', date: '2026-10-30', overdue: false, requirement: { id: 3, title: 'MFA' }, document: null },
+            { kind: 'control', date: '2027-01-01', overdue: false, requirement: { id: 4, title: 'Backup' }, document: null },
+        ];
+        assert.deepEqual(nextControl({ entries, on_change: [] }, {}), { entry: entries[0], count: 2, entries });
+        // A plan with nothing dated says nothing — no assessment date is added beside the server's plan.
+        assert.equal(nextControl({ entries: [], on_change: [] }, { next_review_on: '2027-02-01' }), null);
+        assert.equal(nextControl(null, { next_review_on: '2027-02-01', status: 'active' }).entry.kind, 'assessment');
+        assert.equal(nextControl(null, { next_review_on: '2027-02-01', status: 'ended' }), null);
+        assert.equal(nextControl(null, {}), null);
+    });
+
+    test('the closed summaries say what a section holds, and never invent a value', () => {
+        const date = (iso) => `[${iso}]`;
+        assert.equal(criticalitySummary({ current: { criticality: 'critical', review_interval_months: 6 }, decided_at: '2026-10-12' }, {}, date), 'Kritisk · Hver 6. måned · Sist vurdert [2026-10-12]');
+        assert.equal(criticalitySummary(null), 'Kritikalitet er ikke vurdert ennå.');
+        assert.equal(profileSummary({ answers: null }), 'Ikke fylt ut · Avgjør hvilke kontrollkrav som gjelder');
+        assert.equal(profileSummary({ answers: {}, complete: true }), 'Utfylt · Avgjør hvilke kontrollkrav som gjelder');
+        assert.equal(profileSummary({ answers: {}, complete: false }), 'Delvis utfylt · Avgjør hvilke kontrollkrav som gjelder');
+        const texts = { none: 'Ingen', one: '1 risiko', many: ':count risikoer' };
+        assert.deepEqual([0, 1, 3].map((count) => linkedCountSummary(count, texts)), ['Ingen', '1 risiko', '3 risikoer']);
     });
 });
 
 describe('The page itself', () => {
-    test('Kontrollstatus stays above the tabs, the handoffs open Oversikt, and an ended supplier says so once', () => {
+    test('the handoffs open their section on Oversikt, and an ended supplier says so once', () => {
         const page = source('./Show.jsx');
-        assert.ok(page.indexOf('<SupplierAssuranceStatus') < page.indexOf('data-testid="supplier-page-tabs"'));
-        assert.match(page, /startFollowUp = \(value\) => \{ setFollowUp\(value\); openTab\('overview'\); \}/);
+        assert.match(page, /startFollowUp = \(value\) => \{ setFollowUp\(value\); openDetail\('cases'\); openTab\('overview'\); \}/);
+        assert.match(page, /startRisk = \(value\) => \{ setRiskFrom\(value\); openDetail\('risks'\); openTab\('overview'\); \}/);
         assert.match(page, /supplier-ended-notice/);
         assert.match(page, /item\.status !== 'ended' && <p/);
+    });
+
+    test('Oversikt is its areas in order, the other tabs are not repeated there, and no decision is offered', () => {
+        const page = source('./Show.jsx');
+        const overview = page.slice(page.indexOf("{tab === 'overview' && ("), page.indexOf("{tab === 'requirements' && ("));
+        const order = ['<OverviewAttention', '<SupplierKeyFacts', '<SupplierNextControl', 'data-testid="supplier-details"', 'data-testid="supplier-other-actions"'].map((marker) => overview.indexOf(marker));
+        assert.ok(order.every((index) => index >= 0), 'every area is on Oversikt');
+        assert.deepEqual([...order].sort((a, b) => a - b), order, 'in this order');
+        // Dokumentasjon, Vurderinger and Aktsomhet have their own tabs; history has Historikk.
+        assert.doesNotMatch(overview, /SupplierOverviewSummaries|<SupplierDocuments|<SupplierAssessment|<SupplierDueDiligence|<SecurityPrivacyCard|History/);
+        assert.doesNotMatch(page, /SupplierAssuranceDecision|decision_form|Registrer beslutning/);
+        // The criticality and profile history are on Historikk.
+        const history = page.slice(page.indexOf("{tab === 'history' && ("));
+        assert.match(history, /<SupplierCriticalityHistory/);
+        assert.match(history, /<SupplierProfileHistory/);
+    });
+
+    test('a Detaljer section is a native button with aria-expanded, and a closed one keeps its content mounted', () => {
+        const section = source('./SupplierDetailsSection.jsx');
+        assert.match(section, /<button\s+type="button"\s+aria-expanded=\{open\}\s+aria-controls=\{panelId\}/);
+        assert.match(section, /hidden=\{! open\}/);
+        assert.doesNotMatch(section, /\{open && /, 'the content is never unmounted when closed');
     });
 });

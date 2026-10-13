@@ -110,3 +110,19 @@ describe('Kravmaler (supplier-assurance-v2-plan §16, §22.2)', () => {
         assert.match(source('./ControlRequirements.jsx'), /reviewed=\{templatesReviewed\}/);
     });
 });
+
+describe('Kontrollkrav and Krav og kvalifikasjoner stay apart (2026-10-13)', () => {
+    test('Kravmaler is closed until opened, by a native button, and keeps its content mounted', () => {
+        const section = source('./RequirementTemplates.jsx');
+        assert.match(section, /const \[expanded, setExpanded\] = useState\(false\)/);
+        assert.match(section, /<button\s+type="button"\s+aria-expanded=\{expanded\}\s+aria-controls="requirement-templates-panel"/);
+        assert.match(section, /id="requirement-templates-panel" hidden=\{! expanded\}/);
+    });
+
+    test('Kontrollkrav is headed Kontrollkrav, and the supplier tab has no link suggesting more requirements apply', () => {
+        assert.match(source('./ControlRequirements.jsx'), /<h1[^>]*>\{k\.heading \?\? 'Kontrollkrav'\}<\/h1>/);
+        const tab = source('./SupplierControlRequirements.jsx');
+        assert.doesNotMatch(tab, /go_to_catalogue|Se alle kontrollkrav/);
+        assert.doesNotMatch(tab, /<Link href="\/app\/supplier-management\/control-requirements"/);
+    });
+});

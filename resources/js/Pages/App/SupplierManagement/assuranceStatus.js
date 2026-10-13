@@ -1,8 +1,8 @@
 /**
- * Pure helpers for Kontrollstatus on a supplier (docs/supplier-assurance-v2-plan.md §9.5). The
- * server computes the state now, «Krever beslutning» and which decisions may be registered; these
- * only name codes and arrange what the server sent. They never compute a state, never merge the
- * decision into the state, and never show a share, a percentage or a score.
+ * Pure helpers for Kravstatus on a supplier, and for the earlier kontrollbeslutninger kept as
+ * history. The server computes the state; these only name codes and arrange what the server sent.
+ * They never compute a state and never show a share, a percentage or a score. Registrer beslutning
+ * was retired on 2026-10-12: nothing here builds or checks a decision form any more.
  */
 import { formatLongDate } from '../Improvements/improvementStatus.js';
 import { levelLabel } from './controlRequirements.js';
@@ -15,8 +15,7 @@ export const DECISION_TONES = {
 };
 
 export const STATE_TONES = {
-    decision_required: 'rose',
-    mandatory_open: 'amber',
+    mandatory_open: 'rose',
     follow_up_required: 'amber',
     in_order: 'emerald',
 };
@@ -51,23 +50,23 @@ export function decisionLabel(decision, tr) {
     return tr?.assurance?.decisions?.[decision] ?? DECISION_FALLBACKS[decision] ?? decision;
 }
 
+/** «Obligatorisk krav åpent», «Krever oppfølging», «I orden». */
+export function stateLabel(key, tr) {
+    return tr?.assurance?.states?.[key] ?? STATE_FALLBACKS[key] ?? key;
+}
+
 /**
- * Tilstand nå as one label: «Krever beslutning» when the server's signal is on, otherwise the state
- * itself — «Obligatorisk krav åpent» is only seen when the decision in force is «Ikke godkjent for
- * nye kjøp». Null when nothing applies.
+ * Kravstatus as one label with its tone, from the state code the server computed (a state object or
+ * just its code). Null when nothing applies.
  */
 export function stateNow(state, tr) {
-    if (! state) {
+    const key = typeof state === 'string' ? state : state?.state;
+
+    if (! key) {
         return null;
     }
 
-    const a = tr?.assurance ?? {};
-    const key = state.decision_required ? 'decision_required' : state.state;
-    const label = state.decision_required
-        ? (a.decision_required ?? 'Krever beslutning')
-        : (a.states?.[state.state] ?? STATE_FALLBACKS[state.state] ?? state.state);
-
-    return { key, label, tone: STATE_TONES[key] ?? 'slate' };
+    return { key, label: stateLabel(key, tr), tone: STATE_TONES[key] ?? 'slate' };
 }
 
 /** «18 krav gjelder». */
@@ -135,56 +134,6 @@ export function historyCount(count, tr) {
     return count === 1 ? (a.history_one ?? '1 beslutning') : (a.history_many ?? ':count beslutninger').replace(':count', String(count));
 }
 
-/** An empty decision dated today. */
-export function decisionFormData(today) {
-    return { decision: '', rationale: '', follow_up_note: '', decided_on: today ?? '' };
-}
-
-/**
- * What the form still needs: a decision the server allows, what is followed up for «Godkjent med
- * oppfølging», a date and a begrunnelse. The server checks the same against the state now.
- *
- * @returns {string[]} codes: 'decision' | 'follow_up_note' | 'decided_on' | 'rationale'
- */
-export function decisionMissing(data, allowed = []) {
-    const missing = [];
-
-    if (! data?.decision || ! allowed.includes(data.decision)) {
-        missing.push('decision');
-    }
-
-    if (data?.decision === 'approved_with_follow_up' && ! String(data.follow_up_note ?? '').trim()) {
-        missing.push('follow_up_note');
-    }
-
-    if (! data?.decided_on) {
-        missing.push('decided_on');
-    }
-
-    if (! String(data?.rationale ?? '').trim()) {
-        missing.push('rationale');
-    }
-
-    return missing;
-}
-
-/**
- * The choices in the form, each with its hint and — when the state does not allow it now — why.
- *
- * @returns {{ value: string, label: string, hint: string|undefined, allowed: boolean, reason: string|null }[]}
- */
-export function decisionOptions(decisions = [], allowed = [], tr) {
-    const f = tr?.assurance?.form ?? {};
-
-    return decisions.map((value) => ({
-        value,
-        label: decisionLabel(value, tr),
-        hint: f.hints?.[value],
-        allowed: allowed.includes(value),
-        reason: allowed.includes(value) ? null : (f.not_allowed?.[value] ?? null),
-    }));
-}
-
 /**
  * A decision's snapshot as it reads in the history: the state then, how many applied, the groups,
  * and the mandatory and important requirements that were not documented — never today's state.
@@ -193,7 +142,7 @@ export function snapshotSummary(snapshot, tr) {
     const a = tr?.assurance ?? {};
 
     return {
-        state: snapshot?.state ? (a.states?.[snapshot.state] ?? STATE_FALLBACKS[snapshot.state] ?? snapshot.state) : null,
+        state: snapshot?.state ? stateLabel(snapshot.state, tr) : null,
         applicable: applicableText(Number(snapshot?.applicable_count ?? 0), tr),
         groups: summaryGroups(snapshot?.counts ?? {}, tr),
         unmet: (snapshot?.unmet ?? []).map((row) => ({ id: row.id, text: `${row.title} – ${levelLabel(row.level, tr)} – ${displayStatusLabel(row.display_status, tr)}` })),

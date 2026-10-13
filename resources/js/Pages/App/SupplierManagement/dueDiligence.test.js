@@ -9,9 +9,14 @@ import {
     mappingFacts,
     nextText,
     relatedRequirements,
+    decisiveFacts,
+    irrelevantUnresolvedFacts,
+    mustClarifyText,
+    requiredText,
+    unresolvedFacts,
     withConclusion,
 } from './dueDiligence.js';
-import { attentionFindingText } from './supplierManagement.js';
+import { ATTENTION_TARGETS, attentionCategoryLabel, attentionFindingText } from './supplierManagement.js';
 
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
@@ -55,6 +60,50 @@ describe('Aktsomhet og bærekraft (supplier-assurance-v2-plan §11, §15.1)', ()
         assert.equal(mappingFacts({ high_risk_categories: [] })[1].text, 'Ingen');
     });
 
+    test('the status is one of three, in words, as the server decided — and an unknown status is never «ikke påkrevd»', () => {
+        assert.equal(requiredText({ status: 'required' }), 'Aktsomhetsvurdering er påkrevd');
+        assert.equal(requiredText({ status: 'must_clarify' }), 'Aktsomhetsbehov må avklares');
+        assert.equal(requiredText({ status: 'not_required' }), 'Aktsomhetsvurdering er ikke påkrevd');
+        assert.equal(requiredText({}), 'Aktsomhetsbehov må avklares');
+        assert.equal(requiredText({ status: 'must_clarify' }, { due_diligence: { statuses: { must_clarify: 'The need for due diligence must be clarified' } } }), 'The need for due diligence must be clarified');
+    });
+
+    test('må avklares names only the facts that could change it; the others are said not to matter', () => {
+        const mapping = { profile_empty: false, production_outside_eea: 'no', high_risk_categories: null, uses_subcontractors: 'no', labour_intensive: 'unknown' };
+        const clarify = { status: 'must_clarify', unresolved: ['high_risk_categories'], mapping };
+
+        assert.deepEqual(decisiveFacts(clarify).map((fact) => fact.key), ['high_risk_categories']);
+        assert.equal(mustClarifyText(clarify), 'Det mangler avklarte opplysninger om: Høyrisikokategorier.');
+        // Labour intensity is unclear too, but with subcontractors a clear no it cannot change anything.
+        assert.deepEqual(irrelevantUnresolvedFacts(clarify), []);
+        assert.equal(mustClarifyText({ ...clarify, status: 'required' }), null);
+
+        const settled = { status: 'not_required', unresolved: [], mapping: { ...mapping, high_risk_categories: [] } };
+        assert.deepEqual(irrelevantUnresolvedFacts(settled).map((fact) => [fact.key, fact.text]), [['labour_intensive', 'Ikke avklart']]);
+        // A wholly empty profile is said once, on its own — not as four unclarified facts.
+        assert.deepEqual(unresolvedFacts({ profile_empty: true }), []);
+    });
+
+    test('high-risk categories «Ikke avklart» reads as such, never as «Ingen»', () => {
+        const [, categories] = mappingFacts({ high_risk_categories: ['unknown'] });
+
+        assert.deepEqual([categories.text, categories.uncertain], ['Ikke avklart', true]);
+        assert.deepEqual([mappingFacts({ high_risk_categories: [] })[1].text, mappingFacts({ high_risk_categories: [] })[1].uncertain], ['Ingen', false]);
+    });
+
+    test('the tab reads status, then assessments with the action, then related requirements kept apart', () => {
+        const page = source('./SupplierDueDiligence.jsx');
+        const order = ['due-diligence-relevance', 'due-diligence-grounds', 'due-diligence-current', 'due-diligence-requirements'].map((id) => page.indexOf(`data-testid="${id}"`));
+
+        assert.ok(order.every((index) => index > 0));
+        assert.deepEqual([...order].sort((a, b) => a - b), order);
+        // The register action sits inside Aktsomhetsvurderinger, before the related requirements.
+        const register = page.indexOf("d.register ?? 'Registrer aktsomhetsvurdering'");
+        assert.ok(register > order[2] && register < order[3]);
+        // The process help sits under the heading, before the status.
+        assert.ok(page.indexOf('data-testid="due-diligence-process"') < order[0]);
+    });
+
     test('the latest assessment says when the next falls due, and the related requirements are the HR, labour and environment themes', () => {
         const date = (iso) => `[${iso}]`;
 
@@ -65,7 +114,11 @@ describe('Aktsomhet og bærekraft (supplier-assurance-v2-plan §11, §15.1)', ()
     });
 
     test('signals 10 and 11 read as the register and the page show them', () => {
-        assert.equal(attentionFindingText({ key: 'due_diligence_missing' }), 'Leverandørprofilen gjør en aktsomhetsvurdering relevant, og ingen er registrert.');
+        assert.equal(attentionFindingText({ key: 'due_diligence_missing' }), 'Leverandørprofilen gjør en aktsomhetsvurdering påkrevd, og ingen er registrert.');
+        assert.equal(attentionFindingText({ key: 'due_diligence_unclear' }), 'Leverandørprofilen må avklares for å avgjøre om aktsomhetsvurdering er påkrevd.');
+        // Må avklares sends the person to the profile, never to register an assessment.
+        assert.equal(ATTENTION_TARGETS.due_diligence_unclear.anchor, 'supplier-profile-heading');
+        assert.equal(attentionCategoryLabel('due_diligence_unclear'), 'Aktsomhetsbehov må avklares');
         assert.equal(attentionFindingText({ key: 'due_diligence_overdue', next_on: '2026-10-07' }, {}, (iso) => `[${iso}]`), 'Neste aktsomhetsvurdering var [2026-10-07] og er forfalt.');
     });
 

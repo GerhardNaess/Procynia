@@ -5,7 +5,7 @@ namespace App\Services\EnterpriseWiki\Knowledge\Sources;
 use App\Data\EnterpriseWiki\WikiKnowledgeDraft;
 use App\Data\EnterpriseWiki\WikiKnowledgeDraftSection;
 use App\Models\Supplier;
-use App\Models\SupplierAssuranceDecision;
+use App\Models\SupplierAssessment;
 use App\Models\SupplierRequirementEvaluation;
 use App\Models\User;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSource;
@@ -16,8 +16,11 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Leverandøroppfølging → Wiki. What is reusable about a supplier is how it was assured: what kind
  * of supplier it is, which control requirements applied and how each was documented, and the
- * assurance decision with its reasoning and follow-up. Gated on supplier.assure, the permission
- * that owns that work. Contact details and names of people are never offered.
+ * current leverandørvurdering with its reasoning. Gated on supplier.assure, the permission that owns
+ * that work. Contact details and names of people are never offered.
+ *
+ * The retired kontrollbeslutning is not offered: it is history, not what holds now, and a draft
+ * must not present it as current.
  */
 class SupplierKnowledgeSource implements WikiKnowledgeSource
 {
@@ -82,20 +85,20 @@ class SupplierKnowledgeSource implements WikiKnowledgeSource
             ->values()
             ->all();
 
-        $decision = $source->assuranceDecisions()->reorder()->latest('recorded_at')->latest('id')->first();
+        // The assessment in force: the newest by assessed_on, then id — as on the supplier page.
+        $assessment = $source->assessments()->reorder()->latest('assessed_on')->latest('id')->first();
 
-        $decisionLines = $decision instanceof SupplierAssuranceDecision
+        $assessmentLines = $assessment instanceof SupplierAssessment
             ? array_values(array_filter([
-                __("{$t}.decision").': '.__("{$t}.decisions.{$decision->decision}"),
-                filled($decision->rationale) ? __("{$t}.rationale").': '.$decision->rationale : null,
-                filled($decision->follow_up_note) ? __("{$t}.follow_up").': '.$decision->follow_up_note : null,
+                __("{$t}.assessment").': '.__("{$t}.results.{$assessment->overall_result}").' ('.$assessment->assessed_on?->toDateString().')',
+                filled($assessment->rationale) ? __("{$t}.rationale").': '.$assessment->rationale : null,
             ]))
             : [];
 
         return new WikiKnowledgeDraft($source->name, [
             new WikiKnowledgeDraftSection('profile', __("{$t}.profile_heading"), $profile),
             new WikiKnowledgeDraftSection('requirements', __("{$t}.requirements_heading"), $requirements),
-            new WikiKnowledgeDraftSection('decision', __("{$t}.decision_heading"), $decisionLines),
+            new WikiKnowledgeDraftSection('assessment', __("{$t}.assessment_heading"), $assessmentLines),
         ]);
     }
 

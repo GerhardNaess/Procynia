@@ -527,28 +527,6 @@ export function riskOriginText(entry, tr = {}, formatDate = (date) => date) {
         : (r.from_supplier ?? 'Opprettet fra leverandøren');
 }
 
-/** A requirement as «Legg til krav» offers it: «A.5.15 Tilgangsstyring – ISO 27001 (2022)». */
-export function requirementOptionLabel(option) {
-    const title = option.reference ? `${option.reference} ${option.title}` : option.title;
-
-    return option.source_label ? `${title} – ${option.source_label}` : title;
-}
-
-/** The offered requirements whose reference, title or kravkilde contain every word searched for. */
-export function filterRequirementOptions(options, search) {
-    const words = (search ?? '').toLocaleLowerCase('nb').split(/\s+/).filter(Boolean);
-
-    if (words.length === 0) {
-        return options;
-    }
-
-    return options.filter((option) => {
-        const text = requirementOptionLabel(option).toLocaleLowerCase('nb');
-
-        return words.every((word) => text.includes(word));
-    });
-}
-
 const ATTENTION_FALLBACKS = {
     not_assessed: 'Leverandøren er :level og mangler leverandørvurdering.',
     review_overdue: 'Neste leverandørvurdering var :date og er forfalt.',
@@ -557,26 +535,28 @@ const ATTENTION_FALLBACKS = {
     document_expiring: ':document «:title» utløper om :days dager (:date).',
     document_expiring_one: ':document «:title» utløper i morgen (:date).',
     document_expiring_today: ':document «:title» utløper i dag.',
-    decision_required_one: '1 obligatorisk krav krever beslutning:',
-    decision_required_many: ':count obligatoriske krav krever beslutning:',
+    mandatory_open_one: '1 obligatorisk krav er ikke dokumentert eller midlertidig akseptert:',
+    mandatory_open_many: ':count obligatoriske krav er ikke dokumentert eller midlertidig akseptert:',
     control_overdue_one: '1 kontrollkrav er forfalt:',
     control_overdue_many: ':count kontrollkrav er forfalt:',
     requirement_not_evaluated_one: '1 obligatorisk eller viktig krav er ikke vurdert:',
     requirement_not_evaluated_many: ':count obligatoriske eller viktige krav er ikke vurdert:',
     profile_incomplete: 'Leverandøren er :level, og leverandørprofilen er ikke fylt ut.',
-    due_diligence_missing: 'Leverandørprofilen gjør en aktsomhetsvurdering relevant, og ingen er registrert.',
+    due_diligence_missing: 'Leverandørprofilen gjør en aktsomhetsvurdering påkrevd, og ingen er registrert.',
+    due_diligence_unclear: 'Leverandørprofilen må avklares for å avgjøre om aktsomhetsvurdering er påkrevd.',
     due_diligence_overdue: 'Neste aktsomhetsvurdering var :date og er forfalt.',
 };
 
 /** Findings that name requirements: the sentence counts them, attentionFindingItems() lists them. */
-export const ATTENTION_LIST_KEYS = ['decision_required', 'control_overdue', 'requirement_not_evaluated'];
+export const ATTENTION_LIST_KEYS = ['mandatory_open', 'control_overdue', 'requirement_not_evaluated'];
 
 const ATTENTION_CATEGORY_FALLBACKS = {
-    decision_required: 'Krever beslutning',
+    mandatory_open: 'Obligatorisk krav åpent',
     control_overdue: 'Kontroll forfalt',
     requirement_not_evaluated: 'Krav ikke vurdert',
     profile_incomplete: 'Profil ikke fylt ut',
     due_diligence_missing: 'Aktsomhetsvurdering mangler',
+    due_diligence_unclear: 'Aktsomhetsbehov må avklares',
     due_diligence_overdue: 'Aktsomhetsvurdering forfalt',
     not_assessed: 'Ikke vurdert',
     review_overdue: 'Vurdering forfalt',
@@ -587,11 +567,13 @@ const ATTENTION_CATEGORY_FALLBACKS = {
 
 /** Where on the supplier page a finding is followed up. */
 export const ATTENTION_TARGETS = {
-    decision_required: { anchor: 'supplier-assurance-heading', label: 'go_to_assurance', fallback: 'Gå til Kontrollstatus' },
+    mandatory_open: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
     control_overdue: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
     requirement_not_evaluated: { anchor: 'supplier-control-heading', label: 'go_to_control', fallback: 'Gå til Krav og kvalifikasjoner' },
     profile_incomplete: { anchor: 'supplier-profile-heading', label: 'go_to_profile', fallback: 'Gå til leverandørprofil' },
     due_diligence_missing: { anchor: 'supplier-due-diligence-heading', label: 'go_to_due_diligence', fallback: 'Gå til Aktsomhet og bærekraft' },
+    // Må avklares asks for the profile, not for an assessment.
+    due_diligence_unclear: { anchor: 'supplier-profile-heading', label: 'go_to_profile', fallback: 'Gå til leverandørprofil' },
     due_diligence_overdue: { anchor: 'supplier-due-diligence-heading', label: 'go_to_due_diligence', fallback: 'Gå til Aktsomhet og bærekraft' },
     not_assessed: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
     review_overdue: { anchor: 'supplier-assessment-heading', label: 'go_to_assessment', fallback: 'Gå til leverandørvurdering' },
@@ -600,16 +582,9 @@ export const ATTENTION_TARGETS = {
     document_expiring: { anchor: 'supplier-documents-heading', label: 'go_to_documents', fallback: 'Gå til dokumentasjon' },
 };
 
-/** A «Trenger oppmerksomhet» category as the panel counts it. */
+/** A «Trenger oppfølging» category, as the register marker and Oppfølging name it. */
 export function attentionCategoryLabel(key, tr = {}) {
     return tr.attention?.categories?.[key] ?? ATTENTION_CATEGORY_FALLBACKS[key] ?? key;
-}
-
-/** «1 leverandør trenger oppmerksomhet» / «3 leverandører trenger oppmerksomhet». */
-export function attentionTotalLabel(total, tr = {}) {
-    return total === 1
-        ? (tr.attention?.total_one ?? '1 leverandør trenger oppmerksomhet')
-        : (tr.attention?.total_many ?? ':count leverandører trenger oppmerksomhet').replace(':count', String(total));
 }
 
 /**
@@ -642,29 +617,4 @@ export function attentionFindingText(finding, tr = {}, formatDate = (date) => da
     };
 
     return template.replace(/:(level|date|document|title|days)/g, (match, name) => values[name]);
-}
-
-/** How many suppliers the panel lists before «Vis alle». */
-export const ATTENTION_PREVIEW = 5;
-
-/**
- * What the register's «Trenger oppmerksomhet» panel draws: nothing when no supplier needs attention,
- * else the first ATTENTION_PREVIEW suppliers — or all of them once expanded — and whether there are more.
- */
-export function attentionPanel(attention, expanded = false) {
-    const all = attention?.suppliers ?? [];
-    const total = attention?.total ?? 0;
-
-    if (total === 0 || all.length === 0) {
-        return { visible: false, total: 0, categories: [], items: [], hasMore: false, count: 0 };
-    }
-
-    return {
-        visible: true,
-        total,
-        categories: attention.categories ?? [],
-        items: expanded ? all : all.slice(0, ATTENTION_PREVIEW),
-        hasMore: all.length > ATTENTION_PREVIEW,
-        count: all.length,
-    };
 }

@@ -57,7 +57,7 @@ export default function SupplierControlRequirementsIndex() {
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.index_heading ?? 'Leverandører'}</h1>
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{k.heading ?? 'Kontrollkrav'}</h1>
                         <p className={HINT}>{k.intro}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">

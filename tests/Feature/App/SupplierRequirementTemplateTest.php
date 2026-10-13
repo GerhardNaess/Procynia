@@ -227,7 +227,7 @@ class SupplierRequirementTemplateTest extends TestCase
         $this->assertSame('retired', $p1->fresh()->status);
         $p1->forceFill(['status' => SupplierControlRequirement::STATUS_ACTIVE])->save();
 
-        // On the supplier: the profile decides, as for any requirement; a mandatory one asks for a decision.
+        // On the supplier: the profile decides, as for any requirement; a mandatory one opens Kravstatus.
         $supplier = $this->supplier($customer, $editor, 'Lønn AS', classification: $this->classification(Supplier::CRITICALITY_IMPORTANT, 12, ['processes_personal_data' => true]));
         $show = "/app/supplier-management/{$supplier->id}";
         $this->actingAs($editor)->post("{$show}/profile", [
@@ -235,8 +235,8 @@ class SupplierRequirementTemplateTest extends TestCase
         ])->assertSessionHasNoErrors();
         $page = $this->actingAs($assurer)->get($show)->assertOk()->viewData('page')['props'];
         $this->assertEqualsCanonicalizing(['P1', 'P2', 'P3', 'S4', 'S6', 'S8'], SupplierControlRequirement::query()->whereIn('id', array_column($page['control_requirements']['applicable'], 'id'))->pluck('template_item_key')->all());
-        $this->assertSame(['mandatory_open', true], [$page['assurance']['state']['state'], $page['assurance']['state']['decision_required']]);
-        $this->assertContains($p1->title, array_column($page['assurance']['state']['open_mandatory'], 'title'));
+        $this->assertSame('mandatory_open', $page['requirement_status']['state']);
+        $this->assertContains($p1->title, array_column($page['requirement_status']['open_mandatory'], 'title'));
         // A mandatory requirement from a template cannot be excluded, like any mandatory requirement.
         $this->actingAs($assurer)->post("{$show}/requirement-overrides", ['requirement_id' => $p1->id, 'action' => 'exclude', 'reason' => 'Ikke aktuelt.'])->assertSessionHasErrors();
         // No anchor field without Etterlevelse og revisjon.
@@ -323,7 +323,7 @@ class SupplierRequirementTemplateTest extends TestCase
         ])->assertSessionHasNoErrors();
         $this->assertSame(['Normen for informasjonssikkerhet', [['sector:health_care', 'personal_data']], 'health_care', 'HE1'], [$he1->fresh()->title, $he1->fresh()->applies_when, $he1->fresh()->template_key, $he1->fresh()->template_item_key]);
 
-        // On a cleaning supplier: the profile decides, and the mandatory items ask for a decision (phase 4).
+        // On a cleaning supplier: the profile decides, and the mandatory items are open.
         $supplier = $this->supplier($customer, $editor, 'Renhold AS', classification: $this->classification(Supplier::CRITICALITY_STANDARD, 12));
         $show = "/app/supplier-management/{$supplier->id}";
         $this->actingAs($editor)->post("{$show}/profile", [
@@ -332,8 +332,8 @@ class SupplierRequirementTemplateTest extends TestCase
         ])->assertSessionHasNoErrors();
         $page = $this->actingAs($assurer)->get($show)->assertOk()->viewData('page')['props'];
         $this->assertEqualsCanonicalizing(['R1', 'E2', 'L3', 'L4', 'F1'], SupplierControlRequirement::query()->whereIn('id', array_column($page['control_requirements']['applicable'], 'id'))->pluck('template_item_key')->all());
-        $this->assertSame(['mandatory_open', true], [$page['assurance']['state']['state'], $page['assurance']['state']['decision_required']]);
-        $this->assertEqualsCanonicalizing([RequirementLibrary::title('R1'), RequirementLibrary::title('L3')], array_column($page['assurance']['state']['open_mandatory'], 'title'));
+        $this->assertSame('mandatory_open', $page['requirement_status']['state']);
+        $this->assertEqualsCanonicalizing([RequirementLibrary::title('R1'), RequirementLibrary::title('L3')], array_column($page['requirement_status']['open_mandatory'], 'title'));
 
         // The other customer has none of it, and sees every item as missing.
         $foreignAssurer = $this->supplierUser($foreignCustomer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);

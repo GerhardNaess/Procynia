@@ -38,8 +38,6 @@ use App\Http\Controllers\App\RiskControlController;
 use App\Http\Controllers\App\RiskController;
 use App\Http\Controllers\App\RiskTreatmentActionController;
 use App\Http\Controllers\App\SupplierAssessmentController;
-use App\Http\Controllers\App\SupplierAssuranceDecisionController;
-use App\Http\Controllers\App\SupplierComplianceRequirementController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\SupplierControlRequirementController;
 use App\Http\Controllers\App\SupplierDocumentController;
@@ -565,8 +563,8 @@ Route::prefix('app')
             // Kontroller krav: a new, immutable control with its documentation snapshot (supplier.assure).
             Route::post('/{supplierId}/requirement-evaluations', [SupplierRequirementEvaluationController::class, 'store'])->whereNumber('supplierId')->name('requirement-evaluations.store');
             Route::post('/{supplierId}/documents/{documentId}/reconfirm', [SupplierRequirementEvaluationController::class, 'reconfirm'])->whereNumber(['supplierId', 'documentId'])->name('requirement-evaluations.reconfirm');
-            // Registrer beslutning: a new, immutable assurance decision with a snapshot of the control state (supplier.assure).
-            Route::post('/{supplierId}/assurance-decisions', [SupplierAssuranceDecisionController::class, 'store'])->whereNumber('supplierId')->name('assurance-decisions.store');
+            // No route writes a kontrollbeslutning: Registrer beslutning was retired on 2026-10-12. The
+            // decisions registered before are history, shown read-only under Historikk.
             // Aktsomhetsvurdering: a new, immutable due diligence assessment (supplier.assure).
             Route::post('/{supplierId}/due-diligence-assessments', [SupplierDueDiligenceController::class, 'store'])->whereNumber('supplierId')->name('due-diligence.store');
             // Dokumentasjon: descriptions of the supplier's documentation, never files (supplier.edit or supplier.assure).
@@ -587,10 +585,9 @@ Route::prefix('app')
             Route::post('/{supplierId}/risks', [SupplierRiskController::class, 'store'])->whereNumber('supplierId')->name('risks.store');
             Route::post('/{supplierId}/risks/link', [SupplierRiskController::class, 'link'])->whereNumber('supplierId')->name('risks.link');
             Route::delete('/{supplierId}/risks/{linkId}', [SupplierRiskController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('risks.unlink');
-            // Krav som gjelder leverandøren: an existing requirement in Etterlevelse og revisjon added or
-            // removed; the requirement itself, and its status, stay there.
-            Route::post('/{supplierId}/requirements', [SupplierComplianceRequirementController::class, 'link'])->whereNumber('supplierId')->name('requirements.link');
-            Route::delete('/{supplierId}/requirements/{linkId}', [SupplierComplianceRequirementController::class, 'unlink'])->whereNumber(['supplierId', 'linkId'])->name('requirements.unlink');
+            // No route links a requirement in Etterlevelse og revisjon to a supplier any more: «Krav som
+            // gjelder leverandøren» was retired on 2026-10-13. The links made before are kept and shown
+            // read-only under Historikk; a control requirement's anchor («Forankret i») is the link now.
         });
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');

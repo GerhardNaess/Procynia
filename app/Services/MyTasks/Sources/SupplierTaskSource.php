@@ -16,7 +16,7 @@ use Illuminate\Support\Collection;
  * Leverandøroppfølging: the suppliers this person is intern ansvarlig for that need follow-up.
  *
  * ONE TASK PER SUPPLIER. Whether a supplier needs follow-up, and why, is SupplierAttentionService's
- * — the same eleven signals the register's «Trenger oppmerksomhet» panel and the supplier page show,
+ * — the same eleven signals the register's «Trenger oppmerksomhet» marker and the supplier page show,
  * with the same dates (SupplierReviewSchedule, SupplierDocument::EXPIRING_SOON_DAYS, the resolver's
  * follow-up dates). Nothing is decided again here: each finding becomes a reason on the supplier's
  * one task. A supplier with no finding has no task, so resolving the last one retires it.
@@ -163,8 +163,8 @@ class SupplierTaskSource implements MyTaskSource
     private function canActOn(string $key, array $can): bool
     {
         return match ($key) {
-            // Leverandørkontroll: controls, decisions and aktsomhetsvurdering.
-            Attention::DECISION_REQUIRED,
+            // Leverandørkontroll: controls and aktsomhetsvurdering.
+            Attention::MANDATORY_OPEN,
             Attention::CONTROL_OVERDUE,
             Attention::REQUIREMENT_NOT_EVALUATED,
             Attention::DUE_DILIGENCE_MISSING,

@@ -59,9 +59,9 @@ use Inertia\Response;
  * (supplier.assess). The dokumentasjonsoversikt is shown here and written by
  * SupplierDocumentController (supplier.edit). Avvik og forbedringer hos leverandøren is read here
  * through SupplierImprovementHandoffService and written by SupplierImprovementController; Risikoer
- * som gjelder leverandøren likewise through SupplierRiskService and SupplierRiskController, and Krav
- * som gjelder leverandøren through SupplierComplianceRequirementService and
- * SupplierComplianceRequirementController — never with the requirement's compliance status.
+ * som gjelder leverandøren likewise through SupplierRiskService and SupplierRiskController. The earlier
+ * links to requirements in Etterlevelse og revisjon are read through
+ * SupplierComplianceRequirementService, read-only — never with the requirement's compliance status.
  *
  * supplier.edit registers and changes suppliers, classifies their criticality (Vurder/Endre
  * kritikalitet, SupplierCriticalityService, the only writer of a criticality change) and moves them
@@ -76,13 +76,14 @@ use Inertia\Response;
  * is changed by SupplierRequirementOverrideController and SupplierControlRequirementController
  * (supplier.assure).
  *
- * Kontrollstatus (supplier-assurance-v2-plan §9.5) — the decision in force and the state now, kept
- * apart — is computed by SupplierAssuranceResolver on the register and the page; decisions are
- * written by SupplierAssuranceDecisionController (supplier.assure).
+ * Kravstatus — the state the applying control requirements are in — is computed by
+ * SupplierAssuranceResolver on the register and on Krav og kvalifikasjoner. The general
+ * kontrollbeslutning was retired on 2026-10-12: nothing writes one, and the ones registered before
+ * are shown read-only under Historikk.
  *
- * «Trenger oppmerksomhet» is SupplierAttentionService's: a panel and a filter on the register, the
- * reasons inline on the supplier page — read from the supplier's own data only, Leverandørkontroll's
- * signals included. «Neste kontroller» is SupplierFollowUpPlan's. Both are computed on read; neither
+ * «Trenger oppmerksomhet» is SupplierAttentionService's: a marker and a filter on the register, and
+ * «Trenger oppfølging» with links on the supplier's Oversikt — read from the supplier's own data
+ * only, Leverandørkontroll's signals included. «Neste kontroller» is SupplierFollowUpPlan's. Both are computed on read; neither
  * writes anything when a date passes.
  *
  * An ended supplier is read-only until it is reopened.
@@ -93,9 +94,6 @@ class SupplierManagementController extends Controller
     private const STATUS_FILTER_OPEN = '';
 
     private const STATUS_FILTER_ALL = 'all';
-
-    /** The Beslutning filter's choice for suppliers with no decision registered. */
-    private const DECISION_FILTER_NONE = 'none';
 
     public function __construct(
         private readonly CustomerContext $customerContext,
@@ -125,10 +123,6 @@ class SupplierManagementController extends Controller
         $category = in_array($request->query('category'), Supplier::CATEGORIES, true) ? (string) $request->query('category') : '';
         $criticality = in_array($request->query('criticality'), Supplier::CRITICALITIES, true) ? (string) $request->query('criticality') : '';
         $attentionOnly = $request->boolean('attention');
-        // Kontrollstatus (supplier-assurance-v2-plan §9.5): two separate filters — the decision in
-        // force, and the computed «Krever beslutning».
-        $decision = in_array($request->query('decision'), [...SupplierAssuranceDecision::DECISIONS, self::DECISION_FILTER_NONE], true) ? (string) $request->query('decision') : '';
-        $decisionRequiredOnly = $request->boolean('decision_required');
 
         $query = $this->access->visibleSuppliers($user);
 
@@ -166,50 +160,37 @@ class SupplierManagementController extends Controller
             ->orderBy('suppliers.id')
             ->get();
 
+        // Trenger oppmerksomhet, per row: the same findings as the supplier page and Oppfølging, read
+        // once for the listed suppliers. The register shows only which kinds; the supplier page says why.
+        $findings = $this->attention->findingsForSuppliers($suppliers);
+
         if ($attentionOnly) {
-            $findings = $this->attention->findingsForSuppliers($suppliers);
             $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $findings[(int) $supplier->id] !== [])->values();
         }
 
-        $decisions = $this->assurance->decisionsInForce($suppliers->map(fn (Supplier $supplier): int => (int) $supplier->id)->all());
-        $states = $this->assurance->forSuppliers($suppliers, $decisions);
-        $control = fn (Supplier $supplier): array => [
-            'decision' => ($decisions[(int) $supplier->id] ?? null)?->decision,
-            // Never on an ended supplier: it is not followed up, and no decision can be registered (§13.3).
-            'decision_required' => ! $supplier->isEnded() && (bool) ($states[(int) $supplier->id]['decision_required'] ?? false),
-            'has_state' => ($states[(int) $supplier->id] ?? null) !== null,
-        ];
-
-        if ($decision !== '') {
-            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => ($control($supplier)['decision'] ?? self::DECISION_FILTER_NONE) === $decision)->values();
-        }
-
-        if ($decisionRequiredOnly) {
-            $suppliers = $suppliers->filter(fn (Supplier $supplier): bool => $control($supplier)['decision_required'])->values();
-        }
+        // Kravstatus: the state of the requirements that apply now — null when none does.
+        $states = $this->assurance->forSuppliers($suppliers);
 
         $canEdit = $this->access->canEdit($user);
 
         return Inertia::render('App/SupplierManagement/Index', [
-            'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier) + ['control_status' => $control($supplier)])->all(),
+            'suppliers' => $suppliers->map(fn (Supplier $supplier): array => $this->row($supplier) + [
+                // Never on an ended supplier: it is no longer followed up (§13.3).
+                'requirement_status' => $supplier->isEnded() ? null : ($states[(int) $supplier->id]['state'] ?? null),
+                'attention' => array_values(array_unique(array_column($findings[(int) $supplier->id] ?? [], 'key'))),
+            ])->all(),
             // Only what the user can see — which in v1 is the customer's whole register, or nothing.
             'visible_count' => $this->access->visibleSuppliers($user)->count(),
-            // The worklist of the whole register the user can see, whatever the filters above.
-            'attention' => $this->attention->overview($user),
             'filters' => [
                 'search' => $search,
                 'status' => $status,
                 'category' => $category,
                 'criticality' => $criticality,
                 'attention' => $attentionOnly,
-                'decision' => $decision,
-                'decision_required' => $decisionRequiredOnly,
             ],
-            'assurance_decisions' => SupplierAssuranceDecision::DECISIONS,
-            // The Kontrollstatus column and filters, only once the customer has started
-            // Leverandørkontroll — a customer without control requirements sees the register as in v1.
-            'control_status_enabled' => SupplierControlRequirement::query()->where('customer_id', (int) $user->customer_id)->exists()
-                || SupplierAssuranceDecision::query()->where('customer_id', (int) $user->customer_id)->exists(),
+            // The Kravstatus column, only once the customer has started Leverandørkontroll — a
+            // customer without control requirements sees the register as in v1.
+            'requirement_status_enabled' => SupplierControlRequirement::query()->where('customer_id', (int) $user->customer_id)->exists(),
             'statuses' => Supplier::STATUSES,
             'initial_statuses' => Supplier::INITIAL_STATUSES,
             'categories' => Supplier::CATEGORIES,
@@ -244,7 +225,9 @@ class SupplierManagementController extends Controller
         $canAssess = $this->access->canAssess($user);
         $canDelete = $this->access->canDelete($user);
         $controlRequirements = $this->controlRequirements->forSupplier($user, $supplier);
-        $assurance = $this->controlRequirements->assurance($user, $supplier, $controlRequirements['applicable'] ?? null);
+        $requirementStatus = $controlRequirements !== null ? $this->controlRequirements->requirementStatus($supplier, $controlRequirements['applicable']) : null;
+        $decisionHistory = $this->controlRequirements->decisionHistory($supplier);
+        $lastDecision = $decisionHistory[0] ?? null;
         $row = $this->row($supplier, $assessments->first()?->assessed_on?->toDateString());
         $dueDiligence = $this->dueDiligence->payload($user, $supplier, $today);
 
@@ -269,13 +252,19 @@ class SupplierManagementController extends Controller
             // Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2): computed on read, never stored.
             // null for a customer that has no control requirements.
             'control_requirements' => $controlRequirements,
-            // Kontrollstatus (supplier-assurance-v2-plan §9.5): the decision in force and the state now,
-            // kept apart. null when nothing applies and nothing was decided.
-            'assurance' => $assurance,
-            // Ta i bruk warns — never blocks — when a decision is needed or the decision in force is
-            // «Ikke godkjent for nye kjøp» (supplier-assurance-v2-plan §9.6).
-            'activate_warning' => ($assurance['state']['decision_required'] ?? false)
-                || ($assurance['decision']['decision'] ?? null) === SupplierAssuranceDecision::DECISION_NOT_APPROVED,
+            // Kravstatus, shown on Krav og kvalifikasjoner: the state of the requirements that apply
+            // now. null when nothing applies.
+            'requirement_status' => $requirementStatus,
+            // The retired kontrollbeslutninger, newest first, read-only under Historikk. Empty for
+            // most suppliers.
+            'decision_history' => $decisionHistory,
+            // Ta i bruk warns — never blocks (supplier-assurance-v2-plan §9.6) — when a mandatory
+            // requirement is open, and, so that history keeps the warning it gave, when the latest
+            // decision registered before they were retired is «Ikke godkjent for nye kjøp».
+            'activate_warning' => [
+                'mandatory_open' => ($requirementStatus['state'] ?? null) === SupplierAssuranceResolver::STATE_MANDATORY_OPEN,
+                'not_approved_on' => ($lastDecision['decision'] ?? null) === SupplierAssuranceDecision::DECISION_NOT_APPROVED ? $lastDecision['decided_on'] : null,
+            ],
             'attention' => $this->attention->findingsForSupplier($supplier),
             // Aktsomhet og bærekraft (supplier-assurance-v2-plan §11, §22.1): the assessments, newest
             // first, and whether the profile makes one expected. null for a customer that has not
@@ -349,11 +338,9 @@ class SupplierManagementController extends Controller
                 'link_options' => $canEdit ? $this->risks->linkOptions($user, $supplier) : [],
                 'can_from_supplier' => $canEdit,
             ] : null,
-            // null, not empty: the person cannot read Etterlevelse og revisjon. No compliance status.
-            'requirements' => $this->requirements->requirementsFor($user, $supplier),
-            'requirement_linking' => $canEdit && $open && $this->requirements->canReadRequirements($user) ? [
-                'link_options' => $this->requirements->linkOptions($user, $supplier),
-            ] : null,
+            // Tidligere koblinger til etterlevelseskrav, read-only under Historikk; null, not empty: the
+            // person cannot read Etterlevelse og revisjon. No compliance status, and no way to add one.
+            'earlier_compliance_links' => $this->requirements->requirementsFor($user, $supplier),
             'status_history' => $changes->map(fn (SupplierStatusChange $change): array => [
                 'id' => (int) $change->id,
                 'from_status' => $change->from_status,

@@ -3,7 +3,6 @@
 namespace App\Services\Suppliers\Assurance;
 
 use App\Models\Supplier;
-use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDocument;
 use App\Models\SupplierRequirementEvaluation;
@@ -15,8 +14,8 @@ use Illuminate\Support\Collection;
  * Kontrolltilstand — what the requirements and controls show today (docs/supplier-assurance-v2-plan.md
  * §7.1, §8.3, §9.2–9.3). Computed on every read from the requirements that apply now
  * (SupplierRequirementApplicability) and each one's visningsstatus (SupplierRequirementStatus);
- * never stored. The only stored copy is the snapshot inside a decision, which says what the person
- * saw and is never read back as the state now.
+ * never stored. (The retired kontrollbeslutninger kept a snapshot of it; that is history, shown as
+ * such, and never read back as the state now.)
  *
  *  - Obligatorisk krav åpent: an applying mandatory requirement is not accepted — accepted being
  *    Dokumentert or a Midlertidig akseptert that has not expired;
@@ -25,14 +24,10 @@ use Illuminate\Support\Collection;
  *  - I orden: every applying requirement is Dokumentert;
  *  - no state at all when nothing applies — Kontrollstatus is then not shown.
  *
- * «Krever beslutning» is a computed signal, never a decision: the state is Obligatorisk krav åpent
- * and the decision in force is not «Ikke godkjent for nye kjøp». Which decisions a person may
- * register follows from the same state (§9.3); SupplierAssuranceDecisionService checks it again with
- * the supplier locked.
- *
- * This class never writes a decision — not Godkjent when everything is in order, not «Ikke godkjent
- * for nye kjøp» when a mandatory requirement is open. Only Supplier data is read: no compliance
- * status, no audit, no risk, no case.
+ * The state is a fact about the requirements — Kravstatus — and never an approval of the supplier.
+ * The general kontrollbeslutning that once stood beside it was retired on 2026-10-12: nothing here
+ * reads or weighs a decision. Only Supplier data is read: no compliance status, no audit, no risk,
+ * no case.
  */
 class SupplierAssuranceResolver
 {
@@ -70,20 +65,19 @@ class SupplierAssuranceResolver
     }
 
     /**
-     * The control state from the requirements that apply now, each with its visningsstatus, and the
-     * decision in force. Null when nothing applies. Pure.
+     * The control state from the requirements that apply now, each with its visningsstatus. Null
+     * when nothing applies. Pure.
      *
      * @param  iterable<array{id: int, title: string, level: string, display_status: string}>  $rows
-     * @return array{state: string, decision_required: bool, applicable_count: int, counts: array<string, int>, open_mandatory: list<array<string, mixed>>, unmet: list<array<string, mixed>>, allowed_decisions: list<string>}|null
+     * @return array{state: string, applicable_count: int, counts: array<string, int>, open_mandatory: list<array<string, mixed>>, unmet: list<array<string, mixed>>}|null
      */
-    public static function resolve(iterable $rows, ?string $decisionInForce): ?array
+    public static function resolve(iterable $rows): ?array
     {
         $counts = array_fill_keys(self::DISPLAY_STATUSES, 0);
         $openMandatory = [];
         $unmet = [];
         $applicable = 0;
         $allDocumented = true;
-        $mandatoryAndImportantDocumented = true;
 
         foreach ($rows as $row) {
             $entry = [
@@ -99,7 +93,6 @@ class SupplierAssuranceResolver
             $gate = in_array($entry['level'], [SupplierControlRequirement::LEVEL_MANDATORY, SupplierControlRequirement::LEVEL_IMPORTANT], true);
 
             if ($gate && ! $fulfilled) {
-                $mandatoryAndImportantDocumented = false;
                 $unmet[] = $entry;
             }
 
@@ -125,43 +118,11 @@ class SupplierAssuranceResolver
 
         return [
             'state' => $state,
-            'decision_required' => $state === self::STATE_MANDATORY_OPEN && $decisionInForce !== SupplierAssuranceDecision::DECISION_NOT_APPROVED,
             'applicable_count' => $applicable,
             'counts' => $counts,
             'open_mandatory' => $openMandatory,
             'unmet' => $unmet,
-            // §9.3: Godkjent only with every mandatory and important requirement Dokumentert;
-            // Godkjent med oppfølging with every mandatory one accepted; Ikke godkjent always.
-            'allowed_decisions' => array_values(array_filter([
-                $mandatoryAndImportantDocumented ? SupplierAssuranceDecision::DECISION_APPROVED : null,
-                $openMandatory === [] ? SupplierAssuranceDecision::DECISION_APPROVED_WITH_FOLLOW_UP : null,
-                SupplierAssuranceDecision::DECISION_NOT_APPROVED,
-            ])),
         ];
-    }
-
-    /**
-     * What a decision keeps of the state it was taken on (§9.3, §20.2): the state, how many applied,
-     * how many per visningsstatus, and the mandatory and important requirements not documented — with
-     * id, title, level and visningsstatus. Nothing else; never read back as the state now.
-     *
-     * @param  array<string, mixed>  $state  resolve()
-     * @return array{state: string, applicable_count: int, counts: array<string, int>, unmet: list<array<string, mixed>>}
-     */
-    public static function snapshot(array $state): array
-    {
-        return [
-            'state' => $state['state'],
-            'applicable_count' => $state['applicable_count'],
-            'counts' => $state['counts'],
-            'unmet' => $state['unmet'],
-        ];
-    }
-
-    /** The decision in force among a supplier's decisions: latest decided_on, then the highest id. */
-    public static function decisionInForce(iterable $decisions): ?SupplierAssuranceDecision
-    {
-        return SupplierAssuranceDecision::newestFirst($decisions)[0] ?? null;
     }
 
     /**
@@ -171,49 +132,24 @@ class SupplierAssuranceResolver
      */
     public function forSupplier(Supplier $supplier, ?CarbonInterface $today = null): ?array
     {
-        return $this->forSuppliers(collect([$supplier]), null, $today)[(int) $supplier->id] ?? null;
+        return $this->forSuppliers(collect([$supplier]), $today)[(int) $supplier->id] ?? null;
     }
 
     /**
      * The same for many suppliers of one customer at once, keyed by supplier id — for the register.
      *
      * @param  Collection<int, Supplier>  $suppliers
-     * @param  array<int, SupplierAssuranceDecision>|null  $decisionsInForce  decisionsInForce(), when already read
      * @return array<int, array<string, mixed>|null>
      */
-    public function forSuppliers(Collection $suppliers, ?array $decisionsInForce = null, ?CarbonInterface $today = null): array
+    public function forSuppliers(Collection $suppliers, ?CarbonInterface $today = null): array
     {
-        $rows = $this->rows($suppliers, $today);
-        $decisionsInForce ??= $this->decisionsInForce(array_keys($rows));
         $result = [];
 
-        foreach ($rows as $supplierId => $supplierRows) {
-            $result[$supplierId] = self::resolve($supplierRows, ($decisionsInForce[$supplierId] ?? null)?->decision);
+        foreach ($this->rows($suppliers, $today) as $supplierId => $supplierRows) {
+            $result[$supplierId] = self::resolve($supplierRows);
         }
 
         return $result;
-    }
-
-    /**
-     * The decision in force for each supplier that has one, keyed by supplier id.
-     *
-     * @param  list<int>  $supplierIds
-     * @return array<int, SupplierAssuranceDecision>
-     */
-    public function decisionsInForce(array $supplierIds): array
-    {
-        if ($supplierIds === []) {
-            return [];
-        }
-
-        return SupplierAssuranceDecision::query()
-            ->whereIn('supplier_id', $supplierIds)
-            ->get(['id', 'supplier_id', 'decision', 'decided_on'])
-            ->toBase()
-            ->groupBy('supplier_id')
-            ->map(fn (Collection $decisions): ?SupplierAssuranceDecision => self::decisionInForce($decisions))
-            ->filter()
-            ->all();
     }
 
     /**

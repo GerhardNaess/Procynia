@@ -45,7 +45,7 @@ export function attentionFindingItems(finding, tr = {}, formatDate = (date) => d
         if (finding.key === 'control_overdue') {
             const template = a.overdue_reasons?.[row.reason] ?? OVERDUE_FALLBACKS[row.reason] ?? ':title';
             text = fill(template, { title: row.title, date: row.date ? formatDate(row.date) : '', document: row.document_title ?? '' });
-        } else if (finding.key === 'decision_required') {
+        } else if (finding.key === 'mandatory_open') {
             text = `${row.title} (${displayStatusLabel(row.display_status, tr)})`;
         } else {
             text = `${row.title} (${levelLabel(row.level, tr)})`;

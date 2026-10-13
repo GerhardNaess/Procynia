@@ -5,43 +5,33 @@ namespace App\Services\Suppliers;
 use App\Models\ComplianceRequirement;
 use App\Models\ComplianceSource;
 use App\Models\Supplier;
-use App\Models\SupplierComplianceRequirement;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 /**
- * Krav som gjelder leverandøren: «Legg til krav» and «Fjern krav» on a supplier
- * (docs/supplier-management-v1-plan.md §7.3).
+ * Tidligere koblinger til etterlevelseskrav: the links between a supplier and requirements in
+ * Etterlevelse og revisjon made under Leverandøroppfølging v1 (docs/supplier-management-v1-plan.md
+ * §7.3), read-only.
  *
- * Leverandøroppfølging never grows a requirement register of its own. Requirements are registered,
- * assessed, retired and audited in Etterlevelse og revisjon; the supplier keeps a row saying a
- * requirement applies to it (SupplierComplianceRequirement) and nothing else. Saying so is a claim
- * about the supplier, not a change to the requirement.
+ * RETIRED IN THE USER FLOW on 2026-10-13. A link had no status, no control and no follow-up, and
+ * overlapped with a control requirement's anchor in Etterlevelse og revisjon («Forankret i»), which
+ * is how a supplier requirement is tied to a compliance requirement now. Nothing writes a link any
+ * more; the rows made before are kept — never converted, never deleted here — and listed under
+ * Historikk. A requirement deleted in Etterlevelse og revisjon still takes its rows along (the
+ * foreign key's CASCADE), and a supplier with links is still ended, never deleted.
  *
- * NO SUPPLIER STATUS FROM THE REQUIREMENT. A requirement assessed as Oppfylt in Etterlevelse og
- * revisjon means the organisation meets it — not that a given supplier does. Nothing here reads
- * assessments or ComplianceStatusResolver, and nothing about compliance status leaves this class.
- * Whether the supplier follows the requirements is judged in the supplier assessment (§4.3). The
- * requirement's own lifecycle is shown: a retired requirement is still listed, marked as retired.
+ * NO SUPPLIER STATUS FROM THE REQUIREMENT. A link never said the supplier meets the requirement.
+ * Nothing here reads assessments or ComplianceStatusResolver; the requirement's own lifecycle is
+ * shown — a retired requirement is marked as retired.
  *
- * WHO. supplier.edit on a supplier that is not ended (plan §9.2) and compliance.view in a customer
- * holding Etterlevelse og revisjon (canReadFromAnotherModule()), for adding and removing alike. Only
- * active requirements can be added; one retired afterwards stays listed until removed.
- *
- * SEEING. The supplier page lists only the linked requirements visibleRequirements() returns — one
- * the person cannot read is not listed, not counted, not hinted at. Etterlevelse og revisjon does
- * not show the suppliers back in v1 (§7.3 decides no reverse view).
+ * SEEING. compliance.view in a customer holding Etterlevelse og revisjon (canReadFromAnotherModule()),
+ * and only the requirements visibleRequirements() returns — one the person cannot read is not
+ * listed, not counted, not hinted at.
  */
 class SupplierComplianceRequirementService
 {
-    /** How many requirements «Legg til krav» offers, in register order. */
-    private const LINK_OPTIONS_LIMIT = 500;
-
     public function __construct(
-        private readonly SupplierAccessService $suppliers,
         private readonly ComplianceAccessService $compliance,
     ) {}
 
@@ -54,63 +44,13 @@ class SupplierComplianceRequirementService
         return $this->compliance->canReadFromAnotherModule($user);
     }
 
-    /** Legg til krav: an active requirement the person can read, not already listed here. */
-    public function link(User $user, Supplier $supplier, int $requirementId): void
-    {
-        abort_unless($this->suppliers->canEdit($user), 403);
-
-        $requirement = $this->canReadRequirements($user) ? $this->compliance->findVisibleRequirement($user, $requirementId) : null;
-
-        // A 422 rather than a 404: the id came from a form, and whether it names a requirement the
-        // person cannot see, a retired one or nothing at all, the answer is the same.
-        if ($requirement === null || ! $requirement->isActive()) {
-            throw ValidationException::withMessages(['requirement_id' => __('procynia.supplier_management.validation.requirement_not_available')]);
-        }
-
-        DB::transaction(function () use ($user, $supplier, $requirement): void {
-            $locked = $this->lockOpen($supplier);
-
-            if ($locked->requirementLinks()->where('compliance_requirement_id', $requirement->id)->exists()) {
-                throw ValidationException::withMessages(['requirement_id' => __('procynia.supplier_management.validation.requirement_already_linked')]);
-            }
-
-            SupplierComplianceRequirement::query()->create([
-                'customer_id' => (int) $locked->customer_id,
-                'supplier_id' => (int) $locked->id,
-                'compliance_requirement_id' => (int) $requirement->id,
-                'created_by' => $user->id,
-            ]);
-        });
-    }
-
     /**
-     * Fjern krav: the row goes, the requirement stays in Etterlevelse og revisjon, untouched — also
-     * when it has been retired since. A link to a requirement the person cannot see is a 404.
-     */
-    public function unlink(User $user, Supplier $supplier, int $linkId): void
-    {
-        abort_unless($this->suppliers->canEdit($user), 403);
-
-        $link = $supplier->requirementLinks()->whereKey($linkId)->first();
-        $visible = $link !== null
-            && $this->canReadRequirements($user)
-            && $this->compliance->findVisibleRequirement($user, (int) $link->compliance_requirement_id) !== null;
-
-        abort_unless($visible, 404);
-
-        DB::transaction(function () use ($supplier, $link): void {
-            $this->lockOpen($supplier);
-            $link->delete();
-        });
-    }
-
-    /**
-     * «Krav som gjelder leverandøren»: the linked requirements the person can read, in register
+     * Tidligere koblinger til etterlevelseskrav: the linked requirements the person can read, in register
      * order, with reference, title and kravkilde read from Etterlevelse og revisjon now, and whether
      * the requirement has been retired there. Never its compliance status. Null when the person
      * cannot read Etterlevelse og revisjon at all, so the page says nothing about it.
      *
-     * @return list<array{link_id: int, id: int, reference: string|null, title: string, source_label: string|null, retired: bool, url: string}>|null
+     * @return list<array{id: int, reference: string|null, title: string, source_label: string|null, retired: bool, url: string}>|null
      */
     public function requirementsFor(User $user, Supplier $supplier): ?array
     {
@@ -118,16 +58,15 @@ class SupplierComplianceRequirementService
             return null;
         }
 
-        $links = $supplier->requirementLinks()->get()->keyBy('compliance_requirement_id');
+        $linked = $supplier->requirementLinks()->pluck('compliance_requirement_id')->all();
 
-        if ($links->isEmpty()) {
+        if ($linked === []) {
             return [];
         }
 
-        return $this->inRegisterOrder($this->compliance->visibleRequirements($user)->whereIn('compliance_requirements.id', $links->keys()->all()))
+        return $this->inRegisterOrder($this->compliance->visibleRequirements($user)->whereIn('compliance_requirements.id', $linked))
             ->get()
             ->map(fn (ComplianceRequirement $requirement): array => [
-                'link_id' => (int) $links[(int) $requirement->id]->id,
                 'id' => (int) $requirement->id,
                 'reference' => $requirement->reference,
                 'title' => $requirement->title,
@@ -136,34 +75,6 @@ class SupplierComplianceRequirementService
                 'url' => route('app.compliance.requirements.show', ['requirementId' => $requirement->id]),
             ])
             ->values()
-            ->all();
-    }
-
-    /**
-     * The requirements «Legg til krav» offers: active ones the person can read, not yet listed on the
-     * supplier, in register order.
-     *
-     * @return list<array{id: int, reference: string|null, title: string, source_label: string|null}>
-     */
-    public function linkOptions(User $user, Supplier $supplier): array
-    {
-        if (! $this->canReadRequirements($user)) {
-            return [];
-        }
-
-        $query = $this->compliance->visibleRequirements($user)
-            ->where('compliance_requirements.status', ComplianceRequirement::STATUS_ACTIVE)
-            ->whereNotIn('compliance_requirements.id', $supplier->requirementLinks()->select('compliance_requirement_id'));
-
-        return $this->inRegisterOrder($query)
-            ->limit(self::LINK_OPTIONS_LIMIT)
-            ->get()
-            ->map(fn (ComplianceRequirement $requirement): array => [
-                'id' => (int) $requirement->id,
-                'reference' => $requirement->reference,
-                'title' => $requirement->title,
-                'source_label' => $requirement->source ? $this->sourceLabel($requirement->source) : null,
-            ])
             ->all();
     }
 
@@ -190,17 +101,5 @@ class SupplierComplianceRequirementService
     private function sourceLabel(ComplianceSource $source): string
     {
         return $source->version !== null && $source->version !== '' ? "{$source->name} ({$source->version})" : $source->name;
-    }
-
-    /** The supplier row, locked; refused for an ended supplier, which is read-only. */
-    private function lockOpen(Supplier $supplier): Supplier
-    {
-        $locked = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
-
-        if ($locked->isEnded()) {
-            throw ValidationException::withMessages(['requirement_id' => __('procynia.supplier_management.validation.reopen_before_edit')]);
-        }
-
-        return $locked;
     }
 }

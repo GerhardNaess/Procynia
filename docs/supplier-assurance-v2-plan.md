@@ -355,7 +355,7 @@ blandes ikke.
 | Uforanderlig | Ja. Bare nye rader; modell kaster og trigger nekter UPDATE/DELETE. Gjeldende overstyring = siste rad for (leverandør, krav), etter `created_at`, deretter id |
 | Aktør og tid | `created_by_user_id` (nullOnDelete), `created_at` |
 | Obligatoriske krav | Kan ikke utelukkes. Gjelder et obligatorisk krav feilaktig, er profilen eller regelen feil, og det rettes der — med egen historikk og egen rettighet. Endres et krav til obligatorisk *etter* en utelukkelse, har utelukkelsen ingen virkning (§5.2 pkt. 5) |
-| Leverandørspesifikke krav | Kan ikke overstyres; settes utgått |
+| Leverandørspesifikke krav | Kan ikke overstyres. Endres med «Rediger krav» og settes utgått med «Sett som utgått» på kravets rad hos leverandøren (fra 2026-10-13); slettes aldri derfra. Vises ikke under Kontrollkrav |
 | Endret automatikk | Overstyringen står til den oppheves (`clear`). En `include` på et krav som senere gjelder automatisk, viser fortsatt den manuelle grunnen først |
 | Ikke en kopi | Det finnes aldri en rad per gjeldende krav — bare én rad per menneskelig overstyringshandling |
 
@@ -520,6 +520,25 @@ Utelukkede krav (§5.5) og krav som ikke lenger gjelder, er ikke med i grunnlage
 ---
 
 ## 9. Kontrolltilstand, beslutning og kontrollstatus
+
+> **Avviklet 2026-10-12 — generell kontrollbeslutning.** «Registrer beslutning» (§9.3), signalet
+> «Krever beslutning», beslutningsfilteret i registeret og Kontrollstatus-panelet over fanene (§9.5) er
+> tatt ut av arbeidsflyten. Beslutningen sa ikke hva leverandøren ble godkjent til, og overlappet Krav og
+> kvalifikasjoner. Det som gjelder nå:
+>
+> - Ingen rute, controller eller tjeneste skriver en beslutning; `SupplierAssuranceDecision` nekter `create`.
+> - Tabellen `supplier_assurance_decisions` og triggeren står urørt. Registrerte beslutninger vises
+>   skrivebeskyttet som «Tidligere kontrollbeslutninger» under Historikk, og hindrer fortsatt sletting.
+> - Kontrolltilstanden (§9.2) heter **Kravstatus** og vises øverst på Krav og kvalifikasjoner og som kolonne
+>   i registeret. Den leser ingen beslutning.
+> - Signal 6 heter nå **Obligatorisk krav åpent** (`mandatory_open`): tilstanden er Obligatorisk krav åpent,
+>   uavhengig av tidligere beslutninger.
+> - Ta i bruk advarer ved åpent obligatorisk krav, og – for historikkens skyld – når siste registrerte
+>   beslutning var «Ikke godkjent for nye kjøp».
+> - Ledelsens gjennomgang teller ingen beslutninger; Wiki-utkastet tilbyr gjeldende leverandørvurdering i
+>   stedet for beslutningen.
+>
+> Teksten under beskriver den opprinnelige utformingen og leses som historikk.
 
 ### 9.1 Tre begreper — låst
 
@@ -1391,6 +1410,17 @@ blokken i §9.5 med «Beslutning» og «Tilstand nå» som to merkede linjer · 
 | Risiko | v1-panel, sammendrag | Modul + tilgang |
 | Avvik og forbedringer | v1-panel, sammendrag | Modul + tilgang |
 
+**Endret 2026-10-12 (redesign av Oversikt):** kortene over erstattes av fire områder i fast
+rekkefølge — *Trenger oppfølging* (funnene fra `SupplierAttentionService`, én setning og lenke per
+funn, antall i stedet for kravlisten; nøytral linje uten funn, aldri en godkjenning) · *Om
+leverandøren* (leveranse, kategori, intern ansvarlig, org.nr. når registrert, kontaktperson, «Neste
+kontroll» = første post i `SupplierFollowUpPlan`, «Vis alle kontroller» for resten) · *Detaljer*
+(lukkede seksjoner med sammendrag: Leverandørinformasjon, Kritikalitet, Leverandørprofil, Risikoer,
+Avvik og forbedringer) · *Andre handlinger* (status/livssyklus, sletting, Wiki-overlevering).
+Dokumentasjon, Leverandørvurdering og Aktsomhet har ikke lenger kort på Oversikt; Sikkerhet og
+personvern står øverst på Krav og kvalifikasjoner. Historikken for kritikalitet og profil står på
+Historikk-fanen. Ingen data, beregninger eller rettigheter ble endret.
+
 **Faner** (`?tab=`): Oversikt · Krav og kvalifikasjoner · Dokumentasjon · Vurderinger · Aktsomhet ·
 Historikk. Risiko og Avvik vises i Oversikt (de er lister med lenker, ikke arbeidsflater her).
 
@@ -1400,6 +1430,28 @@ Hver rad: tittel · nivå · visningsstatus · «Gjelder fordi …» · neste ko
 «Krav som ikke gjelder denne leverandøren» (utelukkede, sammenfoldet, med «Opphev»), og «Krav i
 Etterlevelse og revisjon som gjelder leverandøren» (v1, uendret). Nederst «Legg til krav» (inkluder)
 og «Krav for denne leverandøren».
+
+**Endret 2026-10-13 (forenklet kravhåndtering):**
+
+- Seksjonen heter **«Kontrollkrav for leverandøren»** (ikke lenger det samme som fanen), med «Her ser du
+  hvilke kontrollkrav som gjelder leverandøren, og hvordan de er kontrollert.» Anvendelse, kravstatus,
+  kontroller, midlertidig aksept, intervaller, overstyringer og historikk er uendret.
+- **Én «Legg til krav»** åpner et valgpanel med to valg: *Velg eksisterende kontrollkrav* (dagens
+  `include`-overstyring, §5.5, med begrunnelse) og *Opprett krav for denne leverandøren* (leverandør-
+  spesifikt kontrollkrav, §5.1, uten regel). Ingen ny veiviser, intet parallelt register. Valget for
+  eksisterende krav er deaktivert med forklaring når alle aktive katalogkrav allerede gjelder.
+- **Leverandørspesifikke krav** har «Rediger krav» og «Sett som utgått» (med bekreftelse) på raden, via
+  de eksisterende endepunktene `PATCH /control-requirements/{id}` og `POST …/{id}/retire`
+  (`SupplierControlRequirementService`: kundeskop, leverandøren må være synlig og ikke avsluttet,
+  `supplier.assure`). Utgått krav gjelder ikke lenger og teller ikke i kravstatus eller Trenger
+  oppfølging; kontrollene blir stående under «Kontroller av krav som ikke gjelder nå». `can_manage` i
+  radens payload styrer knappene.
+- Opphav skilles med den eksisterende «Gjelder fordi …»-linjen (regel · «inkluderte kravet manuelt» ·
+  «Krav for denne leverandøren»), ingen ekstra merkelapper.
+- **«Krav i Etterlevelse og revisjon som gjelder leverandøren» er fjernet fra fanen** og avviklet som
+  operativ kobling (supplier-management-v1-plan §7.3). Ingen skrivevei finnes; historiske koblinger
+  vises skrivebeskyttet under Historikk som «Tidligere koblinger til etterlevelseskrav». Fanen «Krav og
+  kvalifikasjoner» vises nå bare når kontrollkrav-payloaden finnes.
 
 **Aldri:** generisk «Relasjoner», «koblinger», «predikat», «DNF», «applies_when» i UI.
 

@@ -4,14 +4,14 @@ import { describeHistoryEntry, describeRegistration } from './supplierManagement
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
 /**
- * Historikk: every Ta i bruk, Avslutt and Gjenåpne, newest first, with its begrunnelse — and, last,
+ * Statusendringer, first under Historikk: every Ta i bruk, Avslutt and Gjenåpne, newest first, with its begrunnelse — and, last,
  * the registration itself, so the list always says where the supplier started.
  */
 export default function SupplierHistory({ entries = [], registered, locale, tr }) {
     return (
         <section className={CARD} aria-labelledby="supplier-history-heading">
             <h2 id="supplier-history-heading" className="text-xl font-semibold text-slate-950">
-                {tr.history_heading ?? 'Historikk'}
+                {tr.page?.history_status_heading ?? 'Statusendringer'}
             </h2>
             <ol className="mt-4 divide-y divide-slate-100" data-testid="supplier-history">
                 {entries.map((entry) => (

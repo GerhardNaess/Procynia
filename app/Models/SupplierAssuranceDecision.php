@@ -11,18 +11,18 @@ use LogicException;
  * (docs/supplier-assurance-v2-plan.md §9.3) — Godkjent, Godkjent med oppfølging or Ikke godkjent for
  * nye kjøp, with a begrunnelse, and for Godkjent med oppfølging what is followed up.
  *
- * «Krever beslutning» is never a decision: it is computed by SupplierAssuranceResolver. Nothing in
- * the system creates a decision on its own.
+ * RETIRED 2026-10-12. The general decision did not say what the supplier was approved for, and
+ * overlapped Krav og kvalifikasjoner, so Registrer beslutning was taken out of the workflow: no
+ * route, controller or service writes one any more, and creating() below refuses it. The rows
+ * already registered are history and stay — read-only under Historikk on the supplier page, and
+ * still a reason a supplier cannot be deleted. Nothing reads them as the state now: not
+ * Trenger oppmerksomhet, not Oppfølging, not the register, not Ledelsens gjennomgang, not the Wiki.
  *
- * Immutable: a new decision is a new row. The database refuses changes and deletes too (see the
- * migration's trigger). The decision in force is the latest decided_on, then the highest id —
- * newestFirst(). A decision never becomes invalid by itself; when the control state changes later,
- * Kontrollstatus shows the two side by side.
+ * Immutable: the database refuses changes and deletes too (see the migration's trigger). History
+ * lists them newest first — newestFirst(): latest decided_on, then the highest id.
  *
  * state_snapshot is the control state the person saw — shown as history, never read as the state
  * now.
- *
- * Written only by SupplierAssuranceDecisionService.
  */
 class SupplierAssuranceDecision extends Model
 {
@@ -66,6 +66,10 @@ class SupplierAssuranceDecision extends Model
 
     protected static function booted(): void
     {
+        static::creating(function (): void {
+            throw new LogicException('Assurance decisions are retired: no new decision can be registered.');
+        });
+
         static::updating(function (): void {
             throw new LogicException('An assurance decision is history and cannot be changed.');
         });
@@ -76,7 +80,7 @@ class SupplierAssuranceDecision extends Model
     }
 
     /**
-     * Order for «the decision in force»: latest decided_on, then the highest id.
+     * History order: latest decided_on, then the highest id.
      *
      * @param  iterable<self>  $decisions
      * @return list<self>

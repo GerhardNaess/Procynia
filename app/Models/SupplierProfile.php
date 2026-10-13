@@ -12,7 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * Every answer is nullable and null means «not answered». The yes/no/unknown questions keep unknown
  * (Ikke avklart) apart from no: an unknown answer is treated as if the requirement applies, a no is
- * not. The two lists are arrays of fixed codes; [] is the answer «none of these».
+ * not. The two lists are arrays of fixed codes; [] is the answer «none of these», and
+ * high_risk_categories also takes ['unknown'] — «Ikke avklart» (LIST_UNKNOWN_FIELDS).
  *
  * The four criticality questions (processes_personal_data, has_system_access,
  * supports_critical_delivery, hard_to_replace) are not here: they stay on the supplier, change
@@ -77,6 +78,12 @@ class SupplierProfile extends Model
         'sectors' => self::SECTORS,
     ];
 
+    /**
+     * The lists that also take «Ikke avklart» as an answer of its own, stored as ['unknown'] — never
+     * together with a code. [] stays «Ingen av disse», null not answered, so the three never meet.
+     */
+    public const LIST_UNKNOWN_FIELDS = ['high_risk_categories'];
+
     /** The single-choice questions and their values. */
     public const CHOICE_FIELDS = [
         'data_role' => self::DATA_ROLES,
@@ -96,6 +103,12 @@ class SupplierProfile extends Model
             'sectors' => 'array',
             'completed_at' => 'datetime',
         ];
+    }
+
+    /** A list answered «Ikke avklart»: exactly ['unknown'] on a list that takes it. */
+    public static function isListUnknown(string $field, mixed $value): bool
+    {
+        return in_array($field, self::LIST_UNKNOWN_FIELDS, true) && $value === [self::ANSWER_UNKNOWN];
     }
 
     /** @return list<string> */

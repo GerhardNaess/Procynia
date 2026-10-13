@@ -630,11 +630,11 @@ test.describe('the rail follows what the customer bought, and folds', () => {
         await expectPageHelp(page, 'Om leverandøroppfølging', ['Leverandørene', 'Status', 'Tilgang']);
         await expectReadable(page, 'supplier-management', '01-register');
 
-        // Kontrollkrav is the other tab: the same heading, the tab lit, no second row on the page.
+        // Kontrollkrav is the other tab: its own heading, the tab lit, no second row on the page.
         await page.getByTestId('module-navigation').getByRole('link', { name: 'Kontrollkrav' }).click();
         await expect(page).toHaveURL(/\/app\/supplier-management\/control-requirements$/);
         await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kontrollkrav');
-        await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Kontrollkrav', level: 1 })).toBeVisible();
         await expect(page.locator('main nav:not([data-testid="breadcrumbs"])')).toHaveCount(0);
         await expect(rail.locator('[aria-current="page"]')).toHaveText('Leverandører');
         await page.getByTestId('module-navigation').getByRole('link', { name: 'Leverandører' }).click();

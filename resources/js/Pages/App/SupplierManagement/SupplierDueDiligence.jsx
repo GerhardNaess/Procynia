@@ -11,16 +11,19 @@ import {
     dueDiligenceByline,
     dueDiligenceFormData,
     dueDiligenceMissing,
+    irrelevantUnresolvedFacts,
     levelLabel,
     mappingFacts,
+    mustClarifyText,
     nextText,
     relatedRequirements,
+    requiredText,
     withConclusion,
 } from './dueDiligence';
 import { DISPLAY_STATUS_TONES, displayStatusLabel } from './requirementEvaluations';
 import { criticalityLabel } from './supplierManagement';
 
-const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
+const CARD = 'rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-6';
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
 const LABEL = 'block text-base font-semibold text-slate-900';
@@ -193,7 +196,12 @@ function HistoryEntry({ entry, formatDate, tr }) {
 /**
  * Aktsomhet og bærekraft (docs/supplier-assurance-v2-plan.md §11, §22.1): a structured assessment of
  * risk and follow-up in the supply chain. Not a score — six areas, each named with its level, and a
- * conclusion a person chose. Shown also when the profile does not make it relevant; then it says so.
+ * conclusion a person chose. Shown also when the profile does not make it required; then it says so.
+ *
+ * Three parts, in the order the work is done: whether the profile makes an assessment required (and
+ * what that rests on, with anything not yet clarified named outright), the assessments and the one
+ * action, and last the control requirements that are checked under Krav og kvalifikasjoner — kept
+ * apart so they are not read as the assessment itself.
  *
  * The six steps are guidance, not a wizard: the profile maps, the assessment records the risk,
  * control requirements investigate, Avvik and Risiko carry the measures, and the next assessment
@@ -209,104 +217,131 @@ export default function SupplierDueDiligence({ supplierId, data, applicable = []
 
     const current = data.history?.[0] ?? null;
     const facts = mappingFacts(data.mapping, tr);
+    const unresolved = irrelevantUnresolvedFacts(data, tr);
     const related = relatedRequirements(applicable);
     const next = nextText(data, tr, formatDate);
     const canAct = data.permissions?.can_assess && ! assessing;
 
     return (
         <section className={CARD} aria-labelledby="supplier-due-diligence-heading" data-testid="supplier-due-diligence">
-            <h2 id="supplier-due-diligence-heading" className="text-xl font-semibold text-slate-950">{d.heading ?? 'Aktsomhet og bærekraft'}</h2>
-            <p className={`mt-1 ${HINT}`}>{d.intro ?? 'En strukturert vurdering av risiko og oppfølging i leverandørkjeden. Vurderingen gjøres av en person; systemet regner ikke ut noen samlet risiko.'}</p>
+            <div className="max-w-3xl min-w-0">
+                <h2 id="supplier-due-diligence-heading" className="text-xl font-semibold text-slate-950">{d.heading ?? 'Aktsomhet og bærekraft'}</h2>
+                <p className={`mt-1 ${HINT}`}>{d.intro ?? 'En strukturert vurdering av risiko og oppfølging i leverandørkjeden. Vurderingen gjøres av en person; systemet regner ikke ut noen samlet risiko.'}</p>
 
-            <div className="mt-4 rounded-xl border border-slate-200 p-4" data-testid="due-diligence-relevance">
-                {data.relevant ? (
-                    <>
-                        <p className="text-base font-semibold text-slate-900">{d.relevant ?? 'Aktsomhetsvurdering er relevant for leverandøren'}</p>
-                        {data.because?.text && <p className="mt-1 break-words text-base text-slate-800">{data.because.text}</p>}
-                        {(data.because?.also ?? []).length > 0 && (
-                            <p className="mt-1 break-words text-base text-slate-700">{(d.also ?? 'Også fordi :reasons').replace(':reasons', data.because.also.join('; '))}</p>
-                        )}
-                    </>
-                ) : (
-                    <p className="text-base text-slate-800">{d.not_relevant ?? 'Ikke påkrevd ut fra profilen. Du kan likevel registrere en vurdering.'}</p>
-                )}
-                <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2" data-testid="due-diligence-mapping">
-                    {facts.map((fact) => (
-                        <div key={fact.key} className="min-w-0">
-                            <dt className={TERM}>{fact.label}</dt>
-                            <dd className={`break-words text-base ${fact.uncertain ? 'text-amber-800' : 'text-slate-900'}`}>{fact.text}</dd>
-                        </div>
-                    ))}
-                </dl>
-                {data.mapping?.profile_empty && <p className={`mt-2 ${HINT}`}>{d.profile_empty ?? 'Leverandørprofilen er ikke fylt ut. Ubesvarte forhold er ikke vurdert som lav risiko.'}</p>}
-            </div>
-
-            <div className="mt-4" data-testid="due-diligence-current">
-                <h3 className="text-lg font-semibold text-slate-950">{d.current_heading ?? 'Siste vurdering'}</h3>
-                {current ? (
-                    <>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <span data-testid="due-diligence-conclusion"><StatusBadge tone={DUE_DILIGENCE_CONCLUSION_TONES[current.conclusion] ?? 'slate'}>{conclusionLabel(current.conclusion, tr)}</StatusBadge></span>
-                            <span className="text-base text-slate-600">{dueDiligenceByline(current, tr, formatDate)}</span>
-                        </div>
-                        {next && <p className={`mt-1 text-base ${data.overdue ? 'font-semibold text-amber-800' : 'text-slate-800'}`} data-testid="due-diligence-next">{next}</p>}
-                        <AreaList areas={current.areas} tr={tr} testId="due-diligence-current-areas" />
-                        <p className="mt-2 whitespace-pre-line break-words text-base text-slate-900">{d.rationale_label ?? 'Begrunnelse'}: {current.rationale}</p>
-                    </>
-                ) : (
-                    <p className="mt-1 text-base text-slate-800" data-testid="due-diligence-none">{d.none ?? 'Ingen aktsomhetsvurdering er registrert.'}</p>
-                )}
-            </div>
-
-            {related.length > 0 && (
-                <div className="mt-4" data-testid="due-diligence-requirements">
-                    <h3 className="text-lg font-semibold text-slate-950">{d.requirements_heading ?? 'Kontrollkrav om menneskerettigheter, arbeidsforhold og miljø'}</h3>
-                    <ul className="mt-2 space-y-2">
-                        {related.map((row) => (
-                            <li key={row.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                                <a href={`#control-requirement-${row.id}`} className="min-w-0 break-words text-base font-semibold text-violet-700 hover:text-violet-900">{row.title}</a>
-                                <StatusBadge tone={DISPLAY_STATUS_TONES[row.display_status] ?? 'slate'}>{displayStatusLabel(row.display_status, tr)}</StatusBadge>
+                <details className="mt-2 min-w-0" data-testid="due-diligence-process">
+                    <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>{d.process_heading ?? 'Slik følges aktsomhet opp'}</summary>
+                    <ol className="mt-2 list-decimal space-y-1 pl-6">
+                        {DUE_DILIGENCE_STEPS.map((step) => (
+                            <li key={step} className="break-words text-base text-slate-800" data-step={step}>
+                                <span className="font-semibold text-slate-900">{d.steps?.[step]?.title ?? step}</span>
+                                {d.steps?.[step]?.text ? ` – ${d.steps[step].text}` : ''}
                             </li>
                         ))}
-                    </ul>
-                </div>
-            )}
-
-            {canAct && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => setAssessing(true)} className={PRIMARY_ACTION}>{d.register ?? 'Registrer aktsomhetsvurdering'}</button>
-                    {current?.conclusion === 'measures_required' && onFollowUp && (
-                        <button type="button" onClick={() => onFollowUp(current)} className={SECONDARY_ACTION} data-testid="due-diligence-follow-up">{d.follow_up ?? 'Følg opp i Avvik og forbedringer'}</button>
-                    )}
-                    {current && onCreateRisk && (
-                        <button type="button" onClick={() => onCreateRisk(current)} className={SECONDARY_ACTION} data-testid="due-diligence-create-risk">{d.create_risk ?? 'Opprett risiko'}</button>
-                    )}
-                </div>
-            )}
-            {assessing && <DueDiligenceForm supplierId={supplierId} options={data.options ?? {}} onDone={() => setAssessing(false)} tr={tr} />}
-            {data.permissions?.ended && <p className={`mt-4 ${HINT}`}>{d.ended ?? 'Leverandøren er avsluttet. Gjenåpne den for å registrere en ny aktsomhetsvurdering.'}</p>}
-
-            <details className="mt-5 min-w-0" data-testid="due-diligence-process">
-                <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>{d.process_heading ?? 'Slik følges aktsomhet opp'}</summary>
-                <ol className="mt-3 list-decimal space-y-2 pl-6">
-                    {DUE_DILIGENCE_STEPS.map((step) => (
-                        <li key={step} className="break-words text-base text-slate-800" data-step={step}>
-                            <span className="font-semibold text-slate-900">{d.steps?.[step]?.title ?? step}</span>
-                            {d.steps?.[step]?.text ? ` – ${d.steps[step].text}` : ''}
-                        </li>
-                    ))}
-                </ol>
-            </details>
-
-            {(data.history ?? []).length > 0 && (
-                <details className="mt-4 min-w-0" data-testid="due-diligence-history">
-                    <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>{(d.history_heading ?? 'Tidligere aktsomhetsvurderinger (:count)').replace(':count', String(data.history.length))}</summary>
-                    <ol className="mt-3 space-y-4">
-                        {data.history.map((entry) => <HistoryEntry key={entry.id} entry={entry} formatDate={formatDate} tr={tr} />)}
                     </ol>
                 </details>
-            )}
+
+                {/* A. Aktsomhetsstatus: the server's answer, what it rests on, and what is not clarified. */}
+                <div className="mt-4 border-t border-slate-200 pt-4" data-testid="due-diligence-relevance">
+                    <h3 className="text-lg font-semibold text-slate-950" data-testid="due-diligence-required" data-status={data.status}>{requiredText(data, tr)}</h3>
+                    {data.status === 'required' && (
+                        <>
+                            {data.because?.text && <p className="mt-1 break-words text-base text-slate-800">{data.because.text}</p>}
+                            {(data.because?.also ?? []).length > 0 && (
+                                <p className="mt-1 break-words text-base text-slate-700">{(d.also ?? 'Også fordi :reasons').replace(':reasons', data.because.also.join('; '))}</p>
+                            )}
+                        </>
+                    )}
+                    {data.status === 'must_clarify' && (
+                        <div className="mt-1 min-w-0" data-testid="due-diligence-must-clarify">
+                            {mustClarifyText(data, tr) && <p className="break-words text-base font-semibold text-amber-800">{mustClarifyText(data, tr)}</p>}
+                            <p className="break-words text-base text-slate-800">{d.must_clarify_next ?? 'Avklar leverandørprofilen for å avgjøre om aktsomhetsvurdering er påkrevd. Til da er den verken påkrevd eller utelukket.'}</p>
+                            <a href="#supplier-profile-heading" className="mt-1 inline-block break-words text-base font-semibold text-violet-700 hover:text-violet-900" data-testid="due-diligence-go-to-profile">{tr.attention?.go_to_profile ?? 'Gå til leverandørprofil'}</a>
+                        </div>
+                    )}
+                    {data.status === 'not_required' && (
+                        <p className="mt-1 break-words text-base text-slate-800">{d.not_required_because ?? 'Svarene i leverandørprofilen utløser ingen av kriteriene for aktsomhetsvurdering i Procynia. Det er ikke en vurdering av virksomhetens aktsomhetsplikter.'}</p>
+                    )}
+                    {data.status !== 'required' && <p className={`mt-1 ${HINT}`}>{d.voluntary ?? 'Du kan likevel registrere en frivillig aktsomhetsvurdering.'}</p>}
+                    {data.mapping?.profile_empty && <p className="mt-1 break-words text-base font-semibold text-amber-800" data-testid="due-diligence-profile-empty">{d.profile_empty ?? 'Leverandørprofilen er ikke fylt ut. Ubesvarte forhold er ikke vurdert som lav risiko.'}</p>}
+                    {unresolved.length > 0 && (
+                        <p className="mt-1 break-words text-base text-slate-700" data-testid="due-diligence-unresolved">
+                            <span className="font-semibold">{d.unresolved_irrelevant ?? 'Ikke avklart, uten betydning for konklusjonen:'}</span>{' '}
+                            {unresolved.map((fact) => fact.label).join(', ')}
+                        </p>
+                    )}
+
+                    <details className="mt-2 min-w-0" data-testid="due-diligence-grounds">
+                        <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>{d.grounds_toggle ?? 'Vis vurderingsgrunnlag'}</summary>
+                        <p className={`mt-2 ${HINT}`}>{d.rule ?? 'Påkrevd når varene er i en høyrisikokategori, når det produseres eller arbeides utenfor Norge/EØS, eller når leveransen er arbeidsintensiv og bruker underleverandører. Er et svar som kan utløse vurderingen ikke avklart, må det avklares før Procynia kan konkludere.'}</p>
+                        <dl className="mt-2 min-w-0 divide-y divide-slate-100" data-testid="due-diligence-mapping">
+                            {facts.map((fact) => (
+                                <div key={fact.key} className="flex min-w-0 flex-wrap justify-between gap-x-4 py-1.5" data-fact={fact.key} data-uncertain={fact.uncertain ? 'yes' : 'no'}>
+                                    <dt className="min-w-0 break-words text-base text-slate-700">{fact.label}</dt>
+                                    <dd className={`min-w-0 break-words text-base ${fact.uncertain ? 'font-semibold text-amber-800' : 'font-semibold text-slate-900'}`}>{fact.text}</dd>
+                                </div>
+                            ))}
+                        </dl>
+                    </details>
+                </div>
+
+                {/* B. Aktsomhetsvurderinger: the latest, the action, and the history. */}
+                <div className="mt-5 border-t border-slate-200 pt-4" data-testid="due-diligence-current">
+                    <h3 className="text-lg font-semibold text-slate-950">{d.assessments_heading ?? 'Aktsomhetsvurderinger'}</h3>
+                    {current ? (
+                        <div className="mt-2 min-w-0">
+                            <p className={TERM}>{d.current_heading ?? 'Siste vurdering'}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <span data-testid="due-diligence-conclusion"><StatusBadge tone={DUE_DILIGENCE_CONCLUSION_TONES[current.conclusion] ?? 'slate'}>{conclusionLabel(current.conclusion, tr)}</StatusBadge></span>
+                                <span className="text-base text-slate-600">{dueDiligenceByline(current, tr, formatDate)}</span>
+                            </div>
+                            {next && <p className={`mt-1 text-base ${data.overdue ? 'font-semibold text-amber-800' : 'text-slate-800'}`} data-testid="due-diligence-next">{next}</p>}
+                            <AreaList areas={current.areas} tr={tr} testId="due-diligence-current-areas" />
+                            <p className="mt-2 whitespace-pre-line break-words text-base text-slate-900">{d.rationale_label ?? 'Begrunnelse'}: {current.rationale}</p>
+                        </div>
+                    ) : (
+                        <p className="mt-1 text-base text-slate-800" data-testid="due-diligence-none">{d.none ?? 'Ingen aktsomhetsvurdering er registrert.'}</p>
+                    )}
+
+                    {canAct && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setAssessing(true)} className={PRIMARY_ACTION}>{d.register ?? 'Registrer aktsomhetsvurdering'}</button>
+                            {current?.conclusion === 'measures_required' && onFollowUp && (
+                                <button type="button" onClick={() => onFollowUp(current)} className={SECONDARY_ACTION} data-testid="due-diligence-follow-up">{d.follow_up ?? 'Følg opp i Avvik og forbedringer'}</button>
+                            )}
+                            {current && onCreateRisk && (
+                                <button type="button" onClick={() => onCreateRisk(current)} className={SECONDARY_ACTION} data-testid="due-diligence-create-risk">{d.create_risk ?? 'Opprett risiko'}</button>
+                            )}
+                        </div>
+                    )}
+                    {assessing && <DueDiligenceForm supplierId={supplierId} options={data.options ?? {}} onDone={() => setAssessing(false)} tr={tr} />}
+                    {data.permissions?.ended && <p className={`mt-3 ${HINT}`}>{d.ended ?? 'Leverandøren er avsluttet. Gjenåpne den for å registrere en ny aktsomhetsvurdering.'}</p>}
+
+                    {(data.history ?? []).length > 0 && (
+                        <details className="mt-3 min-w-0" data-testid="due-diligence-history">
+                            <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>{(d.history_heading ?? 'Tidligere aktsomhetsvurderinger (:count)').replace(':count', String(data.history.length))}</summary>
+                            <ol className="mt-3 space-y-4">
+                                {data.history.map((entry) => <HistoryEntry key={entry.id} entry={entry} formatDate={formatDate} tr={tr} />)}
+                            </ol>
+                        </details>
+                    )}
+                </div>
+
+                {/* C. Relaterte kontrollkrav: checked under Krav og kvalifikasjoner, never here. */}
+                {related.length > 0 && (
+                    <div className="mt-5 border-t border-slate-200 pt-4" data-testid="due-diligence-requirements">
+                        <h3 className="text-lg font-semibold text-slate-950">{d.requirements_heading ?? 'Relaterte kontrollkrav'}</h3>
+                        <p className={`mt-1 ${HINT}`}>{d.requirements_intro ?? 'Disse kravene kontrolleres under Krav og kvalifikasjoner og er ikke det samme som en aktsomhetsvurdering.'}</p>
+                        <ul className="mt-2 divide-y divide-slate-100">
+                            {related.map((row) => (
+                                <li key={row.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-2" data-testid="due-diligence-requirement">
+                                    <a href={`#control-requirement-${row.id}`} className="min-w-0 break-words text-base font-semibold text-violet-700 hover:text-violet-900">{row.title}</a>
+                                    <StatusBadge tone={DISPLAY_STATUS_TONES[row.display_status] ?? 'slate'}>{displayStatusLabel(row.display_status, tr)}</StatusBadge>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+            </div>
         </section>
     );
 }
-

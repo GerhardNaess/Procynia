@@ -35,9 +35,13 @@ use Illuminate\Support\Collection;
  *
  * Leverandørkontroll adds four (docs/supplier-assurance-v2-plan.md §15.1, signals 6–9), each read
  * off what SupplierAssuranceResolver already computes — the requirements that apply now, their
- * visningsstatus and follow-up dates, and «Krever beslutning». No rule is decided again here:
+ * visningsstatus and follow-up dates, and the state. No rule is decided again here:
  *
- *  - Krever beslutning (6): the resolver's signal is on. Names the open mandatory requirements.
+ *  - Obligatorisk krav åpent (6): the resolver's state is Obligatorisk krav åpent — an applying
+ *    mandatory requirement is neither Dokumentert nor Midlertidig akseptert. Names those requirements
+ *    with their visningsstatus. Until 2026-10-12 this was «Krever beslutning», and a decision «Ikke
+ *    godkjent for nye kjøp» silenced it; that decision is retired, so nothing silences it now but
+ *    documenting or accepting the requirement.
  *  - Kontroll forfalt (8): active, and an applying requirement is Må fornyes or Aksept utløpt — each
  *    named with why: the control interval ran out, a document it rests on expired or was replaced,
  *    or the acceptance ran out.
@@ -48,19 +52,18 @@ use Illuminate\Support\Collection;
  *    catalogue requirements.
  *
  * One finding per rule and supplier, listing its requirements. A requirement already named under
- * Krever beslutning is not named again under Kontroll forfalt or Krav ikke vurdert: the decision is
- * what it needs. A customer without control requirements gets none of the four.
+ * Obligatorisk krav åpent is not named again under Kontroll forfalt or Krav ikke vurdert: its status
+ * is given there. A customer without control requirements gets none of the four.
  *
- * Phase 7 adds Aktsomhetsvurdering mangler (10) and Aktsomhetsvurdering forfalt (11) — see
- * dueDiligenceFindingsFor().
+ * Phase 7 adds Aktsomhetsvurdering mangler (10) and Aktsomhetsvurdering forfalt (11), and
+ * Aktsomhetsbehov må avklares beside them — see dueDiligenceFindingsFor().
  *
  * An ended supplier raises nothing: it is no longer followed up. A supplier under evaluation
  * (onboarding) is not expected to be assessed yet, so only the owner and documentation rules apply
  * from v1, and Kontroll forfalt (active only) is not raised.
  *
- * Nothing is written, ever: no evaluation when a control falls due, no decision when an acceptance
- * runs out, no stored flag. The decision in force is never touched — «Godkjent» can stand next to
- * «Kontroll forfalt».
+ * Nothing is written, ever: no evaluation when a control falls due, no stored flag when an
+ * acceptance runs out. No kontrollbeslutning is read: the retired decisions are history only.
  *
  * ONLY SUPPLIER DATA. The rules read suppliers, supplier_assessments, supplier_documents and the
  * Leverandørkontroll tables, nothing else — no risk, case, compliance requirement or link to another
@@ -82,7 +85,7 @@ class SupplierAttentionService
 
     public const DOCUMENT_EXPIRING = 'document_expiring';
 
-    public const DECISION_REQUIRED = 'decision_required';
+    public const MANDATORY_OPEN = 'mandatory_open';
 
     public const CONTROL_OVERDUE = 'control_overdue';
 
@@ -91,6 +94,8 @@ class SupplierAttentionService
     public const PROFILE_INCOMPLETE = 'profile_incomplete';
 
     public const DUE_DILIGENCE_MISSING = 'due_diligence_missing';
+
+    public const DUE_DILIGENCE_UNCLEAR = 'due_diligence_unclear';
 
     public const DUE_DILIGENCE_OVERDUE = 'due_diligence_overdue';
 
@@ -103,13 +108,14 @@ class SupplierAttentionService
 
     public const OVERDUE_CONTROL_INTERVAL = 'control_interval';
 
-    /** Display order: the decision a mandatory requirement asks for first. */
+    /** Display order: an open mandatory requirement first. */
     public const CATEGORIES = [
-        self::DECISION_REQUIRED,
+        self::MANDATORY_OPEN,
         self::CONTROL_OVERDUE,
         self::REQUIREMENT_NOT_EVALUATED,
         self::PROFILE_INCOMPLETE,
         self::DUE_DILIGENCE_MISSING,
+        self::DUE_DILIGENCE_UNCLEAR,
         self::DUE_DILIGENCE_OVERDUE,
         self::NOT_ASSESSED,
         self::REVIEW_OVERDUE,
@@ -126,7 +132,7 @@ class SupplierAttentionService
     ) {}
 
     /**
-     * The panel on the register: every visible supplier that is not ended and has a finding, by name,
+     * The overview Ledelsens gjennomgang reads: every visible supplier that is not ended and has a finding, by name,
      * with its findings; the category counts (which may overlap) and the total of unique suppliers.
      * Only non-empty categories are returned, in display order.
      *
@@ -173,7 +179,7 @@ class SupplierAttentionService
      * The findings for each of the given suppliers, keyed by supplier id, in display order. The
      * suppliers must all belong to one customer and already have been reached through
      * SupplierAccessService. One batch whatever their number: assessments, documents, profiles and
-     * the resolver's rows and decisions are each read once, by these ids within the customer.
+     * the resolver's rows are each read once, by these ids within the customer.
      *
      * @param  Collection<int, Supplier>  $suppliers
      * @return array<int, list<array<string, mixed>>>
@@ -206,7 +212,6 @@ class SupplierAttentionService
             ->groupBy(fn (SupplierDocument $document): int => (int) $document->supplier_id);
 
         $assuranceRows = $this->assurance->rows($open, $today);
-        $decisions = $this->assurance->decisionsInForce($ids);
         $hasCatalogue = $ids !== [] && SupplierControlRequirement::query()
             ->where('customer_id', $customerId)
             ->whereNull('supplier_id')
@@ -224,9 +229,18 @@ class SupplierAttentionService
 
         foreach ($suppliers as $supplier) {
             $id = (int) $supplier->id;
-            $findings[$id] = $supplier->isEnded() ? [] : [
-                ...$this->assuranceFindingsFor($supplier, $assuranceRows[$id] ?? [], ($decisions[$id] ?? null)?->decision, $hasCatalogue, $profiles->get($id)),
-                ...$this->dueDiligenceFindingsFor($supplier, $assuranceRows[$id] ?? [], $profiles->get($id), $dueDiligence[$id] ?? null, $today),
+
+            if ($supplier->isEnded()) {
+                $findings[$id] = [];
+
+                continue;
+            }
+
+            $assurance = $this->assuranceFindingsFor($supplier, $assuranceRows[$id] ?? [], $hasCatalogue, $profiles->get($id));
+            $profileIncomplete = in_array(self::PROFILE_INCOMPLETE, array_column($assurance, 'key'), true);
+            $findings[$id] = [
+                ...$assurance,
+                ...$this->dueDiligenceFindingsFor($supplier, $assuranceRows[$id] ?? [], $profiles->get($id), $dueDiligence[$id] ?? null, $today, $profileIncomplete),
                 ...$this->findingsFor($supplier, $latest->get($id), $documents->get($id, collect()), $today),
             ];
         }
@@ -241,15 +255,15 @@ class SupplierAttentionService
      * @param  list<array<string, mixed>>  $rows  SupplierAssuranceResolver::rows() for this supplier
      * @return list<array<string, mixed>>
      */
-    private function assuranceFindingsFor(Supplier $supplier, array $rows, ?string $decisionInForce, bool $hasCatalogue, ?SupplierProfile $profile): array
+    private function assuranceFindingsFor(Supplier $supplier, array $rows, bool $hasCatalogue, ?SupplierProfile $profile): array
     {
         $findings = [];
-        $state = SupplierAssuranceResolver::resolve($rows, $decisionInForce);
+        $state = SupplierAssuranceResolver::resolve($rows);
         $named = [];
 
-        if ($state !== null && $state['decision_required']) {
+        if ($state !== null && $state['state'] === SupplierAssuranceResolver::STATE_MANDATORY_OPEN) {
             $findings[] = [
-                'key' => self::DECISION_REQUIRED,
+                'key' => self::MANDATORY_OPEN,
                 'requirements' => array_map(fn (array $row): array => [
                     'id' => $row['id'],
                     'title' => $row['title'],
@@ -297,33 +311,49 @@ class SupplierAttentionService
      * has at least one requirement applying — like signals 6–9, a customer that has not started
      * Leverandørkontroll gets neither.
      *
-     *  - Aktsomhetsvurdering mangler (10): due_diligence_relevant from the profile, and no assessment.
+     *  - Aktsomhetsvurdering mangler (10): the profile makes an assessment required on clear answers
+     *    (SupplierProfilePredicates::dueDiligenceStatus() «required»), and no assessment.
+     *  - Aktsomhetsbehov må avklares: the status is «must_clarify» — an unclear answer could make it
+     *    required — whether or not an assessment is registered: an assessment is not a clarified
+     *    profile, so only clarifying the profile ends it. It asks for the profile, never for an
+     *    assessment, so it is the profile editor's work. Not for a wholly empty profile: an empty
+     *    profile is followed up by Profil ikke fylt ut (9) where the plan wants that (Viktig and
+     *    Kritisk), not for every supplier in the register. Not either when signal 9 is already
+     *    raised: both send the person to the same profile, and one reason is enough.
      *  - Aktsomhetsvurdering forfalt (11): active, and the next assessment (assessed_on +
-     *    review_interval_months) has passed — due today is not overdue.
+     *    review_interval_months) has passed — due today is not overdue. About the assessment's own
+     *    date, whatever the status, as before.
      *
-     * The two never meet: one needs no assessment, the other one. Neither reads the areas or the
-     * conclusion — «Høy» is not a signal; the person's follow-up of it is in Avvik og Risiko.
+     * Mangler needs no assessment, forfalt one; må avklares reads only the profile. None reads the
+     * areas or the conclusion — «Høy» is not a signal; the person's follow-up of it is in Avvik og
+     * Risiko.
      *
      * @param  list<array<string, mixed>>  $rows
      * @return list<array<string, mixed>>
      */
-    private function dueDiligenceFindingsFor(Supplier $supplier, array $rows, ?SupplierProfile $profile, ?SupplierDueDiligenceAssessment $current, CarbonImmutable $today): array
+    private function dueDiligenceFindingsFor(Supplier $supplier, array $rows, ?SupplierProfile $profile, ?SupplierDueDiligenceAssessment $current, CarbonImmutable $today, bool $profileIncomplete = false): array
     {
         if ($rows === []) {
             return [];
         }
 
-        if ($current === null) {
-            $relevant = SupplierProfilePredicates::dueDiligenceRelevant(SupplierProfilePredicates::for($supplier, $profile));
+        $answers = $profile?->answers();
+        $status = SupplierProfilePredicates::dueDiligenceStatus($answers)['status'];
+        $findings = [];
 
-            return $relevant ? [['key' => self::DUE_DILIGENCE_MISSING]] : [];
+        if ($status === SupplierProfilePredicates::DUE_DILIGENCE_REQUIRED && $current === null) {
+            $findings[] = ['key' => self::DUE_DILIGENCE_MISSING];
         }
 
-        if ($supplier->status === Supplier::STATUS_ACTIVE && $this->dueDiligence->isOverdue($current, $today)) {
-            return [['key' => self::DUE_DILIGENCE_OVERDUE, 'next_on' => $this->dueDiligence->nextOn($current)?->toDateString()]];
+        if ($status === SupplierProfilePredicates::DUE_DILIGENCE_MUST_CLARIFY && ! $profileIncomplete && ! SupplierProfilePredicates::isEmpty($answers)) {
+            $findings[] = ['key' => self::DUE_DILIGENCE_UNCLEAR];
         }
 
-        return [];
+        if ($current !== null && $supplier->status === Supplier::STATUS_ACTIVE && $this->dueDiligence->isOverdue($current, $today)) {
+            $findings[] = ['key' => self::DUE_DILIGENCE_OVERDUE, 'next_on' => $this->dueDiligence->nextOn($current)?->toDateString()];
+        }
+
+        return $findings;
     }
 
     /**

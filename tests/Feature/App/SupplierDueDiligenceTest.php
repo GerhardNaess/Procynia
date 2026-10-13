@@ -131,7 +131,7 @@ class SupplierDueDiligenceTest extends TestCase
         $this->assertSame(['monitor', 'measures_required', 'no_significant_risk'], array_column($data['history'], 'conclusion'));
         $this->assertSame(['Tekstil Norge AS', 'Tekstil AS'], [$data['history'][0]['snapshot']['supplier_name'], $data['history'][1]['snapshot']['supplier_name']]);
         $this->assertSame(now()->addMonthsNoOverflow(6)->toDateString(), $data['next_on']);
-        $this->assertSame([true, false], [$data['relevant'], $data['permissions']['can_assess']]);
+        $this->assertSame(['required', [], false], [$data['status'], $data['unresolved'], $data['permissions']['can_assess']]);
         $this->assertSame(['textiles'], $data['mapping']['high_risk_categories']);
         // Not answered stays not answered, never «no».
         $this->assertNull($data['mapping']['labour_intensive']);
@@ -163,7 +163,7 @@ class SupplierDueDiligenceTest extends TestCase
         $this->assertSame([false, true, 3, false], [$ended['permissions']['can_assess'], $ended['permissions']['ended'], count($ended['history']), $ended['overdue']]);
     }
 
-    public function test_the_card_is_absent_until_leverandorkontroll_is_started_and_says_when_it_is_not_relevant(): void
+    public function test_the_card_is_absent_until_leverandorkontroll_is_started_and_says_what_must_be_clarified(): void
     {
         ['customer' => $customer] = $this->context('grc');
         $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
@@ -175,10 +175,87 @@ class SupplierDueDiligenceTest extends TestCase
 
         $this->requirement($customer);
         $data = $this->actingAs($assurer)->get($show)->viewData('page')['props']['due_diligence'];
-        $this->assertSame([false, null, true, []], [$data['relevant'], $data['because'], $data['mapping']['profile_empty'], $data['history']]);
+        // An empty profile has nothing to conclude «not required» from: all four must be clarified.
+        $this->assertSame(
+            ['must_clarify', null, true, [], ['high_risk_categories', 'production_outside_eea', 'labour_intensive', 'uses_subcontractors']],
+            [$data['status'], $data['because'], $data['mapping']['profile_empty'], $data['history'], $data['unresolved']],
+        );
 
-        // Not relevant, still allowed.
+        // Every criterion ruled out on clear answers: not required — labour intensity left unclear.
+        $this->profile($supplier, ['high_risk_categories' => [], 'production_outside_eea' => 'no', 'uses_subcontractors' => 'no', 'labour_intensive' => 'unknown']);
+        $data = $this->actingAs($assurer)->get($show)->viewData('page')['props']['due_diligence'];
+        $this->assertSame(['not_required', [], null], [$data['status'], $data['unresolved'], $data['because']]);
+
+        // Not required, a voluntary assessment is still registered — and the status does not move.
         $this->actingAs($assurer)->post("{$show}/due-diligence-assessments", $this->assessment())->assertSessionHasNoErrors();
+        $data = $this->actingAs($assurer)->get($show)->viewData('page')['props']['due_diligence'];
+        $this->assertSame(['not_required', 1], [$data['status'], count($data['history'])]);
+    }
+
+    public function test_must_clarify_follows_the_profile_not_the_assessment_once_and_never_beside_profil_ikke_fylt_ut(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        ['customer' => $foreignCustomer] = $this->context('grc');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $unclear = $this->supplier($customer, $assurer, 'Uavklart AS');
+        $empty = $this->supplier($customer, $assurer, 'Tom AS');
+        $important = $this->supplier($customer, $assurer, 'Viktig AS', classification: $this->classification('important', 12));
+        $critical = $this->supplier($customer, $assurer, 'Kritisk AS', classification: $this->classification('critical', 12));
+        $this->profile($unclear, ['high_risk_categories' => null, 'production_outside_eea' => 'no', 'uses_subcontractors' => 'no', 'labour_intensive' => 'no']);
+        $this->profile($critical, ['high_risk_categories' => ['unknown'], 'production_outside_eea' => 'no']);
+        $this->requirement($customer);
+        // Another customer's unclear supplier never counts here.
+        $foreignAssurer = $this->supplierUser($foreignCustomer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $foreign = $this->supplier($foreignCustomer, $foreignAssurer, 'Fremmed AS');
+        $this->profile($foreign, ['high_risk_categories' => ['unknown']]);
+        $this->requirement($foreignCustomer);
+
+        $keys = fn (Supplier $supplier): array => array_values(array_intersect(
+            array_column(app(SupplierAttentionService::class)->findingsForSupplier($supplier->fresh()), 'key'),
+            [SupplierAttentionService::PROFILE_INCOMPLETE, SupplierAttentionService::DUE_DILIGENCE_MISSING, SupplierAttentionService::DUE_DILIGENCE_UNCLEAR, SupplierAttentionService::DUE_DILIGENCE_OVERDUE],
+        ));
+
+        // Må avklares, no assessment: the profile is asked for — neither silent nor «mangler».
+        $this->assertSame([SupplierAttentionService::DUE_DILIGENCE_UNCLEAR], $keys($unclear));
+        // A wholly empty Standard profile is not flagged for every supplier in the register.
+        $this->assertSame([], $keys($empty));
+        // Viktig with no profile, and Kritisk with an incomplete one, have Profil ikke fylt ut: one
+        // reason, same place, never må avklares beside it.
+        $this->assertSame([SupplierAttentionService::PROFILE_INCOMPLETE], $keys($important));
+        $this->assertSame([SupplierAttentionService::PROFILE_INCOMPLETE], $keys($critical));
+
+        $overview = $this->actingAs($assurer)->get('/app/supplier-management?attention=1')->viewData('page')['props'];
+        $this->assertNotContains('Fremmed AS', array_column($overview['suppliers'], 'name'));
+        $row = collect($overview['suppliers'])->firstWhere('name', 'Uavklart AS');
+        $this->assertSame([SupplierAttentionService::DUE_DILIGENCE_UNCLEAR], array_values(array_intersect($row['attention'], [SupplierAttentionService::DUE_DILIGENCE_UNCLEAR, SupplierAttentionService::DUE_DILIGENCE_MISSING])));
+
+        // Må avklares WITH an assessment: still må avklares. An assessment is not a clarified profile.
+        $this->row($customer, $unclear, ['assessed_on' => now()->toDateString()], insert: true);
+        $this->assertSame([SupplierAttentionService::DUE_DILIGENCE_UNCLEAR], $keys($unclear));
+        $data = $this->actingAs($assurer)->get("/app/supplier-management/{$unclear->id}")->viewData('page')['props']['due_diligence'];
+        $this->assertSame(['must_clarify', 1], [$data['status'], count($data['history'])]);
+
+        // Clarified as a category: required, and the registered assessment already answers it.
+        $this->profile($unclear, ['high_risk_categories' => ['textiles']]);
+        $this->assertSame([], $keys($unclear));
+        // Clarified as «Ingen av disse»: not required, nothing to follow up.
+        $this->profile($unclear, ['high_risk_categories' => []]);
+        $this->assertSame([], $keys($unclear));
+        // The assessment is kept through it all, as it was.
+        $this->assertSame(1, SupplierDueDiligenceAssessment::query()->where('supplier_id', $unclear->id)->count());
+
+        // Without an assessment, clarified as a category: Aktsomhetsvurdering mangler takes over.
+        $other = $this->supplier($customer, $assurer, 'Uavklart to AS');
+        $this->profile($other, ['high_risk_categories' => ['unknown'], 'production_outside_eea' => 'no', 'uses_subcontractors' => 'no', 'labour_intensive' => 'no']);
+        $this->assertSame([SupplierAttentionService::DUE_DILIGENCE_UNCLEAR], $keys($other));
+        $this->profile($other, ['high_risk_categories' => ['textiles']]);
+        $this->assertSame([SupplierAttentionService::DUE_DILIGENCE_MISSING], $keys($other));
+
+        // Må avklares and an overdue assessment are two facts, each named once.
+        $stale = $this->supplier($customer, $assurer, 'Gammel vurdering AS');
+        $this->profile($stale, ['high_risk_categories' => ['unknown'], 'production_outside_eea' => 'no', 'uses_subcontractors' => 'no', 'labour_intensive' => 'no']);
+        $this->row($customer, $stale, ['assessed_on' => now()->subYears(2)->toDateString()], insert: true);
+        $this->assertSame([SupplierAttentionService::DUE_DILIGENCE_UNCLEAR, SupplierAttentionService::DUE_DILIGENCE_OVERDUE], $keys($stale));
     }
 
     public function test_signal_10_and_11_follow_the_profile_and_the_next_date_only_for_suppliers_with_requirements(): void
@@ -214,10 +291,12 @@ class SupplierDueDiligenceTest extends TestCase
         $this->assertSame([], $keys($plain));
         $this->assertSame([], $keys($ended));
 
-        // The register's existing filter and panel carry it, for this customer's suppliers only.
+        // The register's existing filter and row marker carry it, for this customer's suppliers only.
         $overview = $this->actingAs($assurer)->get('/app/supplier-management?attention=1')->viewData('page')['props'];
         $this->assertEqualsCanonicalizing(['Tekstil AS', 'Ny AS'], array_column($overview['suppliers'], 'name'));
-        $this->assertSame(2, collect($overview['attention']['categories'])->firstWhere('key', SupplierAttentionService::DUE_DILIGENCE_MISSING)['count']);
+        foreach ($overview['suppliers'] as $row) {
+            $this->assertContains(SupplierAttentionService::DUE_DILIGENCE_MISSING, $row['attention'], $row['name']);
+        }
 
         // An assessment clears it; when its next date passes, Aktsomhetsvurdering forfalt — active only.
         $this->row($customer, $relevant, ['assessed_on' => now()->subMonthsNoOverflow(12)->toDateString()], insert: true);
@@ -342,9 +421,10 @@ class SupplierDueDiligenceTest extends TestCase
         ]);
     }
 
-    /** @param  array<string, mixed>  $answers */
+    /** @param  array<string, mixed>  $answers  written over the supplier's profile, or a new one */
     private function profile(Supplier $supplier, array $answers): void
     {
-        (new SupplierProfile)->forceFill($answers + ['supplier_id' => $supplier->id, 'customer_id' => $supplier->customer_id])->save();
+        $profile = SupplierProfile::query()->find($supplier->id) ?? (new SupplierProfile)->forceFill(['supplier_id' => $supplier->id, 'customer_id' => $supplier->customer_id]);
+        $profile->forceFill($answers)->save();
     }
 }

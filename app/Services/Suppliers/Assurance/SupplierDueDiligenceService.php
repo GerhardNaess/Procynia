@@ -171,8 +171,8 @@ class SupplierDueDiligenceService
     /**
      * «Aktsomhet og bærekraft» on the supplier page. Null for a customer that has not started
      * Leverandørkontroll and a supplier never assessed — such a customer sees the page as before
-     * (plan §17, invariant 16). Otherwise always shown, also when the profile does not make it
-     * relevant: then it says so and an assessment can still be registered (§11.3).
+     * (plan §17, invariant 16). Otherwise always shown, whatever the status: an assessment can be
+     * registered also when it is not required or must be clarified (§11.3).
      *
      * @return array<string, mixed>|null
      */
@@ -187,9 +187,9 @@ class SupplierDueDiligenceService
 
         $today ??= now();
         $answers = $supplier->profile()->first()?->answers();
-        $facts = SupplierProfilePredicates::evaluate($supplier, $answers);
-        $uncertain = SupplierProfilePredicates::uncertain($supplier, $answers);
-        $groups = SupplierRequirementApplicability::holdingGroups(SupplierProfilePredicates::DUE_DILIGENCE_RULE, $facts, $uncertain);
+        $decision = SupplierProfilePredicates::dueDiligenceStatus($answers);
+        // Required only on clear answers, so «Gjelder fordi …» never has to say «ikke avklart».
+        $groups = array_map(fn (array $group): array => array_map(fn (string $predicate): array => ['predicate' => $predicate, 'uncertain' => false], $group), $decision['groups']);
         $because = $groups === [] ? null : $this->reasons->because(['source' => SupplierRequirementApplicability::SOURCE_RULE, 'groups' => $groups]);
         $current = $assessments->first();
         $next = $current !== null ? $this->nextOn($current) : null;
@@ -197,8 +197,12 @@ class SupplierDueDiligenceService
         $canAssure = $this->access->canAssure($user);
 
         return [
-            'relevant' => $groups !== [],
+            // required · must_clarify · not_required (SupplierProfilePredicates::dueDiligenceStatus()).
+            // Whether an assessment is required — not whether one is done, nor what it concluded.
+            'status' => $decision['status'],
             'because' => $because,
+            // must_clarify: the profile questions whose answer could still make it required.
+            'unresolved' => $decision['unresolved'],
             // Kartlegg: the profile's own answers, as they are now. null = not answered — shown as
             // such, never as «no».
             'mapping' => [

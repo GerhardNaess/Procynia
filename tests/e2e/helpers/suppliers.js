@@ -77,3 +77,17 @@ export async function openSupplierTab(page, name) {
     await tab.click();
     await expect(tab).toHaveAttribute('aria-current', 'page');
 }
+
+/**
+ * Opens a section under «Detaljer» on Oversikt — 'info', 'criticality', 'profile', 'risks' or
+ * 'cases' — by its heading, as a person does; a section already open stays open.
+ */
+export async function openSupplierDetails(page, key) {
+    const toggle = page.getByTestId(`details-${key}-toggle`);
+
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
+        await toggle.click();
+    }
+
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}

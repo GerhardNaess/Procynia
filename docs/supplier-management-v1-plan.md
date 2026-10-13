@@ -87,7 +87,8 @@ ingen kunde får noe før modulen er bygget. Implementeringen (fase 1) legger ba
 - Dokumentasjonsoversikt (metadata, ingen filer): type, navn, plassering, gyldighet, fornyelse
 - Risikoer som gjelder leverandøren: se, koble til eksisterende, opprette ny via Risiko
 - Krav som gjelder leverandøren: se og koble til eksisterende krav i Etterlevelse og revisjon — uten
-  leverandørspesifikk kravstatus
+  leverandørspesifikk kravstatus (*avviklet i brukerflyten 2026-10-13, se §7.3; tidligere koblinger
+  vises skrivebeskyttet under Historikk*)
 - Avvik og forbedringer hos leverandøren: opprette via Avvik og forbedringer, koble til eksisterende
 - Trenger oppmerksomhet: fem lokale, deterministiske signaler
 - Tilgang via fire `supplier.*`-rettigheter; System Owner fail-closed
@@ -288,6 +289,9 @@ Under vurdering → **«Ta i bruk»** gjør leverandøren Aktiv. Ingen godkjenni
 
 ### D. Håndtere krav
 
+*Avviklet i brukerflyten 2026-10-13 (§7.3). Kravene til en leverandør håndteres som kontrollkrav på
+fanen «Krav og kvalifikasjoner»; tidligere koblinger står skrivebeskyttet under Historikk.*
+
 1. Leverandørsiden → **«Krav som gjelder leverandøren»**: kravene brukeren selv kan se i Etterlevelse
    og revisjon — referanse, tittel, kilde, lenke til kravet.
 2. **«Legg til krav»**: velg blant aktive krav. Nye krav lages i Etterlevelse og revisjon.
@@ -409,6 +413,15 @@ Felles regler:
   `supplier.view`.
 
 ### 7.3 Etterlevelse og revisjon — krav som gjelder leverandøren
+
+> **Avviklet i brukerflyten 2026-10-13.** Den separate koblingen mellom leverandør og etterlevelseskrav
+> er tatt ut av leverandørsiden: ingen rute legger til eller fjerner en kobling lenger
+> (`SupplierComplianceRequirementController` er fjernet). Radene i `supplier_compliance_requirements`
+> beholdes urørt — ingen konvertering, ingen sletting, uendrede fremmednøkler — og vises skrivebeskyttet
+> under Historikk som **«Tidligere koblinger til etterlevelseskrav»** (`SupplierComplianceRequirementService::requirementsFor()`,
+> samme tilgangsregler som før). Sammenhengen mellom et leverandørkrav og et etterlevelseskrav uttrykkes
+> nå bare som kontrollkravets forankring (`compliance_requirement_id`, «Forankret i»), se
+> supplier-assurance-v2-plan §5.1 og §22.1. Teksten under beskriver v1 slik den var.
 
 - Koblingstabell `supplier_compliance_requirements`.
 - **Se:** `visibleRequirements()` ∩ koblede, gated på `ComplianceAccessService::canReadFromAnotherModule()`.

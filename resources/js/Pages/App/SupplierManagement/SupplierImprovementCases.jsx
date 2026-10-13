@@ -13,7 +13,6 @@ import {
     newHandoffKey,
 } from './supplierManagement';
 
-const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-900';
 const HINT = 'mt-1 text-base text-slate-600';
@@ -60,7 +59,7 @@ function HandoffForm({ supplier, assessment, evaluation, dueDiligence, handoff, 
     return (
         <form ref={ref} onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4" data-testid="case-handoff-form">
             <div>
-                <h3 className="text-lg font-semibold text-slate-950">{c.form_heading ?? 'Følg opp i Avvik og forbedringer'}</h3>
+                <h4 className="text-lg font-semibold text-slate-950">{c.form_heading ?? 'Følg opp i Avvik og forbedringer'}</h4>
                 <p className={HINT}>{c.form_intro ?? 'Det opprettes en ny sak i Avvik og forbedringer. Der følges saken opp med tiltak, status og lukking. Leverandøren viser bare at saken gjelder den.'}</p>
             </div>
 
@@ -147,7 +146,7 @@ function LinkForm({ supplierId, options, onDone, tr, ti }) {
     return (
         <form onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="case-link-form">
             <div>
-                <h3 className="text-lg font-semibold text-slate-950">{c.link_heading ?? 'Koble til eksisterende sak'}</h3>
+                <h4 className="text-lg font-semibold text-slate-950">{c.link_heading ?? 'Koble til eksisterende sak'}</h4>
                 <p className={HINT}>{c.link_intro ?? 'For en sak som allerede er registrert i Avvik og forbedringer.'}</p>
             </div>
             {options.length === 0 ? (
@@ -208,9 +207,8 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
     };
 
     return (
-        <section className={CARD} aria-labelledby="supplier-cases-heading" data-testid="supplier-cases">
-            <h2 id="supplier-cases-heading" className="text-xl font-semibold text-slate-950">{c.heading ?? 'Avvik og forbedringer hos leverandøren'}</h2>
-            <p className="mt-1 text-base text-slate-600">{c.intro ?? 'Saker i Avvik og forbedringer som gjelder leverandøren. Saken behandles der – status, tiltak og lukking følges opp i Avvik og forbedringer.'}</p>
+        <div data-testid="supplier-cases">
+            <p className="text-base text-slate-600">{c.intro ?? 'Saker i Avvik og forbedringer som gjelder leverandøren. Saken behandles der – status, tiltak og lukking følges opp i Avvik og forbedringer.'}</p>
 
             {cases.length === 0 ? (
                 <p className="mt-4 text-base text-slate-800" data-testid="cases-none">{c.none ?? 'Ingen saker i Avvik og forbedringer gjelder leverandøren.'}</p>
@@ -272,6 +270,6 @@ export default function SupplierImprovementCases({ supplier, cases, handoff, fol
             {handoff && linking && (
                 <LinkForm supplierId={supplier.id} options={handoff.link_options ?? []} onDone={() => setLinking(false)} tr={tr} ti={ti} />
             )}
-        </section>
+        </div>
     );
 }

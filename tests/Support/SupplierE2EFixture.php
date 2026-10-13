@@ -154,6 +154,34 @@ class SupplierE2EFixture
     }
 
     /**
+     * A kontrollbeslutning as it was registered before the decisions were retired (2026-10-12) —
+     * written straight to the table, since nothing in the application writes one any more. For the
+     * read-only history under Historikk.
+     *
+     * @return array{id: int}
+     */
+    public static function historicalDecision(string $suffix, int $supplierId, string $decision, string $decidedOn, string $rationale): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $supplier = Supplier::query()->where('customer_id', $customer->id)->findOrFail($supplierId);
+
+        $id = DB::table('supplier_assurance_decisions')->insertGetId([
+            'customer_id' => $customer->id,
+            'supplier_id' => $supplier->id,
+            'decision' => $decision,
+            'rationale' => $rationale,
+            'follow_up_note' => null,
+            'decided_on' => $decidedOn,
+            'recorded_at' => now(),
+            'state_snapshot' => json_encode(['state' => 'mandatory_open', 'applicable_count' => 1, 'counts' => ['missing' => 1], 'unmet' => []]),
+            'supplier_name' => $supplier->name,
+            'criticality' => $supplier->criticality,
+        ]);
+
+        return ['id' => (int) $id];
+    }
+
+    /**
      * An active supplier of the run's customer, owned by the supplier manager, classified with the
      * given level and interval (Ja to the questions in $yes, Nei to the rest) — or not classified
      * without a level.
@@ -287,6 +315,28 @@ class SupplierE2EFixture
 
             return ['source_label' => $source->name, 'reference' => $requirement->reference, 'title' => $requirement->title, 'other_title' => $other->title];
         });
+    }
+
+    /**
+     * seedComplianceAccess(), and a link from the supplier to its first requirement as Leverandør-
+     * oppfølging v1 wrote it — nothing in the application writes one any more (2026-10-13).
+     *
+     * @return array{source_label: string, reference: string, title: string, other_title: string}
+     */
+    public static function seedEarlierComplianceLink(string $suffix, int $supplierId): array
+    {
+        $seeded = self::seedComplianceAccess($suffix);
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $supplier = Supplier::query()->where('customer_id', $customer->id)->findOrFail($supplierId);
+        $requirement = ComplianceRequirement::query()->where('customer_id', $customer->id)->where('title', $seeded['title'])->sole();
+
+        SupplierComplianceRequirement::query()->create([
+            'customer_id' => $customer->id,
+            'supplier_id' => $supplier->id,
+            'compliance_requirement_id' => $requirement->id,
+        ]);
+
+        return $seeded;
     }
 
     /**
@@ -430,6 +480,51 @@ class SupplierE2EFixture
         ])->save();
 
         return ['high_risk_category' => 'textiles'];
+    }
+
+    /**
+     * Aktsomhet, not required (plan §11.3): everything a clear no except labour intensity, which is
+     * «Ikke avklart» — it only counts together with subcontractors, so the profile does not make an
+     * assessment required, and the tab must still name what is not clarified.
+     */
+    public static function seedUnclarifiedLabourProfile(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        (new SupplierProfile)->forceFill([
+            'supplier_id' => $supplier->id,
+            'customer_id' => $supplier->customer_id,
+            'production_outside_eea' => 'no',
+            'high_risk_categories' => [],
+            'uses_subcontractors' => 'no',
+            'labour_intensive' => 'unknown',
+            'updated_by' => $manager->id,
+        ])->save();
+
+        return ['labour_intensive' => 'unknown'];
+    }
+
+    /**
+     * Aktsomhet, må avklares (2026-10-13): every criterion a clear no except the high-risk
+     * categories, answered «Ikke avklart» — which alone could make an assessment required.
+     */
+    public static function seedUnclarifiedHighRiskProfile(string $suffix, int $supplierId): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        (new SupplierProfile)->forceFill([
+            'supplier_id' => $supplier->id,
+            'customer_id' => $supplier->customer_id,
+            'production_outside_eea' => 'no',
+            'high_risk_categories' => [SupplierProfile::ANSWER_UNKNOWN],
+            'uses_subcontractors' => 'no',
+            'labour_intensive' => 'no',
+            'updated_by' => $manager->id,
+        ])->save();
+
+        return ['high_risk_categories' => [SupplierProfile::ANSWER_UNKNOWN]];
     }
 
     /**

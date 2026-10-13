@@ -163,16 +163,79 @@ export function answerText(value, tr = {}) {
 export function mappingFacts(mapping = {}, tr = {}) {
     const d = tr.due_diligence ?? {};
     const categories = mapping?.high_risk_categories;
-    const categoriesText = Array.isArray(categories)
-        ? (categories.length === 0 ? (d.none_chosen ?? 'Ingen') : categories.map((code) => tr.profile?.high_risk_categories?.[code] ?? code).join(', '))
-        : answerText(null, tr);
+    // ['unknown'] is «Ikke avklart» — never a category, never «Ingen».
+    const categoriesUnknown = Array.isArray(categories) && categories.length === 1 && categories[0] === 'unknown';
+    const categoriesText = categoriesUnknown
+        ? answerText('unknown', tr)
+        : Array.isArray(categories)
+            ? (categories.length === 0 ? (d.none_chosen ?? 'Ingen') : categories.map((code) => tr.profile?.high_risk_categories?.[code] ?? code).join(', '))
+            : answerText(null, tr);
 
     return [
         { key: 'production_outside_eea', label: d.facts?.production_outside_eea ?? 'Produksjon eller arbeid utenfor Norge/EØS', text: answerText(mapping?.production_outside_eea, tr), uncertain: mapping?.production_outside_eea !== 'yes' && mapping?.production_outside_eea !== 'no' },
-        { key: 'high_risk_categories', label: d.facts?.high_risk_categories ?? 'Høyrisikokategorier', text: categoriesText, uncertain: ! Array.isArray(categories) },
+        { key: 'high_risk_categories', label: d.facts?.high_risk_categories ?? 'Høyrisikokategorier', text: categoriesText, uncertain: ! Array.isArray(categories) || categoriesUnknown },
         { key: 'uses_subcontractors', label: d.facts?.uses_subcontractors ?? 'Underleverandører i leveransen', text: answerText(mapping?.uses_subcontractors, tr), uncertain: mapping?.uses_subcontractors !== 'yes' && mapping?.uses_subcontractors !== 'no' },
         { key: 'labour_intensive', label: d.facts?.labour_intensive ?? 'Arbeidsintensiv leveranse', text: answerText(mapping?.labour_intensive, tr), uncertain: mapping?.labour_intensive !== 'yes' && mapping?.labour_intensive !== 'no' },
     ];
+}
+
+/** The three answers the server gives (SupplierProfilePredicates::dueDiligenceStatus()). */
+export const DUE_DILIGENCE_STATUSES = ['required', 'must_clarify', 'not_required'];
+
+const STATUS_FALLBACKS = {
+    required: 'Aktsomhetsvurdering er påkrevd',
+    must_clarify: 'Aktsomhetsbehov må avklares',
+    not_required: 'Aktsomhetsvurdering er ikke påkrevd',
+};
+
+/**
+ * The profile facts that are «Ikke avklart» or not answered. Empty for a wholly empty profile — that
+ * is said once, on its own.
+ */
+export function unresolvedFacts(mapping = {}, tr = {}) {
+    if (mapping?.profile_empty) {
+        return [];
+    }
+
+    return mappingFacts(mapping, tr).filter((fact) => fact.uncertain);
+}
+
+/**
+ * The unclear facts that do not matter for the status: with «påkrevd» or «ikke påkrevd» no answer
+ * can change it any more. Named so the profile does not read as settled, and said not to matter.
+ */
+export function irrelevantUnresolvedFacts(data, tr = {}) {
+    if (data?.status === 'must_clarify') {
+        return [];
+    }
+
+    return unresolvedFacts(data?.mapping, tr);
+}
+
+/** «må avklares»: the facts whose answer could still make the assessment required, by name. */
+export function decisiveFacts(data, tr = {}) {
+    const facts = mappingFacts(data?.mapping, tr);
+
+    return (data?.unresolved ?? []).map((key) => facts.find((fact) => fact.key === key)).filter(Boolean);
+}
+
+/** The status line: required, must be clarified, or not required — the server's answer, in words. */
+export function requiredText(data, tr = {}) {
+    const status = DUE_DILIGENCE_STATUSES.includes(data?.status) ? data.status : 'must_clarify';
+
+    return tr.due_diligence?.statuses?.[status] ?? STATUS_FALLBACKS[status];
+}
+
+/** «Det mangler avklarte opplysninger om: Høyrisikokategorier.» — null unless the status is må avklares. */
+export function mustClarifyText(data, tr = {}) {
+    const facts = decisiveFacts(data, tr);
+
+    if (data?.status !== 'must_clarify' || facts.length === 0) {
+        return null;
+    }
+
+    return (tr.due_diligence?.must_clarify_facts ?? 'Det mangler avklarte opplysninger om: :facts.')
+        .replace(':facts', facts.map((fact) => fact.label).join(', '));
 }
 
 /** The control requirements that apply now on human rights, working conditions and environment. */

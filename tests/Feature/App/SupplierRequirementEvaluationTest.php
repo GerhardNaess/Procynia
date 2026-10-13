@@ -4,6 +4,7 @@ namespace Tests\Feature\App;
 
 use App\Models\Customer;
 use App\Models\Supplier;
+use App\Models\SupplierAssessment;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierDocument;
 use App\Models\SupplierRequirementEvaluation;
@@ -286,6 +287,37 @@ class SupplierRequirementEvaluationTest extends TestCase
         $draft = app(SupplierKnowledgeSource::class)->draft($assurer, $supplier->fresh());
         $requirements = collect($draft->sections)->firstWhere('key', 'requirements');
         $this->assertSame(['Databehandleravtale: Mangler — Ikke signert.'], $requirements->lines);
+    }
+
+    public function test_the_wiki_knowledge_draft_offers_the_current_assessment_and_never_a_retired_decision(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $supplier = $this->supplier($customer, $assurer, 'Drift AS');
+        $source = app(SupplierKnowledgeSource::class);
+        $assess = fn (string $on, string $result, string $rationale) => SupplierAssessment::query()->create([
+            'customer_id' => $customer->id, 'supplier_id' => $supplier->id, 'assessed_on' => $on, 'assessed_by_user_id' => $assurer->id,
+            'quality_rating' => 'good', 'delivery_rating' => 'good', 'security_rating' => 'acceptable', 'compliance_rating' => 'good',
+            'overall_result' => $result, 'rationale' => $rationale, 'supplier_name' => $supplier->name, 'recorded_at' => now(),
+        ]);
+
+        // A decision registered before they were retired is history, not what holds now: never offered.
+        DB::table('supplier_assurance_decisions')->insert([
+            'customer_id' => $customer->id, 'supplier_id' => $supplier->id, 'decision' => 'approved', 'rationale' => 'Gammel beslutning.',
+            'decided_on' => '2026-09-01', 'recorded_at' => now(), 'state_snapshot' => '{}', 'supplier_name' => $supplier->name,
+        ]);
+        $sections = collect($source->draft($assurer, $supplier->fresh())->sections);
+        $this->assertNull($sections->firstWhere('key', 'decision'));
+        $this->assertSame([], $sections->firstWhere('key', 'assessment')->lines);
+        $this->assertStringNotContainsString('Gammel beslutning', json_encode($sections->pluck('lines')->all(), JSON_UNESCAPED_UNICODE));
+
+        // The assessment in force: the newest by date, whatever order they were recorded in.
+        $assess('2026-09-20', 'satisfactory', 'Leverer som avtalt.');
+        $assess('2026-06-01', 'unsatisfactory', 'Forsinkelser.');
+        $this->assertSame(
+            ['Samlet vurdering: Tilfredsstillende (2026-09-20)', 'Begrunnelse: Leverer som avtalt.'],
+            collect($source->draft($assurer, $supplier->fresh())->sections)->firstWhere('key', 'assessment')->lines,
+        );
     }
 
     /**

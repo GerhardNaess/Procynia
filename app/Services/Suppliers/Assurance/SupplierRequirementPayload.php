@@ -114,6 +114,9 @@ class SupplierRequirementPayload
                     'can_exclude' => $canOverride && $decision['automatic'] && ! $requirement->isMandatory()
                         && $requirement->supplier_id === null && $decision['override']?->action !== SupplierRequirementOverride::ACTION_EXCLUDE,
                     'can_clear' => $canOverride && $decision['override'] !== null,
+                    // Rediger krav / Sett som utgått: only this supplier's own requirement — a catalogue
+                    // requirement is maintained under Kontrollkrav. Never Slett: it may have controls.
+                    'can_manage' => $canOverride && $requirement->supplier_id !== null,
                 ];
             });
 
@@ -198,48 +201,32 @@ class SupplierRequirementPayload
     }
 
     /**
-     * Kontrollstatus (§9.5): the decision in force and the state now, side by side and never merged
-     * — the decision is a person's and history, the state is computed now. Every decision newest
-     * first, each with the state it was taken on as it was then. Null when nothing applies and no
-     * decision was ever registered: Kontrollstatus is then not shown.
+     * Kravstatus: the state the requirements that apply now are in, computed by
+     * SupplierAssuranceResolver — a fact about the requirements, never an approval of the supplier.
+     * Null when nothing applies.
      *
      * @param  list<array<string, mixed>>|null  $applicable  forSupplier()['applicable'], when already computed
      * @return array<string, mixed>|null
      */
-    public function assurance(User $user, Supplier $supplier, ?array $applicable = null): ?array
+    public function requirementStatus(Supplier $supplier, ?array $applicable = null): ?array
+    {
+        $rows = $applicable ?? ($this->resolver->rows(collect([$supplier]))[(int) $supplier->id] ?? []);
+
+        return SupplierAssuranceResolver::resolve($rows);
+    }
+
+    /**
+     * The kontrollbeslutninger registered before Registrer beslutning was retired (2026-10-12),
+     * newest first, each with the state it was taken on as it was then. History only: read-only,
+     * never the state now. Empty for a supplier that never had one.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function decisionHistory(Supplier $supplier): array
     {
         $decisions = $supplier->assuranceDecisions()->with('decidedBy:id,name')->get();
-        $inForce = SupplierAssuranceResolver::decisionInForce($decisions);
-        $rows = $applicable ?? ($this->resolver->rows(collect([$supplier]))[(int) $supplier->id] ?? []);
-        $state = SupplierAssuranceResolver::resolve($rows, $inForce?->decision);
 
-        // An ended supplier is not followed up and no decision can be registered on it (§13.3): the
-        // state is shown as it is, but «Krever beslutning» does not ask for what cannot be done.
-        if ($state !== null && $supplier->isEnded()) {
-            $state['decision_required'] = false;
-        }
-
-        if ($state === null && $decisions->isEmpty()) {
-            return null;
-        }
-
-        $canDecide = $this->access->canAssure($user) && ! $supplier->isEnded() && $state !== null;
-
-        return [
-            'state' => $state,
-            'decision' => $inForce === null ? null : $this->decision($inForce),
-            'history' => array_map(fn (SupplierAssuranceDecision $decision): array => $this->decision($decision), SupplierAssuranceDecision::newestFirst($decisions)),
-            'form' => $canDecide ? [
-                'decisions' => SupplierAssuranceDecision::DECISIONS,
-                'allowed' => $state['allowed_decisions'],
-                'today' => now()->toDateString(),
-            ] : null,
-            'permissions' => [
-                'can_decide' => $canDecide,
-                // Says why Registrer beslutning is missing, for someone who otherwise could.
-                'ended' => $supplier->isEnded() && $this->access->canAssure($user),
-            ],
-        ];
+        return array_map(fn (SupplierAssuranceDecision $decision): array => $this->decision($decision), SupplierAssuranceDecision::newestFirst($decisions));
     }
 
     /** @return array<string, mixed> */

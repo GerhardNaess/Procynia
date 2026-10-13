@@ -8,6 +8,7 @@ use App\Models\SupplierProfileChange;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAccessService;
 use App\Support\Suppliers\SupplierValidationMessages;
+use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -57,6 +58,16 @@ class SupplierProfileService
             $rules["{$field}.*"] = ['string', Rule::in($codes)];
         }
 
+        // «Ikke avklart» is an answer of its own: alone, never next to a category.
+        foreach (SupplierProfile::LIST_UNKNOWN_FIELDS as $field) {
+            $rules[$field] = ['nullable', 'array', function (string $attribute, mixed $value, Closure $fail): void {
+                if (is_array($value) && in_array(SupplierProfile::ANSWER_UNKNOWN, $value, true) && count($value) > 1) {
+                    $fail(__('procynia.supplier_management.validation.list_unknown_alone'));
+                }
+            }];
+            $rules["{$field}.*"] = ['string', Rule::in([...SupplierProfile::LIST_FIELDS[$field], SupplierProfile::ANSWER_UNKNOWN])];
+        }
+
         $rules['reason'] = ['nullable', 'string', 'max:5000'];
 
         return $rules;
@@ -100,6 +111,12 @@ class SupplierProfileService
             $value = $validated[$field] ?? null;
 
             if (array_key_exists($field, SupplierProfile::LIST_FIELDS)) {
+                if (is_array($value) && SupplierProfile::isListUnknown($field, array_values(array_unique($value)))) {
+                    $answers[$field] = [SupplierProfile::ANSWER_UNKNOWN];
+
+                    continue;
+                }
+
                 $answers[$field] = is_array($value)
                     ? array_values(array_intersect(SupplierProfile::LIST_FIELDS[$field], $value))
                     : null;

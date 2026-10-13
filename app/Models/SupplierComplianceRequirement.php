@@ -12,7 +12,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * assessments are read from Etterlevelse og revisjon, through that module's access rules, when they
  * are shown.
  *
- * Written only by SupplierComplianceRequirementService. Has no access rules of its own: reach it
+ * HISTORICAL ONLY since 2026-10-13: nothing in the application writes a row any more, and the
+ * rows written under Leverandøroppfølging v1 are read by SupplierComplianceRequirementService and
+ * shown under Historikk as «Tidligere koblinger til etterlevelseskrav». A control requirement's
+ * anchor (SupplierControlRequirement::compliance_requirement_id) is the link now.
+ *
+ * Has no access rules of its own: reach it
  * through a supplier from SupplierAccessService and show a requirement only when
  * ComplianceAccessService::visibleRequirements() returns it.
  */

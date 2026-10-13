@@ -105,34 +105,92 @@ class SupplierProfilePredicatesTest extends TestCase
         ));
     }
 
-    /** @return array<string, array{0: array<string, mixed>|null, 1: bool}> */
+    /**
+     * The decision table (2026-10-13): required on clear answers, must_clarify when an unclear answer
+     * could still make it required, not_required when every criterion has a clear no. Columns:
+     * high-risk categories, outside the EEA, labour-intensive, subcontractors.
+     *
+     * @return array<string, array{0: array<string, mixed>|null, 1: string, 2: list<string>}>
+     */
     public static function dueDiligenceProfiles(): array
     {
-        $clear = ['production_outside_eea' => 'no', 'high_risk_categories' => [], 'uses_subcontractors' => 'no', 'labour_intensive' => 'no'];
+        $row = fn (mixed $highRisk, ?string $outside, ?string $labour, ?string $subcontractors): array => [
+            'high_risk_categories' => $highRisk,
+            'production_outside_eea' => $outside,
+            'labour_intensive' => $labour,
+            'uses_subcontractors' => $subcontractors,
+        ];
 
         return [
-            'no profile' => [null, false],
-            'everything answered no' => [$clear, false],
-            'a high-risk category' => [['high_risk_categories' => ['textiles']] + $clear, true],
-            'production outside the EEA' => [['production_outside_eea' => 'yes'] + $clear, true],
-            // «Ikke avklart» and not answered count as holding (plan §2 pkt. 3).
-            'production outside the EEA not clarified' => [['production_outside_eea' => 'unknown'] + $clear, true],
-            'production outside the EEA not answered' => [['production_outside_eea' => null] + $clear, true],
-            'labour intensive without subcontractors' => [['labour_intensive' => 'yes'] + $clear, false],
-            'labour intensive, subcontractors not clarified' => [['labour_intensive' => 'yes', 'uses_subcontractors' => 'unknown'] + $clear, true],
+            'category · no · no · no' => [$row(['textiles'], 'no', 'no', 'no'), 'required', []],
+            'none · yes · no · no' => [$row([], 'yes', 'no', 'no'), 'required', []],
+            'none · no · yes · yes' => [$row([], 'no', 'yes', 'yes'), 'required', []],
+            'none · no · no · yes' => [$row([], 'no', 'no', 'yes'), 'not_required', []],
+            'none · no · unclear · no' => [$row([], 'no', 'unknown', 'no'), 'not_required', []],
+            'none · no · unclear · yes' => [$row([], 'no', 'unknown', 'yes'), 'must_clarify', ['labour_intensive']],
+            'unclear · no · no · no' => [$row(['unknown'], 'no', 'no', 'no'), 'must_clarify', ['high_risk_categories']],
+            'none · unclear · no · no' => [$row([], 'unknown', 'no', 'no'), 'must_clarify', ['production_outside_eea']],
+            'unclear · yes · unclear · unclear' => [$row(['unknown'], 'yes', 'unknown', 'unknown'), 'required', []],
+            // Not answered is as unclear as «Ikke avklart» — for the list too: null is not «Ingen».
+            'categories not answered' => [$row(null, 'no', 'no', 'no'), 'must_clarify', ['high_risk_categories']],
+            'outside the EEA not answered' => [$row([], null, 'no', 'no'), 'must_clarify', ['production_outside_eea']],
+            'both halves of the pair unclear' => [$row([], 'no', 'unknown', null), 'must_clarify', ['labour_intensive', 'uses_subcontractors']],
+            // A wholly empty profile has nothing to conclude «not required» from.
+            'no profile' => [null, 'must_clarify', ['high_risk_categories', 'production_outside_eea', 'labour_intensive', 'uses_subcontractors']],
+            'nothing answered' => [[], 'must_clarify', ['high_risk_categories', 'production_outside_eea', 'labour_intensive', 'uses_subcontractors']],
+            // Questions that cannot trigger it need no answer: only the four are read.
+            'only the four answered' => [$row([], 'no', 'no', 'no'), 'not_required', []],
         ];
     }
 
-    /** @param  array<string, mixed>|null  $answers */
+    /**
+     * @param  array<string, mixed>|null  $answers
+     * @param  list<string>  $unresolved
+     */
     #[DataProvider('dueDiligenceProfiles')]
-    public function test_due_diligence_is_relevant_by_the_plans_rule(?array $answers, bool $relevant): void
+    public function test_the_due_diligence_status_is_one_of_three_by_the_decision_table(?array $answers, string $status, array $unresolved): void
     {
-        $supplier = $this->supplier(['criticality' => 'critical']);
-        $facts = SupplierProfilePredicates::evaluate($supplier, $answers === null ? null : $this->answers($answers));
+        $result = SupplierProfilePredicates::dueDiligenceStatus($answers === null ? null : $this->answers($answers));
 
-        $this->assertSame($relevant, SupplierProfilePredicates::dueDiligenceRelevant($facts));
+        $this->assertSame($status, $result['status']);
+        $this->assertSame($unresolved, $result['unresolved']);
+        $this->assertSame($status === 'required', $result['groups'] !== []);
         // Not a predicate a requirement's rule may use.
         $this->assertNotContains('due_diligence_relevant', SupplierProfilePredicates::all());
+    }
+
+    public function test_a_confirmed_criterion_is_required_whatever_else_is_unclear_and_a_clear_no_moves_must_clarify_to_not_required(): void
+    {
+        $status = fn (array $answers): string => SupplierProfilePredicates::dueDiligenceStatus($this->answers($answers))['status'];
+        $unclear = ['high_risk_categories' => ['unknown'], 'production_outside_eea' => 'unknown', 'labour_intensive' => 'unknown', 'uses_subcontractors' => 'unknown'];
+
+        $this->assertSame('must_clarify', $status($unclear));
+        foreach ([['high_risk_categories' => ['electronics']], ['production_outside_eea' => 'yes'], ['labour_intensive' => 'yes', 'uses_subcontractors' => 'yes']] as $confirmed) {
+            $this->assertSame('required', $status($confirmed + $unclear), json_encode($confirmed));
+        }
+
+        // Clarified one by one as no: must_clarify until the last criterion is ruled out.
+        $answers = $unclear;
+        foreach ([['high_risk_categories' => []], ['production_outside_eea' => 'no']] as $step) {
+            $answers = $step + $answers;
+            $this->assertSame('must_clarify', $status($answers));
+        }
+        $this->assertSame('not_required', $status(['uses_subcontractors' => 'no'] + $answers), 'labour intensity left unclear does not matter');
+    }
+
+    public function test_high_risk_categories_unclear_holds_for_requirements_as_doubt_and_none_does_not(): void
+    {
+        $supplier = $this->supplier(['criticality' => 'standard']);
+        $answers = fn (mixed $categories): array => $this->answers(['high_risk_categories' => $categories, 'labour_intensive' => 'no']);
+
+        $this->assertContains('high_risk_products', SupplierProfilePredicates::evaluate($supplier, $answers(['textiles'])));
+        $this->assertNotContains('high_risk_products', SupplierProfilePredicates::uncertain($supplier, $answers(['textiles'])));
+        // «Ikke avklart» counts as doubt, as for the yes/no questions — and says so.
+        $this->assertContains('high_risk_products', SupplierProfilePredicates::evaluate($supplier, $answers(['unknown'])));
+        $this->assertContains('high_risk_products', SupplierProfilePredicates::uncertain($supplier, $answers(['unknown'])));
+        // «Ingen av disse» and not answered hold nothing for requirements, as before.
+        $this->assertNotContains('high_risk_products', SupplierProfilePredicates::evaluate($supplier, $answers([])));
+        $this->assertNotContains('high_risk_products', SupplierProfilePredicates::evaluate($supplier, $answers(null)));
     }
 
     /** @param  array<string, mixed>  $attributes */

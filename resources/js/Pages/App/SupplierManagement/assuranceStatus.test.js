@@ -1,12 +1,10 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import * as assuranceStatus from './assuranceStatus.js';
 import {
     applicableText,
     decisionByline,
-    decisionFormData,
-    decisionMissing,
-    decisionOptions,
     openMandatory,
     snapshotSummary,
     stateNow,
@@ -17,10 +15,8 @@ const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
 const tr = {
     assurance: {
-        decision_required: 'Krever beslutning',
         states: { mandatory_open: 'Obligatorisk krav åpent', follow_up_required: 'Krever oppfølging', in_order: 'I orden' },
         decisions: { approved: 'Godkjent', approved_with_follow_up: 'Godkjent med oppfølging', not_approved: 'Ikke godkjent for nye kjøp' },
-        form: { not_allowed: { approved: 'Kan ikke velges nå.' } },
     },
     control: {
         levels: { mandatory: 'Obligatorisk', important: 'Viktig' },
@@ -28,21 +24,29 @@ const tr = {
     },
 };
 
-describe('Kontrollstatus (supplier-assurance-v2-plan §9.5)', () => {
-    test('Tilstand nå says Krever beslutning when the server says so, and otherwise the state — never the decision', () => {
-        assert.deepEqual(stateNow({ state: 'mandatory_open', decision_required: true }, tr), { key: 'decision_required', label: 'Krever beslutning', tone: 'rose' });
-        // Ikke godkjent for nye kjøp is in force: the open requirement is still said, but no decision is asked for.
-        assert.equal(stateNow({ state: 'mandatory_open', decision_required: false }, tr).label, 'Obligatorisk krav åpent');
-        assert.equal(stateNow({ state: 'in_order', decision_required: false }, tr).label, 'I orden');
+describe('Kravstatus, and the retired kontrollbeslutninger as history', () => {
+    test('Kravstatus is the state the server computed — never a decision, never a share', () => {
+        assert.deepEqual(stateNow({ state: 'mandatory_open' }, tr), { key: 'mandatory_open', label: 'Obligatorisk krav åpent', tone: 'rose' });
+        assert.deepEqual(stateNow('follow_up_required', tr), { key: 'follow_up_required', label: 'Krever oppfølging', tone: 'amber' });
+        assert.equal(stateNow({ state: 'in_order' }, tr).label, 'I orden');
         assert.equal(stateNow(null, tr), null);
+        // The server no longer sends a decision signal, and a stray one changes nothing.
+        assert.equal(stateNow({ state: 'mandatory_open', decision_required: true }, tr).label, 'Obligatorisk krav åpent');
 
-        // Two labelled lines, the decision and the state, each with its own badge.
         const block = source('./SupplierAssuranceStatus.jsx');
-        assert.match(block, /data-testid="assurance-decision"/);
-        assert.match(block, /data-testid="assurance-state"/);
-        assert.match(block, /a\.decision \?\? 'Beslutning'/);
-        assert.match(block, /a\.state_now \?\? 'Tilstand nå'/);
+        assert.match(block, /data-testid="supplier-requirement-status"/);
         assert.doesNotMatch(block, /<progress|progressbar|\* 100|\/ state\.applicable_count/);
+    });
+
+    test('nothing registers a decision any more: no form, no endpoint, no button', () => {
+        for (const retired of ['decisionFormData', 'decisionMissing', 'decisionOptions']) {
+            assert.equal(assuranceStatus[retired], undefined, retired);
+        }
+
+        for (const file of ['./SupplierAssuranceStatus.jsx', './Show.jsx', './Index.jsx']) {
+            const text = source(file);
+            assert.doesNotMatch(text, /assurance-decisions|Registrer beslutning|Krever beslutning|decision_required|Ingen beslutning registrert/, file);
+        }
     });
 
     test('the summary counts in the plan order, overdue together, zero groups left out — never a share', () => {
@@ -63,25 +67,6 @@ describe('Kontrollstatus (supplier-assurance-v2-plan §9.5)', () => {
             items: [{ id: 3, text: 'Databehandleravtale – Aksept utløpt' }],
         });
         assert.match(openMandatory([{ id: 1, title: 'A' }, { id: 2, title: 'B' }], tr).heading, /^2 obligatoriske krav/);
-    });
-
-    test('the decision form offers only what the state allows, and asks for what the decision needs', () => {
-        const options = decisionOptions(['approved', 'approved_with_follow_up', 'not_approved'], ['approved_with_follow_up', 'not_approved'], tr);
-        assert.deepEqual(options.map((option) => [option.value, option.allowed, option.reason]), [
-            ['approved', false, 'Kan ikke velges nå.'],
-            ['approved_with_follow_up', true, null],
-            ['not_approved', true, null],
-        ]);
-
-        const data = decisionFormData('2026-10-08');
-        assert.deepEqual(data, { decision: '', rationale: '', follow_up_note: '', decided_on: '2026-10-08' });
-        assert.deepEqual(decisionMissing(data, ['not_approved']), ['decision', 'rationale']);
-        // A decision the state does not allow cannot be sent.
-        assert.deepEqual(decisionMissing({ ...data, decision: 'approved', rationale: 'Alt er dokumentert.' }, ['not_approved']), ['decision']);
-        // Godkjent med oppfølging says what is followed up.
-        assert.deepEqual(decisionMissing({ ...data, decision: 'approved_with_follow_up', rationale: 'Akseptert.' }, ['approved_with_follow_up']), ['follow_up_note']);
-        assert.deepEqual(decisionMissing({ ...data, decision: 'not_approved', rationale: '  ' }, ['not_approved']), ['rationale']);
-        assert.deepEqual(decisionMissing({ ...data, decision: 'not_approved', rationale: 'Ikke dokumentert.' }, ['not_approved']), []);
     });
 
     test('the history reads each decision with the state it was taken on, as it was then', () => {

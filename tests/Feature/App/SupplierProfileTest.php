@@ -122,6 +122,28 @@ class SupplierProfileTest extends TestCase
         $this->assertDatabaseRefuses(fn () => (clone $row)->update(['sectors' => '"ict"']), 'a list that is not an array');
     }
 
+    public function test_high_risk_categories_keep_ikke_avklart_apart_from_ingen_and_from_not_answered(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
+        $supplier = $this->supplier($customer, $editor, 'Arbeidstøy AS', classification: $this->classification(Supplier::CRITICALITY_IMPORTANT, 24));
+        $url = "/app/supplier-management/{$supplier->id}/profile";
+
+        // «Ikke avklart» next to a category is refused; it is an answer of its own. Not on sectors.
+        $this->actingAs($editor)->post($url, ['high_risk_categories' => ['unknown', 'textiles']])->assertSessionHasErrors('high_risk_categories');
+        $this->actingAs($editor)->post($url, ['sectors' => ['unknown']])->assertSessionHasErrors('sectors.0');
+        $this->assertFalse($supplier->profile()->exists());
+
+        $this->actingAs($editor)->post($url, ['high_risk_categories' => ['unknown'], 'on_site_work' => 'no'])->assertSessionHasNoErrors();
+        $this->assertSame(['unknown'], $supplier->profile()->sole()->high_risk_categories);
+        $this->assertSame(['unknown'], $this->actingAs($editor)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props']['profile']['answers']['high_risk_categories']);
+
+        // Then «Ingen av disse»: [] — a change like any other, with the old answer kept in the history.
+        $this->actingAs($editor)->post($url, ['high_risk_categories' => [], 'on_site_work' => 'no', 'reason' => 'Avklart med leverandøren.'])->assertSessionHasNoErrors();
+        $this->assertSame([], $supplier->profile()->sole()->high_risk_categories);
+        $this->assertSame(['unknown'], $supplier->profileChanges()->latest('id')->first()->from_profile['high_risk_categories']);
+    }
+
     public function test_every_change_needs_a_reason_and_is_one_row_with_the_whole_profile_before_and_after(): void
     {
         ['customer' => $customer] = $this->context('grc');

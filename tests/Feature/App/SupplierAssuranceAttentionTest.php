@@ -31,7 +31,8 @@ use Tests\TestCase;
  *  - retired, excluded and no-longer-applying requirements raise nothing, nor does an ended supplier
  *    or a customer without a catalogue;
  *  - the register and the page read the same findings, batch equals single, nothing from another
- *    customer, and reading never writes a control or a decision.
+ *    customer, and reading never writes a control or a decision;
+ *  - a historical kontrollbeslutning silences nothing (decisions retired 2026-10-12).
  */
 class SupplierAssuranceAttentionTest extends TestCase
 {
@@ -68,11 +69,11 @@ class SupplierAssuranceAttentionTest extends TestCase
     {
         ['customer' => $customer, 'reader' => $reader, 'mandatory' => $mandatory, 'important' => $important, 'standard' => $standard] = $this->catalogue();
 
-        // Nothing controlled: the mandatory requirement asks for a decision; the important one is
-        // Ikke vurdert; Oppfølging-level raises nothing.
+        // Nothing controlled: the mandatory requirement is Obligatorisk krav åpent; the important one
+        // is Ikke vurdert; Oppfølging-level raises nothing.
         $new = $this->supplier($customer, $reader, 'A Ny AS');
-        // «Ikke godkjent for nye kjøp» switches «Krever beslutning» off, so the mandatory requirement
-        // is named under Krav ikke vurdert instead.
+        // A historical «Ikke godkjent for nye kjøp» (decisions retired 2026-10-12) silences nothing:
+        // the open mandatory requirement is still named.
         $refused = $this->supplier($customer, $reader, 'B Ikke godkjent AS');
         $this->decide($refused, SupplierAssuranceDecision::DECISION_NOT_APPROVED);
         // Kontroll forfalt, each with why: the interval ran out yesterday / a document expired /
@@ -106,13 +107,14 @@ class SupplierAssuranceAttentionTest extends TestCase
             array_map(fn (array $row): string => $row['title'].(isset($row['reason']) ? ':'.$row['reason'].'@'.($row['date'] ?? '-') : ''), $finding['requirements'] ?? []),
         ], $findings[$supplier->id]);
 
-        $this->assertSame([['decision_required', ['DBA']], ['requirement_not_evaluated', ['Sikkerhetsrapport']]], $shape($new));
-        $this->assertSame([['requirement_not_evaluated', ['DBA', 'Sikkerhetsrapport']]], $shape($refused));
+        $this->assertSame([['mandatory_open', ['DBA']], ['requirement_not_evaluated', ['Sikkerhetsrapport']]], $shape($new));
+        $this->assertSame([['mandatory_open', ['DBA']], ['requirement_not_evaluated', ['Sikkerhetsrapport']]], $shape($refused));
+        $this->assertSame('not_evaluated', $findings[$new->id][0]['requirements'][0]['display_status']);
         $this->assertSame([['control_overdue', ['Sikkerhetsrapport:control_interval@2026-10-07']]], $shape($interval));
         $this->assertSame([['control_overdue', ['Sikkerhetsrapport:document_expired@2026-10-07']], ['document_expired', []]], $shape($document));
         $this->assertSame('SOC 2', $findings[$document->id][0]['requirements'][0]['document_title']);
         $this->assertSame([['control_overdue', ['Sikkerhetsrapport:acceptance_expired@2026-10-07']]], $shape($accepted));
-        $this->assertSame([['requirement_not_evaluated', ['DBA']], ['document_expired', []]], $shape($onboarding));
+        $this->assertSame([['mandatory_open', ['DBA']], ['document_expired', []]], $shape($onboarding));
         $this->assertSame([], $shape($ended));
         // v1 stands beside it, unchanged: Kritisk and never assessed.
         $this->assertSame([['profile_incomplete', []], ['not_assessed', []]], $shape($critical));
@@ -136,14 +138,14 @@ class SupplierAssuranceAttentionTest extends TestCase
         $this->evaluate($supplier, $important, 'documented', '2025-01-01');
         $service = app(SupplierAttentionService::class);
 
-        $this->assertSame(['decision_required', 'control_overdue', 'profile_incomplete', 'not_assessed'], array_column($service->findingsForSupplier($supplier), 'key'));
+        $this->assertSame(['mandatory_open', 'control_overdue', 'profile_incomplete', 'not_assessed'], array_column($service->findingsForSupplier($supplier), 'key'));
 
         // Excluded (not mandatory): it no longer applies, so it is neither overdue nor planned.
         DB::table('supplier_requirement_overrides')->insert([
             'customer_id' => $customer->id, 'supplier_id' => $supplier->id, 'requirement_id' => $important->id, 'action' => 'exclude',
             'reason' => 'Ikke relevant.', 'requirement_title' => $important->title, 'requirement_level' => $important->level, 'created_at' => now(),
         ]);
-        $this->assertSame(['decision_required', 'profile_incomplete', 'not_assessed'], array_column($service->findingsForSupplier($supplier), 'key'));
+        $this->assertSame(['mandatory_open', 'profile_incomplete', 'not_assessed'], array_column($service->findingsForSupplier($supplier), 'key'));
 
         // Retired: gone from the signals, its controls kept.
         $mandatory->forceFill(['status' => SupplierControlRequirement::STATUS_RETIRED])->save();
@@ -184,15 +186,16 @@ class SupplierAssuranceAttentionTest extends TestCase
         $this->assertSame($batch[$calm->id], $service->findingsForSupplier($calm));
         $this->assertSame([], $batch[$calm->id]);
 
-        // The register: the panel and the existing «trenger oppmerksomhet» filter carry the new signal,
-        // and nothing of the other customer's.
+        // The register: the row marker and the existing «trenger oppmerksomhet» filter carry the new
+        // signal, and nothing of the other customer's. No register-wide panel.
         $index = $this->actingAs($reader)->get('/app/supplier-management?attention=1')->assertOk()->viewData('page')['props'];
+        $this->assertArrayNotHasKey('attention', $index);
         $this->assertSame(['A Forfalt AS'], array_column($index['suppliers'], 'name'));
-        $this->assertSame(1, $index['attention']['total']);
-        $this->assertSame([['key' => 'control_overdue', 'count' => 1]], $index['attention']['categories']);
-        $this->assertSame($batch[$overdue->id], $index['attention']['suppliers'][0]['findings']);
+        $this->assertSame([['control_overdue']], array_column($index['suppliers'], 'attention'));
+        $this->assertSame(['control_overdue'], array_column($batch[$overdue->id], 'key'));
         $foreignIndex = $this->actingAs($foreignReader)->get('/app/supplier-management')->viewData('page')['props'];
-        $this->assertSame(['D Annen kunde AS'], array_column($foreignIndex['attention']['suppliers'], 'name'));
+        $this->assertSame(['D Annen kunde AS'], array_column($foreignIndex['suppliers'], 'name'));
+        $this->assertNotSame([], $foreignIndex['suppliers'][0]['attention']);
 
         // The page (supplier.view only): the same findings, and Neste kontroller with the overdue
         // control first. An ended supplier has no plan and no findings.

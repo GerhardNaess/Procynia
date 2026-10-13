@@ -3,12 +3,13 @@ import { useForm } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import RequiredMark from '../Risk/RequiredMark';
-import { CRITICALITY_QUESTIONS, answerLabel } from './supplierManagement';
 import {
     isListField,
     profileAnswerLabel,
     profileChangeLines,
+    isListUnknown,
     profileFormData,
+    takesListUnknown,
     toggleListAnswer,
     visibleProfileFields,
 } from './supplierProfileAnswers';
@@ -48,12 +49,14 @@ function Question({ field, form, options, tr }) {
     if (isListField(field)) {
         const codes = options[field] ?? [];
         const noneChosen = Array.isArray(value) && value.length === 0;
+        const withUnknown = takesListUnknown(field);
+        const hint = withUnknown ? (p.list_hint_unknown ?? 'Velg alle som passer, «Ingen av disse» eller «Ikke avklart».') : (p.list_hint ?? 'Velg alle som passer, eller «Ingen av disse».');
 
         return (
             <fieldset className="rounded-xl border border-slate-200 px-4 py-3" data-testid={`profile-question-${field}`}>
                 <legend className="sr-only">{question}</legend>
                 <p className={LEGEND} aria-hidden="true">{question}</p>
-                <p className={HINT}>{field === 'sectors' ? `${p.list_hint ?? 'Velg alle som passer, eller «Ingen av disse».'} ${p.sectors_hint ?? ''}`.trim() : (p.list_hint ?? 'Velg alle som passer, eller «Ingen av disse».')}</p>
+                <p className={HINT}>{field === 'sectors' ? `${hint} ${p.sectors_hint ?? ''}`.trim() : hint}</p>
                 <div className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
                     {codes.map((code) => (
                         <label key={code} className="flex min-h-10 items-start gap-2 py-1 text-base text-slate-900">
@@ -75,6 +78,17 @@ function Question({ field, form, options, tr }) {
                         />
                         <span>{p.none_selected ?? 'Ingen av disse'}</span>
                     </label>
+                    {withUnknown && (
+                        <label className="flex min-h-10 items-start gap-2 py-1 text-base text-slate-900">
+                            <input
+                                type="checkbox"
+                                checked={isListUnknown(value)}
+                                onChange={() => form.setData(field, toggleListAnswer(value, 'unknown', codes))}
+                                className="mt-1 h-5 w-5 shrink-0"
+                            />
+                            <span>{p.answers?.unknown ?? 'Ikke avklart'}</span>
+                        </label>
+                    )}
                 </div>
                 <FieldError message={form.errors[field] ?? form.errors[`${field}.0`]} />
             </fieldset>
@@ -137,7 +151,7 @@ function ProfileForm({ supplierId, profile, fields, onDone, tr }) {
 
                 return shown.length > 0 && (
                     <section key={group} className="space-y-3" aria-labelledby={`profile-form-group-${group}`}>
-                        <h3 id={`profile-form-group-${group}`} className="text-lg font-semibold text-slate-950">{p.groups?.[group] ?? group}</h3>
+                        <h4 id={`profile-form-group-${group}`} className="text-lg font-semibold text-slate-950">{p.groups?.[group] ?? group}</h4>
                         {shown.map((field) => <Question key={field} field={field} form={form} options={options} tr={tr} />)}
                     </section>
                 );
@@ -174,16 +188,17 @@ function ProfileForm({ supplierId, profile, fields, onDone, tr }) {
 }
 
 /**
- * Leverandørprofil on the supplier page: facts about the delivery that will later decide which control
- * requirements apply — not an assessment. The answers by theme, the four criticality answers it is read
- * with (changed under Kritikalitet), and Profilhistorikk with what changed in every save.
+ * Leverandørprofil, under «Detaljer» on Oversikt: facts about the delivery that decide which control
+ * requirements apply — not an assessment. The answers by theme. The four criticality answers the
+ * profile is read with are shown under Kritikalitet only, not repeated here; the technical link
+ * (profile.basis decides which questions are asked) is unchanged. Profilhistorikk is under
+ * Historikk (SupplierProfileHistory). The section heading is the Detaljer section's.
  *
  * «Fyll ut profil» / «Rediger profil» is offered only when the server says this person may change it:
  * supplier.edit on a supplier that is not ended. supplier.assure never gets it.
  */
 export default function SupplierProfile({ supplierId, profile, canEdit, locale, tr }) {
     const p = tr.profile ?? {};
-    const c = tr.criticality ?? {};
     const [open, setOpen] = useState(false);
 
     if (! profile) {
@@ -194,13 +209,11 @@ export default function SupplierProfile({ supplierId, profile, canEdit, locale, 
     const fields = Object.values(groups).flat();
     const answers = profile.answers;
     const visible = profile.visible ?? fields;
-    const history = profile.history ?? [];
     const unknownUser = tr.unknown_user ?? 'en tidligere bruker';
 
     return (
-        <section className={CARD} aria-labelledby="supplier-profile-heading" data-testid="supplier-profile">
-            <h2 id="supplier-profile-heading" className="text-xl font-semibold text-slate-950">{p.heading ?? 'Leverandørprofil'}</h2>
-            <p className="mt-1 text-base text-slate-600">{p.intro ?? 'Profilen beskriver forhold ved leveransen som senere brukes til å avgjøre hvilke kontrollkrav som gjelder.'}</p>
+        <div data-testid="supplier-profile">
+            <p className="text-base text-slate-600">{p.intro ?? 'Profilen beskriver forhold ved leveransen som senere brukes til å avgjøre hvilke kontrollkrav som gjelder.'}</p>
 
             {answers === null ? (
                 <p className="mt-4 text-base text-slate-800" data-testid="profile-none">{p.not_filled ?? 'Profilen er ikke fylt ut ennå.'}</p>
@@ -225,7 +238,7 @@ export default function SupplierProfile({ supplierId, profile, canEdit, locale, 
 
                         return shown.length > 0 && (
                             <div key={group} className="mt-5" data-testid={`profile-group-${group}`}>
-                                <h3 className="text-lg font-semibold text-slate-950">{p.groups?.[group] ?? group}</h3>
+                                <h4 className="text-lg font-semibold text-slate-950">{p.groups?.[group] ?? group}</h4>
                                 <dl className="mt-2 grid gap-4 sm:grid-cols-2">
                                     {shown.map((field) => (
                                         <div key={field} className="min-w-0" data-testid={`profile-answer-${field}`}>
@@ -240,25 +253,9 @@ export default function SupplierProfile({ supplierId, profile, canEdit, locale, 
                 </>
             )}
 
-            {! open && (
-                <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3" data-testid="profile-basis">
-                    <h3 className="text-lg font-semibold text-slate-950">{p.basis_heading ?? 'Fra kritikaliteten'}</h3>
-                    {profile.basis ? (
-                        <>
-                            <ul className="mt-1 space-y-1">
-                                {CRITICALITY_QUESTIONS.map((question) => (
-                                    <li key={question} className="text-base text-slate-700">
-                                        {c.questions?.[question] ?? question}{' '}
-                                        <span className="font-semibold text-slate-900">{answerLabel(profile.basis[question], tr)}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                            <p className="mt-1 text-base text-slate-600">{p.basis_hint ?? 'Endres under Kritikalitet.'}</p>
-                        </>
-                    ) : (
-                        <p className="mt-1 text-base text-slate-600">{p.basis_missing ?? 'Kritikalitet er ikke vurdert ennå. Noen spørsmål i profilen vises først når den er vurdert.'}</p>
-                    )}
-                </div>
+            {/* Without a criticality some questions are not asked yet; the answers themselves are under Kritikalitet. */}
+            {! open && ! profile.basis && (
+                <p className="mt-4 text-base text-slate-600" data-testid="profile-basis-missing">{p.basis_missing ?? 'Kritikalitet er ikke vurdert ennå. Noen spørsmål i profilen vises først når den er vurdert.'}</p>
             )}
 
             {canEdit && ! open && (
@@ -270,28 +267,44 @@ export default function SupplierProfile({ supplierId, profile, canEdit, locale, 
             {canEdit && open && (
                 <ProfileForm supplierId={supplierId} profile={profile} fields={fields} onDone={() => setOpen(false)} tr={tr} />
             )}
+        </div>
+    );
+}
 
-            {history.length > 0 && (
-                <div className="mt-6 border-t border-slate-100 pt-4">
-                    <h3 className="text-lg font-semibold text-slate-950">{p.history_heading ?? 'Profilhistorikk'}</h3>
-                    <ol className="mt-2 divide-y divide-slate-100" data-testid="profile-history">
-                        {history.map((entry) => (
-                            <li key={entry.id} className="space-y-1 py-3" data-testid="profile-history-entry">
-                                <p className="text-base font-semibold text-slate-900">
-                                    {formatLongDate(entry.changed_at, locale)} – {entry.changed_by_name ?? unknownUser}
-                                </p>
-                                <p className="text-base text-slate-600">{entry.from ? (p.history?.changed ?? 'Profilen ble endret') : (p.history?.first ?? 'Profilen ble fylt ut')}</p>
-                                <ul className="list-disc space-y-1 pl-5">
-                                    {profileChangeLines(entry, fields, tr).map((line) => (
-                                        <li key={line} className="break-words text-base text-slate-800">{line}</li>
-                                    ))}
-                                </ul>
-                                {entry.reason && <p className="whitespace-pre-line break-words text-base text-slate-800">{entry.reason}</p>}
-                            </li>
-                        ))}
-                    </ol>
-                </div>
-            )}
+/**
+ * «Profilhistorikk», under Historikk: every save of the profile, newest first — when, by whom, what
+ * changed from what, and why. Read-only; nothing when the profile was never filled in.
+ */
+export function SupplierProfileHistory({ profile, locale, tr }) {
+    const p = tr.profile ?? {};
+    const history = profile?.history ?? [];
+
+    if (history.length === 0) {
+        return null;
+    }
+
+    const fields = Object.values(profile.options?.groups ?? {}).flat();
+    const unknownUser = tr.unknown_user ?? 'en tidligere bruker';
+
+    return (
+        <section className={CARD} aria-labelledby="supplier-profile-history-heading" data-testid="supplier-profile-history">
+            <h2 id="supplier-profile-history-heading" className="text-xl font-semibold text-slate-950">{p.history_heading ?? 'Profilhistorikk'}</h2>
+            <ol className="mt-2 divide-y divide-slate-100" data-testid="profile-history">
+                {history.map((entry) => (
+                    <li key={entry.id} className="space-y-1 py-3" data-testid="profile-history-entry">
+                        <p className="text-base font-semibold text-slate-900">
+                            {formatLongDate(entry.changed_at, locale)} – {entry.changed_by_name ?? unknownUser}
+                        </p>
+                        <p className="text-base text-slate-600">{entry.from ? (p.history?.changed ?? 'Profilen ble endret') : (p.history?.first ?? 'Profilen ble fylt ut')}</p>
+                        <ul className="list-disc space-y-1 pl-5">
+                            {profileChangeLines(entry, fields, tr).map((line) => (
+                                <li key={line} className="break-words text-base text-slate-800">{line}</li>
+                            ))}
+                        </ul>
+                        {entry.reason && <p className="whitespace-pre-line break-words text-base text-slate-800">{entry.reason}</p>}
+                    </li>
+                ))}
+            </ol>
         </section>
     );
 }

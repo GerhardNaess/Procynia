@@ -603,6 +603,18 @@ class SupplierImportAnalyzer
             return [];
         }
 
+        // «Ikke avklart» is an answer of its own on the lists that take it — never «Ingen».
+        if (in_array($field, SupplierProfile::LIST_UNKNOWN_FIELDS, true)) {
+            $unknown = array_map(
+                fn (string $locale): string => SupplierImportColumns::normalize((string) __('procynia.supplier_management.profile.answers.unknown', [], $locale)),
+                ['no', 'en'],
+            );
+
+            if (in_array(SupplierImportColumns::normalize($cells[$field]), $unknown, true)) {
+                return [SupplierProfile::ANSWER_UNKNOWN];
+            }
+        }
+
         $chosen = [];
 
         foreach (preg_split('/[,;\n]+/u', $cells[$field]) ?: [] as $part) {

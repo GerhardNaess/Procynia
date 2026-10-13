@@ -20,6 +20,18 @@ export const PROFILE_ANSWER_FIELDS = [
 
 export const PROFILE_LIST_FIELDS = ['high_risk_categories', 'sectors'];
 
+/** The lists that also take «Ikke avklart», stored as ['unknown'] and never next to a code. */
+export const PROFILE_LIST_UNKNOWN_FIELDS = ['high_risk_categories'];
+
+export function takesListUnknown(field) {
+    return PROFILE_LIST_UNKNOWN_FIELDS.includes(field);
+}
+
+/** A list answered «Ikke avklart». */
+export function isListUnknown(value) {
+    return Array.isArray(value) && value.length === 1 && value[0] === 'unknown';
+}
+
 const ANSWER_FALLBACKS = { yes: 'Ja', no: 'Nei', unknown: 'Ikke avklart' };
 
 /** Which code list names a single-choice or list field's values in translations.supplier_management.profile. */
@@ -82,6 +94,10 @@ export function profileAnswerLabel(field, value, tr = {}) {
             return p.none_selected ?? 'Ingen av disse';
         }
 
+        if (isListUnknown(value)) {
+            return p.answers?.unknown ?? ANSWER_FALLBACKS.unknown;
+        }
+
         return value.map((code) => p[VALUE_LISTS[field]]?.[code] ?? code).join(', ');
     }
 
@@ -108,8 +124,8 @@ export function profileFormData(fields, answers = null) {
 
 /**
  * Ticking or unticking one code in a list. «Ingen av disse» (code null) is the answer [] and clears
- * the codes; ticking a code clears «Ingen av disse». Unticking the last code leaves the question
- * unanswered, not answered «none».
+ * the codes; «Ikke avklart» (code 'unknown') is the answer ['unknown'] and clears them too; ticking a
+ * code clears either. Unticking the last code leaves the question unanswered, not answered «none».
  *
  * @param {string[]|null} current
  * @param {string|null} code   null for «Ingen av disse»
@@ -120,7 +136,11 @@ export function toggleListAnswer(current, code, order = []) {
         return Array.isArray(current) && current.length === 0 ? null : [];
     }
 
-    const chosen = new Set(Array.isArray(current) ? current : []);
+    if (code === 'unknown') {
+        return isListUnknown(current) ? null : ['unknown'];
+    }
+
+    const chosen = new Set(Array.isArray(current) && ! isListUnknown(current) ? current : []);
 
     if (chosen.has(code)) {
         chosen.delete(code);

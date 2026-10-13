@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { loginAs } from './helpers/auth.js';
 import { DESKTOP, expectPageHelp, expectReadable as expectReadableAt } from './helpers/readability.js';
-import { SUPPLIER_E2E_PASSWORD, cleanUpSupplierE2eData, openSupplierTab, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
+import { SUPPLIER_E2E_PASSWORD, cleanUpSupplierE2eData, openSupplierDetails, openSupplierTab, supplierE2eSuffix, supplierFixture } from './helpers/suppliers.js';
 
 const suffix = supplierE2eSuffix();
 cleanUpSupplierE2eData(suffix);
@@ -30,11 +30,15 @@ test('a supplier profile is filled in, changed with a reason, and both saves rea
     await page.setViewportSize(DESKTOP);
     await page.goto(`/app/supplier-management/${supplier.id}`);
 
+    // Leverandørprofil is under Detaljer, closed, its summary saying where it stands.
+    await expect(page.getByTestId('details-profile-summary')).toHaveText('Ikke fylt ut · Avgjør hvilke kontrollkrav som gjelder');
+    await openSupplierDetails(page, 'profile');
+    await expect(page.getByRole('heading', { name: /^Leverandørprofil/ })).toBeVisible();
     const section = page.getByTestId('supplier-profile');
-    await expect(section.getByRole('heading', { name: 'Leverandørprofil', exact: true })).toBeVisible();
     await expect(section.getByTestId('profile-none')).toHaveText('Profilen er ikke fylt ut ennå.');
-    // The four criticality answers are read here and changed under Kritikalitet.
-    await expect(section.getByTestId('profile-basis')).toContainText('Endres under Kritikalitet.');
+    // The four criticality answers are under Kritikalitet, not repeated here.
+    await expect(section.getByTestId('profile-basis')).toHaveCount(0);
+    await expect(section).not.toContainText('Behandler leverandøren personopplysninger på våre vegne?');
 
     // Fyll ut profil: personal data, so the role is asked; no system access, so privileged access is not.
     await section.getByRole('button', { name: 'Fyll ut profil' }).click();
@@ -62,12 +66,18 @@ test('a supplier profile is filled in, changed with a reason, and both saves rea
         await expect(section.getByTestId(`profile-answer-${field}`)).toContainText(text);
     }
     await expect(section.getByTestId('profile-incomplete')).toBeVisible();
+    // No history on Oversikt: Profilhistorikk is under Historikk.
+    await expect(page.getByTestId('profile-history-entry')).toHaveCount(0);
 
-    const entries = section.getByTestId('profile-history-entry');
+    await openSupplierTab(page, 'Historikk');
+    const entries = page.getByTestId('supplier-profile-history').getByTestId('profile-history-entry');
     await expect(entries).toHaveCount(1);
     await expect(entries.nth(0)).toContainText(person.name);
     await expect(entries.nth(0)).toContainText('Profilen ble fylt ut');
     await expect(entries.nth(0)).toContainText('Bruker underleverandører: Nei');
+    await openSupplierTab(page, 'Oversikt');
+    // Back on Oversikt the section is as it was left: open.
+    await openSupplierDetails(page, 'profile');
 
     // Rediger profil: a change needs a begrunnelse.
     await section.getByRole('button', { name: 'Rediger profil' }).click();
@@ -78,6 +88,7 @@ test('a supplier profile is filled in, changed with a reason, and both saves rea
     await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
 
     await expect(section.getByTestId('profile-answer-uses_subcontractors')).toContainText('Ja');
+    await openSupplierTab(page, 'Historikk');
     await expect(entries).toHaveCount(2);
     await expect(entries.nth(0)).toContainText('Profilen ble endret');
     await expect(entries.nth(0)).toContainText('Særlige kategorier eller sensitive personopplysninger: Ikke avklart → Ja');
@@ -113,13 +124,15 @@ test('the profile decides which control requirements apply, and a reasoned overr
     const rows = section.getByTestId('control-requirement-row');
     const row = (title) => rows.filter({ hasText: title });
     await openSupplierTab(page, 'Krav og kvalifikasjoner');
-    await expect(section.getByRole('heading', { name: 'Krav og kvalifikasjoner', exact: true })).toBeVisible();
+    await expect(section.getByRole('heading', { name: 'Kontrollkrav for leverandøren', exact: true })).toBeVisible();
+    await expect(section).toContainText('Her ser du hvilke kontrollkrav som gjelder leverandøren, og hvordan de er kontrollert.');
     // No profile yet: unanswered profile questions do not trigger anything.
     await expect(section.getByTestId('control-none')).toBeVisible();
 
     // The profile makes both requirements apply.
     await openSupplierTab(page, 'Oversikt');
     const profile = page.getByTestId('supplier-profile');
+    await openSupplierDetails(page, 'profile');
     await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
     const form = profile.getByTestId('profile-form');
     await answer(form, 'data_role', 'Databehandler');
@@ -166,6 +179,7 @@ test('the profile decides which control requirements apply, and a reasoned overr
 
     // ... and follows the profile: no subcontractors, no requirement.
     await openSupplierTab(page, 'Oversikt');
+    await openSupplierDetails(page, 'profile');
     await profile.getByRole('button', { name: 'Rediger profil' }).click();
     await answer(form, 'uses_subcontractors', 'Nei');
     await page.locator('#supplier-profile-reason').fill('Leverandøren har sagt opp underleverandøren.');
@@ -175,9 +189,19 @@ test('the profile decides which control requirements apply, and a reasoned overr
     await expect(rows).toHaveCount(1);
     await expect(row(catalogue.subcontractors_title)).toHaveCount(0);
 
+    // One «Legg til krav», two choices — never two main buttons side by side.
+    await expect(section.getByRole('button', { name: 'Nytt krav for denne leverandøren' })).toHaveCount(0);
+    await section.getByTestId('add-requirement').click();
+    const choice = section.getByTestId('add-requirement-choice');
+    await expect(choice.getByRole('heading', { name: 'Legg til krav' })).toBeVisible();
+    await expect(choice.getByTestId('add-requirement-existing')).toContainText('Velg et kontrollkrav som allerede finnes i virksomhetens kravregister, men som ikke gjelder denne leverandøren automatisk.');
+    await expect(choice.getByTestId('add-requirement-own')).toContainText('Hvis kravet skal gjelde flere leverandører, opprett det under Kontrollkrav i stedet.');
+    await expectReadable(page, '06a-add-requirement-choice');
+
     // Included by hand: the manual reason, with who and when.
-    await section.getByRole('button', { name: 'Legg til krav' }).click();
+    await choice.getByRole('button', { name: /Velg eksisterende kontrollkrav/ }).click();
     const include = section.getByTestId('override-form-include');
+    await expect(include.getByRole('heading', { name: 'Velg eksisterende kontrollkrav' })).toBeVisible();
     await expect(include).toContainText('Gjelder når leverandøren bruker underleverandører');
     await include.getByLabel(new RegExp(catalogue.subcontractors_title)).check();
     await include.getByLabel('Begrunnelse').fill('Vi vil ha oversikten uansett.');
@@ -187,9 +211,46 @@ test('the profile decides which control requirements apply, and a reasoned overr
     await expect(row(catalogue.subcontractors_title).getByTestId('requirement-reason')).toContainText('Begrunnelse: Vi vil ha oversikten uansett.');
     await expect(history.getByTestId('control-history-entry')).toHaveCount(3);
 
+    // A requirement for this supplier only: created, edited and retired on the supplier.
+    const ownTitle = `Utslippsfrie kjøretøy ${suffix}`;
+    await section.getByTestId('add-requirement').click();
+    await section.getByTestId('add-requirement-choice').getByRole('button', { name: /Opprett krav for denne leverandøren/ }).click();
+    const create = section.getByTestId('own-requirement-create');
+    await expect(create.getByRole('heading', { name: 'Opprett krav for denne leverandøren' })).toBeVisible();
+    // No rule: it always applies to this supplier.
+    await expect(create.getByTestId('control-requirement-rule')).toHaveCount(0);
+    await create.getByLabel('Tittel').fill(ownTitle);
+    await create.getByLabel('Tema').selectOption({ label: 'Klima og miljø' });
+    await create.getByLabel('Når kontrolleres kravet?').selectOption({ label: 'Løpende' });
+    await create.getByTestId('control-requirement-level').getByLabel(/^Viktig/).check();
+    await expectReadable(page, '06b-own-requirement-form');
+    await create.getByRole('button', { name: 'Lagre kontrollkrav' }).click();
+    await expect(page.getByText('Kontrollkravet er lagret.', { exact: true })).toBeVisible();
+    await expect(row(ownTitle).getByTestId('requirement-reason')).toHaveText('Krav for denne leverandøren');
+    // Catalogue requirements are maintained under Kontrollkrav, not here.
+    await expect(row(catalogue.dpa_title).getByRole('button', { name: 'Rediger krav' })).toHaveCount(0);
+
+    await row(ownTitle).getByRole('button', { name: 'Rediger krav' }).click();
+    const edit = row(ownTitle).getByTestId('own-requirement-edit');
+    await edit.getByLabel('Tittel').fill(`${ownTitle} 50 %`);
+    await edit.getByRole('button', { name: 'Lagre kontrollkrav' }).click();
+    await expect(page.getByText('Kontrollkravet er oppdatert.', { exact: true })).toBeVisible();
+    await expect(row(`${ownTitle} 50 %`)).toHaveCount(1);
+    await expectReadable(page, '06c-own-requirement');
+
+    // Sett som utgått, behind a confirmation: it no longer applies. Never Slett.
+    await expect(row(`${ownTitle} 50 %`).getByRole('button', { name: 'Slett' })).toHaveCount(0);
+    let confirmation = '';
+    page.once('dialog', (dialog) => { confirmation = dialog.message(); dialog.accept(); });
+    await row(`${ownTitle} 50 %`).getByRole('button', { name: 'Sett som utgått' }).click();
+    await expect(page.getByText('Kontrollkravet er satt som utgått. Det gjelder ingen leverandører lenger.', { exact: true })).toBeVisible();
+    expect(confirmation).toContain('Sette kravet som utgått?');
+    await expect(row(`${ownTitle} 50 %`)).toHaveCount(0);
+
     // The catalogue says when each requirement applies, in words.
     await page.goto('/app/supplier-management/control-requirements');
-    await expect(page.getByRole('heading', { name: 'Leverandører', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Kontrollkrav', level: 1 })).toBeVisible();
+    await expect(page.getByText('Her definerer og vedlikeholder dere virksomhetens krav til leverandører.', { exact: true })).toBeVisible();
     await expect(page.getByTestId('module-navigation').locator('[aria-current="page"]')).toHaveText('Kontrollkrav');
     await expect(page.getByTestId('control-catalogue-row').filter({ hasText: catalogue.dpa_title }).getByTestId('control-rule-text'))
         .toHaveText('Gjelder når leverandøren behandler personopplysninger som databehandler');
@@ -217,6 +278,7 @@ test('a requirement is controlled with a document, and the history keeps the doc
 
     // The requirement applies: a data processor.
     const profile = page.getByTestId('supplier-profile');
+    await openSupplierDetails(page, 'profile');
     await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
     await answer(profile.getByTestId('profile-form'), 'data_role', 'Databehandler');
     await profile.getByRole('button', { name: 'Lagre profil' }).click();
@@ -296,20 +358,26 @@ test('a requirement is controlled with a document, and the history keeps the doc
 });
 
 /**
- * Kontrollstatus (plan §7.1, §9.5): a mandatory requirement applies and is controlled as Mangler, so
- * Tilstand nå says Krever beslutning; a person registers a decision, and Beslutning and Tilstand nå
- * are read as two lines. The requirement is then documented: the state changes, the decision does
- * not — it stands in the history with the state it was taken on — and a new decision is a new entry.
- * The state rules, access and immutability are PHP's (SupplierAssuranceResolverTest,
- * SupplierAssuranceDecisionTest).
+ * Kravstatus and Trenger oppfølging, after the kontrollbeslutning was retired (2026-10-12): a
+ * mandatory requirement applies and is open, so Oversikt says so under «Trenger oppfølging» and links
+ * to Krav og kvalifikasjoner, where Kravstatus counts it. Controlled as Mangler, then documented: the
+ * state follows the controls, and nothing anywhere asks anyone to register a decision. A decision from
+ * before the retirement is shown read-only under Historikk. The rules, access and immutability are
+ * PHP's (SupplierAssuranceResolverTest, SupplierAssuranceDecisionTest).
  */
-test('a decision is registered on the control state, and stays as it was when the state changes', async ({ page }) => {
+test('a mandatory requirement is followed up through Kravstatus and Trenger oppfølging, with no decision to register', async ({ page }) => {
     test.setTimeout(150_000);
 
     const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
     const catalogue = await supplierFixture(`seedAssurance('${suffix}')`);
     const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Regnskap ${suffix} AS', 'important', 12, ['processes_personal_data'])`);
+    await supplierFixture(`historicalDecision('${suffix}', ${supplier.id}, 'not_approved', '2026-09-15', 'Ingen nye kjøp før databehandleravtalen er signert.')`);
     const dpaTitle = `DBA ${suffix} regnskap`;
+    const noDecision = async () => {
+        await expect(page.getByRole('button', { name: 'Registrer beslutning' })).toHaveCount(0);
+        await expect(page.getByText('Krever beslutning')).toHaveCount(0);
+        await expect(page.getByText('Ingen beslutning registrert')).toHaveCount(0);
+    };
 
     await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
     await page.setViewportSize(DESKTOP);
@@ -317,6 +385,7 @@ test('a decision is registered on the control state, and stays as it was when th
 
     // Only the mandatory data processing agreement applies: a processor without subcontractors.
     const profile = page.getByTestId('supplier-profile');
+    await openSupplierDetails(page, 'profile');
     await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
     const profileForm = profile.getByTestId('profile-form');
     await answer(profileForm, 'data_role', 'Databehandler');
@@ -324,16 +393,25 @@ test('a decision is registered on the control state, and stays as it was when th
     await profile.getByRole('button', { name: 'Lagre profil' }).click();
     await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
 
-    const status = page.getByTestId('supplier-assurance-status');
-    const decisionLine = status.getByTestId('assurance-decision');
-    const stateLine = status.getByTestId('assurance-state');
-    await expect(status.getByRole('heading', { name: 'Kontrollstatus', exact: true })).toBeVisible();
-    await expect(decisionLine).toContainText('Ingen beslutning registrert');
-    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('Krever beslutning');
-    await expect(stateLine.getByTestId('assurance-applicable')).toHaveText('1 krav gjelder');
+    // No status panel above the tabs; Oversikt says what is missing, once, and where it is done.
+    await expect(page.getByTestId('supplier-assurance-status')).toHaveCount(0);
+    const attention = page.getByTestId('supplier-attention');
+    await expect(attention.getByRole('heading', { name: 'Trenger oppfølging', exact: true })).toBeVisible();
+    const open = attention.locator('[data-finding="mandatory_open"]');
+    // The count and where it is done — the requirements themselves are listed on Krav og kvalifikasjoner.
+    await expect(open).toContainText('1 obligatorisk krav er ikke dokumentert eller midlertidig akseptert.');
+    await expect(open).not.toContainText(catalogue.dpa_title);
+    await noDecision();
+    await expectReadable(page, '09-overview-follow-up');
 
-    // Kontroller krav: Mangler.
-    await openSupplierTab(page, 'Krav og kvalifikasjoner');
+    await open.getByRole('link', { name: 'Gå til Krav og kvalifikasjoner' }).click();
+    await expect(page.getByTestId('supplier-tab-requirements')).toBeVisible();
+    const status = page.getByTestId('supplier-requirement-status');
+    await expect(status.getByRole('heading', { name: 'Kravstatus', exact: true })).toBeVisible();
+    await expect(status.getByTestId('requirement-status-label')).toHaveText('Obligatorisk krav åpent');
+    await expect(status.getByTestId('requirement-status-summary')).toHaveText('1 krav gjelder · 1 ikke vurdert');
+
+    // Kontroller krav: Mangler — still open, named with why.
     const row = page.getByTestId('control-requirement-row').filter({ hasText: catalogue.dpa_title });
     await row.getByRole('button', { name: 'Kontroller krav' }).click();
     const evaluation = row.getByTestId('evaluation-form');
@@ -342,33 +420,14 @@ test('a decision is registered on the control state, and stays as it was when th
     await evaluation.getByRole('button', { name: 'Registrer kontroll' }).click();
     await expect(page.getByText('Kontrollen er registrert.', { exact: true })).toBeVisible();
 
-    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('Krever beslutning');
-    await expect(stateLine).toContainText('Det finnes et forhold som krever at noen tar stilling.');
-    await expect(stateLine.getByTestId('assurance-summary')).toHaveText('1 mangler');
-    await expect(stateLine.getByTestId('assurance-open-mandatory')).toContainText(`${catalogue.dpa_title} – Mangler`);
-    await expect(stateLine).not.toContainText('%');
+    await expect(status.getByTestId('requirement-status-label')).toHaveText('Obligatorisk krav åpent');
+    await expect(status.getByTestId('requirement-status-summary')).toHaveText('1 krav gjelder · 1 mangler');
+    await expect(status.getByTestId('requirement-status-open-mandatory')).toContainText(`${catalogue.dpa_title} – Mangler`);
+    await expect(status).not.toContainText('%');
+    await noDecision();
+    await expectReadable(page, '10-requirement-status');
 
-    // Registrer beslutning: with a mandatory requirement open only «Ikke godkjent for nye kjøp» can be chosen.
-    await status.getByRole('button', { name: 'Registrer beslutning' }).click();
-    const form = status.getByTestId('decision-form');
-    await expect(form.getByRole('radio', { name: /^Godkjent med oppfølging/ })).toBeDisabled();
-    await expect(form.getByRole('radio', { name: /^Godkjent(?! med)/ })).toBeDisabled();
-    await expect(form.getByTestId('decision-not-allowed')).toHaveCount(2);
-    await form.getByRole('radio', { name: /^Ikke godkjent for nye kjøp/ }).check();
-    await form.getByLabel('Begrunnelse').fill('Ingen nye kjøp før databehandleravtalen er signert.');
-    await expectReadable(page, '09-decision-form');
-    await form.getByRole('button', { name: 'Registrer beslutning' }).click();
-    await expect(page.getByText('Beslutningen er registrert.', { exact: true })).toBeVisible();
-
-    // Two lines, labelled apart: the person's decision, and the state now.
-    await expect(decisionLine).toContainText('Beslutning');
-    await expect(decisionLine).toContainText('Ikke godkjent for nye kjøp');
-    await expect(decisionLine.getByTestId('assurance-decision-byline')).toContainText(`av ${person.name}`);
-    await expect(stateLine).toContainText('Tilstand nå');
-    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('Obligatorisk krav åpent');
-    await expectReadable(page, '10-decision-and-state');
-
-    // Dokumentasjon, then Kontroller krav: Dokumentert. The state changes; the decision does not.
+    // Dokumentasjon, then Kontroller krav: Dokumentert. Kravstatus follows; the system decides nothing.
     await openSupplierTab(page, 'Dokumentasjon');
     const documents = page.getByTestId('supplier-documents');
     await documents.getByRole('button', { name: 'Legg til dokumentasjon' }).click();
@@ -384,39 +443,36 @@ test('a decision is registered on the control state, and stays as it was when th
     await evaluation.getByRole('button', { name: 'Registrer kontroll' }).click();
     await expect(page.getByText('Kontrollen er registrert.', { exact: true })).toBeVisible();
 
-    await expect(stateLine.getByTestId('assurance-state-label')).toHaveText('I orden');
-    await expect(stateLine.getByTestId('assurance-summary')).toHaveText('1 dokumentert');
-    await expect(stateLine.getByTestId('assurance-open-mandatory')).toHaveCount(0);
-    await expect(decisionLine).toContainText('Ikke godkjent for nye kjøp');
+    await expect(status.getByTestId('requirement-status-label')).toHaveText('I orden');
+    await expect(status.getByTestId('requirement-status-summary')).toHaveText('1 krav gjelder · 1 dokumentert');
+    await expect(status.getByTestId('requirement-status-open-mandatory')).toHaveCount(0);
 
-    // A new decision: a new entry, newest first; the first still shows the state it was taken on.
-    await status.getByRole('button', { name: 'Registrer beslutning' }).click();
-    await form.getByRole('radio', { name: /^Godkjent(?! med)/ }).check();
-    await form.getByLabel('Begrunnelse').fill('Databehandleravtalen er signert og kontrollert.');
-    await form.getByRole('button', { name: 'Registrer beslutning' }).click();
-    await expect(page.getByText('Beslutningen er registrert.', { exact: true })).toBeVisible();
-    await expect(decisionLine).toContainText('Godkjent');
-    await expect(decisionLine).not.toContainText('Ikke godkjent');
+    // Oversikt no longer names the requirement.
+    await openSupplierTab(page, 'Oversikt');
+    await expect(page.locator('[data-finding="mandatory_open"]')).toHaveCount(0);
 
-    const history = status.getByTestId('decision-history');
-    await history.locator('summary').click();
+    // The decision from before the retirement: read-only history, never the state now.
+    await openSupplierTab(page, 'Historikk');
+    const history = page.getByTestId('decision-history');
+    await expect(history.getByRole('heading', { name: /^Tidligere kontrollbeslutninger/ })).toBeVisible();
+    await expect(history).toContainText('Samlede kontrollbeslutninger registreres ikke lenger.');
     const entries = history.getByTestId('decision-history-entry');
-    await expect(entries).toHaveCount(2);
-    await expect(entries.nth(0)).toContainText('Godkjent');
-    await expect(entries.nth(0).getByTestId('decision-snapshot')).toContainText('I orden');
-    await expect(entries.nth(0).getByTestId('decision-snapshot')).toContainText('Alle obligatoriske og viktige krav var dokumentert.');
-    await expect(entries.nth(1)).toContainText('Ikke godkjent for nye kjøp');
-    await expect(entries.nth(1)).toContainText('Ingen nye kjøp før databehandleravtalen er signert.');
-    await expect(entries.nth(1).getByTestId('decision-snapshot')).toContainText('Obligatorisk krav åpent');
-    await expect(entries.nth(1).getByTestId('decision-snapshot')).toContainText('1 krav gjelder · 1 mangler');
-    await expect(entries.nth(1).getByTestId('decision-snapshot')).toContainText(`${catalogue.dpa_title} – Obligatorisk – Mangler`);
+    await expect(entries).toHaveCount(1);
+    await expect(entries.nth(0)).toContainText('Ikke godkjent for nye kjøp');
+    await expect(entries.nth(0)).toContainText('Ingen nye kjøp før databehandleravtalen er signert.');
+    await expect(entries.nth(0).getByTestId('decision-snapshot')).toContainText('Obligatorisk krav åpent');
+    await expect(history.getByRole('button')).toHaveCount(0);
+    await noDecision();
     await expectReadable(page, '11-decision-history');
 
-    // The register: the decision in its own column, and no «Krever beslutning» marker now.
+    // The register: Kravstatus in its own column, and no decision filter.
     await page.goto('/app/supplier-management');
     const registerRow = page.getByTestId('supplier-table').getByRole('row').filter({ hasText: `Regnskap ${suffix} AS` });
-    await expect(registerRow.getByTestId('register-control-status')).toHaveText('Godkjent');
-    await expect(registerRow.getByTestId('register-decision-required')).toHaveCount(0);
+    await expect(registerRow.getByTestId('register-requirement-status')).toHaveText('I orden');
+    await expect(page.getByTestId('supplier-table').getByRole('columnheader', { name: 'Kravstatus' })).toBeVisible();
+    await expect(page.locator('#supplier-decision-filter')).toHaveCount(0);
+    await expect(page.getByTestId('supplier-decision-required-filter')).toHaveCount(0);
+    await noDecision();
     await expectReadable(page, '12-register');
 });
 
@@ -458,6 +514,20 @@ test('a reader opens a template with «Vis kravene», is told why nothing can be
     });
     expect(order, 'the register comes before the templates').toBe(true);
 
+    // Kravmaler: optional suggestions, closed when the page opens; opened and closed by its heading, from the keyboard too.
+    const templatesToggle = page.getByTestId('requirement-templates-toggle');
+    await expect(templatesToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('requirement-templates-summary')).toHaveText('Ferdige forslag til kontrollkrav som kan legges til virksomhetens kravbibliotek. Gjennomgå og tilpass kravene før bruk.');
+    await expect(page.getByTestId('requirement-template').first()).toBeHidden();
+    await templatesToggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(templatesToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('requirement-template').first()).toBeVisible();
+    await expect(page.getByTestId('requirement-templates-unreviewed')).toBeVisible();
+    await page.keyboard.press('Space');
+    await expect(templatesToggle).toHaveAttribute('aria-expanded', 'false');
+    await templatesToggle.click();
+
     // «Vis kravene (11)»: the items, as many as the card says, with code, theme, level and use.
     const itSaas = page.getByTestId('requirement-template').filter({ has: page.getByRole('heading', { name: 'IT/SaaS-leverandør', exact: true }) });
     await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
@@ -490,6 +560,7 @@ test('a reader opens a template with «Vis kravene», is told why nothing can be
     await page.reload();
     await expect(page.getByTestId('control-read-only')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Nytt kontrollkrav' })).toBeVisible();
+    await page.getByTestId('requirement-templates-toggle').click();
     await itSaas.getByRole('button', { name: 'Ta i bruk kravmal' }).click();
     await page.getByRole('dialog', { name: 'Ta i bruk kravmal: IT/SaaS-leverandør' }).getByRole('button', { name: 'Legg til 11 kontrollkrav' }).click();
     await expect(page.getByText('11 kontrollkrav ble lagt til.', { exact: true })).toBeVisible();
@@ -510,7 +581,8 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     await page.goto('/app/supplier-management/control-requirements');
 
     const templates = page.getByTestId('requirement-templates');
-    await expect(templates.getByRole('heading', { name: 'Kravmaler', exact: true })).toBeVisible();
+    await expect(templates.getByRole('heading', { name: /^Kravmaler/ })).toBeVisible();
+    await page.getByTestId('requirement-templates-toggle').click();
     await expect(templates.getByTestId('requirement-template')).toHaveCount(9);
     const itSaas = templates.getByTestId('requirement-template').filter({ has: page.getByRole('heading', { name: 'IT/SaaS-leverandør', exact: true }) });
     await expect(itSaas).toContainText('11 krav · 5 obligatoriske');
@@ -542,6 +614,7 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     // On the supplier: the profile decides.
     await page.goto(`/app/supplier-management/${supplier.id}`);
     const profile = page.getByTestId('supplier-profile');
+    await openSupplierDetails(page, 'profile');
     await profile.getByRole('button', { name: 'Fyll ut profil' }).click();
     const form = profile.getByTestId('profile-form');
     await answer(form, 'data_role', 'Databehandler');
@@ -550,7 +623,10 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     await form.getByRole('button', { name: 'Lagre profil' }).click();
     await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
 
-    // Sikkerhet og personvern on Oversikt: the profile facts and the status of each such requirement — no score.
+    // Not on Oversikt: Sikkerhet og personvern is beside the requirements it filters.
+    await expect(page.getByTestId('supplier-security-privacy')).toHaveCount(0);
+    await openSupplierTab(page, 'Krav og kvalifikasjoner');
+    // Sikkerhet og personvern: the profile facts and the status of each such requirement — no score.
     const security = page.getByTestId('supplier-security-privacy');
     await expect(security.getByRole('heading', { name: 'Sikkerhet og personvern', exact: true })).toBeVisible();
     await expect(security.locator('[data-fact="personal_data"]')).toContainText('Databehandler');
@@ -558,7 +634,7 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
     await expect(security.getByTestId('security-privacy-open').locator('li').filter({ hasText: 'Tilgangsstyring og MFA' })).toContainText('Ikke vurdert');
     await expect(security).not.toContainText('%');
     await expectReadable(page, '16a-security-privacy');
-    // «Åpne» leads to the requirement on its tab.
+    // Each open requirement links to its row.
     await security.getByRole('link', { name: 'Tilgangsstyring og MFA' }).click();
     await expect(page.getByTestId('supplier-page-tabs').getByRole('link', { name: 'Krav og kvalifikasjoner', exact: true })).toHaveAttribute('aria-current', 'page');
 
@@ -576,12 +652,12 @@ test('a requirement template fills Kontrollkrav, and the profile decides which o
 /**
  * Oppfølging (plan §14, §15.1): a requirement controlled every 6 months was last controlled 7 months
  * ago — a fixture with explicit historical dates rather than a moved clock. The register's existing
- * «trenger oppmerksomhet» filter finds the supplier and says which requirement is overdue and why;
+ * «trenger oppfølging» filter finds the supplier and says which requirement is overdue and why;
  * the supplier page names it, points to its row and lists it first in Neste kontroller. A new control
  * clears that finding; the earlier control stays in the history. Every other signal, edge and
  * tenant rule is PHP's (SupplierAssuranceAttentionTest, SupplierFollowUpPlanTest).
  */
-test('an overdue control is found from the register, controlled again, and leaves Trenger oppmerksomhet', async ({ page }) => {
+test('an overdue control is found from the register, controlled again, and leaves Trenger oppfølging', async ({ page }) => {
     test.setTimeout(150_000);
 
     const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
@@ -597,32 +673,36 @@ test('an overdue control is found from the register, controlled again, and leave
     await page.getByTestId('supplier-attention-filter').check();
     await page.getByRole('button', { name: 'Søk', exact: true }).click();
     await expect(page).toHaveURL(/attention=1/);
-    const item = page.getByTestId('supplier-attention-item').filter({ hasText: supplier.name });
-    await expect(item).toContainText('1 kontrollkrav er forfalt:');
-    await expect(item.getByTestId('supplier-attention-requirements')).toContainText(`${overdue.requirement_title} – kontrollfristen var`);
-    await expect(page.getByTestId('supplier-attention-categories')).toContainText('Kontroll forfalt');
+    const item = page.getByTestId('supplier-table').getByRole('row').filter({ hasText: supplier.name });
+    await expect(item.getByTestId('supplier-row-attention')).toContainText('Kontroll forfalt');
     await expectReadable(page, '17-register-control-overdue');
 
-    // The supplier: which requirement, why, and where it is followed up.
+    // The supplier: which requirement, why, and where it is followed up — the register only names the kind.
     await item.getByRole('link', { name: supplier.name }).click();
     const attention = page.getByTestId('supplier-attention');
-    await expect(attention.locator('[data-finding="control_overdue"]')).toContainText('1 kontrollkrav er forfalt:');
-    await expect(attention.getByRole('link', { name: 'Gå til Krav og kvalifikasjoner' })).toHaveAttribute('href', '#supplier-control-heading');
-    const requirementLink = attention.getByRole('link', { name: new RegExp(`^${overdue.requirement_title} – kontrollfristen var`) });
+    await expect(attention.locator('[data-finding="control_overdue"]')).toContainText('1 kontrollkrav er forfalt.');
+    const goToControl = attention.getByRole('link', { name: 'Gå til Krav og kvalifikasjoner' });
+    await expect(goToControl).toHaveAttribute('href', '#supplier-control-heading');
     const row = page.getByTestId('control-requirement-row').filter({ hasText: overdue.requirement_title });
-    // The link opens Krav og kvalifikasjoner at the requirement's row.
-    await requirementLink.click();
-    await expect(row).toBeInViewport();
+    // The link opens Krav og kvalifikasjoner, where the requirement says why.
+    await goToControl.click();
     await expect(page).toHaveURL(/tab=requirements/);
+    await expect(row).toBeVisible();
     await expect(row.getByTestId('requirement-display-status')).toHaveText('Må fornyes');
     await expect(row.getByTestId('requirement-next-control')).toContainText('Kontrollfristen var');
 
+    // Neste kontroll among the key facts: the overdue control first, and the whole plan on request.
     await openSupplierTab(page, 'Oversikt');
+    const next = page.getByTestId('supplier-next-control');
+    await expect(next).toContainText(`Ny kontroll: ${overdue.requirement_title}`);
+    await expect(next.getByTestId('supplier-next-control-date')).toContainText('Forfalt');
     const plan = page.getByTestId('supplier-follow-up');
-    const first = plan.getByTestId('follow-up-entry').first();
-    await expect(first).toHaveAttribute('data-overdue', '1');
-    await expect(first).toContainText(`Ny kontroll: ${overdue.requirement_title}`);
-    await expect(first).toContainText('Forfalt');
+    const showAll = page.getByTestId('supplier-next-control-toggle');
+    if (await showAll.count() > 0) {
+        await showAll.click();
+        await expect(showAll).toHaveAttribute('aria-expanded', 'true');
+        await expect(plan.getByTestId('follow-up-entry').first()).toHaveAttribute('data-overdue', '1');
+    }
     await expectReadable(page, '18-supplier-control-overdue');
 
     // A new control, on the same report.
@@ -641,7 +721,7 @@ test('an overdue control is found from the register, controlled again, and leave
     await openSupplierTab(page, 'Oversikt');
     await expect(page.getByTestId('supplier-tab-overview')).toBeVisible();
     await expect(page.locator('[data-finding="control_overdue"]')).toHaveCount(0);
-    await expect(plan.getByTestId('follow-up-entry').filter({ hasText: overdue.requirement_title })).toHaveAttribute('data-overdue', '0');
+    await expect(next).not.toContainText('Forfalt');
     await openSupplierTab(page, 'Krav og kvalifikasjoner');
     await row.getByTestId('evaluation-history').locator('summary').click();
     await expect(row.getByTestId('evaluation-entry')).toHaveCount(2);
@@ -656,7 +736,7 @@ test('an overdue control is found from the register, controlled again, and leave
  * chooses. The finding is gone and the assessment reads in the history. Access, immutability, signal
  * 11 and the hand-offs to Avvik and Risiko are PHP's (SupplierDueDiligenceTest).
  */
-test('a product supplier with human rights risk gets an aktsomhetsvurdering, and Trenger oppmerksomhet follows', async ({ page }) => {
+test('a product supplier with human rights risk gets an aktsomhetsvurdering, and Trenger oppfølging follows', async ({ page }) => {
     test.setTimeout(150_000);
 
     const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
@@ -669,6 +749,7 @@ test('a product supplier with human rights risk gets an aktsomhetsvurdering, and
     await page.goto('/app/supplier-management/control-requirements');
 
     // Template 4, next to the others, through the same «Ta i bruk kravmal».
+    await page.getByTestId('requirement-templates-toggle').click();
     const template = page.getByTestId('requirement-template').filter({ hasText: 'Produktleverandør med menneskerettighetsrisiko' });
     await expect(template).toContainText('5 krav · 1 obligatoriske');
     await template.getByRole('button', { name: 'Ta i bruk kravmal' }).click();
@@ -680,9 +761,8 @@ test('a product supplier with human rights risk gets an aktsomhetsvurdering, and
     await page.goto('/app/supplier-management');
     await page.getByTestId('supplier-attention-filter').check();
     await page.getByRole('button', { name: 'Søk', exact: true }).click();
-    const item = page.getByTestId('supplier-attention-item').filter({ hasText: supplier.name });
-    await expect(item).toContainText('Leverandørprofilen gjør en aktsomhetsvurdering relevant, og ingen er registrert.');
-    await expect(page.getByTestId('supplier-attention-categories')).toContainText('Aktsomhetsvurdering mangler');
+    const item = page.getByTestId('supplier-table').getByRole('row').filter({ hasText: supplier.name });
+    await expect(item.getByTestId('supplier-row-attention')).toContainText('Aktsomhetsvurdering mangler');
     await expectReadable(page, '20-register-due-diligence-missing');
 
     // The supplier: why it is relevant, what the profile maps, and the requirements that investigate it.
@@ -692,12 +772,46 @@ test('a product supplier with human rights risk gets an aktsomhetsvurdering, and
     await goToDueDiligence.click();
     await expect(page).toHaveURL(/tab=due_diligence/);
     const card = page.getByTestId('supplier-due-diligence');
-    await expect(card.getByTestId('due-diligence-relevance')).toContainText('Aktsomhetsvurdering er relevant for leverandøren');
+    // A. Status first: required, why, and what the profile leaves unclarified — without opening anything.
+    await expect(card.getByTestId('due-diligence-required')).toHaveText('Aktsomhetsvurdering er påkrevd');
     await expect(card.getByTestId('due-diligence-relevance')).toContainText('Gjelder fordi');
-    await expect(card.getByTestId('due-diligence-mapping')).toContainText('Ikke avklart');
-    await expect(card.getByTestId('due-diligence-none')).toBeVisible();
-    await expect(card.getByTestId('due-diligence-requirements')).toContainText('Egenerklæring om menneskerettigheter og arbeidsforhold i leverandørkjeden');
+    await expect(card.getByTestId('due-diligence-required')).toHaveAttribute('data-status', 'required');
+    // Labour intensity is unclear, but with a confirmed criterion it changes nothing — and says so.
+    await expect(card.getByTestId('due-diligence-unresolved')).toHaveText('Ikke avklart, uten betydning for konklusjonen: Arbeidsintensiv leveranse');
+    // The grounds are closed until asked for, then readable with every value.
+    const grounds = card.getByTestId('due-diligence-grounds');
+    await expect(card.getByTestId('due-diligence-mapping')).toBeHidden();
+    await grounds.locator('summary').filter({ hasText: 'Vis vurderingsgrunnlag' }).click();
+    await expect(card.getByTestId('due-diligence-mapping')).toBeVisible();
+    await expect(card.locator('[data-fact="labour_intensive"]')).toContainText('Ikke avklart');
+    await expect(card.locator('[data-fact="labour_intensive"]')).toHaveAttribute('data-uncertain', 'yes');
+    await expect(card.locator('[data-fact="production_outside_eea"]')).toContainText('Ja');
+    // B. Aktsomhetsvurderinger: empty, with the action in the section.
+    const assessments = card.getByTestId('due-diligence-current');
+    await expect(assessments.getByRole('heading', { name: 'Aktsomhetsvurderinger', exact: true })).toBeVisible();
+    await expect(card.getByTestId('due-diligence-none')).toHaveText('Ingen aktsomhetsvurdering er registrert.');
+    await expect(assessments.getByRole('button', { name: 'Registrer aktsomhetsvurdering' })).toBeVisible();
+    // C. Relaterte kontrollkrav, kept apart, each with its status, linking to the requirement.
+    const related = card.getByTestId('due-diligence-requirements');
+    await expect(related.getByRole('heading', { name: 'Relaterte kontrollkrav', exact: true })).toBeVisible();
+    await expect(related).toContainText('ikke det samme som en aktsomhetsvurdering');
+    const relatedRow = related.getByTestId('due-diligence-requirement').filter({ hasText: 'Egenerklæring om menneskerettigheter og arbeidsforhold i leverandørkjeden' });
+    // Never controlled yet, so the status reads as on Krav og kvalifikasjoner.
+    await expect(relatedRow).toContainText('Ikke vurdert');
+    // The process help sits by the heading.
+    const process = card.getByTestId('due-diligence-process');
+    await process.locator('summary').filter({ hasText: 'Slik følges aktsomhet opp' }).click();
+    await expect(process.locator('[data-step="map"]')).toContainText('Kartlegg');
     await expectReadable(page, '21-supplier-due-diligence-missing');
+    await process.locator('summary').click();
+
+    // The link to a related requirement opens it on Krav og kvalifikasjoner.
+    const requirementLink = relatedRow.getByRole('link');
+    const requirementAnchor = (await requirementLink.getAttribute('href')).slice(1);
+    await requirementLink.click();
+    await expect(page).toHaveURL(/tab=requirements/);
+    await expect(page.locator(`#${requirementAnchor}`)).toBeVisible();
+    await openSupplierTab(page, 'Aktsomhet');
 
     // The assessment: each area chosen, the conclusion chosen; the interval follows the conclusion.
     await card.getByRole('button', { name: 'Registrer aktsomhetsvurdering' }).click();
@@ -727,12 +841,53 @@ test('a product supplier with human rights risk gets an aktsomhetsvurdering, and
     await expect(areas.locator('[data-area="freedom_of_association_risk"]')).toContainText('Ukjent');
     await expect(card.getByTestId('due-diligence-next')).toContainText('Neste aktsomhetsvurdering');
     await openSupplierTab(page, 'Oversikt');
-    await expect(page.getByTestId('overview-due-diligence')).toContainText('Tiltak kreves');
+    // Aktsomhet has its own tab; Oversikt does not repeat it.
+    await expect(page.getByTestId('overview-due-diligence')).toHaveCount(0);
     await expect(page.locator('[data-finding="due_diligence_missing"]')).toHaveCount(0);
     await openSupplierTab(page, 'Aktsomhet');
     await card.getByTestId('due-diligence-history').locator('summary').click();
     await expect(card.getByTestId('due-diligence-history-entry')).toHaveCount(1);
     await expectReadable(page, '23-supplier-due-diligence-assessed');
+});
+
+/**
+ * Aktsomhet, not required (plan §11.3): every profile answer a clear no except labour intensity,
+ * «Ikke avklart». Labour intensity only counts together with subcontractors, so the server says not
+ * required — and the tab says so in words while naming what the profile leaves unclarified, so it
+ * does not read as settled. An assessment can still be registered; the help explains the rule.
+ */
+test('a supplier whose profile does not require an aktsomhetsvurdering still names what is not clarified', async ({ page }) => {
+    test.setTimeout(90_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Kontorrekvisita ${suffix} AS')`);
+    await supplierFixture(`seedUnclarifiedLabourProfile('${suffix}', ${supplier.id})`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+    await openSupplierTab(page, 'Aktsomhet');
+
+    const card = page.getByTestId('supplier-due-diligence');
+    await expect(card.getByTestId('due-diligence-required')).toHaveText('Aktsomhetsvurdering er ikke påkrevd');
+    await expect(card.getByTestId('due-diligence-required')).toHaveAttribute('data-status', 'not_required');
+    // Procynia's criteria, not the organisation's obligations; voluntary still possible.
+    await expect(card.getByTestId('due-diligence-relevance')).toContainText('Det er ikke en vurdering av virksomhetens aktsomhetsplikter.');
+    await expect(card.getByTestId('due-diligence-relevance')).toContainText('Du kan likevel registrere en frivillig aktsomhetsvurdering.');
+    await expect(card.getByTestId('due-diligence-unresolved')).toHaveText('Ikke avklart, uten betydning for konklusjonen: Arbeidsintensiv leveranse');
+
+    await card.getByTestId('due-diligence-grounds').locator('summary').click();
+    await expect(card.getByTestId('due-diligence-grounds')).toContainText('arbeidsintensiv og bruker underleverandører');
+    await expect(card.locator('[data-fact="uses_subcontractors"]')).toContainText('Nei');
+    await expect(card.locator('[data-fact="high_risk_categories"]')).toContainText('Ingen');
+    await expect(card.locator('[data-fact="labour_intensive"]')).toContainText('Ikke avklart');
+
+    await expect(card.getByTestId('due-diligence-none')).toHaveText('Ingen aktsomhetsvurdering er registrert.');
+    await expect(card.getByTestId('due-diligence-current').getByRole('button', { name: 'Registrer aktsomhetsvurdering' })).toBeVisible();
+    await expectReadable(page, '24-supplier-due-diligence-not-required');
+
+    await expectPageHelp(page, 'Om leverandøren', ['Aktsomhet og bærekraft']);
 });
 
 /**
@@ -757,6 +912,7 @@ test('a template that overlaps one in use adds only what is missing, and never c
     await page.goto('/app/supplier-management/control-requirements');
 
     const templates = page.getByTestId('requirement-templates');
+    await page.getByTestId('requirement-templates-toggle').click();
     await expect(templates.getByTestId('requirement-template')).toHaveCount(9);
     for (const name of ['Kritisk IKT-leverandør', 'Bygg og anlegg', 'Renhold', 'Bemanning', 'Helse']) {
         await expect(templates.getByRole('heading', { name, exact: true })).toBeVisible();
@@ -797,4 +953,71 @@ test('a template that overlaps one in use adds only what is missing, and never c
     await expect(applicable.filter({ hasText: 'Logging og sporbarhet av tilgang' })).toHaveCount(0);
     await expect(applicable.filter({ hasText: 'Kritiske avhengigheter og underleverandører kartlagt' })).toHaveCount(0);
     await expectReadable(page, '26-critical-ict-on-supplier');
+});
+
+/**
+ * Aktsomhetsbehov må avklares (2026-10-13): every criterion a clear no except the high-risk
+ * categories, «Ikke avklart». Not required, not «ikke påkrevd» either: the tab names what is
+ * missing and sends the person to the profile, where «Ingen av disse» is an answer of its own —
+ * and the status follows. The rules and the follow-up signal are PHP's (SupplierProfilePredicatesTest,
+ * SupplierDueDiligenceTest).
+ */
+test('an unclarified high-risk answer must be clarified in the profile before the need is decided', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const person = await supplierFixture(`seedJourney('${suffix}', '${SUPPLIER_E2E_PASSWORD}')`);
+    await supplierFixture(`seedAssurance('${suffix}')`);
+    const supplier = await supplierFixture(`activeSupplier('${suffix}', 'Møbler ${suffix} AS', 'standard', 24, ['processes_personal_data'])`);
+    await supplierFixture(`seedUnclarifiedHighRiskProfile('${suffix}', ${supplier.id})`);
+
+    await loginAs(page, person.email, SUPPLIER_E2E_PASSWORD);
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/app/supplier-management/${supplier.id}`);
+
+    // Oppfølging names it as the profile's work, never as a missing assessment.
+    const attention = page.getByTestId('supplier-attention');
+    await expect(attention).toContainText('Leverandørprofilen må avklares for å avgjøre om aktsomhetsvurdering er påkrevd.');
+    await expect(page.locator('[data-finding="due_diligence_missing"]')).toHaveCount(0);
+
+    await openSupplierTab(page, 'Aktsomhet');
+    const card = page.getByTestId('supplier-due-diligence');
+    await expect(card.getByTestId('due-diligence-required')).toHaveText('Aktsomhetsbehov må avklares');
+    await expect(card.getByTestId('due-diligence-required')).toHaveAttribute('data-status', 'must_clarify');
+    const clarify = card.getByTestId('due-diligence-must-clarify');
+    await expect(clarify).toContainText('Det mangler avklarte opplysninger om: Høyrisikokategorier.');
+    await expect(clarify).toContainText('Til da er den verken påkrevd eller utelukket.');
+    // No unclear fact is waved through as irrelevant here.
+    await expect(card.getByTestId('due-diligence-unresolved')).toHaveCount(0);
+    await card.getByTestId('due-diligence-grounds').locator('summary').click();
+    await expect(card.locator('[data-fact="high_risk_categories"]')).toContainText('Ikke avklart');
+    await expect(card.locator('[data-fact="high_risk_categories"]')).toHaveAttribute('data-uncertain', 'yes');
+    // A voluntary assessment can still be registered.
+    await expect(card.getByTestId('due-diligence-current').getByRole('button', { name: 'Registrer aktsomhetsvurdering' })).toBeVisible();
+    await expectReadable(page, '25-supplier-due-diligence-must-clarify');
+
+    // «Gå til leverandørprofil» opens the profile on Oversikt.
+    await clarify.getByRole('link', { name: 'Gå til leverandørprofil' }).click();
+    await expect(page.getByTestId('supplier-page-tabs').getByRole('link', { name: 'Oversikt', exact: true })).toHaveAttribute('aria-current', 'page');
+    const section = page.getByTestId('supplier-profile');
+    await expect(section).toBeVisible();
+    await expect(section.getByTestId('profile-answer-high_risk_categories')).toContainText('Ikke avklart');
+
+    // «Ikke avklart» is ticked on its own; «Ingen av disse» replaces it.
+    await section.getByRole('button', { name: 'Rediger profil' }).click();
+    const form = section.getByTestId('profile-form');
+    const question = form.getByTestId('profile-question-high_risk_categories');
+    await expect(question).toContainText('Velg alle som passer, «Ingen av disse» eller «Ikke avklart».');
+    await expect(question.getByLabel('Ikke avklart', { exact: true })).toBeChecked();
+    await expectReadable(page, '26-profile-high-risk-unclear');
+    await question.getByLabel('Ingen av disse', { exact: true }).check();
+    await expect(question.getByLabel('Ikke avklart', { exact: true })).not.toBeChecked();
+    await page.locator('#supplier-profile-reason').fill('Leverandøren har bekreftet at ingen varer er i høyrisikokategorier.');
+    await form.getByRole('button', { name: 'Lagre profil' }).click();
+    await expect(page.getByText('Leverandørprofilen er lagret.', { exact: true })).toBeVisible();
+    await expect(section.getByTestId('profile-answer-high_risk_categories')).toContainText('Ingen av disse');
+
+    // Clarified: not required, and Oppfølging has nothing left about it.
+    await expect(page.getByText('Leverandørprofilen må avklares for å avgjøre om aktsomhetsvurdering er påkrevd.')).toHaveCount(0);
+    await openSupplierTab(page, 'Aktsomhet');
+    await expect(card.getByTestId('due-diligence-required')).toHaveText('Aktsomhetsvurdering er ikke påkrevd');
 });

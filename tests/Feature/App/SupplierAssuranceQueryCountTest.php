@@ -55,7 +55,7 @@ class SupplierAssuranceQueryCountTest extends TestCase
         $this->controlledSupplier($customer, $assurer, 'Leverandør 1', $requirements);
         $this->controlledSupplier($customer, $assurer, 'Leverandør 2', $requirements);
 
-        $filtered = '/app/supplier-management?attention=1&decision_required=1';
+        $filtered = '/app/supplier-management?attention=1&status=all';
         $few = $this->queriesFor($assurer, '/app/supplier-management');
         $fewFiltered = $this->queriesFor($assurer, $filtered);
 

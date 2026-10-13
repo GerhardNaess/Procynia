@@ -277,7 +277,7 @@ class InfoCenterSupplierTaskTest extends TestCase
         $this->document($supplier, 'Forsikring', '2026-10-06');
 
         $reasons = collect($this->supplierTasksFor($owner)[0]['reasons']);
-        $controlKeys = [SupplierAttentionService::DECISION_REQUIRED, SupplierAttentionService::REQUIREMENT_NOT_EVALUATED, SupplierAttentionService::CONTROL_OVERDUE];
+        $controlKeys = [SupplierAttentionService::MANDATORY_OPEN, SupplierAttentionService::REQUIREMENT_NOT_EVALUATED, SupplierAttentionService::CONTROL_OVERDUE];
 
         $this->assertNotEmpty($reasons->whereIn('key', $controlKeys));
         $this->assertSame([false], $reasons->whereIn('key', $controlKeys)->pluck('can_act')->unique()->values()->all());

@@ -10,11 +10,7 @@ import {
     assessmentNeedsFollowUp,
     caseHandoffPrefill,
     attentionFindingText,
-    attentionPanel,
-    attentionTotalLabel,
     caseOriginText,
-    filterRequirementOptions,
-    requirementOptionLabel,
     riskLevelText,
     riskOriginText,
     RESULT_TONES,
@@ -228,7 +224,7 @@ describe('Risikoer som gjelder leverandøren', () => {
 });
 
 describe('Trenger oppmerksomhet', () => {
-    test('each finding reads as a sentence in domain words, and the panel shows five before «Vis alle»', () => {
+    test('each finding reads as a sentence in domain words', () => {
         assert.equal(attentionFindingText({ key: 'not_assessed', criticality: 'critical' }), 'Leverandøren er Kritisk og mangler leverandørvurdering.');
         assert.equal(attentionFindingText({ key: 'review_overdue', next_review_on: '2026-10-06' }), 'Neste leverandørvurdering var 2026-10-06 og er forfalt.');
         assert.equal(attentionFindingText({ key: 'missing_owner' }), 'Leverandøren mangler intern ansvarlig.');
@@ -236,33 +232,19 @@ describe('Trenger oppmerksomhet', () => {
         assert.equal(attentionFindingText({ key: 'document_expired', document_type: 'insurance_certificate', title: 'Ansvar 2025', valid_until: '2026-10-06', days: -1 }, tr), 'Forsikringsbeviset «Ansvar 2025» er utløpt (gyldig til 2026-10-06).');
         assert.equal(attentionFindingText({ key: 'document_expiring', document_type: 'certificate', title: 'ISO 27001', valid_until: '2026-10-25', days: 18 }, tr), 'Sertifikatet «ISO 27001» utløper om 18 dager (2026-10-25).');
         assert.equal(attentionFindingText({ key: 'document_expiring', document_type: 'certificate', title: 'ISO 27001', valid_until: '2026-10-07', days: 0 }, tr), 'Sertifikatet «ISO 27001» utløper i dag.');
-
-        assert.equal(attentionPanel(null).visible, false);
-        const suppliers = Array.from({ length: 7 }, (_, id) => ({ id, name: `L${id}`, findings: [] }));
-        assert.deepEqual([attentionPanel({ total: 7, suppliers }).items.length, attentionPanel({ total: 7, suppliers }, true).items.length, attentionPanel({ total: 7, suppliers }).hasMore], [5, 7, true]);
-        assert.equal(attentionTotalLabel(1), '1 leverandør trenger oppmerksomhet');
-        assert.equal(attentionTotalLabel(3), '3 leverandører trenger oppmerksomhet');
     });
 });
 
-describe('Krav som gjelder leverandøren', () => {
-    test('an offered requirement reads as reference, title and kravkilde, and the search matches every word', () => {
-        const options = [
-            { id: 1, reference: 'A.5.15', title: 'Tilgangsstyring', source_label: 'ISO 27001 (2022)' },
-            { id: 2, reference: null, title: 'Sikkerhetskopi hver natt', source_label: 'Driftsavtale Acme' },
-        ];
-        assert.equal(requirementOptionLabel(options[0]), 'A.5.15 Tilgangsstyring – ISO 27001 (2022)');
-        assert.equal(requirementOptionLabel(options[1]), 'Sikkerhetskopi hver natt – Driftsavtale Acme');
-        assert.deepEqual(filterRequirementOptions(options, '  ').map((o) => o.id), [1, 2]);
-        assert.deepEqual(filterRequirementOptions(options, 'iso tilgang').map((o) => o.id), [1]);
-        assert.deepEqual(filterRequirementOptions(options, 'acme natt').map((o) => o.id), [2]);
-    });
-
-    test('the section says nothing without access, never shows a compliance status and adds or removes only when allowed', () => {
-        const section = source('./SupplierRequirements.jsx');
-        assert.match(section, /if \(requirements === null \|\| requirements === undefined\) \{\s*return null;/);
+describe('Tidligere koblinger til etterlevelseskrav', () => {
+    test('read-only under Historikk: nothing without access or links, no compliance status, no way to add or remove', () => {
+        const section = source('./SupplierEarlierComplianceLinks.jsx');
+        assert.match(section, /if \(! Array\.isArray\(links\) \|\| links\.length === 0\) \{\s*return null;/);
         assert.doesNotMatch(section, /StatusBadge|entry\.status|entry\.result|compliance_status/, 'no compliance status on the supplier page');
-        assert.match(section, /\{linking && ! adding && \(\s*<button type="button" onClick=\{\(\) => remove\(entry\)\}/, 'Fjern krav only with linking rights on an open supplier');
+        assert.doesNotMatch(section, /<button|<form|router\.|useForm/, 'nothing adds or removes a link');
+
+        const page = source('./Show.jsx');
+        assert.match(page, /tab === 'history'[\s\S]*<SupplierEarlierComplianceLinks links=\{earlierComplianceLinks\}/);
+        assert.doesNotMatch(page, /requirement_linking|SupplierRequirements\b/);
     });
 });
 

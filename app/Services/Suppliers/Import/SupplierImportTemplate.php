@@ -112,6 +112,7 @@ class SupplierImportTemplate
             isset(SupplierProfile::LIST_FIELDS[$field]) => [
                 ...$this->values->labels(SupplierProfile::LIST_FIELDS[$field], "procynia.supplier_management.profile.{$field}"),
                 (string) __('procynia.supplier_management.profile.none_selected'),
+                ...(in_array($field, SupplierProfile::LIST_UNKNOWN_FIELDS, true) ? [(string) __('procynia.supplier_management.profile.answers.unknown')] : []),
             ],
             default => [],
         };

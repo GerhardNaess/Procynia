@@ -9,7 +9,7 @@ const tr = {
 };
 const date = (value) => `«${value}»`;
 
-describe('Leverandørkontroll in Trenger oppmerksomhet', () => {
+describe('Leverandørkontroll in Trenger oppfølging', () => {
     test('a finding counts its requirements and lists each with why', () => {
         const overdue = {
             key: 'control_overdue',
@@ -29,9 +29,9 @@ describe('Leverandørkontroll in Trenger oppmerksomhet', () => {
             'Forsikring – «Polise 2025» er erstattet av en ny utgave',
         ]);
 
-        const decision = { key: 'decision_required', requirements: [{ id: 5, title: 'DBA', display_status: 'not_evaluated' }] };
-        assert.equal(attentionFindingText(decision, tr), '1 obligatorisk krav krever beslutning:');
-        assert.deepEqual(attentionFindingItems(decision, tr), [{ id: 5, text: 'DBA (Ikke vurdert)' }]);
+        const open = { key: 'mandatory_open', requirements: [{ id: 5, title: 'DBA', display_status: 'not_evaluated' }] };
+        assert.equal(attentionFindingText(open, tr), '1 obligatorisk krav er ikke dokumentert eller midlertidig akseptert:');
+        assert.deepEqual(attentionFindingItems(open, tr), [{ id: 5, text: 'DBA (Ikke vurdert)' }]);
 
         const notEvaluated = { key: 'requirement_not_evaluated', requirements: [{ id: 6, title: 'A', level: 'mandatory' }, { id: 7, title: 'B', level: 'important' }] };
         assert.equal(attentionFindingText(notEvaluated, tr), '2 obligatoriske eller viktige krav er ikke vurdert:');
@@ -44,7 +44,9 @@ describe('Leverandørkontroll in Trenger oppmerksomhet', () => {
     });
 
     test('each new finding points to where it is followed up', () => {
-        assert.equal(ATTENTION_TARGETS.decision_required.anchor, 'supplier-assurance-heading');
+        // An open mandatory requirement is followed up on Krav og kvalifikasjoner; there is no decision to register.
+        assert.equal(ATTENTION_TARGETS.mandatory_open.anchor, 'supplier-control-heading');
+        assert.equal(ATTENTION_TARGETS.decision_required, undefined);
         assert.equal(ATTENTION_TARGETS.control_overdue.anchor, 'supplier-control-heading');
         assert.equal(ATTENTION_TARGETS.requirement_not_evaluated.anchor, 'supplier-control-heading');
         assert.equal(ATTENTION_TARGETS.profile_incomplete.anchor, 'supplier-profile-heading');

@@ -1,11 +1,12 @@
 /**
  * The supplier page's structure (docs/supplier-assurance-v2-plan.md §22.1): which tabs it has, which
- * tab a link inside the page leads to, and the short summaries on Oversikt. Pure: everything here is
- * arranged from what the server already sent for the page — nothing is computed that the server did
- * not decide, and no summary is a share, a percentage or a score.
+ * tab a link inside the page leads to, and the short summaries on Oversikt and its closed sections.
+ * Pure: everything here is arranged from what the server already sent for the page — nothing is
+ * computed that the server did not decide, and no summary is a share, a percentage or a score.
  */
 import { profileAnswerLabel } from './supplierProfileAnswers.js';
 import { summaryGroups } from './assuranceStatus.js';
+import { criticalityLabel, intervalLabel } from './supplierManagement.js';
 
 /** The tabs, in order. Oversikt is the default and has no ?tab= of its own. */
 export const SUPPLIER_TABS = ['overview', 'requirements', 'documents', 'assessments', 'due_diligence', 'history'];
@@ -22,22 +23,20 @@ const TAB_FALLBACKS = {
 /** The themes «Sikkerhet og personvern» shows (plan §12). */
 export const SECURITY_PRIVACY_THEMES = ['information_security', 'privacy', 'continuity'];
 
-/** How many days ahead documentation «utløper snart» — the same 60 days as Trenger oppmerksomhet. */
-export const EXPIRING_SOON_DAYS = 60;
-
 export function tabLabel(tab, tr = {}) {
     return tr.page?.tabs?.[tab] ?? TAB_FALLBACKS[tab] ?? tab;
 }
 
 /**
  * The tabs this supplier page has. Krav og kvalifikasjoner only when there is something to show
- * there — control requirements (or the right to start with one) or requirements from Etterlevelse og
- * revisjon; Aktsomhet only when the server sent it. The rest always.
+ * there — control requirements, or the right to start with one; the earlier links to requirements in
+ * Etterlevelse og revisjon are under Historikk, which is always there. Aktsomhet only when the server
+ * sent it. The rest always.
  */
-export function supplierPageTabs({ controlRequirements = null, requirements = null, dueDiligence = null } = {}) {
+export function supplierPageTabs({ controlRequirements = null, dueDiligence = null } = {}) {
     return SUPPLIER_TABS.filter((tab) => {
         if (tab === 'requirements') {
-            return controlRequirements !== null || requirements !== null;
+            return controlRequirements !== null;
         }
 
         if (tab === 'due_diligence') {
@@ -78,7 +77,7 @@ export function tabSearch(search, tab) {
 export function tabForAnchor(anchor) {
     const id = String(anchor ?? '').replace(/^#/, '');
 
-    if (id === 'supplier-control-heading' || id === 'supplier-requirements-heading' || /^control-requirement-\d+$/.test(id)) {
+    if (id === 'supplier-control-heading' || id === 'supplier-requirement-status-heading' || /^control-requirement-\d+$/.test(id)) {
         return 'requirements';
     }
 
@@ -87,13 +86,99 @@ export function tabForAnchor(anchor) {
         'supplier-assessment-heading': 'assessments',
         'supplier-due-diligence-heading': 'due_diligence',
         'supplier-history-heading': 'history',
+        'supplier-decision-history-heading': 'history',
+        'supplier-criticality-history-heading': 'history',
+        'supplier-profile-history-heading': 'history',
+        'supplier-earlier-compliance-links-heading': 'history',
+        'supplier-security-privacy-heading': 'requirements',
+        'supplier-follow-up-heading': 'overview',
+        'supplier-attention-heading': 'overview',
         'supplier-details-heading': 'overview',
-        'supplier-criticality-heading': 'overview',
-        'supplier-profile-heading': 'overview',
-        'supplier-security-privacy-heading': 'overview',
-        'supplier-cases-heading': 'overview',
-        'supplier-risks-heading': 'overview',
+        ...Object.fromEntries(Object.values(OVERVIEW_DETAILS).map((anchor) => [anchor, 'overview'])),
     }[id] ?? null;
+}
+
+/**
+ * The sections under «Detaljer» on Oversikt, closed until opened, and the anchor of each. A link to
+ * one of them — «Gå til leverandørprofil» under Trenger oppfølging — opens it before it scrolls there.
+ */
+export const OVERVIEW_DETAILS = {
+    info: 'supplier-info-heading',
+    criticality: 'supplier-criticality-heading',
+    profile: 'supplier-profile-heading',
+    risks: 'supplier-risks-heading',
+    cases: 'supplier-cases-heading',
+};
+
+/** Which section under «Detaljer» an in-page link (#anchor) leads to, or null. */
+export function detailForAnchor(anchor) {
+    const id = String(anchor ?? '').replace(/^#/, '');
+
+    return Object.keys(OVERVIEW_DETAILS).find((key) => OVERVIEW_DETAILS[key] === id) ?? null;
+}
+
+/**
+ * «Neste kontroll» among the key facts on Oversikt: the first entry of the plan the server built
+ * (SupplierFollowUpPlan — overdue first, then nearest), and how many there are in all. Without a
+ * plan (Leverandørkontroll not started, or an ended supplier) the next supplier assessment the
+ * server dated, if any. Null when nothing is dated — nothing is computed here.
+ *
+ * @returns {{ entry: object, count: number, entries: object[] }|null}
+ */
+export function nextControl(plan = null, supplier = {}) {
+    const entries = Array.isArray(plan?.entries) ? plan.entries : [];
+
+    if (entries.length > 0) {
+        return { entry: entries[0], count: entries.length, entries };
+    }
+
+    if (! plan && supplier?.next_review_on && supplier.status !== 'ended') {
+        const entry = { kind: 'assessment', date: supplier.next_review_on, overdue: false, requirement: null, document: null };
+
+        return { entry, count: 1, entries: [entry] };
+    }
+
+    return null;
+}
+
+/**
+ * The closed summary of Kritikalitet: «Kritisk · Hver 6. måned · Sist vurdert 12. oktober 2026», or
+ * that it is not assessed yet.
+ */
+export function criticalitySummary(criticality, tr = {}, formatDate = (date) => date) {
+    const c = tr.criticality ?? {};
+    const current = criticality?.current ?? null;
+
+    if (! current) {
+        return c.not_classified ?? 'Kritikalitet er ikke vurdert ennå.';
+    }
+
+    const parts = [criticalityLabel(current.criticality, tr), intervalLabel(current.review_interval_months, tr)];
+
+    if (criticality.decided_at) {
+        parts.push((c.last_decided_on ?? 'Sist vurdert :date').replace(':date', formatDate(criticality.decided_at)));
+    }
+
+    return parts.join(' · ');
+}
+
+/** The closed summary of Leverandørprofil: whether it is filled in, and what it is for. */
+export function profileSummary(profile, tr = {}) {
+    const p = tr.profile ?? {};
+    const state = profile?.answers == null
+        ? (p.summary_not_filled ?? 'Ikke fylt ut')
+        : (profile.complete ? (p.summary_complete ?? 'Utfylt') : (p.summary_incomplete ?? 'Delvis utfylt'));
+
+    return `${state} · ${p.summary_purpose ?? 'Avgjør hvilke kontrollkrav som gjelder'}`;
+}
+
+/** «2 risikoer» / «Ingen tilknyttede risikoer» — the closed summary of a linked list. */
+export function linkedCountSummary(count, texts = {}) {
+    if (! count) {
+        return texts.none;
+    }
+
+    return count === 1 ? texts.one : texts.many.replace(':count', String(count));
 }
 
 /**
@@ -185,50 +270,4 @@ function answerFact(field, label, answers, tr, uncertain) {
     const value = answers?.[field] ?? null;
 
     return { key: field, label, text: profileAnswerLabel(field, value, tr), uncertain: uncertain(value) };
-}
-
-/**
- * Dokumentasjon on Oversikt: how many rows are current and how they stand today — gyldig, utløper
- * snart, utløpt. Replaced rows are history, not counted. Counts only; which rows are named under
- * Trenger oppmerksomhet and on the Dokumentasjon tab.
- *
- * @param {object[]} documents  the page's `documents`
- * @param {string} today        YYYY-MM-DD
- */
-export function documentationSummary(documents = [], today = '') {
-    const current = (Array.isArray(documents) ? documents : []).filter((row) => row.status !== 'replaced');
-    const soon = (row) => {
-        if (row.status !== 'valid' || ! row.valid_until || ! today) {
-            return false;
-        }
-
-        const days = Math.round((Date.parse(`${row.valid_until}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
-
-        return days <= EXPIRING_SOON_DAYS;
-    };
-
-    return {
-        total: current.length,
-        valid: current.filter((row) => (row.status === 'valid' && ! soon(row)) || row.status === 'no_expiry').length,
-        expiringSoon: current.filter(soon).length,
-        expired: current.filter((row) => row.status === 'expired').length,
-    };
-}
-
-/** «3 gyldige · 1 utløper snart · 1 utløpt», groups with 0 left out; «Ingen dokumentasjon registrert» when none. */
-export function documentationSummaryText(summary, tr = {}) {
-    const s = tr.page?.documents_summary ?? {};
-
-    if (! summary || summary.total === 0) {
-        return s.none ?? 'Ingen dokumentasjon registrert';
-    }
-
-    return [
-        [summary.valid, s.valid ?? ':count gyldige'],
-        [summary.expiringSoon, s.expiring_soon ?? ':count utløper snart'],
-        [summary.expired, s.expired ?? ':count utløpt'],
-    ]
-        .filter(([count]) => count > 0)
-        .map(([count, text]) => text.replace(':count', String(count)))
-        .join(' · ');
 }

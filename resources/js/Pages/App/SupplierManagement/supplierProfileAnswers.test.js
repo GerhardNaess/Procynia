@@ -2,9 +2,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+    isListUnknown,
     profileAnswerLabel,
     profileChangeLines,
     profileFormData,
+    takesListUnknown,
     toggleListAnswer,
     visibleProfileFields,
 } from './supplierProfileAnswers.js';
@@ -45,6 +47,25 @@ describe('Ja, Nei and Ikke avklart stay apart from not answered', () => {
         assert.deepEqual(toggleListAnswer([], 'goods', order), ['goods']);
         assert.deepEqual(toggleListAnswer(['goods'], 'ict', order), ['ict', 'goods']);
         assert.equal(toggleListAnswer(['ict'], 'ict', order), null);
+    });
+
+    test('high-risk categories take «Ikke avklart» of its own, never next to a category and never read as «Ingen»', () => {
+        const order = ['textiles', 'electronics'];
+
+        assert.ok(takesListUnknown('high_risk_categories'));
+        assert.ok(! takesListUnknown('sectors'));
+        assert.deepEqual(toggleListAnswer(null, 'unknown', order), ['unknown']);
+        // «Ikke avklart» clears the categories and «Ingen av disse»; either clears it.
+        assert.deepEqual(toggleListAnswer(['textiles'], 'unknown', order), ['unknown']);
+        assert.deepEqual(toggleListAnswer([], 'unknown', order), ['unknown']);
+        assert.deepEqual(toggleListAnswer(['unknown'], 'textiles', order), ['textiles']);
+        assert.deepEqual(toggleListAnswer(['unknown'], null, order), []);
+        assert.equal(toggleListAnswer(['unknown'], 'unknown', order), null);
+        assert.ok(isListUnknown(['unknown']));
+        assert.ok(! isListUnknown([]));
+        assert.equal(profileAnswerLabel('high_risk_categories', ['unknown'], tr), 'Ikke avklart');
+        assert.equal(profileAnswerLabel('high_risk_categories', [], tr), 'Ingen av disse');
+        assert.equal(profileAnswerLabel('high_risk_categories', null, tr), 'Ikke besvart');
     });
 
     test('the form starts from the current answers, with a fresh begrunnelse', () => {

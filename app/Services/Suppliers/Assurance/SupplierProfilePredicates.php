@@ -24,7 +24,8 @@ use App\Models\SupplierProfile;
  * A question the profile does not ask for this supplier (SupplierProfile::visibleFields()) is never
  * read as unknown: each conditional question's predicate also requires the fact it is asked on.
  *
- * The two lists have no unknown: a category or sector holds only when it was chosen.
+ * The two lists have no unknown by omission: a category or sector holds only when it was chosen —
+ * or, for high_risk_categories, when the answer is «Ikke avklart» (['unknown']).
  */
 final class SupplierProfilePredicates
 {
@@ -54,13 +55,27 @@ final class SupplierProfilePredicates
     public const SECTOR_PREFIX = 'sector:';
 
     /**
-     * When an aktsomhetsvurdering is expected (docs/supplier-assurance-v2-plan.md §11.3,
-     * «due_diligence_relevant»): high_risk_products ∨ production_outside_eea ∨ (labour_intensive ∧
-     * subcontractors), as groups over the predicates above, so «Ikke avklart» counts as it does for
-     * requirements and a wholly empty profile does not. Not a predicate a requirement's rule may use:
-     * it decides signal 10 and what the Aktsomhet card says, nothing else.
+     * When an aktsomhetsvurdering is expected (docs/supplier-assurance-v2-plan.md §11.3):
+     * high_risk_products ∨ production_outside_eea ∨ (labour_intensive ∧ subcontractors), as groups
+     * over the predicates above. Not a predicate a requirement's rule may use: it decides signal 10,
+     * «Aktsomhetsbehov må avklares» and what the Aktsomhet card says, nothing else —
+     * dueDiligenceStatus() reads it.
      */
     public const DUE_DILIGENCE_RULE = [['high_risk_products'], ['production_outside_eea'], ['labour_intensive', 'subcontractors']];
+
+    /** The profile question each predicate in DUE_DILIGENCE_RULE is read from. */
+    public const DUE_DILIGENCE_FIELDS = [
+        'high_risk_products' => 'high_risk_categories',
+        'production_outside_eea' => 'production_outside_eea',
+        'labour_intensive' => 'labour_intensive',
+        'subcontractors' => 'uses_subcontractors',
+    ];
+
+    public const DUE_DILIGENCE_REQUIRED = 'required';
+
+    public const DUE_DILIGENCE_MUST_CLARIFY = 'must_clarify';
+
+    public const DUE_DILIGENCE_NOT_REQUIRED = 'not_required';
 
     /**
      * Every predicate name a rule may use.
@@ -147,7 +162,10 @@ final class SupplierProfilePredicates
             'data_outside_eea' => $storesOurData && in_array($answers['data_location'] ?? null, ['outside_eea', ...$doubt], true),
             'subcontractors' => $applies('uses_subcontractors'),
             'production_outside_eea' => $applies('production_outside_eea'),
-            'high_risk_products' => is_array($highRisk) && $highRisk !== [],
+            // A category chosen, or «Ikke avklart» (['unknown']) — doubt counts as for the yes/no
+            // questions. Not answered (null) still holds nothing here: the lists have no unknown
+            // by omission, only by answer.
+            'high_risk_products' => is_array($highRisk) && $highRisk !== [] && ($certainOnly ? ! SupplierProfile::isListUnknown('high_risk_categories', $highRisk) : true),
             'on_site_work' => $applies('on_site_work'),
             'labour_intensive' => $applies('labour_intensive'),
             'public_contract_terms' => $applies('public_contract_terms'),
@@ -162,19 +180,87 @@ final class SupplierProfilePredicates
     }
 
     /**
-     * Whether an aktsomhetsvurdering is expected, from the predicates that hold (for()/evaluate()).
+     * Whether the profile makes an aktsomhetsvurdering required — three answers, never two, so
+     * «not known» is never read as «not required» and never as «required» either:
      *
-     * @param  list<string>  $facts
+     *  - required: one group of DUE_DILIGENCE_RULE holds on clear answers only. It wins, whatever
+     *    else is unclear.
+     *  - must_clarify: no group holds for certain, but one could: each of its facts is either a
+     *    clear yes or unclear (Ikke avklart, or not answered). Only those unclear facts are named —
+     *    labour intensity left unclear next to a clear «no» to subcontractors changes nothing.
+     *  - not_required: every group has a clear no. Questions that cannot change that need no answer.
+     *
+     * Each fact is read from the profile alone: yes is yes, no is no, anything else is unclear; for
+     * the high-risk list a chosen category is yes, [] («Ingen av disse») no, and ['unknown'] or not
+     * answered unclear. A wholly empty profile is therefore must_clarify — there is nothing to
+     * conclude «not required» from. Nothing here reads the criticality answers, an assessment or its
+     * conclusion: whether one is required is not whether one is done.
+     *
+     * Returns the status, the groups that hold for certain (required), and the profile questions to
+     * clarify (must_clarify), in DUE_DILIGENCE_FIELDS order.
+     *
+     * @param  array<string, mixed>|null  $answers
+     * @return array{status: string, groups: list<list<string>>, unresolved: list<string>}
      */
-    public static function dueDiligenceRelevant(array $facts): bool
+    public static function dueDiligenceStatus(?array $answers): array
     {
+        $fact = function (string $predicate) use ($answers): ?bool {
+            $field = self::DUE_DILIGENCE_FIELDS[$predicate];
+            $value = $answers[$field] ?? null;
+
+            if ($field === 'high_risk_categories') {
+                if (! is_array($value) || SupplierProfile::isListUnknown($field, $value)) {
+                    return null;
+                }
+
+                return $value !== [];
+            }
+
+            return match ($value) {
+                SupplierProfile::ANSWER_YES => true,
+                SupplierProfile::ANSWER_NO => false,
+                default => null,
+            };
+        };
+
+        $holding = [];
+        $open = [];
+
         foreach (self::DUE_DILIGENCE_RULE as $group) {
-            if (array_diff($group, $facts) === []) {
-                return true;
+            $values = array_map($fact, $group);
+
+            if (in_array(false, $values, true)) {
+                continue;
+            }
+
+            if (! in_array(null, $values, true)) {
+                $holding[] = $group;
+
+                continue;
+            }
+
+            foreach ($group as $index => $predicate) {
+                if ($values[$index] === null) {
+                    $open[] = $predicate;
+                }
             }
         }
 
-        return false;
+        if ($holding !== []) {
+            return ['status' => self::DUE_DILIGENCE_REQUIRED, 'groups' => $holding, 'unresolved' => []];
+        }
+
+        if ($open !== []) {
+            $fields = array_values(array_filter(
+                self::DUE_DILIGENCE_FIELDS,
+                fn (string $field, string $predicate): bool => in_array($predicate, $open, true),
+                ARRAY_FILTER_USE_BOTH,
+            ));
+
+            return ['status' => self::DUE_DILIGENCE_MUST_CLARIFY, 'groups' => [], 'unresolved' => $fields];
+        }
+
+        return ['status' => self::DUE_DILIGENCE_NOT_REQUIRED, 'groups' => [], 'unresolved' => []];
     }
 
     /** No profile, or a profile where nothing is answered. */

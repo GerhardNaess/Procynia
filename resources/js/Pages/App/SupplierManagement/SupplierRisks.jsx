@@ -8,7 +8,6 @@ import { ownersForArea } from '../Risk/riskOwners';
 import { RISK_STATUS_TONES } from '../Risk/riskStatus';
 import { riskLevelText, riskOriginText, riskStatusLabel } from './supplierManagement';
 
-const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-900';
 const HINT = 'mt-1 text-base text-slate-600';
@@ -59,7 +58,7 @@ function CreateForm({ supplier, handoff, dueDiligence = null, onDone, formatDate
     return (
         <form ref={ref} onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4" data-testid="risk-create-form">
             <div>
-                <h3 className="text-lg font-semibold text-slate-950">{r.form_heading ?? 'Opprett risiko'}</h3>
+                <h4 className="text-lg font-semibold text-slate-950">{r.form_heading ?? 'Opprett risiko'}</h4>
                 <p className={HINT}>{r.form_intro ?? 'Det opprettes en ny risiko i Risiko. Der vurderes og behandles den. Leverandøren viser bare at risikoen gjelder den.'}</p>
                 {dueDiligence && <p className={HINT} data-testid="risk-from-due-diligence">{riskOriginText({ origin: 'created_from_supplier', due_diligence_assessed_on: dueDiligence.assessed_on }, tr, formatDate)}</p>}
             </div>
@@ -128,7 +127,7 @@ function LinkForm({ supplierId, options, onDone, tr }) {
     return (
         <form onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="risk-link-form">
             <div>
-                <h3 className="text-lg font-semibold text-slate-950">{r.link_heading ?? 'Koble til eksisterende risiko'}</h3>
+                <h4 className="text-lg font-semibold text-slate-950">{r.link_heading ?? 'Koble til eksisterende risiko'}</h4>
                 <p className={HINT}>{r.link_intro ?? 'For en risiko som allerede er registrert i Risiko. Du kan velge blant risikoer du kan redigere.'}</p>
             </div>
             {options.length === 0 ? (
@@ -186,9 +185,8 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
     };
 
     return (
-        <section className={CARD} aria-labelledby="supplier-risks-heading" data-testid="supplier-risks">
-            <h2 id="supplier-risks-heading" className="text-xl font-semibold text-slate-950">{r.heading ?? 'Risikoer som gjelder leverandøren'}</h2>
-            <p className="mt-1 text-base text-slate-600">{r.intro ?? 'Risikoer i Risiko som gjelder leverandøren. Risikoen vurderes og behandles der – vurdering, tiltak, aksept og revurdering følges opp i Risiko.'}</p>
+        <div data-testid="supplier-risks">
+            <p className="text-base text-slate-600">{r.intro ?? 'Risikoer i Risiko som gjelder leverandøren. Risikoen vurderes og behandles der – vurdering, tiltak, aksept og revurdering følges opp i Risiko.'}</p>
 
             {risks.length === 0 ? (
                 <p className="mt-4 text-base text-slate-800" data-testid="risks-none">{r.none ?? 'Ingen risikoer i Risiko gjelder leverandøren.'}</p>
@@ -245,6 +243,6 @@ export default function SupplierRisks({ supplier, risks, handoff, hasEditRight, 
             {handoff && panel === 'link' && (
                 <LinkForm supplierId={supplier.id} options={handoff.link_options ?? []} onDone={() => setPanel(null)} tr={tr} />
             )}
-        </section>
+        </div>
     );
 }

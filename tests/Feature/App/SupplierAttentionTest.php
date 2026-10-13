@@ -110,7 +110,7 @@ class SupplierAttentionTest extends TestCase
         $this->assertSame(['not_assessed'], array_column($service->findingsForSupplier($important), 'key'));
     }
 
-    public function test_the_register_panel_and_filter_and_the_supplier_page_carry_the_findings(): void
+    public function test_the_register_rows_and_filter_and_the_supplier_page_carry_the_findings(): void
     {
         ['customer' => $customer] = $this->context('grc');
         $reader = $this->supplierUser($customer, []);
@@ -118,8 +118,10 @@ class SupplierAttentionTest extends TestCase
         $this->supplier($customer, $reader, 'Rolig AS');
 
         $page = $this->actingAs($reader)->get('/app/supplier-management')->assertOk()->viewData('page')['props'];
-        $this->assertSame([1, ['Kritisk AS']], [$page['attention']['total'], array_column($page['attention']['suppliers'], 'name')]);
+        // No register-wide panel: each row carries only which kinds of follow-up it has.
+        $this->assertArrayNotHasKey('attention', $page);
         $this->assertSame(['Kritisk AS', 'Rolig AS'], array_column($page['suppliers'], 'name'));
+        $this->assertSame([['not_assessed'], []], array_column($page['suppliers'], 'attention'));
 
         $filtered = $this->actingAs($reader)->get('/app/supplier-management?attention=1')->viewData('page')['props'];
         $this->assertSame([['Kritisk AS'], true], [array_column($filtered['suppliers'], 'name'), $filtered['filters']['attention']]);

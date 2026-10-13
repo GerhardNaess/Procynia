@@ -129,6 +129,69 @@ class SupplierAssuranceRequirementTest extends TestCase
         $this->assertDatabaseRefuses(fn () => DB::table('supplier_control_requirements')->insert($this->requirementRow($customer) + ['supplier_id' => $supplier->id, 'applies_when' => '[["processor"]]']), 'a rule on a requirement for one supplier');
     }
 
+    public function test_a_requirement_for_one_supplier_is_edited_and_retired_on_the_supplier_and_its_controls_are_kept(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        ['customer' => $foreignCustomer] = $this->context('grc');
+        $assurer = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $supplier = $this->supplier($customer, $assurer, 'Transport AS', classification: $this->classification());
+        $neighbour = $this->supplier($customer, $assurer, 'Nabo AS', classification: $this->classification());
+        $page = fn (Supplier $of, ?User $as = null): array => $this->actingAs($as ?? $assurer)->get("/app/supplier-management/{$of->id}")->assertOk()->viewData('page')['props'];
+        $titles = fn (array $props, string $list): array => array_column($props['control_requirements'][$list] ?? [], 'title');
+
+        $this->actingAs($assurer)->post("/app/supplier-management/{$supplier->id}/control-requirements", $this->requirementPayload(['title' => 'Utslippsfrie kjøretøy', 'level' => 'mandatory']))->assertSessionHas('success');
+        $own = SupplierControlRequirement::query()->where('supplier_id', $supplier->id)->sole();
+
+        // On its supplier: applies, says why, and may be edited and retired there — never deleted.
+        $row = collect($page($supplier)['control_requirements']['applicable'])->firstWhere('id', $own->id);
+        $this->assertSame([true, true, 'Krav for denne leverandøren'], [$row['supplier_specific'], $row['can_manage'], $row['reason']['text']]);
+        $this->assertArrayNotHasKey('deletable', $row);
+        // A catalogue requirement on the same page is managed under Kontrollkrav, not here.
+        $catalogue = $this->requirement($customer, 'Felles krav', []);
+        $this->assertFalse(collect($page($supplier)['control_requirements']['applicable'])->firstWhere('id', $catalogue->id)['can_manage']);
+        // Never a shared requirement: not on the neighbour, not includable there, not in the catalogue.
+        $this->assertNotContains('Utslippsfrie kjøretøy', [...$titles($page($neighbour), 'applicable'), ...$titles($page($neighbour), 'includable')]);
+        $this->assertSame(['Felles krav'], array_column($this->actingAs($assurer)->get(self::CATALOGUE)->viewData('page')['props']['requirements'], 'title'));
+
+        // Rediger krav: the text changes, the rule stays empty whatever is sent.
+        $this->actingAs($assurer)->patch(self::CATALOGUE."/{$own->id}", $this->requirementPayload(['title' => 'Minst 50 % utslippsfrie kjøretøy', 'level' => 'mandatory', 'conditions' => ['processor']]))->assertSessionHas('success');
+        $this->assertSame(['Minst 50 % utslippsfrie kjøretøy', [], (int) $supplier->id], [$own->fresh()->title, $own->fresh()->applies_when, (int) $own->fresh()->supplier_id]);
+
+        // A control of it counts: mandatory and missing is open.
+        $this->actingAs($assurer)->post("/app/supplier-management/{$supplier->id}/requirement-evaluations", [
+            'requirement_id' => $own->id, 'status' => 'missing', 'rationale' => 'Ikke dokumentert.', 'evaluated_on' => now()->toDateString(), 'accepted_until' => '', 'document_ids' => [],
+        ])->assertSessionHasNoErrors();
+        $open = fn (): array => collect($page($supplier)['attention'])->firstWhere('key', 'mandatory_open')['requirements'] ?? [];
+        $this->assertSame(['Minst 50 % utslippsfrie kjøretøy'], array_column($open(), 'title'));
+
+        // Without supplier.assure, or from another customer: refused; a reader is offered nothing.
+        $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
+        $this->actingAs($editor)->patch(self::CATALOGUE."/{$own->id}", $this->requirementPayload())->assertForbidden();
+        $this->actingAs($editor)->post(self::CATALOGUE."/{$own->id}/retire")->assertForbidden();
+        $this->assertFalse(collect($page($supplier, $editor)['control_requirements']['applicable'])->firstWhere('id', $own->id)['can_manage']);
+        $foreignAssurer = $this->supplierUser($foreignCustomer, [CustomerPermissionCatalog::SUPPLIER_ASSURE]);
+        $this->actingAs($foreignAssurer)->patch(self::CATALOGUE."/{$own->id}", $this->requirementPayload())->assertNotFound();
+        $this->actingAs($foreignAssurer)->post(self::CATALOGUE."/{$own->id}/retire")->assertNotFound();
+
+        // Ended: neither edited nor retired until reopened, and nothing is offered.
+        $this->actingAs($editor)->post("/app/supplier-management/{$supplier->id}/end", ['reason' => 'Avtalen er sagt opp.'])->assertSessionHas('success');
+        $this->actingAs($assurer)->post(self::CATALOGUE."/{$own->id}/retire")->assertSessionHasErrors('requirement');
+        $this->actingAs($assurer)->patch(self::CATALOGUE."/{$own->id}", $this->requirementPayload())->assertSessionHasErrors('requirement');
+        $this->assertFalse(collect($page($supplier)['control_requirements']['applicable'])->firstWhere('id', $own->id)['can_manage']);
+        $this->assertSame(SupplierControlRequirement::STATUS_ACTIVE, $own->fresh()->status);
+        $this->actingAs($editor)->post("/app/supplier-management/{$supplier->id}/reopen", ['reason' => 'Ny avtale.'])->assertSessionHas('success');
+
+        // Sett som utgått: no longer applies or counts; the control stays, under the earlier ones.
+        $this->actingAs($assurer)->post(self::CATALOGUE."/{$own->id}/retire")->assertSessionHas('success');
+        $props = $page($supplier);
+        $this->assertSame(SupplierControlRequirement::STATUS_RETIRED, $own->fresh()->status);
+        $this->assertNotContains($own->id, array_column($props['control_requirements']['applicable'], 'id'));
+        $this->assertSame([], $open());
+        $this->assertSame(['Minst 50 % utslippsfrie kjøretøy'], array_column($props['control_requirements']['earlier_evaluations'], 'title'));
+        $this->assertSame(1, $own->evaluations()->count());
+        $this->assertNotContains($own->id, array_column($props['control_requirements']['includable'], 'id'));
+    }
+
     public function test_the_requirement_profile_follows_the_profile_live_and_stores_no_applicability(): void
     {
         ['customer' => $customer] = $this->context('grc');

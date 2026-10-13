@@ -7,44 +7,49 @@ import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHand
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import SupplierAssessment from './SupplierAssessment';
-import SupplierAssuranceStatus from './SupplierAssuranceStatus';
+import SupplierRequirementStatus, { SupplierDecisionHistory } from './SupplierAssuranceStatus';
 import SupplierControlRequirements from './SupplierControlRequirements';
-import { SupplierAttentionFindings } from './SupplierAttention';
-import SupplierCriticality from './SupplierCriticality';
+import SupplierCriticality, { SupplierCriticalityHistory } from './SupplierCriticality';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
+import SupplierDetailsSection from './SupplierDetailsSection';
 import SupplierDocuments from './SupplierDocuments';
 import SupplierDueDiligence from './SupplierDueDiligence';
-import SupplierFollowUpPlan from './SupplierFollowUpPlan';
 import SupplierForm from './SupplierForm';
 import SupplierHistory from './SupplierHistory';
-import { SecurityPrivacyCard, SupplierOverviewSummaries } from './SupplierOverview';
+import { OverviewAttention, SecurityPrivacyCard, SupplierInfoDetails, SupplierKeyFacts, SupplierNextControl } from './SupplierOverview';
 import SupplierImprovementCases from './SupplierImprovementCases';
-import SupplierProfile from './SupplierProfile';
-import SupplierRequirements from './SupplierRequirements';
+import SupplierProfile, { SupplierProfileHistory } from './SupplierProfile';
+import SupplierEarlierComplianceLinks from './SupplierEarlierComplianceLinks';
 import SupplierRisks from './SupplierRisks';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
 import { supplierHelp } from './supplierHelp';
-import { documentationSummary, securityPrivacySummary, supplierPageTabs, tabForAnchor, tabFromSearch, tabLabel, tabSearch } from './supplierPage';
-import { SUPPLIER_STATUS_TONES, categoryLabel, statusLabel } from './supplierManagement';
+import {
+    OVERVIEW_DETAILS,
+    criticalitySummary,
+    detailForAnchor,
+    linkedCountSummary,
+    nextControl,
+    profileSummary,
+    securityPrivacySummary,
+    supplierPageTabs,
+    tabForAnchor,
+    tabFromSearch,
+    tabLabel,
+    tabSearch,
+} from './supplierPage';
+import { SUPPLIER_STATUS_TONES, statusLabel } from './supplierManagement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const TERM = 'text-base font-semibold text-slate-600';
-const VALUE = 'mt-1 break-words text-base text-slate-900';
-
-function Fact({ term, children }) {
-    return (
-        <div className="min-w-0">
-            <dt className={TERM}>{term}</dt>
-            <dd className={VALUE}>{children}</dd>
-        </div>
-    );
-}
 
 /**
- * One supplier: who they are, what they deliver, who follows them up and how to reach them; the
- * status and what can be done with it; and the history. Every action is offered only when the
- * server said this person may do it; the controller refuses it otherwise. A supplier that is not
- * ended can be edited and ended; an ended one only reopened. Status never moves through Rediger.
+ * One supplier. Oversikt answers who the supplier is, what it delivers, who is responsible, what
+ * needs following up and when the next control is — «Trenger oppfølging» and «Om leverandøren» —
+ * with everything else under «Detaljer», closed until opened, and «Andre handlinger» last. The work
+ * itself is on the other tabs; the history of status, criticality and profile is on Historikk.
+ *
+ * Every action is offered only when the server said this person may do it; the controller refuses
+ * it otherwise. A supplier that is not ended can be edited and ended; an ended one only reopened.
+ * Status never moves through Rediger.
  */
 export default function SupplierManagementShow() {
     const {
@@ -54,8 +59,9 @@ export default function SupplierManagementShow() {
         criticality = null,
         profile = null,
         control_requirements: controlRequirements = null,
-        assurance = null,
-        activate_warning: activateWarning = false,
+        requirement_status: requirementStatus = null,
+        decision_history: decisionHistory = [],
+        activate_warning: activateWarning = {},
         attention = [],
         follow_up_plan: followUpPlan = null,
         due_diligence: dueDiligence = null,
@@ -74,8 +80,7 @@ export default function SupplierManagementShow() {
         improvement_handoff: improvementHandoff = null,
         risks = null,
         risk_handoff: riskHandoff = null,
-        requirements = null,
-        requirement_linking: requirementLinking = null,
+        earlier_compliance_links: earlierComplianceLinks = null,
         status_history: statusHistory = [],
         permissions = {},
         categories = [],
@@ -96,10 +101,14 @@ export default function SupplierManagementShow() {
     const [riskFrom, setRiskFrom] = useState(null);
     const canCreateRisk = (riskHandoff?.area_options ?? []).length > 0;
     const date = (value) => formatLongDate(value, locale);
-    const tabs = supplierPageTabs({ controlRequirements, requirements, dueDiligence });
+    const tabs = supplierPageTabs({ controlRequirements, dueDiligence });
     const [tab, setTab] = useState(() => tabFromSearch(typeof window === 'undefined' ? '' : window.location.search, tabs));
     // An in-page link to a section on another tab: the tab opens first, then the section scrolls in.
     const [scrollTo, setScrollTo] = useState(null);
+    // Which sections under «Detaljer» are open; all closed at first.
+    const [details, setDetails] = useState({});
+    const toggleDetail = (key) => setDetails((open) => ({ ...open, [key]: ! open[key] }));
+    const openDetail = (key) => setDetails((open) => ({ ...open, [key]: true }));
 
     const openTab = (next, anchor = null) => {
         setTab(next);
@@ -119,8 +128,8 @@ export default function SupplierManagementShow() {
         }
     }, [scrollTo, tab]);
 
-    // Trenger oppmerksomhet, Neste kontroller and the summaries link to #sections; the ones on another
-    // tab are opened there. An anchor on every tab (Kontrollstatus) is left to the browser.
+    // Trenger oppfølging and Neste kontroll link to #sections; the ones on another tab are opened
+    // there, and a section under «Detaljer» is opened before it scrolls in.
     const followInPageLink = (event) => {
         const link = event.target.closest?.('a[href^="#"]');
         const anchor = link?.getAttribute('href')?.slice(1);
@@ -128,13 +137,21 @@ export default function SupplierManagementShow() {
 
         if (target && tabs.includes(target)) {
             event.preventDefault();
+            const detail = detailForAnchor(anchor);
+
+            if (detail) {
+                openDetail(detail);
+            }
+
             openTab(target, anchor);
         }
     };
 
-    // «Følg opp» and «Opprett risiko» open their form in the panels on Oversikt.
-    const startFollowUp = (value) => { setFollowUp(value); openTab('overview'); };
-    const startRisk = (value) => { setRiskFrom(value); openTab('overview'); };
+    // «Følg opp» and «Opprett risiko» open their form in its section under «Detaljer» on Oversikt.
+    const startFollowUp = (value) => { setFollowUp(value); openDetail('cases'); openTab('overview'); };
+    const startRisk = (value) => { setRiskFrom(value); openDetail('risks'); openTab('overview'); };
+    const o = tr.page?.overview ?? {};
+    const next = nextControl(followUpPlan, item);
     const security = securityPrivacySummary(profile, controlRequirements?.applicable ?? [], tr);
 
     const form = useForm({
@@ -166,8 +183,9 @@ export default function SupplierManagementShow() {
         router.delete(`/app/supplier-management/${item.id}`);
     };
 
-    const hasContact = Boolean(item.contact_name || item.contact_email || item.contact_phone);
-    const notRegistered = <span className="text-slate-600">{tr.not_registered ?? 'Ikke registrert'}</span>;
+    // Ta i bruk warns — never blocks — when a mandatory requirement is open, or the last decision
+    // registered before they were retired was «Ikke godkjent for nye kjøp».
+    const warnOnActivate = Boolean(activateWarning.mandatory_open || activateWarning.not_approved_on);
 
     return (
         <CustomerAppLayout title={item.name} showPageTitle={false} workView={panel === 'edit' ? (tr.edit ?? 'Rediger') : null}>
@@ -195,9 +213,6 @@ export default function SupplierManagementShow() {
                     </p>
                 )}
 
-                {/* Kontrollstatus: Beslutning and Tilstand nå, side by side and never merged (plan §9.5). */}
-                {assurance && <SupplierAssuranceStatus supplierId={item.id} data={assurance} showRequirementsLink={tabs.includes('requirements')} locale={locale} tr={tr} />}
-
                 <nav aria-label={tr.page?.tabs_label ?? 'Leverandørsiden'} className="flex flex-wrap gap-x-1 gap-y-0 border-b border-slate-200" data-testid="supplier-page-tabs">
                     {tabs.map((key) => (
                         <a
@@ -215,14 +230,8 @@ export default function SupplierManagementShow() {
 
                 {tab === 'overview' && (
                     <div className="space-y-6" data-testid="supplier-tab-overview">
-                        {attention.length > 0 && (
-                            <section className="rounded-[24px] border border-amber-200 bg-amber-50 p-6 shadow-sm" aria-labelledby="supplier-attention-heading" data-testid="supplier-attention">
-                                <h2 id="supplier-attention-heading" className="text-xl font-semibold text-slate-950">{tr.attention?.heading ?? 'Trenger oppmerksomhet'}</h2>
-                                <div className="mt-3">
-                                    <SupplierAttentionFindings findings={attention} tr={tr} formatDate={(date) => formatLongDate(date, locale)} withLinks />
-                                </div>
-                            </section>
-                        )}
+                        {/* Trenger oppfølging: what is missing and where it is done — the count, never the list. */}
+                        <OverviewAttention findings={attention} formatDate={date} tr={tr} />
 
                         {panel === 'edit' ? (
                             <section className={CARD} aria-labelledby="supplier-edit-heading">
@@ -237,157 +246,180 @@ export default function SupplierManagementShow() {
                                 />
                             </section>
                         ) : (
-                            <section className={CARD} aria-labelledby="supplier-details-heading">
-                                <h2 id="supplier-details-heading" className="text-xl font-semibold text-slate-950">{tr.details_heading ?? 'Om leverandøren'}</h2>
-                                <dl className="mt-4 grid gap-4 sm:grid-cols-3" data-testid="supplier-facts">
-                                    <Fact term={fields.category ?? 'Kategori'}>{categoryLabel(item.category, tr)}</Fact>
-                                    <Fact term={fields.organization_number ?? 'Organisasjonsnummer'}>{item.organization_number ?? notRegistered}</Fact>
-                                    <Fact term={fields.owner ?? 'Intern ansvarlig'}>
-                                        {item.owner_name ?? <span className="text-amber-800">{tr.no_owner ?? 'Mangler ansvarlig'}</span>}
-                                    </Fact>
-                                </dl>
-                                <dl className="mt-4 space-y-4">
-                                    <div>
-                                        <dt className={TERM}>{fields.deliverable_description ?? 'Hva leverer de til oss?'}</dt>
-                                        <dd className={`${VALUE} whitespace-pre-line`} data-testid="supplier-deliverable">{item.deliverable_description}</dd>
-                                    </div>
-                                    {item.note && (
-                                        <div>
-                                            <dt className={TERM}>{fields.note ?? 'Notat'}</dt>
-                                            <dd className={`${VALUE} whitespace-pre-line`}>{item.note}</dd>
-                                        </div>
-                                    )}
-                                </dl>
-
-                                <h3 className="mt-6 text-lg font-semibold text-slate-950">{tr.contact_heading ?? 'Kontaktperson hos leverandøren'}</h3>
-                                {hasContact ? (
-                                    <dl className="mt-3 grid gap-4 sm:grid-cols-3" data-testid="supplier-contact">
-                                        <Fact term={fields.contact_name ?? 'Navn'}>{item.contact_name ?? notRegistered}</Fact>
-                                        <Fact term={fields.contact_email ?? 'E-post'}>
-                                            {item.contact_email
-                                                ? <a href={`mailto:${item.contact_email}`} className="font-semibold text-violet-700 hover:text-violet-900">{item.contact_email}</a>
-                                                : notRegistered}
-                                        </Fact>
-                                        <Fact term={fields.contact_phone ?? 'Telefon'}>{item.contact_phone ?? notRegistered}</Fact>
-                                    </dl>
-                                ) : (
-                                    <p className="mt-2 text-base text-slate-600">{tr.no_contact ?? 'Ingen kontaktperson er registrert.'}</p>
-                                )}
-                            </section>
+                            <SupplierKeyFacts supplier={item} tr={tr} />
                         )}
 
-                        <SupplierCriticality
-                            supplierId={item.id}
-                            criticality={criticality}
-                            canChange={permissions.can_change_criticality ?? false}
-                            reviewIntervals={reviewIntervals}
-                            locale={locale}
-                            tr={tr}
-                        />
+                        <SupplierNextControl next={next} plan={followUpPlan} formatDate={date} tr={tr} />
 
-                        <SupplierProfile
-                            supplierId={item.id}
-                            profile={profile}
-                            canEdit={permissions.can_edit_profile ?? false}
-                            locale={locale}
-                            tr={tr}
-                        />
+                        {/* Detaljer: everything else, closed until opened. A closed section keeps its form. */}
+                        <section className={CARD} aria-labelledby="supplier-more-details-heading" data-testid="supplier-details">
+                            <h2 id="supplier-more-details-heading" className="text-xl font-semibold text-slate-950">{o.details_heading ?? 'Detaljer'}</h2>
+                            <div className="mt-2">
+                                <SupplierDetailsSection
+                                    headingId={OVERVIEW_DETAILS.info}
+                                    testId="details-info"
+                                    title={o.info_heading ?? 'Leverandørinformasjon'}
+                                    summary={item.note ? (o.info_summary_note ?? 'Notat og registrering') : (o.info_summary ?? 'Registrering')}
+                                    open={Boolean(details.info)}
+                                    onToggle={() => toggleDetail('info')}
+                                >
+                                    <SupplierInfoDetails supplier={item} registered={registered} formatDate={date} tr={tr} />
+                                </SupplierDetailsSection>
 
-                        <SecurityPrivacyCard summary={security} tr={tr} />
+                                <SupplierDetailsSection
+                                    headingId={OVERVIEW_DETAILS.criticality}
+                                    testId="details-criticality"
+                                    title={tr.criticality?.heading ?? 'Kritikalitet'}
+                                    summary={criticalitySummary(criticality, tr, date)}
+                                    open={Boolean(details.criticality)}
+                                    onToggle={() => toggleDetail('criticality')}
+                                >
+                                    <SupplierCriticality
+                                        supplierId={item.id}
+                                        criticality={criticality}
+                                        canChange={permissions.can_change_criticality ?? false}
+                                        reviewIntervals={reviewIntervals}
+                                        locale={locale}
+                                        tr={tr}
+                                    />
+                                </SupplierDetailsSection>
 
-                        <SupplierOverviewSummaries
-                            supplier={item}
-                            documentation={documentationSummary(documents, today)}
-                            assessments={assessments}
-                            dueDiligence={dueDiligence}
-                            formatDate={date}
-                            tr={tr}
-                        />
+                                {profile && (
+                                    <SupplierDetailsSection
+                                        headingId={OVERVIEW_DETAILS.profile}
+                                        testId="details-profile"
+                                        title={tr.profile?.heading ?? 'Leverandørprofil'}
+                                        summary={profileSummary(profile, tr)}
+                                        open={Boolean(details.profile)}
+                                        onToggle={() => toggleDetail('profile')}
+                                    >
+                                        <SupplierProfile
+                                            supplierId={item.id}
+                                            profile={profile}
+                                            canEdit={permissions.can_edit_profile ?? false}
+                                            locale={locale}
+                                            tr={tr}
+                                        />
+                                    </SupplierDetailsSection>
+                                )}
 
-                        <SupplierFollowUpPlan plan={followUpPlan} formatDate={(date) => formatLongDate(date, locale)} tr={tr} />
+                                {risks !== null && (
+                                    <SupplierDetailsSection
+                                        headingId={OVERVIEW_DETAILS.risks}
+                                        testId="details-risks"
+                                        title={o.risks_heading ?? 'Risikoer'}
+                                        summary={linkedCountSummary(risks.length, { none: o.risks_none ?? 'Ingen tilknyttede risikoer', one: o.risks_one ?? '1 risiko', many: o.risks_many ?? ':count risikoer' })}
+                                        open={Boolean(details.risks)}
+                                        onToggle={() => toggleDetail('risks')}
+                                    >
+                                        <SupplierRisks
+                                            supplier={item}
+                                            risks={risks}
+                                            handoff={riskHandoff}
+                                            hasEditRight={permissions.has_edit_right ?? false}
+                                            fromDueDiligence={riskFrom}
+                                            onDueDiligenceDone={() => setRiskFrom(null)}
+                                            formatDate={date}
+                                            tr={tr}
+                                            trRisk={translations?.risk ?? {}}
+                                        />
+                                    </SupplierDetailsSection>
+                                )}
 
-                        <SupplierRisks
-                            supplier={item}
-                            risks={risks}
-                            handoff={riskHandoff}
-                            hasEditRight={permissions.has_edit_right ?? false}
-                            fromDueDiligence={riskFrom}
-                            onDueDiligenceDone={() => setRiskFrom(null)}
-                            formatDate={date}
-                            tr={tr}
-                            trRisk={translations?.risk ?? {}}
-                        />
-
-                        <SupplierImprovementCases
-                            supplier={item}
-                            cases={improvementCases}
-                            handoff={improvementHandoff}
-                            followUp={followUp}
-                            setFollowUp={setFollowUp}
-                            hasEditRight={permissions.has_edit_right ?? false}
-                            locale={locale}
-                            tr={tr}
-                            ti={translations?.improvements ?? {}}
-                        />
-
-                        <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`supplier-${item.id}`} />
-
-                        <section className={CARD} aria-labelledby="supplier-status-heading" data-testid="supplier-status">
-                            <h2 id="supplier-status-heading" className="text-xl font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h2>
-                            {/* An ended supplier says so at the top of the page, once. */}
-                            {item.status !== 'ended' && <p className="mt-3 text-base text-slate-800">{tr.status_text?.[item.status] ?? ''}</p>}
-                            {/* Ta i bruk has no form of its own; a refusal (the supplier moved on) lands here. */}
-                            {panel === null && errors.reason && <p className="mt-2 text-base text-rose-700">{errors.reason}</p>}
-
-                            {panel === null && (permissions.can_activate || permissions.can_end || permissions.can_reopen) && (
-                                <div className="mt-4 flex flex-wrap gap-2">
-                                    {permissions.can_activate && (
-                                        <button type="button" onClick={activateWarning ? () => setPanel('activate') : activate} className={PRIMARY_ACTION}>{tr.activate ?? 'Ta i bruk'}</button>
-                                    )}
-                                    {permissions.can_end && (
-                                        <button type="button" onClick={() => setPanel('end')} className={WARNING_ACTION}>{tr.end ?? 'Avslutt leverandør'}</button>
-                                    )}
-                                    {permissions.can_reopen && (
-                                        <button type="button" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne leverandør'}</button>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Ta i bruk warns, never blocks (plan §9.6): Procynia is not the purchasing system. */}
-                            {panel === 'activate' && (
-                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4" role="alert" data-testid="activate-warning">
-                                    <p className="text-lg font-semibold text-slate-950">{a.activate_warning_heading ?? 'Ta i bruk leverandøren?'}</p>
-                                    {assurance?.state?.decision_required && <p className="mt-1 text-base text-slate-900">{a.activate_warning_decision_required}</p>}
-                                    {assurance?.decision?.decision === 'not_approved' && <p className="mt-1 text-base text-slate-900">{a.activate_warning_not_approved}</p>}
-                                    <p className="mt-1 text-base text-slate-800">{a.activate_warning_text}</p>
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        <button type="button" onClick={() => { setPanel(null); activate(); }} className={WARNING_ACTION}>{a.activate_anyway ?? 'Ta i bruk likevel'}</button>
-                                        <button type="button" onClick={() => setPanel(null)} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {panel === null && permissions.has_delete_right && (
-                                <div className="mt-6 border-t border-slate-100 pt-4" data-testid="supplier-delete">
-                                    {permissions.can_delete ? (
-                                        <>
-                                            <p className="text-base text-slate-600">{tr.delete_hint ?? 'Sletting er bare for en leverandør som ble registrert ved en feil. Er leverandøren ikke lenger i bruk, avslutt den i stedet.'}</p>
-                                            <button type="button" onClick={destroy} className={`mt-3 ${DESTRUCTIVE_ACTION}`}>{tr.delete ?? 'Slett leverandør'}</button>
-                                        </>
-                                    ) : (
-                                        <p className="text-base text-slate-600">{tr.not_deletable_hint ?? 'Leverandøren har historikk og kan ikke slettes. Avslutt den i stedet.'}</p>
-                                    )}
-                                </div>
-                            )}
+                                {improvementCases !== null && (
+                                    <SupplierDetailsSection
+                                        headingId={OVERVIEW_DETAILS.cases}
+                                        testId="details-cases"
+                                        title={o.cases_heading ?? 'Avvik og forbedringer'}
+                                        summary={linkedCountSummary(improvementCases.length, { none: o.cases_none ?? 'Ingen tilknyttede saker', one: o.cases_one ?? '1 sak', many: o.cases_many ?? ':count saker' })}
+                                        open={Boolean(details.cases)}
+                                        onToggle={() => toggleDetail('cases')}
+                                    >
+                                        <SupplierImprovementCases
+                                            supplier={item}
+                                            cases={improvementCases}
+                                            handoff={improvementHandoff}
+                                            followUp={followUp}
+                                            setFollowUp={setFollowUp}
+                                            hasEditRight={permissions.has_edit_right ?? false}
+                                            locale={locale}
+                                            tr={tr}
+                                            ti={translations?.improvements ?? {}}
+                                        />
+                                    </SupplierDetailsSection>
+                                )}
+                            </div>
                         </section>
 
-                        {panel === 'end' && <SupplierEndForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
-                        {panel === 'reopen' && <SupplierReopenForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                        {/* Andre handlinger: what is not part of following the supplier up day to day. */}
+                        <section className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-6" aria-labelledby="supplier-other-actions-heading" data-testid="supplier-other-actions">
+                            <h2 id="supplier-other-actions-heading" className="text-lg font-semibold text-slate-950">{o.other_actions_heading ?? 'Andre handlinger'}</h2>
+
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5" data-testid="supplier-status">
+                                <h3 className="text-lg font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h3>
+                                {/* An ended supplier says so at the top of the page, once. */}
+                                {item.status !== 'ended' && <p className="mt-2 text-base text-slate-800">{tr.status_text?.[item.status] ?? ''}</p>}
+                                {/* Ta i bruk has no form of its own; a refusal (the supplier moved on) lands here. */}
+                                {panel === null && errors.reason && <p className="mt-2 text-base text-rose-700">{errors.reason}</p>}
+
+                                {panel === null && (permissions.can_activate || permissions.can_end || permissions.can_reopen) && (
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        {permissions.can_activate && (
+                                            <button type="button" onClick={warnOnActivate ? () => setPanel('activate') : activate} className={PRIMARY_ACTION}>{tr.activate ?? 'Ta i bruk'}</button>
+                                        )}
+                                        {permissions.can_end && (
+                                            <button type="button" onClick={() => setPanel('end')} className={WARNING_ACTION}>{tr.end ?? 'Avslutt leverandør'}</button>
+                                        )}
+                                        {permissions.can_reopen && (
+                                            <button type="button" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne leverandør'}</button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Ta i bruk warns, never blocks (plan §9.6): Procynia is not the purchasing system. */}
+                                {panel === 'activate' && (
+                                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4" role="alert" data-testid="activate-warning">
+                                        <p className="text-lg font-semibold text-slate-950">{a.activate_warning_heading ?? 'Ta i bruk leverandøren?'}</p>
+                                        {activateWarning.mandatory_open && <p className="mt-1 text-base text-slate-900">{a.activate_warning_mandatory_open ?? 'Et obligatorisk kontrollkrav er ikke dokumentert eller midlertidig akseptert.'}</p>}
+                                        {activateWarning.not_approved_on && <p className="mt-1 text-base text-slate-900">{(a.activate_warning_not_approved ?? 'Siste kontrollbeslutning som ble registrert, var «Ikke godkjent for nye kjøp» (:date).').replace(':date', date(activateWarning.not_approved_on))}</p>}
+                                        <p className="mt-1 text-base text-slate-800">{a.activate_warning_text}</p>
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            <button type="button" onClick={() => { setPanel(null); activate(); }} className={WARNING_ACTION}>{a.activate_anyway ?? 'Ta i bruk likevel'}</button>
+                                            <button type="button" onClick={() => setPanel(null)} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {panel === 'end' && <SupplierEndForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                                {panel === 'reopen' && <SupplierReopenForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+
+                                {panel === null && permissions.has_delete_right && (
+                                    <div className="mt-6 border-t border-slate-100 pt-4" data-testid="supplier-delete">
+                                        {permissions.can_delete ? (
+                                            <>
+                                                <p className="text-base text-slate-600">{tr.delete_hint ?? 'Sletting er bare for en leverandør som ble registrert ved en feil. Er leverandøren ikke lenger i bruk, avslutt den i stedet.'}</p>
+                                                <button type="button" onClick={destroy} className={`mt-3 ${DESTRUCTIVE_ACTION}`}>{tr.delete ?? 'Slett leverandør'}</button>
+                                            </>
+                                        ) : (
+                                            <p className="text-base text-slate-600">{tr.not_deletable_hint ?? 'Leverandøren har historikk og kan ikke slettes. Avslutt den i stedet.'}</p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            <WikiKnowledgeHandoffPanel handoff={knowledgeHandoff} idPrefix={`supplier-${item.id}`} />
+                        </section>
                     </div>
                 )}
 
                 {tab === 'requirements' && (
                     <div className="space-y-6" data-testid="supplier-tab-requirements">
+                        {/* Kravstatus: the facts about the requirements, above the requirements themselves. */}
+                        <SupplierRequirementStatus state={requirementStatus} tr={tr} />
+
+                        {/* Sikkerhet og personvern: a filtered view of these requirements, beside them. */}
+                        <SecurityPrivacyCard summary={security} tr={tr} />
+
                         {controlRequirements && (
                             <SupplierControlRequirements
                                 supplierId={item.id}
@@ -397,14 +429,6 @@ export default function SupplierManagementShow() {
                                 tr={tr}
                             />
                         )}
-
-                        <SupplierRequirements
-                            supplier={item}
-                            requirements={requirements}
-                            linking={requirementLinking}
-                            hasEditRight={permissions.has_edit_right ?? false}
-                            tr={tr}
-                        />
                     </div>
                 )}
 
@@ -458,8 +482,12 @@ export default function SupplierManagementShow() {
 
                 {tab === 'history' && (
                     <div className="space-y-6" data-testid="supplier-tab-history">
-                        <p className="text-base text-slate-600">{tr.page?.history_intro ?? 'Statusendringene står her. Historikken for kritikalitet, profil, kontroller, beslutninger og vurderinger står ved hver av dem.'}</p>
+                        <p className="text-base text-slate-600">{tr.page?.history_intro ?? 'Endringer i status, kritikalitet og leverandørprofil, nyeste først. Historikken for kontroller, dokumentasjon og vurderinger står på fanen der de registreres.'}</p>
                         <SupplierHistory entries={statusHistory} registered={registered} locale={locale} tr={tr} />
+                        <SupplierCriticalityHistory criticality={criticality} locale={locale} tr={tr} />
+                        <SupplierProfileHistory profile={profile} locale={locale} tr={tr} />
+                        <SupplierDecisionHistory history={decisionHistory} locale={locale} tr={tr} />
+                        <SupplierEarlierComplianceLinks links={earlierComplianceLinks} tr={tr} />
                     </div>
                 )}
             </div>
