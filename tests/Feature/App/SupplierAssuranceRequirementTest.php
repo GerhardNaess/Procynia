@@ -187,9 +187,38 @@ class SupplierAssuranceRequirementTest extends TestCase
         $this->assertSame(SupplierControlRequirement::STATUS_RETIRED, $own->fresh()->status);
         $this->assertNotContains($own->id, array_column($props['control_requirements']['applicable'], 'id'));
         $this->assertSame([], $open());
-        $this->assertSame(['Minst 50 % utslippsfrie kjøretøy'], array_column($props['control_requirements']['earlier_evaluations'], 'title'));
         $this->assertSame(1, $own->evaluations()->count());
         $this->assertNotContains($own->id, array_column($props['control_requirements']['includable'], 'id'));
+
+        // Utgåtte kontrollkrav: the same row with its control, offered Ta i bruk igjen; its control is
+        // not repeated among the earlier ones. Nothing about it on the neighbour.
+        $retired = $props['control_requirements']['retired_own'];
+        $this->assertSame([[(int) $own->id, 'Minst 50 % utslippsfrie kjøretøy', 'retired', true]], array_map(fn (array $row): array => [$row['id'], $row['title'], $row['status'], $row['can_reactivate']], $retired));
+        $this->assertSame(['Ikke dokumentert.'], array_column($retired[0]['evaluations'], 'rationale'));
+        $this->assertSame([], $props['control_requirements']['earlier_evaluations']);
+        $this->assertSame([], $page($neighbour)['control_requirements']['retired_own']);
+
+        // Ta i bruk igjen: supplier.assure only, never across customers, never on an ended supplier.
+        $this->assertFalse($page($supplier, $editor)['control_requirements']['retired_own'][0]['can_reactivate']);
+        $this->actingAs($editor)->post(self::CATALOGUE."/{$own->id}/reactivate")->assertForbidden();
+        $this->actingAs($foreignAssurer)->post(self::CATALOGUE."/{$own->id}/reactivate")->assertNotFound();
+        $this->actingAs($editor)->post("/app/supplier-management/{$supplier->id}/end", ['reason' => 'Pause.'])->assertSessionHas('success');
+        $this->assertFalse($page($supplier)['control_requirements']['retired_own'][0]['can_reactivate']);
+        $this->actingAs($assurer)->post(self::CATALOGUE."/{$own->id}/reactivate")->assertSessionHasErrors('requirement');
+        $this->actingAs($editor)->post("/app/supplier-management/{$supplier->id}/reopen", ['reason' => 'Ny avtale igjen.'])->assertSessionHas('success');
+        $this->assertSame(SupplierControlRequirement::STATUS_RETIRED, $own->fresh()->status);
+
+        // Reactivated: the same requirement applies again — same id, no copy — with its control in force,
+        // so Kravstatus and Trenger oppfølging count it as before.
+        $this->actingAs($assurer)->post(self::CATALOGUE."/{$own->id}/reactivate")->assertSessionHas('success');
+        $this->actingAs($assurer)->post(self::CATALOGUE."/{$own->id}/reactivate")->assertSessionHasErrors('requirement');
+        $props = $page($supplier);
+        $row = collect($props['control_requirements']['applicable'])->firstWhere('id', $own->id);
+        $this->assertSame([true, 'missing', 1], [$row['can_manage'], $row['current']['status'], count($row['evaluations'])]);
+        $this->assertSame([], $props['control_requirements']['retired_own']);
+        $this->assertSame(1, SupplierControlRequirement::query()->where('supplier_id', $supplier->id)->count());
+        $this->assertSame(1, $own->evaluations()->count());
+        $this->assertSame(['Minst 50 % utslippsfrie kjøretøy'], array_column($open(), 'title'));
     }
 
     public function test_the_requirement_profile_follows_the_profile_live_and_stores_no_applicability(): void

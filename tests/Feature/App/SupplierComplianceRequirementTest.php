@@ -8,11 +8,13 @@ use App\Models\Customer;
 use App\Models\Supplier;
 use App\Models\SupplierComplianceRequirement;
 use App\Models\User;
+use App\Services\Suppliers\SupplierLifecycleService;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use RuntimeException;
 use Tests\Concerns\CreatesComplianceScenarios;
 use Tests\Concerns\CreatesImprovementCaseScenarios;
 use Tests\Concerns\CreatesSupplierScenarios;
@@ -29,8 +31,10 @@ use Tests\TestCase;
  *    status; a requirement retired afterwards is marked as retired; also on an ended supplier;
  *  - no route writes a link — neither adding nor removing — whatever the person's rights;
  *  - someone who cannot read Etterlevelse og revisjon hears nothing about it on the supplier page;
- *  - a supplier with links is ended, never deleted; a requirement deleted there takes the row; no
- *    row can cross customers.
+ *  - links alone never block deleting: a supplier that may otherwise be deleted takes its links
+ *    along, atomically, leaving the requirements and other suppliers' links; any other history still
+ *    blocks, and then the links stay; a requirement deleted there takes the row; no row can cross
+ *    customers.
  */
 class SupplierComplianceRequirementTest extends TestCase
 {
@@ -136,20 +140,108 @@ class SupplierComplianceRequirementTest extends TestCase
         }
     }
 
-    public function test_a_supplier_with_links_is_ended_never_deleted_and_a_deleted_requirement_takes_its_row_along(): void
+    public function test_links_alone_never_block_deleting_and_go_with_the_supplier_leaving_the_requirements(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $manager = $this->requirementManager($customer, [CustomerPermissionCatalog::SUPPLIER_DELETE]);
+        $requirement = $this->complianceRequirement($this->complianceSource($customer), 'Registrert ved en feil');
+        $plain = $this->supplier($customer, $manager, 'Uten koblinger AS');
+        $supplier = $this->supplier($customer, $manager, 'Acme AS');
+        $neighbour = $this->supplier($customer, $manager, 'Nabo AS');
+        $this->link($supplier, $requirement, $manager);
+        $neighbourLink = $this->link($neighbour, $requirement, $manager);
+
+        // Without links, as before.
+        $this->assertTrue($plain->fresh()->isDeletable());
+        $this->actingAs($manager)->delete("/app/supplier-management/{$plain->id}")->assertRedirect(route('app.supplier-management.index'))->assertSessionHas('success');
+        $this->assertNull(Supplier::query()->find($plain->id));
+
+        // Links only: Slett is offered, and the link goes with the supplier.
+        $this->assertTrue($supplier->fresh()->isDeletable());
+        $this->assertTrue($this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props']['permissions']['can_delete']);
+        $this->actingAs($manager)->delete("/app/supplier-management/{$supplier->id}")->assertRedirect(route('app.supplier-management.index'))->assertSessionHas('success');
+        $this->assertNull(Supplier::query()->find($supplier->id));
+        $this->assertSame(0, SupplierComplianceRequirement::query()->where('supplier_id', $supplier->id)->count());
+
+        // The requirement and another supplier's link to it are untouched.
+        $this->assertNotNull(ComplianceRequirement::query()->find($requirement->id));
+        $this->assertNotNull(SupplierComplianceRequirement::query()->find($neighbourLink->id));
+        $this->assertSame(['Registrert ved en feil'], array_column($this->actingAs($manager)->get("/app/supplier-management/{$neighbour->id}")->viewData('page')['props']['earlier_compliance_links'], 'title'));
+    }
+
+    public function test_a_supplier_with_another_blocker_is_still_not_deleted_and_keeps_its_links(): void
     {
         ['customer' => $customer] = $this->context('grc');
         ['customer' => $foreignCustomer] = $this->context('grc');
-        $manager = $this->requirementManager($customer, [CustomerPermissionCatalog::SUPPLIER_DELETE, CustomerPermissionCatalog::COMPLIANCE_DELETE]);
+        $manager = $this->requirementManager($customer, [CustomerPermissionCatalog::SUPPLIER_DELETE]);
+        $requirement = $this->complianceRequirement($this->complianceSource($customer), 'Tilgangsstyring');
+        $supplier = $this->supplier($customer, $manager, 'Acme AS');
+        $this->link($supplier, $requirement, $manager);
+
+        // No supplier.delete, or another customer: refused, nothing removed.
+        $this->actingAs($this->requirementManager($customer))->delete("/app/supplier-management/{$supplier->id}")->assertForbidden();
+        $foreign = $this->supplierUser($foreignCustomer, [CustomerPermissionCatalog::SUPPLIER_EDIT, CustomerPermissionCatalog::SUPPLIER_DELETE]);
+        $this->actingAs($foreign)->delete("/app/supplier-management/{$supplier->id}")->assertNotFound();
+        $this->assertSame(1, $supplier->requirementLinks()->count());
+
+        // Ended: it has a history and is not deleted; the link stays, still read under Historikk.
+        $this->actingAs($manager)->post("/app/supplier-management/{$supplier->id}/end", ['reason' => 'Avtalen er sagt opp.'])->assertSessionHas('success');
+        $this->assertFalse($supplier->fresh()->isDeletable());
+        $props = $this->actingAs($manager)->get("/app/supplier-management/{$supplier->id}")->viewData('page')['props'];
+        $this->assertFalse($props['permissions']['can_delete']);
+        $this->assertSame(['Tilgangsstyring'], array_column($props['earlier_compliance_links'], 'title'));
+        $this->actingAs($manager)->delete("/app/supplier-management/{$supplier->id}")->assertSessionHas('error');
+        $this->assertNotNull(Supplier::query()->find($supplier->id));
+        $this->assertSame(1, $supplier->requirementLinks()->count());
+        $this->assertDatabaseRefuses(fn () => DB::table('suppliers')->where('id', $supplier->id)->delete(), 'deleting a supplier with a history');
+
+        // Reopened, unchanged: active again, link and history kept.
+        $this->actingAs($manager)->post("/app/supplier-management/{$supplier->id}/reopen", ['reason' => 'Ny avtale.'])->assertSessionHas('success');
+        $this->assertSame([Supplier::STATUS_ACTIVE, 1], [$supplier->fresh()->status, $supplier->requirementLinks()->count()]);
+    }
+
+    public function test_deleting_is_checked_again_inside_the_lock_and_rolls_back_as_a_whole(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $manager = $this->requirementManager($customer, [CustomerPermissionCatalog::SUPPLIER_DELETE]);
+        $requirement = $this->complianceRequirement($this->complianceSource($customer), 'Tilgangsstyring');
+        $lifecycle = app(SupplierLifecycleService::class);
+
+        // A history written after the page was read: the locked row says no, nothing is removed.
+        $stale = $this->supplier($customer, $manager, 'Gammel visning AS');
+        $this->link($stale, $requirement, $manager);
+        $this->assertTrue($stale->isDeletable());
+        app(SupplierLifecycleService::class)->end(Supplier::query()->findOrFail($stale->id), $manager, 'Avsluttet i mellomtiden.');
+        $this->assertFalse($lifecycle->delete($stale));
+        $this->assertSame(1, $stale->requirementLinks()->count());
+
+        // The supplier delete fails after its links are removed: both are rolled back.
+        $supplier = $this->supplier($customer, $manager, 'Acme AS');
+        $this->link($supplier, $requirement, $manager);
+        Supplier::deleting(function (Supplier $deleting) use ($supplier): void {
+            if ((int) $deleting->id === (int) $supplier->id) {
+                throw new RuntimeException('Simulated failure.');
+            }
+        });
+        try {
+            $lifecycle->delete($supplier);
+            $this->fail('The delete should have failed.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Simulated failure.', $exception->getMessage());
+        }
+        $this->assertNotNull(Supplier::query()->find($supplier->id));
+        $this->assertSame(1, $supplier->requirementLinks()->count());
+    }
+
+    public function test_no_link_can_cross_customers_and_a_deleted_requirement_takes_its_row_along(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        ['customer' => $foreignCustomer] = $this->context('grc');
+        $manager = $this->requirementManager($customer, [CustomerPermissionCatalog::COMPLIANCE_DELETE]);
         $supplier = $this->supplier($customer, $manager, 'Acme AS');
         $requirement = $this->complianceRequirement($this->complianceSource($customer), 'Registrert ved en feil');
         $this->link($supplier, $requirement, $manager);
 
-        $this->assertFalse($supplier->fresh()->isDeletable());
-        $this->actingAs($manager)->delete("/app/supplier-management/{$supplier->id}")->assertSessionHas('error');
-        $this->assertDatabaseRefuses(fn () => DB::table('suppliers')->where('id', $supplier->id)->delete(), 'deleting a supplier with requirements');
-
-        // No row can cross customers.
         $foreignRequirement = $this->complianceRequirement($this->complianceSource($foreignCustomer), 'Fremmed krav');
         $this->assertDatabaseRefuses(fn () => DB::table('supplier_compliance_requirements')->insert([
             'customer_id' => $customer->id, 'supplier_id' => $supplier->id, 'compliance_requirement_id' => $foreignRequirement->id, 'created_at' => now(),
@@ -159,7 +251,6 @@ class SupplierComplianceRequirementTest extends TestCase
         // and takes the row with it.
         $this->actingAs($manager)->delete("/app/compliance/requirements/{$requirement->id}")->assertRedirect(route('app.compliance.requirements.index'));
         $this->assertFalse($supplier->requirementLinks()->exists());
-        $this->assertTrue($supplier->fresh()->isDeletable());
     }
 
     /** A link as v1 wrote it; nothing in the application writes one any more. */

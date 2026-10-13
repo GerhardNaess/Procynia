@@ -190,12 +190,18 @@ test('a supplier registered by mistake is deleted after a confirmation that says
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/supplier-management\/\d+$/);
 
+    // An earlier link to Etterlevelse og revisjon never blocks it on its own: it goes with the supplier.
+    const supplierId = Number(new URL(page.url()).pathname.split('/').pop());
+    const linked = await supplierFixture(`seedMistakenComplianceLink('${suffix}', ${supplierId})`);
+    await page.reload();
+
     let message = '';
     page.once('dialog', (dialog) => { message = dialog.message(); dialog.accept(); });
     await page.getByRole('button', { name: 'Slett leverandør' }).click();
     await page.waitForURL(/\/app\/supplier-management$/);
     expect(message).toContain('registrert ved en feil');
     await expect(page.getByText('Leverandøren er slettet.', { exact: true })).toBeVisible();
+    expect(linked.requirement_id).toBeGreaterThan(0);
     await expect(page.getByText('Ingen leverandører er registrert ennå')).toBeVisible();
 });
 

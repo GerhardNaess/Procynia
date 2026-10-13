@@ -26,7 +26,8 @@ use Illuminate\Support\Collection;
  * Controls (phase 3): each applying requirement carries its visningsstatus
  * (SupplierRequirementStatus), the control in force and every control newest first, each with the
  * documentation as it was at the control and — separately — the row as it is now. Controls of
- * requirements that no longer apply stay readable under earlier_evaluations.
+ * requirements that no longer apply stay readable: a retired requirement for this supplier under
+ * retired_own, with Ta i bruk igjen, any other under earlier_evaluations.
  *
  * Only supplier data. The anchor in Etterlevelse og revisjon is present only when the customer holds
  * the module and the person can read that requirement — otherwise it is absent: no title, no id, no
@@ -64,7 +65,14 @@ class SupplierRequirementPayload
         }
 
         $decisions = collect($this->applicability->for($supplier));
-        $anchors = $this->anchors($user, $decisions->map(fn (array $decision) => $decision['requirement']));
+        // Utgåtte kontrollkrav: this supplier's own requirements that have been retired — the same rows,
+        // never copies, so Ta i bruk igjen brings each back with its id and its controls.
+        $retiredOwn = $supplier->controlRequirements()
+            ->where('status', SupplierControlRequirement::STATUS_RETIRED)
+            ->orderByRaw('lower(title)')
+            ->orderBy('id')
+            ->get();
+        $anchors = $this->anchors($user, $decisions->map(fn (array $decision) => $decision['requirement'])->concat($retiredOwn));
         // Veiledning fra Enterprise Wiki — null without Wiki read access, so nothing is said about it.
         $guidance = $this->wikiGuidance->forRequirements($user, $decisions->map(fn (array $decision) => $decision['requirement']));
         $today = now();
@@ -146,9 +154,15 @@ class SupplierRequirementPayload
 
         return [
             'applicable' => $applicable,
-            // Controls of requirements that do not apply now (retired, excluded, rule no longer
-            // holds): kept and readable, never counted.
-            'earlier_evaluations' => $evaluations->except($applyingIds)
+            // This supplier's own retired requirements, each with its controls; never counted.
+            'retired_own' => $retiredOwn->map(fn (SupplierControlRequirement $requirement): array => $this->requirement($requirement, $anchors, null) + [
+                'evaluations' => $entries((int) $requirement->id),
+                // Ta i bruk igjen: the same right and the same open supplier as Sett som utgått.
+                'can_reactivate' => $canOverride,
+            ])->values()->all(),
+            // Controls of the other requirements that do not apply now (retired catalogue requirement,
+            // excluded, rule no longer holds): kept and readable, never counted.
+            'earlier_evaluations' => $evaluations->except([...$applyingIds, ...$retiredOwn->modelKeys()])
                 ->map(fn ($rows, $requirementId): array => [
                     'requirement_id' => (int) $requirementId,
                     'title' => $rows->first()->requirement_title,

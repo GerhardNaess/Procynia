@@ -168,26 +168,30 @@ function Basis({ row, tr }) {
  *
  * One «Legg til krav» (AddChoice). A requirement for this supplier only is maintained on its row —
  * Rediger krav and Sett som utgått, never Slett — since Kontrollkrav lists the catalogue alone.
- * Its controls stay after it is retired, under «Kontroller av krav som ikke gjelder nå».
+ * Once retired it is listed, with its controls, under «Utgåtte kontrollkrav», folded away, where Ta i
+ * bruk igjen makes the same requirement apply again.
  */
 export default function SupplierControlRequirements({ supplierId, data, onFollowUp = null, locale = 'no', tr }) {
     const c = tr.control ?? {};
     // One open form at a time: { kind: 'evaluate' | 'include' | 'exclude' | 'clear' | 'add' | 'own' | 'edit', requirement }.
     const [panel, setPanel] = useState(null);
-    // Why Sett som utgått was refused, e.g. the supplier was ended meanwhile.
+    // Why Sett som utgått or Ta i bruk igjen was refused, e.g. the supplier was ended meanwhile.
     const [retireError, setRetireError] = useState(null);
     const close = () => setPanel(null);
-    const retire = (row) => {
-        if (! window.confirm(c.retire_own_confirm ?? 'Sette kravet som utgått? Det gjelder da ikke leverandøren lenger. Kontrollene av kravet blir stående i historikken.')) {
+    const changeStatus = (row, action, confirmText) => {
+        if (! window.confirm(confirmText)) {
             return;
         }
 
         setRetireError(null);
-        router.post(`/app/supplier-management/control-requirements/${row.id}/retire`, {}, {
+        router.post(`/app/supplier-management/control-requirements/${row.id}/${action}`, {}, {
             preserveScroll: true,
             onError: (errors) => setRetireError({ id: row.id, message: errors.requirement ?? Object.values(errors)[0] }),
         });
     };
+    const retire = (row) => changeStatus(row, 'retire', c.retire_own_confirm ?? 'Sette kravet som utgått? Det gjelder da ikke leverandøren lenger. Kontrollene av kravet blir stående i historikken.');
+    const reactivate = (row) => changeStatus(row, 'reactivate', c.reactivate_own_confirm ?? 'Ta kravet i bruk igjen? Det blir et aktivt kontrollkrav for denne leverandøren igjen, med de samme tidligere kontrollene.');
+    const retiredOwn = data.retired_own ?? [];
     const canOverride = data.permissions?.can_override ?? false;
     const groups = groupByTheme(data.applicable, tr);
 
@@ -318,6 +322,34 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                                     <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={`mt-3 ${SECONDARY_ACTION}`}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>
                                 )}
                                 {panelFor(row)}
+                            </li>
+                        ))}
+                    </ul>
+                </details>
+            )}
+
+            {/* This supplier's own retired requirements: the same rows, folded away, and Ta i bruk igjen. */}
+            {retiredOwn.length > 0 && (
+                <details className="mt-6 border-t border-slate-100 pt-4" data-testid="control-retired-own">
+                    <summary className={`${DISCLOSURE_INLINE} cursor-pointer`}>
+                        {c.retired_own_heading ?? 'Utgåtte kontrollkrav'} ({retiredOwn.length})
+                    </summary>
+                    <p className={`mt-2 ${HINT}`}>{c.retired_own_intro ?? 'Krav som er opprettet for denne leverandøren og satt som utgått. De gjelder ikke leverandøren nå, men kontrollene er tatt vare på.'}</p>
+                    <ul className="mt-3 space-y-3">
+                        {retiredOwn.map((row) => (
+                            <li key={row.id} id={`control-requirement-${row.id}`} className="min-w-0 scroll-mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="control-retired-own-row">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
+                                    <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
+                                    <StatusBadge tone="slate">{c.retired_own_badge ?? 'Utgått'}</StatusBadge>
+                                </div>
+                                {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
+                                <Basis row={row} tr={tr} />
+                                {panel === null && row.can_reactivate && (
+                                    <button type="button" onClick={() => reactivate(row)} className={`mt-3 ${SECONDARY_ACTION}`}>{c.reactivate_own ?? 'Ta i bruk igjen'}</button>
+                                )}
+                                {retireError?.id === row.id && <p className={`mt-2 ${ERROR}`} role="alert">{retireError.message}</p>}
+                                <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} testId="retired-own-evaluation-history" />
                             </li>
                         ))}
                     </ul>

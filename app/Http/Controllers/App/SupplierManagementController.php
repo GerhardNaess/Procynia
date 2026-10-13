@@ -505,11 +505,10 @@ class SupplierManagementController extends Controller
         $supplier = $this->visibleSupplierOrFail($user, $supplierId);
         abort_unless($this->access->canDelete($user), 403);
 
-        if (! $supplier->isDeletable()) {
+        // Checked again inside the lock; earlier compliance links are deleted with the supplier.
+        if (! $this->lifecycle->delete($supplier)) {
             return back()->with('error', __('procynia.supplier_management.validation.not_deletable'));
         }
-
-        $supplier->delete();
 
         return redirect()->route('app.supplier-management.index')->with('success', __('procynia.supplier_management.flash.deleted'));
     }

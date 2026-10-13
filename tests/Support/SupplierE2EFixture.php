@@ -340,6 +340,34 @@ class SupplierE2EFixture
     }
 
     /**
+     * An earlier link, as v1 wrote it, to a requirement of its own («Registrert ved en feil») — no
+     * role, so it can be used next to seedComplianceAccess(). Returns the requirement id, which must
+     * outlive the supplier.
+     *
+     * @return array{requirement_id: int}
+     */
+    public static function seedMistakenComplianceLink(string $suffix, int $supplierId): array
+    {
+        $customer = Customer::query()->where('name', '~', self::pattern($suffix))->sole();
+        $supplier = Supplier::query()->where('customer_id', $customer->id)->findOrFail($supplierId);
+        $name = self::namer($suffix);
+
+        return DB::transaction(function () use ($customer, $supplier, $name): array {
+            $source = ComplianceSource::query()->create(['customer_id' => $customer->id, 'name' => $name('Feilkilde'), 'version' => null, 'kind' => ComplianceSource::KIND_CONTRACT]);
+            $requirement = ComplianceRequirement::query()->create([
+                'customer_id' => $customer->id,
+                'source_id' => $source->id,
+                'reference' => '9.9',
+                'title' => $name('Registrert ved en feil'),
+                'requirement_text' => 'Koblet til leverandøren ved en feil.',
+            ]);
+            SupplierComplianceRequirement::query()->create(['customer_id' => $customer->id, 'supplier_id' => $supplier->id, 'compliance_requirement_id' => $requirement->id]);
+
+            return ['requirement_id' => (int) $requirement->id];
+        });
+    }
+
+    /**
      * Gives the supplier manager supplier.assure (Leverandørkontroll) and registers two catalogue
      * requirements by hand — no templates: «Databehandleravtale», mandatory, for data processors, and
      * «Oversikt over underleverandører», important, for suppliers that use subcontractors.

@@ -247,6 +247,20 @@ test('the profile decides which control requirements apply, and a reasoned overr
     expect(confirmation).toContain('Sette kravet som utgått?');
     await expect(row(`${ownTitle} 50 %`)).toHaveCount(0);
 
+    // Utgåtte kontrollkrav: closed by default, the same requirement, and Ta i bruk igjen behind a confirmation.
+    const retiredOwn = section.getByTestId('control-retired-own');
+    await expect(retiredOwn).not.toHaveAttribute('open');
+    await retiredOwn.locator('summary').click();
+    const retiredRow = retiredOwn.getByTestId('control-retired-own-row').filter({ hasText: `${ownTitle} 50 %` });
+    await expect(retiredRow).toContainText('Utgått');
+    await expectReadable(page, '06d-retired-own-requirement');
+    page.once('dialog', (dialog) => { confirmation = dialog.message(); dialog.accept(); });
+    await retiredRow.getByRole('button', { name: 'Ta i bruk igjen' }).click();
+    await expect(page.getByText('Kontrollkravet er tatt i bruk igjen.', { exact: true })).toBeVisible();
+    expect(confirmation).toContain('Ta kravet i bruk igjen?');
+    await expect(row(`${ownTitle} 50 %`)).toHaveCount(1);
+    await expect(section.getByTestId('control-retired-own')).toHaveCount(0);
+
     // The catalogue says when each requirement applies, in words.
     await page.goto('/app/supplier-management/control-requirements');
     await expect(page.getByRole('heading', { name: 'Kontrollkrav', level: 1 })).toBeVisible();

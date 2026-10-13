@@ -19,7 +19,8 @@ use Illuminate\Database\Eloquent\Builder;
  * is how a supplier requirement is tied to a compliance requirement now. Nothing writes a link any
  * more; the rows made before are kept — never converted, never deleted here — and listed under
  * Historikk. A requirement deleted in Etterlevelse og revisjon still takes its rows along (the
- * foreign key's CASCADE), and a supplier with links is still ended, never deleted.
+ * foreign key's CASCADE), and a supplier deleted under the usual rules takes its links along
+ * (SupplierLifecycleService::delete()) — they never block deleting it on their own.
  *
  * NO SUPPLIER STATUS FROM THE REQUIREMENT. A link never said the supplier meets the requirement.
  * Nothing here reads assessments or ComplianceStatusResolver; the requirement's own lifecycle is

@@ -172,10 +172,13 @@ class Supplier extends Model
      * Whether the supplier may be deleted at all, before any permission is considered. Deleting is
      * for a supplier registered by mistake and never used: one that has changed status or
      * criticality, has been assessed, has documentation registered, has a leverandørprofil, concerns
-     * a case in Avvik og forbedringer or a risk in Risiko, or has a requirement in Etterlevelse og
-     * revisjon applying to it has a history — a real decision was made about it — and is ended instead. The
-     * classification it was registered with is the supplier's own and does not count. The database
-     * refuses the delete as well (NO ACTION from every child table).
+     * a case in Avvik og forbedringer or a risk in Risiko has a history — a real decision was made
+     * about it — and is ended instead. The classification it was registered with is the supplier's own
+     * and does not count. The database refuses the delete as well (NO ACTION from every child table).
+     *
+     * An earlier link to a requirement in Etterlevelse og revisjon (requirementLinks()) does not count:
+     * since 2026-10-13 nothing can add or remove one, so it would block for good. It is deleted with the
+     * supplier by SupplierLifecycleService::delete(), in the same transaction.
      */
     public function isDeletable(): bool
     {
@@ -196,8 +199,7 @@ class Supplier extends Model
             // Phase 7: any aktsomhetsvurdering.
             && ! $this->dueDiligenceAssessments()->exists()
             && ! $this->improvementCaseLinks()->exists()
-            && ! $this->riskLinks()->exists()
-            && ! $this->requirementLinks()->exists();
+            && ! $this->riskLinks()->exists();
     }
 
     public function owner(): BelongsTo

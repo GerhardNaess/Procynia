@@ -48,7 +48,7 @@ describe('Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2, §5.5)', ()
         assert.match(code, /name="?reason|'reason'|data\.reason/);
     });
 
-    test('one «Legg til krav» opens two choices; this supplier’s own requirement is edited and retired on its row, never deleted', () => {
+    test('one «Legg til krav» opens two choices; this supplier’s own requirement is edited and retired on its row, found again and used again, never deleted', () => {
         const code = source('./SupplierControlRequirements.jsx');
 
         // One main action, not two side by side; the choices are the existing include and own-requirement flows.
@@ -63,7 +63,15 @@ describe('Krav og kvalifikasjoner (supplier-assurance-v2-plan §5.2, §5.5)', ()
         // Rediger krav / Sett som utgått only where the server says so, the retire behind a confirm; no Slett.
         assert.match(code, /row\.can_manage && <button type="button" onClick=\{\(\) => setPanel\(\{ kind: 'edit', requirement: row \}\)\}/);
         assert.match(code, /row\.can_manage && <button type="button" onClick=\{\(\) => retire\(row\)\}/);
-        assert.match(code, /window\.confirm\([\s\S]*control-requirements\/\$\{row\.id\}\/retire/);
+        assert.match(code, /window\.confirm\([\s\S]*control-requirements\/\$\{row\.id\}\/\$\{action\}/);
+        assert.match(code, /changeStatus\(row, 'retire', c\.retire_own_confirm/);
+
+        // Utgåtte kontrollkrav: their own folded section, never among the ones that apply; Ta i bruk igjen
+        // only where the server says so, behind the same confirm.
+        assert.match(code, /retiredOwn\.length > 0 && \(\s*<details [^>]*data-testid="control-retired-own"/);
+        assert.doesNotMatch(code, /<details open[^>]*control-retired-own/);
+        assert.match(code, /row\.can_reactivate && \(\s*<button type="button" onClick=\{\(\) => reactivate\(row\)\}/);
+        assert.match(code, /changeStatus\(row, 'reactivate', c\.reactivate_own_confirm/);
         assert.doesNotMatch(code, /router\.delete|\/destroy|k\.delete/);
         assert.match(code, /<ControlRequirementForm requirement=\{row\}/);
     });

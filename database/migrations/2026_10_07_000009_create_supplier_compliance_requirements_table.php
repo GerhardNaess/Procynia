@@ -16,8 +16,9 @@ use Illuminate\Support\Facades\Schema;
  * suppliers; a requirement is listed once per supplier.
  *
  * Keys:
- *  - (supplier_id, customer_id) → suppliers, NO ACTION: never another customer's supplier, and a
- *    supplier with requirements is ended, not deleted.
+ *  - (supplier_id, customer_id) → suppliers, NO ACTION: never another customer's supplier. Since
+ *    2026-10-13 the rows are historical only and no longer block deleting a supplier: they are
+ *    deleted with it, in the same transaction, by SupplierLifecycleService::delete().
  *  - (compliance_requirement_id, customer_id) → compliance_requirements, CASCADE: never another
  *    customer's requirement, and a requirement Etterlevelse og revisjon allows to be deleted takes
  *    the row with it (its delete rule is unchanged). compliance_requirements already has

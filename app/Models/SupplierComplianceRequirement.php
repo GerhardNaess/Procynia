@@ -15,7 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * HISTORICAL ONLY since 2026-10-13: nothing in the application writes a row any more, and the
  * rows written under Leverandøroppfølging v1 are read by SupplierComplianceRequirementService and
  * shown under Historikk as «Tidligere koblinger til etterlevelseskrav». A control requirement's
- * anchor (SupplierControlRequirement::compliance_requirement_id) is the link now.
+ * anchor (SupplierControlRequirement::compliance_requirement_id) is the link now. A row never blocks
+ * deleting its supplier: SupplierLifecycleService::delete() removes the supplier's rows together with
+ * a supplier that may otherwise be deleted.
  *
  * Has no access rules of its own: reach it
  * through a supplier from SupplierAccessService and show a requirement only when
