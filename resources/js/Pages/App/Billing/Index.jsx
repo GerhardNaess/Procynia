@@ -200,7 +200,7 @@ export default function BillingIndex() {
     const resolvePackageName = (key) => packageLabels[key] ?? key;
     const resolveModuleLabel = (key) => moduleLabels[key] ?? key;
     const { base: basePackage, options: optionPackages } = splitPackages(modulePackages);
-    // "Wiki, Kvalitet og Avvik og forbedringer" — said once, in the Basis card.
+    // "Wiki, Kvalitet, Avvik og forbedringer og Ledelsens gjennomgang" — said once, in the Basis card.
     const basisModules = basePackage?.modules?.length
         ? new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(basePackage.modules.map((key) => resolveModuleLabel(key)))
         : null;

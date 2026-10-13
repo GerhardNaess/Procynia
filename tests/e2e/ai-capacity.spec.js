@@ -45,7 +45,7 @@ test('the customer chooses its AI capacity level and the pool follows users and 
     const options = page.getByTestId('module-packages');
     const card = page.getByTestId('ai-capacity-card');
     await expect(basis.getByRole('heading', { name: 'Basis', exact: true })).toBeVisible();
-    await expect(basis).toContainText('Inneholder Wiki, Kvalitet og Avvik og forbedringer.');
+    await expect(basis).toContainText('Inneholder Wiki, Kvalitet, Avvik og forbedringer og Ledelsens gjennomgang.');
     await expect(options.getByRole('heading', { name: 'Opsjoner', level: 2 })).toBeVisible();
     // Basis is said once: not again as a row among the options, and only one status badge for it.
     await expect(options.getByText('Basis', { exact: true })).toHaveCount(0);
@@ -98,7 +98,7 @@ test('the customer chooses its AI capacity level and the pool follows users and 
     expect(headingPx).toBeLessThanOrEqual(22);
     expect(await fontPx(page.getByRole('heading', { level: 1 }))).toBeGreaterThan(headingPx);
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
-    const bodyPx = await fontPx(basis.getByText('Inneholder Wiki, Kvalitet og Avvik og forbedringer.'));
+    const bodyPx = await fontPx(basis.getByText('Inneholder Wiki, Kvalitet, Avvik og forbedringer og Ledelsens gjennomgang.'));
     expect(bodyPx).toBe(16);
     const headlinePx = await fontPx(card.getByTestId('ai-capacity-headline'));
     expect(headlinePx).toBeGreaterThanOrEqual(18);
