@@ -4,6 +4,7 @@ namespace App\Services\Suppliers;
 
 use App\Models\Supplier;
 use App\Models\SupplierComplianceRequirement;
+use App\Models\SupplierDeletion;
 use App\Models\SupplierStatusChange;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,9 @@ use Illuminate\Validation\ValidationException;
  * Slett leverandør locks the row the same way and asks Supplier::isDeletable() again inside the lock.
  * The supplier's earlier links to Etterlevelse og revisjon (SupplierComplianceRequirement, historical
  * only, with no way left to remove them) go with it in the same transaction — never on their own, and
- * never the compliance requirements themselves.
+ * never the compliance requirements themselves. The same transaction writes one immutable
+ * SupplierDeletion — who, when, the supplier's id and name — so a deletion is never without its row,
+ * and a row never without the deletion: if either fails, nothing is removed.
  *
  * Authorization is the caller's (supplier.edit through SupplierAccessService). This only guards the
  * transition itself.
@@ -50,11 +53,11 @@ class SupplierLifecycleService
 
     /**
      * Slett leverandør: false, and nothing changed, when the supplier may not be deleted (anymore). The
-     * links and the supplier go together or not at all.
+     * links, the supplier and the SupplierDeletion row go together or not at all.
      */
-    public function delete(Supplier $supplier): bool
+    public function delete(Supplier $supplier, User $actor): bool
     {
-        return DB::transaction(function () use ($supplier): bool {
+        return DB::transaction(function () use ($supplier, $actor): bool {
             $locked = Supplier::query()
                 ->whereKey($supplier->id)
                 ->where('customer_id', (int) $supplier->customer_id)
@@ -69,6 +72,14 @@ class SupplierLifecycleService
                 ->where('supplier_id', (int) $locked->id)
                 ->where('customer_id', (int) $locked->customer_id)
                 ->delete();
+
+            SupplierDeletion::query()->create([
+                'customer_id' => (int) $locked->customer_id,
+                'supplier_id' => (int) $locked->id,
+                'supplier_name' => $locked->name,
+                'deleted_by_user_id' => (int) $actor->id,
+                'deleted_at' => now(),
+            ]);
 
             $locked->delete();
 

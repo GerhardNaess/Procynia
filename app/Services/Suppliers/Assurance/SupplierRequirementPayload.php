@@ -6,6 +6,7 @@ use App\Models\ComplianceRequirement;
 use App\Models\Supplier;
 use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierControlRequirement;
+use App\Models\SupplierControlRequirementStatusChange;
 use App\Models\SupplierDocument;
 use App\Models\SupplierRequirementEvaluation;
 use App\Models\SupplierRequirementEvaluationDocument;
@@ -28,6 +29,9 @@ use Illuminate\Support\Collection;
  * documentation as it was at the control and — separately — the row as it is now. Controls of
  * requirements that no longer apply stay readable: a retired requirement for this supplier under
  * retired_own, with Ta i bruk igjen, any other under earlier_evaluations.
+ *
+ * Endringshistorikk: each requirement shown carries its own Sett som utgått / Ta i bruk igjen, newest
+ * first (status_history) — kept apart from its controls.
  *
  * Only supplier data. The anchor in Etterlevelse og revisjon is present only when the customer holds
  * the module and the person can read that requirement — otherwise it is absent: no title, no id, no
@@ -88,9 +92,11 @@ class SupplierRequirementPayload
         $entries = fn (int $requirementId): array => ($evaluations->get($requirementId) ?? collect())
             ->map(fn (SupplierRequirementEvaluation $evaluation): array => $this->evaluation($evaluation, $documents, $today))->values()->all();
         $current = [];
+        $statusHistory = $this->statusHistory($decisions->filter(fn (array $decision): bool => $decision['applies'])
+            ->map(fn (array $decision): int => (int) $decision['requirement']->id)->concat($retiredOwn->modelKeys()));
 
         $applicable = $decisions->filter(fn (array $decision): bool => $decision['applies'])
-            ->map(function (array $decision) use ($anchors, $guidance, $canOverride, $canEvaluate, $evaluations, $documents, $today, $entries, &$current): array {
+            ->map(function (array $decision) use ($anchors, $guidance, $canOverride, $canEvaluate, $evaluations, $documents, $today, $entries, $statusHistory, &$current): array {
                 $requirement = $decision['requirement'];
                 $inForce = SupplierRequirementStatus::current($evaluations->get($requirement->id) ?? []);
                 $documentsNow = $inForce?->documents->map(fn (SupplierRequirementEvaluationDocument $used) => $documents->get($used->supplier_document_id))->filter() ?? collect();
@@ -115,6 +121,7 @@ class SupplierRequirementPayload
                         'evaluated_by_name' => $inForce->evaluatedBy?->name,
                     ],
                     'evaluations' => $entries((int) $requirement->id),
+                    'status_history' => $statusHistory[(int) $requirement->id] ?? [],
                     'can_evaluate' => $canEvaluate,
                     // «Følg opp i Avvik og forbedringer» from the control in force — supplier.assure, a
                     // result short of Dokumentert. The page also needs a fagområde to register in.
@@ -157,6 +164,7 @@ class SupplierRequirementPayload
             // This supplier's own retired requirements, each with its controls; never counted.
             'retired_own' => $retiredOwn->map(fn (SupplierControlRequirement $requirement): array => $this->requirement($requirement, $anchors, null) + [
                 'evaluations' => $entries((int) $requirement->id),
+                'status_history' => $statusHistory[(int) $requirement->id] ?? [],
                 // Ta i bruk igjen: the same right and the same open supplier as Sett som utgått.
                 'can_reactivate' => $canOverride,
             ])->values()->all(),
@@ -279,7 +287,7 @@ class SupplierRequirementPayload
         $requirements = SupplierControlRequirement::query()
             ->where('customer_id', (int) $user->customer_id)
             ->whereNull('supplier_id')
-            ->withExists(['overrides', 'evaluations'])
+            ->withExists(['overrides', 'evaluations', 'statusChanges'])
             ->orderByRaw('lower(title)')
             ->orderBy('id')
             ->get();
@@ -298,12 +306,15 @@ class SupplierRequirementPayload
 
         $anchors = $this->anchors($user, $requirements);
         $guidance = $this->wikiGuidance->forRequirements($user, $requirements);
+        $statusHistory = $this->statusHistory(collect($requirements->modelKeys()));
 
         return $this->sorted($requirements->map(fn (SupplierControlRequirement $requirement): array => $this->requirement($requirement, $anchors, $guidance) + [
             'rule_text' => $this->text->rule((array) $requirement->applies_when),
             'rule' => SupplierRequirementRule::toForm((array) $requirement->applies_when),
             'applies_to_count' => $counts[(int) $requirement->id] ?? 0,
-            'deletable' => ! $requirement->overrides_exists && ! $requirement->evaluations_exists,
+            // Never once it has a status history: it is retired instead (SupplierControlRequirement::isDeletable()).
+            'deletable' => ! $requirement->overrides_exists && ! $requirement->evaluations_exists && ! $requirement->status_changes_exists,
+            'status_history' => $statusHistory[(int) $requirement->id] ?? [],
             // Where it came from, quietly: the template's name, never a key. The row is the customer's.
             'template' => $requirement->template_key !== null && RequirementTemplates::find($requirement->template_key) !== null
                 ? ['name' => RequirementTemplates::name($requirement->template_key), 'version' => $requirement->template_version]
@@ -417,6 +428,36 @@ class SupplierRequirementPayload
             // Veiledning fra Enterprise Wiki: the pages the person can read; null when they cannot read the Wiki.
             'wiki_guidance' => $guidance === null ? null : ($guidance[(int) $requirement->id] ?? []),
         ];
+    }
+
+    /**
+     * Endringshistorikk per requirement id: every Sett som utgått and Ta i bruk igjen, newest first,
+     * with when and by whom. Only for the ids given — requirements the caller already may read.
+     *
+     * @param  Collection<int, int>  $requirementIds
+     * @return array<int, list<array<string, mixed>>>
+     */
+    private function statusHistory(Collection $requirementIds): array
+    {
+        if ($requirementIds->isEmpty()) {
+            return [];
+        }
+
+        return SupplierControlRequirementStatusChange::query()
+            ->with('changedBy:id,name')
+            ->whereIn('requirement_id', $requirementIds->unique()->values()->all())
+            ->orderByDesc('changed_at')
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('requirement_id')
+            ->map(fn (Collection $changes): array => $changes->map(fn (SupplierControlRequirementStatusChange $change): array => [
+                'id' => (int) $change->id,
+                'from_status' => $change->from_status,
+                'to_status' => $change->to_status,
+                'changed_at' => $change->changed_at?->toIso8601String(),
+                'changed_by_name' => $change->changedBy?->name,
+            ])->values()->all())
+            ->all();
     }
 
     /**

@@ -212,7 +212,7 @@ class SupplierComplianceRequirementTest extends TestCase
         $this->link($stale, $requirement, $manager);
         $this->assertTrue($stale->isDeletable());
         app(SupplierLifecycleService::class)->end(Supplier::query()->findOrFail($stale->id), $manager, 'Avsluttet i mellomtiden.');
-        $this->assertFalse($lifecycle->delete($stale));
+        $this->assertFalse($lifecycle->delete($stale, $manager));
         $this->assertSame(1, $stale->requirementLinks()->count());
 
         // The supplier delete fails after its links are removed: both are rolled back.
@@ -224,7 +224,7 @@ class SupplierComplianceRequirementTest extends TestCase
             }
         });
         try {
-            $lifecycle->delete($supplier);
+            $lifecycle->delete($supplier, $manager);
             $this->fail('The delete should have failed.');
         } catch (RuntimeException $exception) {
             $this->assertSame('Simulated failure.', $exception->getMessage());

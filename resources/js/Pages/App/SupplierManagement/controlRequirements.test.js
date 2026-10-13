@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { appliesToText, groupByTheme, requirementFormData, rowActions, toggleCode } from './controlRequirements.js';
+import { appliesToText, groupByTheme, requirementFormData, rowActions, statusChangeByline, statusChangeText, toggleCode } from './controlRequirements.js';
 
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
@@ -103,5 +103,41 @@ describe('Kontrollkrav (supplier-assurance-v2-plan §5.1, §5.3)', () => {
 
     test('the anchor is only offered when the server sent options', () => {
         assert.match(source('./ControlRequirementForm.jsx'), /anchorOptions !== null &&/);
+    });
+});
+
+describe('Endringshistorikk on a requirement', () => {
+    const history = { control: { status_history: { retired: 'Satt som utgått', reactivated: 'Tatt i bruk igjen' } }, unknown_user: 'en tidligere bruker' };
+
+    test('says what each change did in words, never the status codes', () => {
+        assert.equal(statusChangeText({ from_status: 'active', to_status: 'retired' }, history), 'Satt som utgått');
+        assert.equal(statusChangeText({ from_status: 'retired', to_status: 'active' }, history), 'Tatt i bruk igjen');
+        assert.equal(statusChangeText({ to_status: 'retired' }, {}), 'Satt som utgått');
+        assert.equal(statusChangeText({ to_status: 'active' }, {}), 'Tatt i bruk igjen');
+    });
+
+    test('says when and by whom, with a stand-in for a deleted user', () => {
+        const format = (iso) => `[${iso}]`;
+        assert.equal(statusChangeByline({ changed_at: '2026-10-13T09:30:00Z', changed_by_name: 'Kari' }, history, format), '[2026-10-13T09:30:00Z] – Kari');
+        assert.equal(statusChangeByline({ changed_at: '2026-10-13T09:30:00Z', changed_by_name: null }, history, format), '[2026-10-13T09:30:00Z] – en tidligere bruker');
+    });
+
+    test('is shown on the requirement, apart from its controls, on Kontrollkrav and on the supplier', () => {
+        assert.match(source('./ControlRequirements.jsx'), /<RequirementStatusHistory entries=\{row\.status_history \?\? \[\]\}/);
+        const supplier = source('./SupplierControlRequirements.jsx');
+        assert.equal(supplier.match(/<RequirementStatusHistory entries=\{row\.status_history \?\? \[\]\}/g)?.length, 2, 'applying and retired rows');
+        assert.doesNotMatch(source('./RequirementStatusHistory.jsx'), /evaluations/);
+    });
+});
+
+describe('Slettede leverandører', () => {
+    test('the register offers the log only when the server says the person may delete', () => {
+        assert.match(source('./Index.jsx'), /\{canViewDeletions && ! creating && \(/);
+        assert.match(source('./Index.jsx'), /permissions\.can_view_deletions \?\? false/);
+    });
+
+    test('the log is read-only: no form, no button that writes', () => {
+        const page = source('./DeletedSuppliers.jsx');
+        assert.doesNotMatch(page, /router\.(post|delete|patch|put)|useForm|<form/);
     });
 });

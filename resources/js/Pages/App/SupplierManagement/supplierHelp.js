@@ -1,5 +1,5 @@
 /** The pages of Leverandøroppfølging that carry PageHelp, in the order of the language files. */
-export const SUPPLIER_HELP_PAGES = ['index', 'control_requirements', 'supplier', 'import'];
+export const SUPPLIER_HELP_PAGES = ['index', 'control_requirements', 'supplier', 'import', 'deleted'];
 
 /**
  * The PageHelpButton props for one page in Leverandøroppfølging, from
@@ -8,7 +8,7 @@ export const SUPPLIER_HELP_PAGES = ['index', 'control_requirements', 'supplier',
  * sections.
  *
  * @param {object} tr    translations.supplier_management
- * @param {string} page  'index', 'control_requirements', 'supplier' or 'import'
+ * @param {string} page  'index', 'control_requirements', 'supplier', 'import' or 'deleted'
  */
 export function supplierHelp(tr, page) {
     const help = tr?.help ?? {};

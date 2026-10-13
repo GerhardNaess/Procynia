@@ -5,6 +5,7 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import ControlRequirementForm from './ControlRequirementForm';
+import RequirementStatusHistory from './RequirementStatusHistory';
 import RequirementTemplates from './RequirementTemplates';
 import WikiGuidance from './WikiGuidance';
 import { LEVEL_TONES, anchorLabel, appliesToText, controlPointLabel, groupByTheme, intervalLabel, levelLabel } from './controlRequirements';
@@ -25,7 +26,7 @@ const HINT = 'text-base text-slate-600';
  * the buttons simply missing.
  */
 export default function SupplierControlRequirementsIndex() {
-    const { translations = {}, requirements = [], templates = [], templates_reviewed: templatesReviewed = false, form: formOptions = null, permissions = {}, errors = {} } = usePage().props;
+    const { translations = {}, requirements = [], templates = [], templates_reviewed: templatesReviewed = false, form: formOptions = null, permissions = {}, errors = {}, locale = 'no' } = usePage().props;
     const tr = translations?.supplier_management ?? {};
     const c = tr.control ?? {};
     const k = c.catalogue ?? {};
@@ -126,6 +127,7 @@ export default function SupplierControlRequirementsIndex() {
                                             </p>
                                         )}
                                         <WikiGuidance requirementId={row.id} guidance={row.wiki_guidance} canManage={canManageGuidance} tr={tr} />
+                                        <RequirementStatusHistory entries={row.status_history ?? []} locale={locale} tr={tr} />
 
                                         {canManage && editing === null && (
                                             <div className="mt-3 flex flex-wrap gap-2">

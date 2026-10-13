@@ -60,7 +60,7 @@ class SupplierManagementTranslationsTest extends TestCase
             $help = $strings['help']['index'];
             $this->assertNotSame('', $help['intro_title'] ?? '');
             $this->assertSame(
-                ['1.', '2.', '3.', '4.', '5.', '6.', '7.'],
+                ['1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.'],
                 array_map(fn (array $item): string => strtok($item['title'], ' '), $help['sections'][0]['items']),
             );
         }
@@ -72,10 +72,29 @@ class SupplierManagementTranslationsTest extends TestCase
             $no['search'], $no['reset'], $no['create'], $no['import']['button'], $no['status_filter_all'],
             $no['criticality']['assess'], $no['profile']['fill'], $no['assessment']['assess'], $no['control']['evaluate'],
             $no['page']['tabs']['requirements'], $no['page']['tabs']['assessments'], $no['page']['tabs']['documents'],
-            $no['attention']['heading'], $no['attention']['filter'],
+            $no['attention']['heading'], $no['attention']['filter'], $no['deleted']['button'],
         ] as $label) {
             $this->assertStringContainsString("«{$label}»", $steps);
         }
+    }
+
+    /** Slettede leverandører: a step-by-step guide in both languages, naming the page's own labels. */
+    public function test_the_deleted_suppliers_help_is_a_guide_in_both_languages(): void
+    {
+        $no = (require dirname(__DIR__, 2).'/lang/no/procynia.php')['supplier_management'];
+        $en = (require dirname(__DIR__, 2).'/lang/en/procynia.php')['supplier_management'];
+
+        foreach ([$no, $en] as $strings) {
+            $help = $strings['help']['deleted'];
+            $this->assertNotSame('', $help['intro_title'] ?? '');
+            $this->assertSame(['1.', '2.', '3.'], array_map(fn (array $item): string => strtok($item['title'], ' '), $help['sections'][0]['items']));
+            $steps = implode(' ', array_column($help['sections'][0]['items'], 'text'));
+            $this->assertStringContainsString("«{$strings['deleted']['button']}»", $steps);
+            $this->assertStringContainsString("«{$strings['deleted']['back']}»", $steps);
+        }
+
+        $this->assertSame(['Hva brukes siden til?', 'Slik gjør du det'], [$no['help']['deleted']['intro_title'], $no['help']['deleted']['sections'][0]['title']]);
+        $this->assertSame(count($no['help']['deleted']['sections']), count($en['help']['deleted']['sections']));
     }
 
     /**

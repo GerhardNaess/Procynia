@@ -5,6 +5,7 @@ namespace App\Services\Suppliers\Assurance;
 use App\Models\ComplianceRequirement;
 use App\Models\Supplier;
 use App\Models\SupplierControlRequirement;
+use App\Models\SupplierControlRequirementStatusChange;
 use App\Models\SupplierDocument;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
@@ -22,11 +23,13 @@ use Illuminate\Validation\ValidationException;
  * WHO. supplier.assure, and only that (§13.2): the catalogue is what Leverandørkontroll checks
  * against. supplier.edit, supplier.assess and supplier.delete grant nothing here.
  *
- * Mutable current state with no history of its own: an edit changes the requirement in place, and
- * the overrides and controls keep their own snapshot of title and level. Sett som utgått
- * retires it — it then applies to no one, is never controlled again, and its overrides and
- * controls stay — and Ta i bruk igjen reverses
- * that. Slett is only for a requirement nothing refers to.
+ * Mutable current state: an edit changes the requirement in place, and the overrides and controls
+ * keep their own snapshot of title and level. Sett som utgått retires it — it then applies to no
+ * one, is never controlled again, and its overrides and controls stay — and Ta i bruk igjen reverses
+ * that. Each of the two writes one immutable SupplierControlRequirementStatusChange in the same
+ * transaction, with the row locked and its status checked again inside the lock, so a double submit
+ * writes no second row. Slett is only for a requirement nothing refers to — a status history
+ * included.
  *
  * A requirement for one supplier (supplier_id set) has no rule and always applies to that supplier.
  * It is written only while that supplier is not ended, and reaches the supplier through
@@ -153,7 +156,11 @@ class SupplierControlRequirementService
             $locked = $this->lock($actor, $requirement);
 
             if (! $locked->isDeletable()) {
-                throw ValidationException::withMessages(['requirement' => __('procynia.supplier_management.validation.control_requirement_in_use')]);
+                $message = $locked->statusChanges()->exists()
+                    ? 'procynia.supplier_management.validation.control_requirement_has_history'
+                    : 'procynia.supplier_management.validation.control_requirement_in_use';
+
+                throw ValidationException::withMessages(['requirement' => __($message)]);
             }
 
             $locked->delete();
@@ -188,6 +195,16 @@ class SupplierControlRequirementService
             if ($locked->status === $status) {
                 throw ValidationException::withMessages(['requirement' => __('procynia.supplier_management.validation.control_requirement_status_unchanged')]);
             }
+
+            SupplierControlRequirementStatusChange::query()->create([
+                'customer_id' => (int) $locked->customer_id,
+                'requirement_id' => (int) $locked->id,
+                'supplier_id' => $locked->supplier_id !== null ? (int) $locked->supplier_id : null,
+                'from_status' => $locked->status,
+                'to_status' => $status,
+                'changed_by_user_id' => (int) $actor->id,
+                'changed_at' => now(),
+            ]);
 
             $locked->forceFill(['status' => $status, 'updated_by' => (int) $actor->id])->save();
         });

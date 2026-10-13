@@ -17,6 +17,8 @@ const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 const REGISTER_URL = '/app/supplier-management';
+// A way to a read-only log, not work: a plain link, never a button competing with Registrer leverandør.
+const QUIET_LINK = 'inline-flex min-h-10 items-center rounded-lg px-2 text-base font-semibold text-slate-700 underline-offset-4 hover:text-slate-950 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500';
 
 /**
  * Kravstatus in the register: the state of the control requirements that apply now, as the server
@@ -65,6 +67,7 @@ export default function SupplierManagementIndex() {
 
     const tr = translations?.supplier_management ?? {};
     const canEdit = permissions.can_edit ?? false;
+    const canViewDeletions = permissions.can_view_deletions ?? false;
     const formatDate = (date) => formatLongDate(date, locale);
     const nextReview = (item) => nextReviewText(item, tr, formatDate);
 
@@ -130,6 +133,12 @@ export default function SupplierManagementIndex() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...supplierHelp(tr, 'index')} />
+                        {/* The read-only deletion log, quietly, for those who may delete (supplier.delete). */}
+                        {canViewDeletions && ! creating && (
+                            <Link href={`${REGISTER_URL}/deleted`} className={QUIET_LINK} data-testid="supplier-deletions-link">
+                                {tr.deleted?.button ?? 'Slettede leverandører'}
+                            </Link>
+                        )}
                         {canEdit && ! creating && (
                             <Link href={`${REGISTER_URL}/import`} className={SECONDARY_ACTION} data-testid="supplier-import-link">
                                 {tr.import?.button ?? 'Importer leverandører'}

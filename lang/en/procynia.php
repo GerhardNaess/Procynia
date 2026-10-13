@@ -2762,6 +2762,16 @@ return [
             'owner_assigned_title' => 'Supplier responsibility',
             'owner_assigned_message' => 'You have been made responsible for the supplier :name.',
         ],
+        'deleted' => [
+            'button' => 'Deleted suppliers',
+            'title' => 'Deleted suppliers',
+            'heading' => 'Deleted suppliers',
+            'intro' => 'Suppliers deleted because they were registered by mistake: the name, when they were deleted and who deleted them. The log cannot be changed.',
+            'back' => 'To suppliers',
+            'empty' => 'No suppliers have been deleted.',
+            'empty_hint' => 'When a supplier is deleted, this shows who deleted it and when.',
+            'deleted_by' => 'Deleted :date by :name',
+        ],
         'import' => [
             'button' => 'Import suppliers',
             'title' => 'Import suppliers',
@@ -3345,6 +3355,11 @@ return [
             'retire_own_confirm' => 'Mark the requirement as retired? It then no longer applies to the supplier. The controls of the requirement stay in the history.',
             'retired_own_heading' => 'Retired control requirements',
             'retired_own_intro' => 'Requirements created for this supplier and marked as retired. They do not apply to the supplier now, but their controls are kept.',
+            'status_history' => [
+                'heading' => 'Change history',
+                'retired' => 'Marked as retired',
+                'reactivated' => 'Used again',
+            ],
             'retired_own_badge' => 'Retired',
             'reactivate_own' => 'Use again',
             'reactivate_own_confirm' => 'Use the requirement again? It becomes an active control requirement for this supplier again, with the same earlier controls.',
@@ -4209,6 +4224,7 @@ return [
             'conditions_max' => 'Choose up to :max conditions.',
             'control_requirement_in_use' => 'The requirement has been used for a supplier and cannot be deleted. Mark it as retired instead.',
             'control_requirement_status_unchanged' => 'The requirement already has this status. Reload the page.',
+            'control_requirement_has_history' => 'The requirement has been retired or used again and cannot be deleted. Mark it as retired instead.',
             'control_requirement_not_available' => 'Choose an active control requirement.',
             'override_not_allowed' => 'This cannot be done for the requirement now. Reload the page.',
             'mandatory_not_excludable' => 'A mandatory requirement cannot be excluded. If the requirement is wrong for the supplier, correct the supplier profile or the requirement.',
@@ -4304,6 +4320,7 @@ return [
                             ['title' => '5. Carry out a supplier assessment', 'text' => 'Open the «Assessments» tab and choose «Assess supplier». Assess the four areas and choose the overall assessment.'],
                             ['title' => '6. Assess the control requirements', 'text' => 'Register the documentation under the «Documentation» tab. Then open the «Requirements and qualifications» tab and choose «Control requirement» on each requirement to be assessed.'],
                             ['title' => '7. See what needs follow-up', 'text' => 'In the list, «Needs follow-up» appears under the name of suppliers that have something to follow up, with what it concerns. Tick «Only suppliers that need follow-up» and choose «Search» to see only those. On the supplier page, «Needs follow-up» is on the «Overview» tab, with each point and a link to the right tab. Suppliers you are the internal owner of also appear as tasks under Follow-up in the left menu.'],
+                            ['title' => '8. See deleted suppliers', 'text' => 'If you have the right to delete suppliers, choose «Deleted suppliers» at the top right. It lists which suppliers have been deleted, when and by whom. The log cannot be changed.'],
                         ],
                     ],
                     [
@@ -4360,7 +4377,7 @@ return [
                             ['title' => '3. See what a template contains', 'text' => 'Choose the «Requirement templates» heading at the bottom of the page to open the section. Then choose «Show the requirements» on a template. You see the code, title, theme and level of each requirement, and whether it is already in use. Choose «Hide the requirements» to close the list. Looking at the requirements changes nothing.'],
                             ['title' => '4. Use a requirement template', 'text' => 'Choose «Use requirement template». The confirmation shows which requirements are added and which are already there. Choose «Add … control requirements» to add them.'],
                             ['title' => '5. Create your own control requirement', 'text' => 'Choose «New control requirement», fill in the title, theme, level, when and how often the requirement is controlled, and which suppliers it applies to. Choose «Save control requirement».'],
-                            ['title' => '6. Change a requirement', 'text' => 'Choose «Edit» on the requirement. «Mark as retired» makes the requirement apply to no supplier, and «Use again» makes it apply again. «Delete» is offered only for requirements that have never been used.'],
+                            ['title' => '6. Change a requirement', 'text' => 'Choose «Edit» on the requirement. «Mark as retired» makes the requirement apply to no supplier, and «Use again» makes it apply again. «Delete» is offered only for requirements that have never been used or retired. «Change history» on the requirement shows when it was retired or used again, and by whom.'],
                             ['title' => '7. Find the requirements for a supplier', 'text' => 'Open the supplier from the «Suppliers» tab, and choose the «Requirements and qualifications» tab. Under «Control requirements for the supplier» it lists the requirements that apply to the supplier, and why. With «Add requirement» and «Does not apply to this supplier» you override with a reason. A requirement for one supplier only is created and maintained on the supplier.'],
                             ['title' => '8. Document the control', 'text' => 'Register the documentation under the «Documentation» tab. Then choose «Control requirement» on the requirement, and choose the documentation you relied on, the result and the reason. Requirement status at the top of the tab shows how many requirements are documented and which mandatory requirements are open.'],
                             ['title' => '9. Permissions', 'text' => 'Everyone with access to Suppliers can see the control requirements and the templates. Creating and changing control requirements, using templates, overriding and controlling requirements require the «Carry out supplier control» permission. It is given in a role under Customer environment → Permissions.'],
@@ -4382,7 +4399,7 @@ return [
                     [
                         'title' => 'Changing and retiring',
                         'items' => [
-                            ['title' => 'Mark as retired', 'text' => 'A retired requirement applies to no supplier. Manual decisions and history are kept. A requirement that has never been used can be deleted.'],
+                            ['title' => 'Mark as retired', 'text' => 'A retired requirement applies to no supplier. Manual decisions and history are kept, and the change is recorded in the requirement\'s «Change history» with time and who did it. That history cannot be changed or deleted. A requirement that has never been used or retired can be deleted.'],
                             ['title' => 'Anchor', 'text' => 'A requirement can be anchored in a requirement in Compliance and audit. The anchor is optional and shown only to people with access there. The basis is always written in the requirement itself.'],
                             ['title' => 'Access', 'text' => 'Everyone with access to Supplier management can see the requirements. Only roles with the supplier assurance permission can change them.'],
                         ],
@@ -4460,7 +4477,7 @@ return [
                             ['title' => 'Applies because …', 'text' => 'Each requirement shows why it applies. A condition that is «Not clarified» in the profile counts as applying, and the reason then says it is not clarified.'],
                             ['title' => 'Add requirement', 'text' => 'With the supplier assurance permission you choose «Add requirement» and then «Choose an existing control requirement» for a requirement from Control requirements that does not apply automatically, or «Create a requirement for this supplier» for a requirement that should apply to this supplier only. Adding an existing requirement needs a reason and is kept in the history.'],
                             ['title' => 'Excluding a requirement', 'text' => '«Does not apply to this supplier» excludes a requirement that applies automatically, with a reason. Mandatory requirements cannot be excluded. «Back to automatic assessment» lifts the decision.'],
-                            ['title' => 'Requirements for this supplier only', 'text' => 'A requirement created for this supplier is changed with «Edit requirement» on the requirement. When it no longer applies, choose «Mark as retired». The requirement then moves to «Retired control requirements» at the bottom of the section, with its controls. There you can choose «Use again» – it is the same requirement, not a copy, and earlier controls stay. The requirement is not listed under Control requirements and applies to no other supplier.'],
+                            ['title' => 'Requirements for this supplier only', 'text' => 'A requirement created for this supplier is changed with «Edit requirement» on the requirement. When it no longer applies, choose «Mark as retired». The requirement then moves to «Retired control requirements» at the bottom of the section, with its controls. There you can choose «Use again» – it is the same requirement, not a copy, and earlier controls stay. «Change history» on the requirement shows each time it was retired or used again, with time and who did it, apart from the controls. The requirement is not listed under Control requirements and applies to no other supplier.'],
                             ['title' => 'Anchored in', 'text' => '«Anchored in» shows which requirement in Compliance and audit the control requirement comes from. It does not say the requirement is met – the control of the requirement shows that.'],
                             ['title' => 'Documentation is the basis', 'text' => 'When you control a requirement, you choose the documentation you relied on. Documentation is registered under Documentation. Choosing a document does not mean the requirement is met.'],
                             ['title' => 'The controller judges', 'text' => 'You decide whether the documentation covers the requirement: Documented, Partially documented, Missing or Temporarily accepted until a date. The system never sets the result itself. «Documented» needs at least one document, and every result needs a reason.'],
@@ -4587,6 +4604,29 @@ return [
                         'items' => [
                             ['title' => 'No file', 'text' => 'The Excel file itself is not stored. Only the values that can be imported are kept until you confirm, and they are deleted after a day if the import is not confirmed.'],
                             ['title' => 'Traceability', 'text' => 'New suppliers are registered with you as creator. The import records who carried it out, when, and what happened to each row.'],
+                        ],
+                    ],
+                ],
+            ],
+            'deleted' => [
+                'title' => 'About deleted suppliers',
+                'intro_title' => 'What is this page for?',
+                'intro' => 'This page shows which suppliers have been deleted, when it happened and who did it. It is read-only and documents the deletion afterwards.',
+                'sections' => [
+                    [
+                        'title' => 'How to do it',
+                        'items' => [
+                            ['title' => '1. Open the log', 'text' => 'Choose Governance → Suppliers in the left menu, then «Deleted suppliers» at the top right of the page.'],
+                            ['title' => '2. Read the log', 'text' => 'Each line shows the supplier\'s name as it was when it was deleted, and «Deleted … by …» with the time and who deleted it. The most recent deletion comes first.'],
+                            ['title' => '3. Go back', 'text' => 'Choose «To suppliers» to return to the register.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'About the log',
+                        'items' => [
+                            ['title' => 'What is kept', 'text' => 'Only the name, the time and who deleted it. Only suppliers without history, assessments, documentation or controls can be deleted, so there is nothing more to keep.'],
+                            ['title' => 'Cannot be changed', 'text' => 'The log cannot be changed or deleted, and a deleted supplier cannot be restored. Register it again if it is to be used.'],
+                            ['title' => 'Access', 'text' => 'Only roles with the right to delete suppliers see the log. The right is managed under Customer environment → Permissions.'],
                         ],
                     ],
                 ],

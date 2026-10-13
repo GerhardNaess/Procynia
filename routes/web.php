@@ -524,6 +524,8 @@ Route::prefix('app')
         Route::prefix('/supplier-management')->name('supplier-management.')->group(function (): void {
             Route::get('/', [SupplierManagementController::class, 'index'])->name('index');
             Route::post('/', [SupplierManagementController::class, 'store'])->name('store');
+            // Slettede leverandører: the read-only deletion log (supplier.delete).
+            Route::get('/deleted', [SupplierManagementController::class, 'deleted'])->name('deleted');
             // Importer leverandører: Last opp → Kontroller → Bekreft (supplier.edit). Nothing is written before Bekreft.
             Route::get('/import', [SupplierImportController::class, 'create'])->name('import.create');
             Route::get('/import/template', [SupplierImportController::class, 'template'])->name('import.template');

@@ -151,3 +151,20 @@ export function toggleCode(list, code, max = Infinity) {
 
     return current.length >= max ? current : [...current, code];
 }
+
+/**
+ * Endringshistorikk on a requirement: what one status change did, in words — «Satt som utgått» or
+ * «Tatt i bruk igjen». Never the stored status codes.
+ */
+export function statusChangeText(entry, tr) {
+    const h = tr?.control?.status_history ?? {};
+
+    return entry?.to_status === 'retired' ? (h.retired ?? 'Satt som utgått') : (h.reactivated ?? 'Tatt i bruk igjen');
+}
+
+/** When and by whom: «6. oktober 2026 kl. 09:30 – Kari Nordmann», with a stand-in for a deleted user. */
+export function statusChangeByline(entry, tr, formatDate) {
+    const name = entry?.changed_by_name ?? tr?.unknown_user ?? 'en tidligere bruker';
+
+    return `${formatDate(entry?.changed_at)} – ${name}`;
+}

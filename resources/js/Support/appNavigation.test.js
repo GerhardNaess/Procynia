@@ -47,6 +47,8 @@ describe('the examples the navigation was specified with', () => {
         assert.deepEqual(labels(trail('/app/supplier-management/control-requirements')), ['Styring', 'Leverandører', 'Kontrollkrav']);
         assert.deepEqual(links(trail('/app/supplier-management/control-requirements')), ['/app/governance', '/app/supplier-management', null]);
         assert.deepEqual(labels(trail('/app/supplier-management/import', { title: 'Importer leverandører' })), ['Styring', 'Leverandører', 'Importer leverandører']);
+        assert.deepEqual(labels(trail('/app/supplier-management/deleted', { title: 'Slettede leverandører' })), ['Styring', 'Leverandører', 'Slettede leverandører']);
+        assert.deepEqual(links(trail('/app/supplier-management/deleted', { title: 'Slettede leverandører' })), ['/app/governance', '/app/supplier-management', null]);
         assert.deepEqual(labels(trail('/app/supplier-management/12', { title: 'Acme AS' })), ['Styring', 'Leverandører', 'Acme AS']);
         assert.deepEqual(links(trail('/app/supplier-management/12', { title: 'Acme AS' })), ['/app/governance', '/app/supplier-management', null]);
     });

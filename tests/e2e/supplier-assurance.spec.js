@@ -250,7 +250,8 @@ test('the profile decides which control requirements apply, and a reasoned overr
     // Utgåtte kontrollkrav: closed by default, the same requirement, and Ta i bruk igjen behind a confirmation.
     const retiredOwn = section.getByTestId('control-retired-own');
     await expect(retiredOwn).not.toHaveAttribute('open');
-    await retiredOwn.locator('summary').click();
+    // Its own summary, not the Endringshistorikk folded inside the row.
+    await retiredOwn.locator(':scope > summary').click();
     const retiredRow = retiredOwn.getByTestId('control-retired-own-row').filter({ hasText: `${ownTitle} 50 %` });
     await expect(retiredRow).toContainText('Utgått');
     await expectReadable(page, '06d-retired-own-requirement');

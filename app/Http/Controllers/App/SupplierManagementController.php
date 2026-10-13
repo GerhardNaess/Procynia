@@ -9,6 +9,7 @@ use App\Models\SupplierAssessment;
 use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierControlRequirement;
 use App\Models\SupplierCriticalityChange;
+use App\Models\SupplierDeletion;
 use App\Models\SupplierDocument;
 use App\Models\SupplierProfile;
 use App\Models\SupplierProfileChange;
@@ -198,8 +199,30 @@ class SupplierManagementController extends Controller
             'review_intervals' => Supplier::REVIEW_INTERVALS,
             'permissions' => [
                 'can_edit' => $canEdit,
+                // «Slettede leverandører»: the deletion log is for those who may delete.
+                'can_view_deletions' => $this->access->canDelete($user),
             ],
             'owner_options' => $canEdit ? $this->access->ownerCandidates($user) : [],
+        ]);
+    }
+
+    /**
+     * Slettede leverandører: read-only — the name, when and by whom, for the customer's own deleted
+     * suppliers. supplier.delete only; nothing here links to a supplier, since none is left.
+     */
+    public function deleted(): Response
+    {
+        $user = $this->authorizedUser();
+        abort_unless($this->access->canDelete($user), 403);
+
+        return Inertia::render('App/SupplierManagement/DeletedSuppliers', [
+            'deletions' => $this->access->deletionLog($user)->with('deletedBy:id,name')->get()
+                ->map(fn (SupplierDeletion $deletion): array => [
+                    'id' => (int) $deletion->id,
+                    'supplier_name' => $deletion->supplier_name,
+                    'deleted_at' => $deletion->deleted_at?->toIso8601String(),
+                    'deleted_by_name' => $deletion->deletedBy?->name,
+                ])->all(),
         ]);
     }
 
@@ -506,7 +529,7 @@ class SupplierManagementController extends Controller
         abort_unless($this->access->canDelete($user), 403);
 
         // Checked again inside the lock; earlier compliance links are deleted with the supplier.
-        if (! $this->lifecycle->delete($supplier)) {
+        if (! $this->lifecycle->delete($supplier, $user)) {
             return back()->with('error', __('procynia.supplier_management.validation.not_deletable'));
         }
 

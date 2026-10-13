@@ -3,6 +3,7 @@
 namespace App\Services\Suppliers;
 
 use App\Models\Supplier;
+use App\Models\SupplierDeletion;
 use App\Models\User;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Services\Permissions\CustomerPermissionService;
@@ -114,6 +115,23 @@ class SupplierAccessService
         }
 
         return $query->where('suppliers.customer_id', (int) $user->customer_id);
+    }
+
+    /**
+     * Slettede leverandører: the customer's own deletion log, newest first — only for someone with
+     * supplier.delete, and nothing at all otherwise.
+     *
+     * @return Builder<SupplierDeletion>
+     */
+    public function deletionLog(User $user): Builder
+    {
+        $query = SupplierDeletion::query()->orderByDesc('deleted_at')->orderByDesc('id');
+
+        if (! $this->canDelete($user)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where('customer_id', (int) $user->customer_id);
     }
 
     public function findVisibleSupplier(User $user, int $supplierId): ?Supplier

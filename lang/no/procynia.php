@@ -2766,6 +2766,16 @@ return [
             'owner_assigned_title' => 'Ansvar for leverandør',
             'owner_assigned_message' => 'Du er tildelt ansvar for leverandøren :name.',
         ],
+        'deleted' => [
+            'button' => 'Slettede leverandører',
+            'title' => 'Slettede leverandører',
+            'heading' => 'Slettede leverandører',
+            'intro' => 'Leverandører som er slettet fordi de ble registrert ved en feil: navnet, når de ble slettet og hvem som slettet dem. Loggen kan ikke endres.',
+            'back' => 'Til leverandører',
+            'empty' => 'Ingen leverandører er slettet.',
+            'empty_hint' => 'Når en leverandør slettes, står det her hvem som slettet den og når.',
+            'deleted_by' => 'Slettet :date av :name',
+        ],
         'import' => [
             'button' => 'Importer leverandører',
             'title' => 'Importer leverandører',
@@ -3349,6 +3359,11 @@ return [
             'retire_own_confirm' => 'Sette kravet som utgått? Det gjelder da ikke leverandøren lenger. Kontrollene av kravet blir stående i historikken.',
             'retired_own_heading' => 'Utgåtte kontrollkrav',
             'retired_own_intro' => 'Krav som er opprettet for denne leverandøren og satt som utgått. De gjelder ikke leverandøren nå, men kontrollene er tatt vare på.',
+            'status_history' => [
+                'heading' => 'Endringshistorikk',
+                'retired' => 'Satt som utgått',
+                'reactivated' => 'Tatt i bruk igjen',
+            ],
             'retired_own_badge' => 'Utgått',
             'reactivate_own' => 'Ta i bruk igjen',
             'reactivate_own_confirm' => 'Ta kravet i bruk igjen? Det blir et aktivt kontrollkrav for denne leverandøren igjen, med de samme tidligere kontrollene.',
@@ -4213,6 +4228,7 @@ return [
             'conditions_max' => 'Velg opptil :max forhold.',
             'control_requirement_in_use' => 'Kravet er brukt for en leverandør og kan ikke slettes. Sett det som utgått i stedet.',
             'control_requirement_status_unchanged' => 'Kravet har allerede denne statusen. Last siden på nytt.',
+            'control_requirement_has_history' => 'Kravet har vært satt som utgått eller tatt i bruk igjen og kan ikke slettes. Sett det som utgått i stedet.',
             'control_requirement_not_available' => 'Velg et aktivt kontrollkrav.',
             'override_not_allowed' => 'Dette kan ikke gjøres for kravet nå. Last siden på nytt.',
             'mandatory_not_excludable' => 'Et obligatorisk krav kan ikke utelukkes. Er kravet feil for leverandøren, rett leverandørprofilen eller kravet.',
@@ -4308,6 +4324,7 @@ return [
                             ['title' => '5. Gjennomfør leverandørvurdering', 'text' => 'Åpne fanen «Vurderinger» og velg «Vurder leverandør». Vurder de fire områdene og velg samlet vurdering.'],
                             ['title' => '6. Vurder kontrollkravene', 'text' => 'Registrer dokumentasjonen under fanen «Dokumentasjon». Åpne deretter fanen «Krav og kvalifikasjoner» og velg «Kontroller krav» på hvert krav som skal vurderes.'],
                             ['title' => '7. Se hva som må følges opp', 'text' => 'I listen står «Trenger oppfølging» under navnet til leverandører som har noe å følge opp, med hva det gjelder. Kryss av for «Bare leverandører som trenger oppfølging» og velg «Søk» for å se bare dem. På leverandørsiden står «Trenger oppfølging» på fanen «Oversikt», med hvert punkt og en lenke til riktig fane. Leverandører du er intern ansvarlig for, står også som oppgaver under Oppfølging i venstremenyen.'],
+                            ['title' => '8. Se slettede leverandører', 'text' => 'Har du rettigheten til å slette leverandører, velger du «Slettede leverandører» øverst til høyre. Der står hvilke leverandører som er slettet, når og av hvem. Loggen kan ikke endres.'],
                         ],
                     ],
                     [
@@ -4364,7 +4381,7 @@ return [
                             ['title' => '3. Se hva en kravmal inneholder', 'text' => 'Velg overskriften «Kravmaler» nederst på siden for å åpne seksjonen. Velg deretter «Vis kravene» på en mal. Du ser kode, tittel, tema og kravnivå for hvert krav, og om kravet allerede er tatt i bruk. Velg «Skjul kravene» for å lukke listen. Å se kravene endrer ingenting.'],
                             ['title' => '4. Ta i bruk en kravmal', 'text' => 'Velg «Ta i bruk kravmal». Bekreftelsen viser hvilke krav som legges til, og hvilke som finnes fra før. Velg «Legg til … kontrollkrav» for å legge dem til.'],
                             ['title' => '5. Opprett et eget kontrollkrav', 'text' => 'Velg «Nytt kontrollkrav», fyll ut tittel, tema, kravnivå, når og hvor ofte kravet kontrolleres, og hvilke leverandører det gjelder. Velg «Lagre kontrollkrav».'],
-                            ['title' => '6. Endre et krav', 'text' => 'Velg «Rediger» på kravet. «Sett som utgått» gjør at kravet ikke lenger gjelder noen leverandør, og «Ta i bruk igjen» gjør det gjeldende på nytt. «Slett» finnes bare for krav som aldri er brukt.'],
+                            ['title' => '6. Endre et krav', 'text' => 'Velg «Rediger» på kravet. «Sett som utgått» gjør at kravet ikke lenger gjelder noen leverandør, og «Ta i bruk igjen» gjør det gjeldende på nytt. «Slett» finnes bare for krav som aldri er brukt eller satt som utgått. «Endringshistorikk» på kravet viser når det ble satt som utgått eller tatt i bruk igjen, og av hvem.'],
                             ['title' => '7. Finn kravene for en leverandør', 'text' => 'Åpne leverandøren fra fanen «Leverandører», og velg fanen «Krav og kvalifikasjoner». Under «Kontrollkrav for leverandøren» står kravene som gjelder leverandøren, og hvorfor. Med «Legg til krav» og «Gjelder ikke denne leverandøren» overstyrer du med en begrunnelse. Et krav som bare gjelder én leverandør, opprettes og vedlikeholdes på leverandøren.'],
                             ['title' => '8. Dokumenter kontrollen', 'text' => 'Registrer dokumentasjonen under fanen «Dokumentasjon». Velg deretter «Kontroller krav» på kravet, velg dokumentasjonen du har lagt til grunn, resultatet og begrunnelsen. Kravstatus øverst på fanen viser hvor mange krav som er dokumentert, og hvilke obligatoriske krav som står åpne.'],
                             ['title' => '9. Rettigheter', 'text' => 'Alle med tilgang til Leverandører kan se kontrollkravene og kravmalene. Å opprette og endre kontrollkrav, ta i bruk kravmaler, overstyre og kontrollere krav krever rettigheten «Gjennomføre leverandørkontroll». Den gis i en rolle under Kundemiljø → Tilganger.'],
@@ -4386,7 +4403,7 @@ return [
                     [
                         'title' => 'Endre og avslutte',
                         'items' => [
-                            ['title' => 'Sett som utgått', 'text' => 'Et utgått krav gjelder ingen leverandører. Manuelle avgjørelser og historikk blir stående. Et krav som aldri er brukt, kan slettes.'],
+                            ['title' => 'Sett som utgått', 'text' => 'Et utgått krav gjelder ingen leverandører. Manuelle avgjørelser og historikk blir stående, og endringen lagres i kravets «Endringshistorikk» med tidspunkt og hvem som gjorde den. Den historikken kan ikke endres eller slettes. Et krav som aldri er brukt eller satt som utgått, kan slettes.'],
                             ['title' => 'Forankring', 'text' => 'Et krav kan forankres i et krav i Etterlevelse og revisjon. Forankringen er valgfri og vises bare for dem som har tilgang dit. Grunnlaget skrives alltid i kravet selv.'],
                             ['title' => 'Tilgang', 'text' => 'Alle med tilgang til Leverandøroppfølging kan se kravene. Bare roller med rettigheten for leverandørkontroll kan endre dem.'],
                         ],
@@ -4464,7 +4481,7 @@ return [
                             ['title' => 'Gjelder fordi …', 'text' => 'Hvert krav viser hvorfor det gjelder. Et forhold som er «Ikke avklart» i profilen, regnes som om det gjelder, og det står da at det ikke er avklart.'],
                             ['title' => 'Legg til krav', 'text' => 'Med rettigheten for leverandørkontroll velger du «Legg til krav» og deretter «Velg eksisterende kontrollkrav» for et krav fra Kontrollkrav som ikke gjelder automatisk, eller «Opprett krav for denne leverandøren» for et krav som bare skal gjelde denne leverandøren. Å legge til et eksisterende krav krever begrunnelse og lagres i historikken.'],
                             ['title' => 'Utelukke et krav', 'text' => '«Gjelder ikke denne leverandøren» utelukker et krav som gjelder automatisk, med begrunnelse. Obligatoriske krav kan ikke utelukkes. «Tilbake til automatisk vurdering» opphever avgjørelsen.'],
-                            ['title' => 'Krav bare for denne leverandøren', 'text' => 'Et krav som er opprettet for denne leverandøren, endrer du med «Rediger krav» på kravet. Gjelder det ikke lenger, velger du «Sett som utgått». Kravet flyttes da til «Utgåtte kontrollkrav» nederst i seksjonen, med kontrollene. Der kan du velge «Ta i bruk igjen» – det er det samme kravet, ikke en kopi, og tidligere kontroller blir stående. Kravet vises ikke under Kontrollkrav og gjelder ingen andre leverandører.'],
+                            ['title' => 'Krav bare for denne leverandøren', 'text' => 'Et krav som er opprettet for denne leverandøren, endrer du med «Rediger krav» på kravet. Gjelder det ikke lenger, velger du «Sett som utgått». Kravet flyttes da til «Utgåtte kontrollkrav» nederst i seksjonen, med kontrollene. Der kan du velge «Ta i bruk igjen» – det er det samme kravet, ikke en kopi, og tidligere kontroller blir stående. «Endringshistorikk» på kravet viser hver gang det er satt som utgått eller tatt i bruk igjen, med tidspunkt og hvem, adskilt fra kontrollene. Kravet vises ikke under Kontrollkrav og gjelder ingen andre leverandører.'],
                             ['title' => 'Forankret i', 'text' => '«Forankret i» viser hvilket krav i Etterlevelse og revisjon kontrollkravet kommer fra. Det sier ikke at kravet er oppfylt – det viser kontrollen av kravet.'],
                             ['title' => 'Dokumentasjon er grunnlaget', 'text' => 'Når du kontrollerer et krav, velger du dokumentasjonen du har lagt til grunn. Dokumentasjonen registreres under Dokumentasjon. At et dokument er valgt, betyr ikke at kravet er oppfylt.'],
                             ['title' => 'Kontrolløren vurderer', 'text' => 'Du avgjør om dokumentasjonen dekker kravet: Dokumentert, Delvis dokumentert, Mangler eller Midlertidig akseptert til en dato. Systemet setter aldri resultatet selv. «Dokumentert» krever minst ett dokument, og alle resultater krever begrunnelse.'],
@@ -4591,6 +4608,29 @@ return [
                         'items' => [
                             ['title' => 'Ingen fil', 'text' => 'Selve Excel-filen lagres ikke. Bare verdiene som kan importeres holdes til du bekrefter, og slettes etter et døgn hvis importen ikke blir bekreftet.'],
                             ['title' => 'Sporbarhet', 'text' => 'Nye leverandører registreres med deg som oppretter. Importen husker hvem som gjennomførte den, når, og hva som skjedde med hver rad.'],
+                        ],
+                    ],
+                ],
+            ],
+            'deleted' => [
+                'title' => 'Om slettede leverandører',
+                'intro_title' => 'Hva brukes siden til?',
+                'intro' => 'Her ser du hvilke leverandører som er slettet, når det skjedde og hvem som gjorde det. Siden er bare til lesing og dokumenterer slettingen i etterkant.',
+                'sections' => [
+                    [
+                        'title' => 'Slik gjør du det',
+                        'items' => [
+                            ['title' => '1. Åpne loggen', 'text' => 'Velg Styring → Leverandører i venstremenyen, og deretter «Slettede leverandører» øverst til høyre på siden.'],
+                            ['title' => '2. Les loggen', 'text' => 'Hver linje viser leverandørens navn slik det var da den ble slettet, og «Slettet … av …» med tidspunkt og hvem som slettet den. Den nyeste slettingen står først.'],
+                            ['title' => '3. Gå tilbake', 'text' => 'Velg «Til leverandører» for å gå tilbake til registeret.'],
+                        ],
+                    ],
+                    [
+                        'title' => 'Om loggen',
+                        'items' => [
+                            ['title' => 'Hva som tas vare på', 'text' => 'Bare navnet, tidspunktet og hvem som slettet. Bare leverandører uten historikk, vurderinger, dokumentasjon eller kontroller kan slettes, så det finnes ikke mer å ta vare på.'],
+                            ['title' => 'Kan ikke endres', 'text' => 'Loggen kan ikke endres eller slettes, og en slettet leverandør kan ikke hentes tilbake. Registrer den på nytt om den skal brukes.'],
+                            ['title' => 'Tilgang', 'text' => 'Bare roller med rettigheten til å slette leverandører ser loggen. Rettigheten administreres under Kundemiljø → Tilganger.'],
                         ],
                     ],
                 ],

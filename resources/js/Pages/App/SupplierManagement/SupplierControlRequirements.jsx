@@ -5,6 +5,7 @@ import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } f
 import { formatLongDate } from '../Improvements/improvementStatus';
 import RequiredMark from '../Risk/RequiredMark';
 import ControlRequirementForm from './ControlRequirementForm';
+import RequirementStatusHistory from './RequirementStatusHistory';
 import { LEVEL_TONES, anchorLabel, groupByTheme, levelLabel, rowActions } from './controlRequirements';
 import { DISPLAY_STATUS_TONES, displayStatusLabel, lastControlText } from './requirementEvaluations';
 import { nextControlText } from './assuranceFollowUp';
@@ -169,7 +170,8 @@ function Basis({ row, tr }) {
  * One «Legg til krav» (AddChoice). A requirement for this supplier only is maintained on its row —
  * Rediger krav and Sett som utgått, never Slett — since Kontrollkrav lists the catalogue alone.
  * Once retired it is listed, with its controls, under «Utgåtte kontrollkrav», folded away, where Ta i
- * bruk igjen makes the same requirement apply again.
+ * bruk igjen makes the same requirement apply again. Each row's Endringshistorikk — those status
+ * changes, with when and by whom — is folded away below its controls.
  */
 export default function SupplierControlRequirements({ supplierId, data, onFollowUp = null, locale = 'no', tr }) {
     const c = tr.control ?? {};
@@ -282,6 +284,7 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                                     {retireError?.id === row.id && <p className={`mt-2 ${ERROR}`} role="alert">{retireError.message}</p>}
                                     {panelFor(row)}
                                     <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} />
+                                    <RequirementStatusHistory entries={row.status_history ?? []} locale={locale} tr={tr} />
                                 </li>
                             );
                         })}
@@ -350,6 +353,7 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                                 )}
                                 {retireError?.id === row.id && <p className={`mt-2 ${ERROR}`} role="alert">{retireError.message}</p>}
                                 <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} testId="retired-own-evaluation-history" />
+                                <RequirementStatusHistory entries={row.status_history ?? []} locale={locale} tr={tr} />
                             </li>
                         ))}
                     </ul>

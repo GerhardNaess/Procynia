@@ -111,7 +111,7 @@ class SupplierControlRequirement extends Model
     /** Unused: nothing refers to it, so it may be deleted rather than retired. */
     public function isDeletable(): bool
     {
-        return ! $this->overrides()->exists() && ! $this->evaluations()->exists();
+        return ! $this->overrides()->exists() && ! $this->evaluations()->exists() && ! $this->statusChanges()->exists();
     }
 
     public function supplier(): BelongsTo
@@ -127,5 +127,13 @@ class SupplierControlRequirement extends Model
     public function evaluations(): HasMany
     {
         return $this->hasMany(SupplierRequirementEvaluation::class, 'requirement_id');
+    }
+
+    /** Sett som utgått and Ta i bruk igjen, newest first. */
+    public function statusChanges(): HasMany
+    {
+        return $this->hasMany(SupplierControlRequirementStatusChange::class, 'requirement_id')
+            ->orderByDesc('changed_at')
+            ->orderByDesc('id');
     }
 }

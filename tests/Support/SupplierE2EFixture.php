@@ -16,7 +16,9 @@ use App\Models\SupplierAssessment;
 use App\Models\SupplierAssuranceDecision;
 use App\Models\SupplierComplianceRequirement;
 use App\Models\SupplierControlRequirement;
+use App\Models\SupplierControlRequirementStatusChange;
 use App\Models\SupplierCriticalityChange;
+use App\Models\SupplierDeletion;
 use App\Models\SupplierDocument;
 use App\Models\SupplierDueDiligenceAssessment;
 use App\Models\SupplierImport;
@@ -214,6 +216,31 @@ class SupplierE2EFixture
         $supplier->save();
 
         return ['id' => (int) $supplier->id, 'name' => $supplier->name];
+    }
+
+    /**
+     * A requirement for one supplier only, as «Opprett krav for denne leverandøren» writes it: no rule,
+     * always applying to that supplier.
+     *
+     * @return array{id: int, title: string}
+     */
+    public static function ownRequirement(string $suffix, int $supplierId, string $title): array
+    {
+        $supplier = Supplier::query()->whereKey($supplierId)->where('name', 'like', '%'.$suffix.'%')->sole();
+        $manager = User::query()->where('email', 'e2e.lev.'.strtolower($suffix).'.ansvarlig@procynia.test')->sole();
+
+        $requirement = SupplierControlRequirement::query()->create([
+            'customer_id' => $supplier->customer_id,
+            'supplier_id' => $supplier->id,
+            'title' => $title,
+            'theme' => 'environment',
+            'level' => 'important',
+            'control_point' => 'ongoing',
+            'created_by' => $manager->id,
+            'updated_by' => $manager->id,
+        ]);
+
+        return ['id' => (int) $requirement->id, 'title' => $requirement->title];
     }
 
     /**
@@ -662,6 +689,8 @@ class SupplierE2EFixture
             'profiles' => SupplierProfile::query()->whereIn('customer_id', $customerIds)->count(),
             'profile_changes' => SupplierProfileChange::query()->whereIn('customer_id', $customerIds)->count(),
             'control_requirements' => SupplierControlRequirement::query()->whereIn('customer_id', $customerIds)->count(),
+            'requirement_status_changes' => SupplierControlRequirementStatusChange::query()->whereIn('customer_id', $customerIds)->count(),
+            'deletions' => SupplierDeletion::query()->whereIn('customer_id', $customerIds)->count(),
             'requirement_overrides' => SupplierRequirementOverride::query()->whereIn('customer_id', $customerIds)->count(),
             'requirement_evaluations' => SupplierRequirementEvaluation::query()->whereIn('customer_id', $customerIds)->count(),
             'evaluation_documents' => SupplierRequirementEvaluationDocument::query()->whereIn('customer_id', $customerIds)->count(),
