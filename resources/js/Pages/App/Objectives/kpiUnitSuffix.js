@@ -4,7 +4,7 @@
  * sends, so the stored numbers are exactly what was typed.
  *
  * Follows the units the KPI model has (percent, count, number, currency, hours, days):
- *  - percent:  «%»
+ *  - percent, percent_change:  «%»
  *  - currency: «kr» for NOK, otherwise the currency code («EUR»)
  *  - count:    the KPI's own unit label («hendelser»), else «stk.»
  *  - number:   the KPI's own unit label, else nothing
@@ -23,6 +23,7 @@ export function kpiUnitSuffix(definition, tr = {}, value = '') {
 
     switch (unit) {
         case 'percent':
+        case 'percent_change':
             return '%';
         case 'currency': {
             const code = String(definition?.currency_code ?? '').trim().toUpperCase();

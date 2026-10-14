@@ -5,23 +5,35 @@ namespace App\Services\EnterpriseWiki\Knowledge\Sources;
 use App\Data\EnterpriseWiki\WikiKnowledgeDraft;
 use App\Data\EnterpriseWiki\WikiKnowledgeDraftSection;
 use App\Models\Kpi;
-use App\Models\KpiMeasurement;
 use App\Models\Objective;
 use App\Models\User;
 use App\Services\EnterpriseWiki\Knowledge\WikiKnowledgeSource;
+use App\Services\Objectives\KpiMeasurementResolver;
 use App\Services\Objectives\ObjectiveAccessService;
+use App\Support\Objectives\KpiPeriodFormatter;
+use App\Support\Objectives\KpiPresenter;
+use App\Support\Objectives\KpiTargetFormatter;
 use Illuminate\Database\Eloquent\Model;
 
 /**
  * Mål og KPI → Wiki. What carries over from an objective is what it aimed at, how it was measured,
  * where the measurements ended and what was concluded when it closed. Gated on objective.edit in
  * the objective's fagområde.
+ *
+ * A KPI reads the way its page reads it — the same KpiTargetFormatter, KpiMeasurementResolver and
+ * KpiPresenter — so the Wiki never gets raw column values («1000000.0000–1300000.0000») and never
+ * calls an interval a minimum: the målverdi as its rule sentence, the latest current value with its
+ * period, and today's status.
  */
 class ObjectiveKnowledgeSource implements WikiKnowledgeSource
 {
     public const MODEL = Objective::class;
 
-    public function __construct(private readonly ObjectiveAccessService $access) {}
+    public function __construct(
+        private readonly ObjectiveAccessService $access,
+        private readonly KpiMeasurementResolver $resolver,
+        private readonly KpiPresenter $presenter,
+    ) {}
 
     public function sourceType(): string
     {
@@ -60,24 +72,26 @@ class ObjectiveKnowledgeSource implements WikiKnowledgeSource
 
         $about = array_values(array_filter([
             filled($source->description) ? __("{$t}.description").': '.$source->description : null,
-            $source->target_date !== null ? __("{$t}.target_date").': '.$source->target_date->toDateString() : null,
+            $source->target_date !== null ? __("{$t}.target_date").': '.(new KpiPeriodFormatter)->date($source->target_date) : null,
             __("{$t}.status").': '.__("{$t}.statuses.{$source->status}"),
         ]));
 
-        $kpis = $source->kpis()->orderBy('id')->get()
-            ->map(function (Kpi $kpi) use ($t): string {
-                $unit = trim((string) ($kpi->unit_label ?? ''));
-                $target = match (true) {
-                    $kpi->target_min !== null && $kpi->target_max !== null => $kpi->target_min.'–'.$kpi->target_max,
-                    $kpi->target_min !== null => '≥ '.$kpi->target_min,
-                    $kpi->target_max !== null => '≤ '.$kpi->target_max,
-                    default => null,
-                };
-                $latest = $kpi->measurements()->whereNull('withdrawn_at')->reorder()->latest('period_end')->latest('id')->first();
+        $formatter = new KpiTargetFormatter;
+        $periodFormatter = new KpiPeriodFormatter;
+        $kpis = $source->kpis()->with('measurements')->orderBy('id')->get()
+            ->map(function (Kpi $kpi) use ($t, $formatter, $periodFormatter): string {
+                $latest = $this->resolver->latest($kpi->measurements);
+                $result = $this->presenter->currentResult($kpi, $latest);
 
-                return $kpi->title
-                    .($target !== null ? ' — '.__("{$t}.target").': '.$target.($unit !== '' ? ' '.$unit : '') : '')
-                    .($latest instanceof KpiMeasurement ? ' — '.__("{$t}.latest").': '.$latest->value.($unit !== '' ? ' '.$unit : '').' ('.$latest->period_end?->toDateString().')' : '');
+                return implode(' — ', array_filter([
+                    $kpi->title.($kpi->isActive() ? '' : ' ('.__("{$t}.kpi_retired").')'),
+                    $formatter->rule($kpi),
+                    $latest !== null
+                        ? __("{$t}.latest").': '.$formatter->amount($kpi, $latest->value)
+                            .' ('.$periodFormatter->range($latest->period_start, $latest->period_end).')'
+                        : null,
+                    __("{$t}.result").': '.__("procynia.objectives.measurement.results.{$result}"),
+                ]));
             })
             ->all();
 

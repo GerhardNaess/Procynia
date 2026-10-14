@@ -60,14 +60,21 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await expect(page.locator('#kpi-status')).toHaveCount(0);
     await page.locator('#kpi-title').fill(kpiTitle);
     await page.locator('#kpi-description').fill('Andel av måneden kundeportalen er tilgjengelig.');
-    await page.locator('#kpi-unit').selectOption({ label: 'Prosent' });
+    await page.locator('#kpi-unit').selectOption({ label: 'Prosentandel' });
     await expect(page.locator('#kpi-currency-code')).toHaveCount(0);
     await expect(page.locator('#kpi-unit-label')).toHaveCount(0);
+    // «Minst» is the måltype a new KPI starts from, and the rule is stated as it is typed.
+    await expect(page.getByRole('radio', { name: 'Minst' })).toBeChecked();
     await page.locator('#kpi-target-min').fill('99,5');
+    await expect(page.getByTestId('kpi-rule-preview')).toContainText('Målet er nådd når verdien er minst 99,5 %.');
+    // The tolerance is an advanced setting, in percentage points for a share.
+    await expect(page.locator('#kpi-tolerance')).toHaveCount(0);
+    await page.getByRole('button', { name: /Avanserte innstillinger/ }).click();
     await page.locator('#kpi-tolerance').fill('1');
+    await expect(page.getByTestId('kpi-rule-preview')).toContainText('Inntil 1 prosentpoeng under målet gir «Trenger oppmerksomhet».');
     // The unit sits inside each number field, outside the value.
     await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('%');
-    await expect(page.getByTestId('kpi-tolerance-suffix')).toHaveText('%');
+    await expect(page.getByTestId('kpi-tolerance-suffix')).toHaveText('%-poeng');
     await expect(page.locator('#kpi-target-min')).toHaveValue('99,5');
     await page.locator('#kpi-frequency').selectOption({ label: 'Månedlig' });
     await expect(page.locator('#kpi-grace-days')).toHaveValue('7');
@@ -83,12 +90,16 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await expect(page.getByRole('heading', { name: kpiTitle, level: 1 })).toBeVisible();
     const details = page.getByTestId('kpi-details');
     const result = page.getByTestId('kpi-result');
-    await expect(result).toContainText('≥ 99,5 %');
-    await expect(result).toContainText('Månedlig');
+    await expect(page.getByTestId('kpi-target-rule')).toHaveText('Målet er nådd når verdien er minst 99,5 %.');
+    await expect(result).toContainText('Inntil 1 prosentpoeng under målet');
     await expect(result).toContainText('E2E User (målets ansvarlig)');
     await expect(result).toContainText('Ikke målt');
-    await expect(details).toContainText('1 %');
-    await expect(details).toContainText('Prosent');
+    await expect(page.getByTestId('kpi-status-explanation')).toHaveText('Ingen gjeldende måling ennå. KPI-en får status når den første målingen er registrert.');
+    await expect(page.getByTestId('kpi-deadline')).toHaveText('Løpende – målet har ingen måldato');
+    await expect(details).toContainText('≥ 99,5 %');
+    await expect(details).toContainText('Månedlig');
+    await expect(details).toContainText('1 prosentpoeng');
+    await expect(details).toContainText('Prosentandel');
     await expect(details).toContainText('7 dager etter at perioden er slutt');
     await expect(details).toContainText(objectiveTitle);
     // This role has no objective.measure.
@@ -114,17 +125,24 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('%');
     await expect(page.locator('#kpi-target-min')).toHaveValue(/^99[.,]5$/);
     await page.locator('#kpi-unit').selectOption({ label: 'Antall' });
-    await expect(page.getByTestId('kpi-target-max-suffix')).toHaveText('stk.');
+    await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('stk.');
     await page.locator('#kpi-unit-label').fill('hendelser');
+    await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('hendelser');
+    // Høyst: only its own field is shown.
+    await page.getByRole('radio', { name: 'Høyst' }).check();
+    await expect(page.locator('#kpi-target-min')).toHaveCount(0);
     await expect(page.getByTestId('kpi-target-max-suffix')).toHaveText('hendelser');
-    await page.locator('#kpi-target-min').fill('');
     await page.locator('#kpi-target-max').fill('3');
+    // A count is a whole number: 2,5 is refused before anything is sent.
+    await page.locator('#kpi-tolerance').fill('2,5');
+    await page.locator('#kpi-tolerance').blur();
+    await expect(page.locator('#kpi-tolerance-error')).toHaveText('Skriv et helt tall.');
     await page.locator('#kpi-tolerance').fill('');
     await page.locator('#kpi-owner').selectOption({ label: 'E2E User' });
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.getByText('KPI-en er oppdatert.')).toBeVisible();
     await expect(page.getByRole('heading', { name: editedKpiTitle, level: 1 })).toBeVisible();
-    await expect(result).toContainText('≤ 3 hendelser');
+    await expect(page.getByTestId('kpi-target-rule')).toHaveText('Målet er nådd når verdien er høyst 3 hendelser.');
     await expect(details).toContainText('Antall (hendelser)');
     await expect(result).not.toContainText('målets ansvarlig');
 
@@ -199,15 +217,19 @@ test('the number fields show the chosen unit inside them, outside the value', as
     await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
     await page.locator('#kpi-title').fill(kpiTitle);
 
+    // An interval: «Fra» and «Til» side by side.
+    await page.getByRole('radio', { name: 'Innenfor intervall' }).check();
+    await page.getByRole('button', { name: /Avanserte innstillinger/ }).click();
     const min = page.locator('#kpi-target-min');
     const minSuffix = page.getByTestId('kpi-target-min-suffix');
+    const checkedType = page.getByRole('radio', { name: 'Innenfor intervall' });
 
     // No unit chosen: no suffix.
     await expect(minSuffix).toHaveCount(0);
 
     // Each unit, at once.
     const unit = page.locator('#kpi-unit');
-    await unit.selectOption({ label: 'Prosent' });
+    await unit.selectOption({ label: 'Prosentandel' });
     await expect(minSuffix).toHaveText('%');
     await unit.selectOption({ label: 'Timer' });
     await expect(minSuffix).toHaveText('timer');
@@ -228,7 +250,7 @@ test('the number fields show the chosen unit inside them, outside the value', as
     await expect(minSuffix).toHaveText('kr');
 
     // A keyboard user tabs into the field, types, selects and replaces; the unit is never in the value.
-    await page.locator('#kpi-currency-code').focus();
+    await checkedType.focus();
     await page.keyboard.press('Tab');
     await expect(min).toBeFocused();
     await page.keyboard.press('ControlOrMeta+a');
@@ -286,7 +308,7 @@ test('the number fields show the chosen unit inside them, outside the value', as
     await expect(min).toHaveValue(nb('2 500 000'));
 
     // Tab from the field before selects the whole value; typing replaces it.
-    await page.locator('#kpi-currency-code').focus();
+    await checkedType.focus();
     await page.keyboard.press('Tab');
     await expect(min).toBeFocused();
     await expect.poll(() => min.evaluate((input) => [input.value, input.selectionStart, input.selectionEnd])).toEqual(['2500000', 0, 7]);
@@ -344,7 +366,8 @@ test('the number fields show the chosen unit inside them, outside the value', as
     // What was typed is what is saved: the number alone, read back in the KPI's unit.
     await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/objectives\/\d+\/kpis\/\d+$/);
-    await expect(page.getByTestId('kpi-result')).toContainText('NOK 1 300 000–1 500 000,25');
+    await expect(page.getByTestId('kpi-details')).toContainText('NOK 1 300 000–1 500 000,25');
+    await expect(page.getByTestId('kpi-target-rule')).toHaveText('Målet er nådd når verdien er mellom NOK 1 300 000 og NOK 1 500 000,25.');
     const stored = await storedTargets(kpiTitle);
     expect(stored).toEqual({ target_min: '1300000.0000', target_max: '1500000.2500', tolerance: '1500.0000' });
 

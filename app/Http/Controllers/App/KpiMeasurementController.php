@@ -7,9 +7,11 @@ use App\Models\Kpi;
 use App\Models\KpiMeasurement;
 use App\Models\User;
 use App\Services\Objectives\KpiMeasurementService;
+use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Support\CustomerContext;
 use App\Support\Objectives\ObjectiveValidationMessages;
+use Brick\Math\BigDecimal;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -22,7 +24,7 @@ use Illuminate\Validation\ValidationException;
  * asked for under the wrong parent, is a 404.
  *
  * Both take objective.measure in the objective's area; objective.edit neither gives nor needs it.
- * Both need the objective and the KPI active. There is no edit and no delete: a mistake is
+ * Both need the objective and the KPI active, and a value must fit the KPI's unit (KpiUnitRules). There is no edit and no delete: a mistake is
  * corrected by a new measurement for the same period, or withdrawn.
  */
 class KpiMeasurementController extends Controller
@@ -58,6 +60,11 @@ class KpiMeasurementController extends Controller
         ], [
             'value.regex' => __('procynia.objectives.measurement.validation.value_number'),
         ] + ObjectiveValidationMessages::messages(), ObjectiveValidationMessages::attributes());
+
+        // The value must fit the KPI's unit: a whole number of saker, a share between 0 and 100 %.
+        if (($message = KpiUnitRules::message($kpi->unit, BigDecimal::of($validated['value']))) !== null) {
+            throw ValidationException::withMessages(['value' => $message]);
+        }
 
         $period = $this->measurements->periodFor($kpi, $validated['period'] ?? null, $validated['measured_on'] ?? null, now());
         $this->measurements->record($kpi, $user, $period, $validated['value'], $validated['comment'] ?? null);

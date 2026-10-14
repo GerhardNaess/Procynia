@@ -50,7 +50,7 @@ test('a KPI is linked to a process and activities, shown, unlinked and relinked;
     const kpiSection = page.locator('section', { has: page.getByRole('heading', { name: 'KPI-er', exact: true }) });
     await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
     await page.locator('#kpi-title').fill(kpiTitle);
-    await page.locator('#kpi-unit').selectOption({ label: 'Prosent' });
+    await page.locator('#kpi-unit').selectOption({ label: 'Prosentandel' });
     await page.locator('#kpi-target-min').fill('95');
     await page.locator('#kpi-frequency').selectOption({ label: 'Månedlig' });
     await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();

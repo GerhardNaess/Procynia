@@ -887,6 +887,89 @@ class KpiMeasurementTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // The whole flow, and values that must fit the unit
+    // ---------------------------------------------------------------------
+
+    /**
+     * «30 % økning av FCV»: created as a growth KPI by the editor, measured month by month by the
+     * measurer — a backdated month, a correction, a withdrawal — and the page says at every step
+     * what the status is and why. The målverdi never moves because of a measurement.
+     */
+    public function test_a_growth_kpi_from_creation_through_measurements_corrections_and_status(): void
+    {
+        $this->at('2026-10-10');
+        ['objective' => $objective, 'measurer' => $measurer, 'editor' => $editor] = $this->scenario();
+        $objective->forceFill(['target_date' => '2027-09-30'])->save();
+
+        $this->actingAs($editor)->post("/app/objectives/{$objective->id}/kpis", $this->payload([
+            'title' => 'FCV', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'growth',
+            'baseline_value' => '1000000', 'baseline_date' => '2026-07-01', 'change_percent' => '30', 'tolerance' => '100000',
+        ]))->assertSessionHasNoErrors();
+        $kpi = Kpi::query()->where('title', 'FCV')->sole();
+        $this->assertSame('not_measured', $this->kpiProps($kpi, $measurer)['kpi']['result']);
+
+        $this->record($kpi, $measurer, '2026-09', '1250000');
+        $props = $this->kpiProps($kpi, $measurer);
+        $this->assertSame('attention', $props['kpi']['result']);
+        $this->assertSame(
+            'Siste verdi NOK 1 250 000 er under målet ≥ NOK 1 300 000, men innenfor toleransen på NOK 100 000.',
+            str_replace("\u{00A0}", ' ', $props['kpi']['status_explanation']),
+        );
+
+        // A backdated month, registered later, never becomes the latest.
+        $this->record($kpi, $measurer, '2026-08', '1100000');
+        $this->assertSame('attention', $this->kpiProps($kpi, $measurer)['kpi']['result']);
+
+        // Correcting September to a value on target.
+        $this->record($kpi, $measurer, '2026-09', '1350000', 'Revidert regnskap');
+        $props = $this->kpiProps($kpi, $measurer);
+        $this->assertSame('on_target', $props['kpi']['result']);
+        $this->assertSame('Siste verdi NOK 1 350 000 oppfyller målet ≥ NOK 1 300 000.', str_replace("\u{00A0}", ' ', $props['kpi']['status_explanation']));
+        $this->assertSame(['current', 'superseded', 'current'], array_column($props['measurements'], 'state'));
+        // «Korriger» opens Registrer måling on the row's own period; a withdrawn row offers nothing.
+        $this->assertSame(['2026-09', '2026-09', '2026-08'], array_column($props['measurements'], 'correction_choice'));
+
+        // Utvikling over tid: the current value of each period, oldest first, against today's target.
+        $this->assertSame(['1100000', '1350000'], array_column($props['kpi']['trend']['points'], 'value'));
+        $this->assertSame(['off_target', 'on_target'], array_column($props['kpi']['trend']['points'], 'result'));
+        $this->assertSame(['target_min' => '1300000', 'target_max' => null, 'baseline' => '1000000'], array_diff_key($props['kpi']['trend'], ['points' => true]));
+
+        // Withdrawing the correction brings the first September value back.
+        $correction = KpiMeasurement::query()->where('kpi_id', $kpi->id)->where('value', '1350000')->sole();
+        $this->actingAs($measurer)->post($this->withdrawUrl($correction), ['reason' => 'Feil fil'])->assertSessionHasNoErrors();
+        $props = $this->kpiProps($kpi, $measurer);
+        $this->assertSame('attention', $props['kpi']['result']);
+        $this->assertNull(collect($props['measurements'])->firstWhere('state', 'withdrawn')['correction_choice']);
+
+        // Measuring never touched the målverdi or the startverdi.
+        $kpi->refresh();
+        $this->assertSame(['1300000.0000', null, '1000000.0000'], [$kpi->target_min, $kpi->target_max, $kpi->baseline_value]);
+        $this->assertSame('30. september 2027', $props['kpi']['deadline']['date_display']);
+    }
+
+    public function test_a_measured_value_must_fit_the_kpis_unit(): void
+    {
+        $this->at('2026-10-10');
+        ['kpi' => $share, 'measurer' => $user, 'objective' => $objective] = $this->scenario();
+        $count = $this->kpi($objective, ['title' => 'Avvik', 'unit' => Kpi::UNIT_COUNT, 'target_min' => null, 'target_max' => '3']);
+        $change = $this->kpi($objective, ['title' => 'Vekst', 'unit' => Kpi::UNIT_PERCENT_CHANGE, 'target_min' => '10']);
+
+        $this->actingAs($user)->post($this->measureUrl($share), ['period' => '2026-09', 'value' => '101'])
+            ->assertSessionHasErrors(['value' => 'En prosentandel er mellom 0 og 100. Måler KPI-en endring, velg enheten «Prosentvis endring».']);
+        $this->actingAs($user)->post($this->measureUrl($count), ['period' => '2026-09', 'value' => '2,5'])
+            ->assertSessionHasErrors(['value' => 'Skriv et helt tall.']);
+        $this->actingAs($user)->post($this->measureUrl($count), ['period' => '2026-09', 'value' => '-1'])
+            ->assertSessionHasErrors(['value' => 'Verdien kan ikke være negativ for denne enheten.']);
+        $this->assertSame(0, KpiMeasurement::query()->count() - KpiMeasurement::query()->whereNotIn('kpi_id', [$share->id, $count->id])->count());
+
+        $this->record($share, $user, '2026-09', '99,995');
+        $this->record($count, $user, '2026-09', '2');
+        $this->record($change, $user, '2026-09', '-12,5');
+        $this->assertSame('off_target', $this->kpiProps($change, $user)['kpi']['result']);
+        $this->assertSame('on_target', $this->kpiProps($count, $user)['kpi']['result']);
+    }
+
+    // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 

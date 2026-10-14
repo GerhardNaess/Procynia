@@ -19,6 +19,7 @@ export function objectiveHelp(tr, page) {
     return {
         buttonLabel: help.button ?? 'Hjelp',
         title: content.title ?? 'Om Mål og KPI',
+        ...(content.intro_title ? { introTitle: content.intro_title } : {}),
         intro: content.intro,
         sections: Array.isArray(content.sections) ? content.sections : [],
     };

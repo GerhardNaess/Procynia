@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Objectives\KpiGrowth;
 use App\Services\Objectives\KpiTarget;
 use DomainException;
 use Illuminate\Database\Eloquent\Model;
@@ -24,7 +25,10 @@ use InvalidArgumentException;
  * (Avslutt / Gjenåpne), which writes each change to statusChanges().
  *
  * Once a measurement exists the KPI cannot be deleted (it is retired instead) and its unit,
- * unit label and currency code are fixed (UNIT_DEFINITION).
+ * unit label and currency code are fixed (UNIT_DEFINITION) — except between the two percent units.
+ *
+ * A KPI may carry a startverdi (baseline_value on baseline_date): its målverdi was then set as change
+ * from that level (KpiGrowth), and the computed målverdi is its one bound.
  *
  * The rules a KPI must keep — a target with at least one bound, min <= max, tolerance >= 0, a
  * currency code exactly for currency, a unit label only for counts and numbers, grace days >= 0 and
@@ -39,7 +43,11 @@ class Kpi extends Model
 
     public const STATUSES = [self::STATUS_ACTIVE, self::STATUS_RETIRED];
 
+    /** A share, 0–100 % (KpiUnitRules). */
     public const UNIT_PERCENT = 'percent';
+
+    /** Change in per cent: may be negative or above 100. */
+    public const UNIT_PERCENT_CHANGE = 'percent_change';
 
     public const UNIT_COUNT = 'count';
 
@@ -53,12 +61,20 @@ class Kpi extends Model
 
     public const UNITS = [
         self::UNIT_PERCENT,
+        self::UNIT_PERCENT_CHANGE,
         self::UNIT_COUNT,
         self::UNIT_NUMBER,
         self::UNIT_CURRENCY,
         self::UNIT_HOURS,
         self::UNIT_DAYS,
     ];
+
+    /**
+     * Both written in per cent. A KPI with measurements may still move between them: the numbers
+     * keep their meaning, and a share registered before the distinction existed can be corrected
+     * to change (or back) without losing its history.
+     */
+    public const PERCENT_UNITS = [self::UNIT_PERCENT, self::UNIT_PERCENT_CHANGE];
 
     /** The units that take a free unit label («saker», «hendelser»). */
     public const LABELLED_UNITS = [self::UNIT_COUNT, self::UNIT_NUMBER];
@@ -108,6 +124,8 @@ class Kpi extends Model
         'target_min',
         'target_max',
         'tolerance',
+        'baseline_value',
+        'baseline_date',
         'frequency',
         'reporting_grace_days',
         'created_by',
@@ -121,6 +139,8 @@ class Kpi extends Model
             'target_min' => 'decimal:4',
             'target_max' => 'decimal:4',
             'tolerance' => 'decimal:4',
+            'baseline_value' => 'decimal:4',
+            'baseline_date' => 'date:Y-m-d',
             'reporting_grace_days' => 'integer',
         ];
     }
@@ -159,6 +179,34 @@ class Kpi extends Model
     public function target(): KpiTarget
     {
         return KpiTarget::of($this->target_min, $this->target_max, $this->tolerance);
+    }
+
+    /** Whether the målverdi was set as change from a startverdi (KpiGrowth). */
+    public function hasBaseline(): bool
+    {
+        return $this->baseline_value !== null;
+    }
+
+    /**
+     * Whether the unit definition would change. Moving between the two percent units is not a
+     * change of what the numbers mean (PERCENT_UNITS).
+     */
+    public function unitDefinitionChanges(array $attributes): bool
+    {
+        foreach (self::UNIT_DEFINITION as $field) {
+            $old = $this->getOriginal($field);
+            $new = $attributes[$field] ?? null;
+
+            if ($field === 'unit' && in_array($old, self::PERCENT_UNITS, true) && in_array($new, self::PERCENT_UNITS, true)) {
+                continue;
+            }
+
+            if ($old !== $new) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -233,7 +281,28 @@ class Kpi extends Model
             throw new DomainException($exception->getMessage(), 0, $exception);
         }
 
-        if ($this->exists && $this->isDirty(self::UNIT_DEFINITION) && $this->hasMeasurementHistory()) {
+        if (($this->baseline_value === null) !== ($this->baseline_date === null)) {
+            throw new DomainException('A startverdi needs its date, and a date its startverdi.');
+        }
+
+        if ($this->hasBaseline()) {
+            if (! in_array($this->unit, KpiGrowth::UNITS, true)) {
+                throw new DomainException("A KPI in [{$this->unit}] takes no startverdi.");
+            }
+
+            if (! KpiTarget::decimal($this->baseline_value)->isPositive()) {
+                throw new DomainException('A startverdi must be above zero.');
+            }
+
+            if ($this->target()->type() === KpiTarget::TYPE_RANGE || $this->target()->type() === KpiTarget::TYPE_EXACT) {
+                throw new DomainException('A målverdi set from a startverdi has exactly one bound.');
+            }
+        }
+
+        if ($this->exists
+            && $this->isDirty(self::UNIT_DEFINITION)
+            && $this->unitDefinitionChanges($this->only(self::UNIT_DEFINITION))
+            && $this->hasMeasurementHistory()) {
             throw new DomainException('The unit of a KPI with measurements cannot change.');
         }
 

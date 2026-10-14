@@ -3,7 +3,9 @@
 namespace App\Support\Objectives;
 
 use App\Models\Kpi;
+use App\Services\Objectives\KpiGrowth;
 use App\Services\Objectives\KpiTarget;
+use App\Services\Objectives\KpiTargetPolicy;
 use Brick\Math\BigDecimal;
 
 /**
@@ -54,6 +56,141 @@ final class KpiTargetFormatter
         return $this->withUnit($kpi, $this->number($value), $value);
     }
 
+    /**
+     * The tolerance as an amount in the KPI's unit — for the percent units in percentage points, so
+     * «2» is never read as two per cent of the målverdi: «2 prosentpoeng», «2 timer», «NOK 500».
+     */
+    public function tolerance(Kpi $kpi, BigDecimal|string $value): string
+    {
+        if (in_array($kpi->unit, Kpi::PERCENT_UNITS, true)) {
+            $value = KpiTarget::decimal($value);
+
+            return $this->number($value).self::NBSP.__(
+                'procynia.objectives.kpi.percentage_points.'.($value->isEqualTo(1) ? 'one' : 'other'),
+                [],
+                $this->locale(),
+            );
+        }
+
+        return $this->amount($kpi, $value);
+    }
+
+    /**
+     * What counts as reaching the målverdi, as one sentence: «Målet er nådd når verdien er minst
+     * NOK 1 300 000.» Followed, for a målverdi set from a startverdi, by where it comes from.
+     */
+    public function rule(Kpi $kpi, ?KpiTarget $target = null): string
+    {
+        $target ??= $kpi->target();
+        $key = 'procynia.objectives.kpi.rule.'.$target->type();
+        $sentence = (string) match ($target->type()) {
+            KpiTarget::TYPE_AT_LEAST => __($key, ['value' => $this->amount($kpi, $target->min)], $this->locale()),
+            KpiTarget::TYPE_AT_MOST => __($key, ['value' => $this->amount($kpi, $target->max)], $this->locale()),
+            KpiTarget::TYPE_EXACT => __($key, ['value' => $this->amount($kpi, $target->min)], $this->locale()),
+            default => __($key, ['min' => $this->amount($kpi, $target->min), 'max' => $this->amount($kpi, $target->max)], $this->locale()),
+        };
+
+        $growth = $this->growth($kpi);
+
+        return $growth !== null ? $sentence.' '.$growth : $sentence;
+    }
+
+    /**
+     * Where a målverdi set from a startverdi comes from: «Det er en økning på 30 % fra startverdien
+     * NOK 1 000 000 (1. oktober 2026).» Null for any other KPI. The change is derived, never stored.
+     */
+    public function growth(Kpi $kpi): ?string
+    {
+        if (! $kpi->hasBaseline()) {
+            return null;
+        }
+
+        $baseline = KpiTarget::decimal($kpi->baseline_value);
+        $change = KpiGrowth::changePercent($baseline, KpiTarget::decimal($kpi->target_min ?? $kpi->target_max));
+
+        return (string) __('procynia.objectives.kpi.growth_sentence.'.($change->isNegative() ? 'decrease' : 'increase'), [
+            'change' => $this->change($change),
+            'baseline' => $this->amount($kpi, $baseline),
+            'date' => (new KpiPeriodFormatter(locale: $this->locale()))->date($kpi->baseline_date),
+        ], $this->locale());
+    }
+
+    /** The change from the startverdi as a label: «Økning på 30 %», «Reduksjon på 20 %». */
+    public function changeLabel(Kpi $kpi): ?string
+    {
+        if (! $kpi->hasBaseline()) {
+            return null;
+        }
+
+        $change = KpiGrowth::changePercent(KpiTarget::decimal($kpi->baseline_value), KpiTarget::decimal($kpi->target_min ?? $kpi->target_max));
+
+        return (string) __('procynia.objectives.kpi.change_label.'.($change->isNegative() ? 'decrease' : 'increase'), [
+            'change' => $this->change($change),
+        ], $this->locale());
+    }
+
+    /** A change in per cent without its sign — the sentence says which way: «30 %», «12,5 %». */
+    public function change(BigDecimal $percent): string
+    {
+        return $this->number($percent->abs()).($this->isEnglish() ? '%' : self::NBSP.'%');
+    }
+
+    /**
+     * What the tolerance means for this KPI, or null without one: «Inntil 2 dager over målet gir
+     * «Trenger oppmerksomhet».» Always outwards — the tolerance never turns the direction around.
+     */
+    public function toleranceRule(Kpi $kpi, ?KpiTarget $target = null): ?string
+    {
+        $target ??= $kpi->target();
+
+        if (! $target->hasTolerance()) {
+            return null;
+        }
+
+        $side = match ($target->type()) {
+            KpiTarget::TYPE_AT_LEAST => 'below',
+            KpiTarget::TYPE_AT_MOST => 'above',
+            default => 'outside',
+        };
+
+        return (string) __("procynia.objectives.kpi.tolerance_rule.{$side}", [
+            'tolerance' => $this->tolerance($kpi, $target->tolerance),
+        ], $this->locale());
+    }
+
+    /**
+     * Why the KPI has the status it has, in one sentence: the latest value, which side of the
+     * målverdi it is on, and whether the tolerance kept it at «Trenger oppmerksomhet». $value is null
+     * when there is no current measurement.
+     */
+    public function explanation(Kpi $kpi, ?string $value, string $result, ?KpiTarget $target = null): string
+    {
+        $target ??= $kpi->target();
+        $t = 'procynia.objectives.kpi.explanation';
+
+        if ($value === null) {
+            return (string) __("{$t}.not_measured", [], $this->locale());
+        }
+
+        $decimal = KpiTarget::decimal($value);
+        $replace = [
+            'value' => $this->amount($kpi, $decimal),
+            'target' => $this->target($kpi, $target),
+            'tolerance' => $target->hasTolerance() ? $this->tolerance($kpi, $target->tolerance) : '',
+        ];
+
+        if ($result === KpiTargetPolicy::ON_TARGET) {
+            return (string) __("{$t}.on_target", $replace, $this->locale());
+        }
+
+        $side = $target->min !== null && $decimal->isLessThan($target->min) ? 'below' : 'above';
+        $key = $result === KpiTargetPolicy::ATTENTION
+            ? "attention_{$side}"
+            : ($target->hasTolerance() ? "off_target_{$side}_tolerance" : "off_target_{$side}");
+
+        return (string) __("{$t}.{$key}", $replace, $this->locale());
+    }
+
     /** The unit as a column reads it: «Prosent», «Antall (hendelser)», «Valuta (NOK)». */
     public function unit(Kpi $kpi): string
     {
@@ -93,7 +230,7 @@ final class KpiTargetFormatter
         $locale = $this->locale();
 
         return match ($kpi->unit) {
-            Kpi::UNIT_PERCENT => $number.($this->isEnglish() ? '%' : self::NBSP.'%'),
+            Kpi::UNIT_PERCENT, Kpi::UNIT_PERCENT_CHANGE => $number.($this->isEnglish() ? '%' : self::NBSP.'%'),
             Kpi::UNIT_CURRENCY => $kpi->currency_code.self::NBSP.$number,
             Kpi::UNIT_HOURS, Kpi::UNIT_DAYS => $number.self::NBSP.__(
                 "procynia.objectives.kpi.unit_suffix.{$kpi->unit}.".($one ? 'one' : 'other'),

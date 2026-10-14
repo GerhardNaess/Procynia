@@ -4,7 +4,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
-import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { SECONDARY_ACTION } from '../../../Support/actionStyles';
 import { ObjectiveAttentionNote } from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
 import { objectiveHelp } from './objectiveHelp';
@@ -111,11 +111,6 @@ export default function ObjectiveShow() {
                                 {tr.reopen ?? 'Gjenåpne'}
                             </button>
                         )}
-                        {permissions.can_delete && (
-                            <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>
-                                {tr.delete ?? 'Slett mål'}
-                            </button>
-                        )}
                     </div>
                 </header>
 
@@ -191,6 +186,16 @@ export default function ObjectiveShow() {
                                         </li>
                                     ))}
                                 </ul>
+                            </div>
+                        )}
+
+                        {/* Deleting is for an objective registered by mistake: kept small and out of the way. */}
+                        {permissions.can_delete && (
+                            <div className="mt-6 border-t border-slate-100 pt-4">
+                                <button type="button" onClick={destroy} className="text-base font-semibold text-rose-700 underline-offset-2 hover:underline">
+                                    {tr.delete ?? 'Slett mål'}
+                                </button>
+                                <p className="text-base text-slate-500">{tr.delete_hint ?? 'Bare for mål som er registrert ved en feil. Et ferdig mål lukkes i stedet.'}</p>
                             </div>
                         )}
                     </section>

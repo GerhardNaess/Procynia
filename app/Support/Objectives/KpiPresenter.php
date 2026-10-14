@@ -6,12 +6,14 @@ use App\Models\Kpi;
 use App\Models\KpiMeasurement;
 use App\Models\Objective;
 use App\Models\User;
+use App\Services\Objectives\KpiGrowth;
 use App\Services\Objectives\KpiMeasurementResolver;
 use App\Services\Objectives\KpiMeasurementSchedule;
 use App\Services\Objectives\KpiPeriod;
 use App\Services\Objectives\KpiPeriods;
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiTargetPolicy;
+use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -33,6 +35,9 @@ final class KpiPresenter
 {
     /** No current measurement: «Ikke målt». Not a KpiTargetPolicy result — there is nothing to judge. */
     public const NOT_MEASURED = 'not_measured';
+
+    /** How many periods «Utvikling over tid» draws, the latest ones. */
+    private const TREND_PERIODS = 24;
 
     /** How far back Registrer måling offers periods, beyond the one it suggests. */
     private const PERIOD_OPTIONS = [
@@ -68,6 +73,8 @@ final class KpiPresenter
             'unit' => $kpi->unit,
             'unit_display' => $formatter->unit($kpi),
             'target_display' => $formatter->target($kpi),
+            'target_type' => $kpi->target()->type(),
+            'target_rule' => $formatter->rule($kpi),
             'frequency' => $kpi->frequency,
             'responsible_name' => $responsible?->name,
             'responsible_is_fallback' => $kpi->owner_user_id === null && $responsible !== null,
@@ -129,13 +136,34 @@ final class KpiPresenter
             'owner_user_id' => $kpi->owner_user_id !== null ? (int) $kpi->owner_user_id : null,
             'unit_label' => $kpi->unit_label,
             'currency_code' => $kpi->currency_code,
+            // How the målverdi was set, for the form: one of KpiTarget::TYPES, or growth.
+            'form_target_type' => $kpi->hasBaseline() ? 'growth' : $kpi->target()->type(),
             // Plain decimals for the form, without the trailing zeros of the column.
             'target_min' => $this->plain($kpi->target_min),
             'target_max' => $this->plain($kpi->target_max),
             'tolerance' => $this->plain($kpi->tolerance),
             'tolerance_display' => $kpi->target()->hasTolerance()
-                ? $formatter->amount($kpi, $kpi->tolerance)
+                ? $formatter->tolerance($kpi, $kpi->tolerance)
                 : null,
+            'tolerance_rule' => $formatter->toleranceRule($kpi),
+            'baseline_value' => $this->plain($kpi->baseline_value),
+            'baseline_date' => $kpi->baseline_date?->format('Y-m-d'),
+            // Derived from the startverdi and the målverdi; never stored (KpiGrowth).
+            'change_percent' => $kpi->hasBaseline()
+                ? (string) KpiGrowth::changePercent(KpiTarget::decimal($kpi->baseline_value), KpiTarget::decimal($kpi->target_min ?? $kpi->target_max))
+                : null,
+            'baseline_display' => $kpi->hasBaseline()
+                ? $formatter->amount($kpi, $kpi->baseline_value).' ('.$periodFormatter->date($kpi->baseline_date).')'
+                : null,
+            'change_display' => $kpi->hasBaseline() ? $formatter->changeLabel($kpi) : null,
+            'status_explanation' => $formatter->explanation($kpi, $latest?->value, $this->currentResult($kpi, $latest)),
+            // Stored numbers that do not fit the unit: shown for manual correction, never guessed at.
+            'definition_problems' => array_map(
+                fn (string $field): string => (string) __("procynia.objectives.validation.attributes.{$field}"),
+                KpiUnitRules::definitionProblems($kpi),
+            ),
+            'deadline' => $this->deadline($kpi->objective, $today),
+            'trend' => $this->trend($kpi, $measurements),
             'reporting_grace_days' => (int) $kpi->reporting_grace_days,
             'deadline_display' => $kpi->frequency !== null
                 ? trans_choice('procynia.objectives.kpi.deadline_value', (int) $kpi->reporting_grace_days, ['count' => (int) $kpi->reporting_grace_days])
@@ -187,6 +215,8 @@ final class KpiPresenter
             ->map(fn (KpiMeasurement $measurement): array => [
                 'id' => (int) $measurement->id,
                 'period_label' => $periodFormatter->range($measurement->period_start, $measurement->period_end),
+                // What Registrer måling selects to correct this row: a period key, or the day.
+                'correction_choice' => $this->correctionChoice($kpi, $measurement),
                 'value_display' => $formatter->amount($kpi, $measurement->value),
                 'state' => $states[(int) $measurement->id],
                 // Against the target that applied when it was registered — not today's.
@@ -202,6 +232,80 @@ final class KpiPresenter
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * When the KPI should reach its målverdi: the objective's måldato, which every KPI under it
+     * follows. Null for a running objective. Reaching the målverdi and the date are separate things —
+     * the date never changes the status, and a KPI on target before it is simply on target.
+     *
+     * @return array{date: string, date_display: string, passed: bool}|null
+     */
+    private function deadline(?Objective $objective, CarbonInterface $today): ?array
+    {
+        if ($objective?->target_date === null) {
+            return null;
+        }
+
+        return [
+            'date' => $objective->target_date->format('Y-m-d'),
+            'date_display' => (new KpiPeriodFormatter)->date($objective->target_date),
+            'passed' => $objective->target_date->lt($today->copy()->startOfDay()),
+        ];
+    }
+
+    /**
+     * «Utvikling over tid»: the current value of each measured period, oldest first, with today's
+     * målverdi to draw it against. Superseded and withdrawn rows are left out — they do not count.
+     *
+     * @param  Collection<int, KpiMeasurement>  $measurements
+     * @return array{points: list<array<string, mixed>>, target_min: ?string, target_max: ?string, baseline: ?string}
+     */
+    private function trend(Kpi $kpi, Collection $measurements): array
+    {
+        $formatter = new KpiTargetFormatter;
+        $periodFormatter = new KpiPeriodFormatter;
+
+        $points = collect($this->resolver->currentByPeriod($measurements))
+            ->sortBy([
+                fn (KpiMeasurement $a, KpiMeasurement $b): int => $a->period_end <=> $b->period_end,
+                fn (KpiMeasurement $a, KpiMeasurement $b): int => $a->period_start <=> $b->period_start,
+            ])
+            ->take(-self::TREND_PERIODS)
+            ->map(fn (KpiMeasurement $measurement): array => [
+                'id' => (int) $measurement->id,
+                'label' => $periodFormatter->range($measurement->period_start, $measurement->period_end),
+                'value' => $this->plain($measurement->value),
+                'value_display' => $formatter->amount($kpi, $measurement->value),
+                'result' => $this->policy->evaluate($kpi->target(), $measurement->value),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'points' => $points,
+            'target_min' => $this->plain($kpi->target_min),
+            'target_max' => $this->plain($kpi->target_max),
+            'baseline' => $this->plain($kpi->baseline_value),
+        ];
+    }
+
+    /** The choice in Registrer måling that corrects this measurement, or null when none offers it. */
+    private function correctionChoice(Kpi $kpi, KpiMeasurement $measurement): ?string
+    {
+        if ($measurement->isWithdrawn()) {
+            return null;
+        }
+
+        if ($kpi->frequency === null) {
+            return $measurement->period_start->equalTo($measurement->period_end)
+                ? $measurement->period_start->format('Y-m-d')
+                : null;
+        }
+
+        $period = $this->periods->fromRange($measurement->period_start, $measurement->period_end);
+
+        return $period !== null && $period->frequency === $kpi->frequency ? $period->key : null;
     }
 
     /**
@@ -235,6 +339,7 @@ final class KpiPresenter
                 'mode' => 'date',
                 'today' => $today->format('Y-m-d'),
                 'existing_by_date' => $existing,
+                'unit_rules' => KpiUnitRules::forClient(),
             ];
         }
 
@@ -256,6 +361,7 @@ final class KpiPresenter
             'mode' => 'period',
             'period_options' => $options,
             'suggested_key' => $suggested?->key ?? $options[0]['key'],
+            'unit_rules' => KpiUnitRules::forClient(),
         ];
     }
 
@@ -291,6 +397,11 @@ final class KpiPresenter
         return [
             'units' => Kpi::UNITS,
             'labelled_units' => Kpi::LABELLED_UNITS,
+            'percent_units' => Kpi::PERCENT_UNITS,
+            'growth_units' => KpiGrowth::UNITS,
+            'unit_rules' => KpiUnitRules::forClient(),
+            'today' => now()->format('Y-m-d'),
+            'deadline' => $this->deadline($objective, now()),
             'frequencies' => Kpi::FREQUENCIES,
             'default_currency_code' => Kpi::DEFAULT_CURRENCY_CODE,
             'default_grace_days' => Kpi::DEFAULT_REPORTING_GRACE_DAYS,

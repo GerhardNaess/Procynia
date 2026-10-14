@@ -2,6 +2,7 @@ import { useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
 import { existingValueFor } from './kpiStatus';
+import { unitProblem, unitProblemMessage } from './kpiTarget';
 import { kpiUnitSuffix } from './kpiUnitSuffix';
 import UnitInput from './UnitInput';
 import { useKpiNumberFields } from './useKpiNumberFields';
@@ -19,25 +20,30 @@ const LABEL = 'block text-base font-semibold text-slate-700';
  * notation; only the plain number is sent, and a value that does not read stops the form.
  *
  * When the chosen period already has a value, the form says this is a correction and the comment
- * becomes required. The server checks the same again.
+ * becomes required. «Korriger» in the history opens the form on that row's period (initialChoice).
+ * The value must fit the KPI's unit — a whole number of saker, a share up to 100 % — as the server
+ * checks again (KpiUnitRules).
  */
-export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr }) {
+export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr, initialChoice = null }) {
     const form = useForm({
-        period: options.mode === 'period' ? (options.suggested_key ?? '') : '',
-        measured_on: options.mode === 'date' ? (options.today ?? '') : '',
+        period: options.mode === 'period' ? (initialChoice ?? options.suggested_key ?? '') : '',
+        measured_on: options.mode === 'date' ? (initialChoice ?? options.today ?? '') : '',
         value: '',
         comment: '',
     });
 
     const { locale = 'no' } = usePage().props;
-    const numbers = useKpiNumberFields(form, tr, locale);
+    const rules = options.unit_rules ?? {};
+    const numbers = useKpiNumberFields(form, tr, locale, {
+        ruleProblem: (field, value) => unitProblemMessage(unitProblem(value, kpi.unit, rules), kpi.unit, rules, tr),
+    });
     const existing = existingValueFor(options, form.data);
     const correction = existing !== null;
 
     const submit = (event) => {
         event.preventDefault();
 
-        if (! numbers.checkBeforeSubmit()) {
+        if (! numbers.checkBeforeSubmit(['value'])) {
             return;
         }
 
@@ -48,7 +54,9 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr }) {
 
     return (
         <section className={CARD} aria-labelledby="kpi-measure-heading">
-            <h2 id="kpi-measure-heading" className="text-lg font-semibold text-slate-950">{tr.register_heading ?? 'Registrer måling'}</h2>
+            <h2 id="kpi-measure-heading" className="text-lg font-semibold text-slate-950">
+                {initialChoice ? (tr.correct ?? 'Korriger') : (tr.register_heading ?? 'Registrer måling')}
+            </h2>
             <p className="mt-1 text-base text-slate-600">
                 {tr.register_intro ?? 'Målverdien som gjelder nå, lagres sammen med verdien, slik at historikken viser hva målverdien var.'}
             </p>

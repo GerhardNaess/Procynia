@@ -9,9 +9,13 @@ use InvalidArgumentException;
 /**
  * A KPI's målverdi: a lower bound, an upper bound or both, and one optional tolerance.
  *
- *  - only min:  value >= min is on target («Oppetid ≥ 99,5 %»)
- *  - only max:  value <= max is on target («Alvorlige avvik ≤ 3»)
- *  - both:      min <= value <= max is on target («Svartid 2–5 timer»)
+ *  - only min:  value >= min is on target («Oppetid ≥ 99,5 %»)          — type «at_least»
+ *  - only max:  value <= max is on target («Alvorlige avvik ≤ 3»)        — type «at_most»
+ *  - both:      min <= value <= max is on target («Svartid 2–5 timer»)  — type «range»
+ *  - min = max: the value must hit it («Måltall = 100»)                 — type «exact»
+ *
+ * The type is never stored: it follows from the bounds, one way only, so an existing KPI with both
+ * bounds is an interval and keeps being one. A form chooses the type and fills the bounds it needs.
  *
  * Exact decimals throughout (BigDecimal, the same library behind Laravel's decimal cast), never
  * floats: 99.5 - 1.0 must be exactly 98.5, or a value on the tolerance edge lands on the wrong side.
@@ -26,6 +30,16 @@ final class KpiTarget
     public const ERROR_MIN_ABOVE_MAX = 'min_above_max';
 
     public const ERROR_NEGATIVE_TOLERANCE = 'negative_tolerance';
+
+    public const TYPE_AT_LEAST = 'at_least';
+
+    public const TYPE_AT_MOST = 'at_most';
+
+    public const TYPE_RANGE = 'range';
+
+    public const TYPE_EXACT = 'exact';
+
+    public const TYPES = [self::TYPE_AT_LEAST, self::TYPE_AT_MOST, self::TYPE_RANGE, self::TYPE_EXACT];
 
     private function __construct(
         public readonly ?BigDecimal $min,
@@ -72,6 +86,17 @@ final class KpiTarget
     public function isInterval(): bool
     {
         return $this->min !== null && $this->max !== null;
+    }
+
+    /** What counts as reaching the target, from the bounds alone. */
+    public function type(): string
+    {
+        return match (true) {
+            $this->isInterval() && $this->min->isEqualTo($this->max) => self::TYPE_EXACT,
+            $this->isInterval() => self::TYPE_RANGE,
+            $this->hasMin() => self::TYPE_AT_LEAST,
+            default => self::TYPE_AT_MOST,
+        };
     }
 
     /** Zero and no tolerance mean the same: a value is either on target or off it. */

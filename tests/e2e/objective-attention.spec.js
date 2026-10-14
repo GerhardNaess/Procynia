@@ -44,7 +44,7 @@ async function createKpi(page, title, targetMin) {
     const kpiSection = page.locator('section', { has: page.getByRole('heading', { name: 'KPI-er', exact: true }) });
     await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
     await page.locator('#kpi-title').fill(title);
-    await page.locator('#kpi-unit').selectOption({ label: 'Prosent' });
+    await page.locator('#kpi-unit').selectOption({ label: 'Prosentandel' });
     await page.locator('#kpi-target-min').fill(targetMin);
     await page.locator('#kpi-frequency').selectOption({ label: 'Månedlig' });
     await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();

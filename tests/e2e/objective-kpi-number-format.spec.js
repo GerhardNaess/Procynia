@@ -63,6 +63,9 @@ test('an English user writes, edits and measures KPI numbers the English way', a
     await page.locator('#kpi-unit').selectOption({ label: 'Currency' });
     await expect(page.locator('#kpi-currency-code')).toHaveValue('NOK');
 
+    // Both bounds: a range. The tolerance is under the advanced settings.
+    await page.getByRole('radio', { name: 'Within a range' }).check();
+    await page.getByRole('button', { name: /Advanced settings/ }).click();
     const min = page.locator('#kpi-target-min');
     const max = page.locator('#kpi-target-max');
     const tolerance = page.locator('#kpi-tolerance');

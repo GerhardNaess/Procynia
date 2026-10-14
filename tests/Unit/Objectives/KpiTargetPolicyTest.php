@@ -65,6 +65,70 @@ class KpiTargetPolicyTest extends TestCase
         ];
     }
 
+    /**
+     * The four måltyper as a person sets them, with the result the brief requires.
+     *
+     * @return array<string, array{string|null, string|null, string, string, string}>
+     */
+    public static function targetTypes(): array
+    {
+        return [
+            'minst 100, 120' => ['100', null, KpiTarget::TYPE_AT_LEAST, '120', KpiTargetPolicy::ON_TARGET],
+            'minst 100, 80' => ['100', null, KpiTarget::TYPE_AT_LEAST, '80', KpiTargetPolicy::OFF_TARGET],
+            'høyst 5, 3' => [null, '5', KpiTarget::TYPE_AT_MOST, '3', KpiTargetPolicy::ON_TARGET],
+            'høyst 5, 8' => [null, '5', KpiTarget::TYPE_AT_MOST, '8', KpiTargetPolicy::OFF_TARGET],
+            'intervall 18–22, 20' => ['18', '22', KpiTarget::TYPE_RANGE, '20', KpiTargetPolicy::ON_TARGET],
+            'intervall 18–22, 25' => ['18', '22', KpiTarget::TYPE_RANGE, '25', KpiTargetPolicy::OFF_TARGET],
+            'nøyaktig 100, 100' => ['100', '100', KpiTarget::TYPE_EXACT, '100', KpiTargetPolicy::ON_TARGET],
+            'nøyaktig 100, 110' => ['100', '100', KpiTarget::TYPE_EXACT, '110', KpiTargetPolicy::OFF_TARGET],
+            'nøyaktig 100, 99.9999' => ['100', '100', KpiTarget::TYPE_EXACT, '99.9999', KpiTargetPolicy::OFF_TARGET],
+            // An interval of 1 000 000–1 300 000 is an interval: 1 400 000 is above it, not «more growth».
+            'intervall 1 000 000–1 300 000, 1 400 000' => ['1000000', '1300000', KpiTarget::TYPE_RANGE, '1400000', KpiTargetPolicy::OFF_TARGET],
+            'intervall 1 000 000–1 300 000, 1 000 000' => ['1000000', '1300000', KpiTarget::TYPE_RANGE, '1000000', KpiTargetPolicy::ON_TARGET],
+            'negativ intervall -10–-2, -5' => ['-10', '-2', KpiTarget::TYPE_RANGE, '-5', KpiTargetPolicy::ON_TARGET],
+            'negativ minst -2, -3' => ['-2', null, KpiTarget::TYPE_AT_LEAST, '-3', KpiTargetPolicy::OFF_TARGET],
+        ];
+    }
+
+    #[DataProvider('targetTypes')]
+    public function test_each_target_type_is_derived_from_the_bounds_and_judged_as_the_brief_says(?string $min, ?string $max, string $type, string $value, string $expected): void
+    {
+        $target = KpiTarget::of($min, $max);
+
+        $this->assertSame($type, $target->type());
+        $this->assertSame($expected, (new KpiTargetPolicy)->evaluate($target, $value));
+    }
+
+    public function test_an_exact_target_with_tolerance_gives_attention_on_both_sides(): void
+    {
+        $target = KpiTarget::of('100', '100', '5');
+        $policy = new KpiTargetPolicy;
+
+        $this->assertSame(KpiTargetPolicy::ON_TARGET, $policy->evaluate($target, '100'));
+        $this->assertSame(KpiTargetPolicy::ATTENTION, $policy->evaluate($target, '95'));
+        $this->assertSame(KpiTargetPolicy::ATTENTION, $policy->evaluate($target, '105'));
+        $this->assertSame(KpiTargetPolicy::OFF_TARGET, $policy->evaluate($target, '105.0001'));
+    }
+
+    /** However large, a tolerance only widens outwards: a better value is never made worse by it. */
+    public function test_a_tolerance_never_turns_the_direction_around(): void
+    {
+        $policy = new KpiTargetPolicy;
+
+        foreach (['0', '1', '1000', '1000000000'] as $tolerance) {
+            foreach (['100', '100.0001', '5000', '999999999'] as $better) {
+                $this->assertSame(KpiTargetPolicy::ON_TARGET, $policy->evaluate(KpiTarget::of('100', null, $tolerance), $better));
+            }
+
+            foreach (['5', '4.9999', '0', '-999999'] as $better) {
+                $this->assertSame(KpiTargetPolicy::ON_TARGET, $policy->evaluate(KpiTarget::of(null, '5', $tolerance), $better));
+            }
+
+            $this->assertNotSame(KpiTargetPolicy::ON_TARGET, $policy->evaluate(KpiTarget::of('100', null, $tolerance), '99.9999'));
+            $this->assertNotSame(KpiTargetPolicy::ON_TARGET, $policy->evaluate(KpiTarget::of(null, '5', $tolerance), '5.0001'));
+        }
+    }
+
     #[DataProvider('evaluations')]
     public function test_a_value_is_placed_against_the_target(?string $min, ?string $max, ?string $tolerance, string $value, string $expected): void
     {

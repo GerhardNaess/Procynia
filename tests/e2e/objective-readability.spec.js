@@ -66,17 +66,19 @@ test('every page and panel in Mål og KPI is readable at 16 px and has help', as
     const kpiSection = page.locator('section', { has: page.getByRole('heading', { name: 'KPI-er', exact: true }) });
     await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
     await page.locator('#kpi-title').fill(kpiTitle);
-    await page.locator('#kpi-unit').selectOption({ label: 'Prosent' });
+    await page.locator('#kpi-unit').selectOption({ label: 'Prosentandel' });
     await page.locator('#kpi-target-min').fill('98');
-    await page.locator('#kpi-tolerance').fill('1');
     await page.locator('#kpi-frequency').selectOption({ label: 'Månedlig' });
+    await page.getByRole('button', { name: /Avanserte innstillinger/ }).click();
+    await page.locator('#kpi-tolerance').fill('1');
     await page.locator('#kpi-grace-days').fill('5');
     await expectReadable(page, '02-new-kpi');
     await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/objectives\/\d+\/kpis\/\d+$/);
     const kpiUrl = page.url();
 
-    await expect(page.getByTestId('kpi-result')).toContainText('Målefrekvens');
+    await expect(page.getByTestId('kpi-details')).toContainText('Målefrekvens');
+    await expect(page.getByTestId('kpi-result')).toContainText('Når er målet nådd?');
     await expect(page.getByTestId('kpi-result')).toContainText('Dagens status');
 
     // Prosess og aktivitet, when Kvalitet has a process to link to.
@@ -139,7 +141,7 @@ test('every page and panel in Mål og KPI is readable at 16 px and has help', as
     await page.goto(kpiUrl);
     await expect(page.getByTestId('kpi-measurement-missing')).toBeVisible();
     await expectReadable(page, '08-kpi');
-    await expectPageHelp(page, 'Om KPI-en', ['KPI-en', 'Målinger', 'Dagens status og Status da', 'Prosess og aktivitet']);
+    await expectPageHelp(page, 'Om KPI-en', ['Slik gjør du det', 'Måltyper', 'Status, toleranse og frist', 'Enheter og målinger', 'Prosess og aktivitet']);
 
     // The objective: its note, the KPI table, Lukk mål, the history and Gjenåpne.
     await page.goto(objectiveUrl);

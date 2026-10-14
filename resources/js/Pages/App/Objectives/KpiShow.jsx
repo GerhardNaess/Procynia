@@ -3,9 +3,10 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
-import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_COLOURS } from '../../../Support/actionStyles';
+import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_COLOURS } from '../../../Support/actionStyles';
 import KpiContextPanel from './KpiContextPanel';
 import KpiForm, { initialKpiData } from './KpiForm';
+import KpiTrend from './KpiTrend';
 import { KpiMeasurementForm, KpiWithdrawForm } from './KpiMeasurementForms';
 import ObjectiveHistory from './ObjectiveHistory';
 import { KpiReopenForm, KpiRetireForm } from './KpiStatusForms';
@@ -16,6 +17,7 @@ import { formatLongDate } from './objectiveStatus';
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 // A row action in a dense table: the warning colours, at the size of a badge.
 const ROW_WARNING_ACTION = `inline-flex items-center whitespace-nowrap rounded-full px-3 py-1.5 text-base font-semibold transition ${WARNING_COLOURS}`;
+const ROW_ACTION = 'inline-flex items-center whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:bg-slate-50';
 
 function Detail({ label, children }) {
     return (
@@ -61,7 +63,7 @@ function NextMeasurement({ kpi, tm }) {
  * Målehistorikk: every measurement, newest period first, each judged against the target that
  * applied when it was registered. Superseded and withdrawn rows stay — they are the audit trail.
  */
-function MeasurementHistory({ measurements, baseUrl, locale, tm }) {
+function MeasurementHistory({ measurements, baseUrl, locale, tm, onCorrect = null, canCorrect = () => false }) {
     const [withdrawing, setWithdrawing] = useState(null);
     const results = tm.results ?? {};
 
@@ -132,11 +134,18 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm }) {
                                                 )}
                                             </td>
                                             <td className="py-3 pl-3 text-right">
-                                                {row.can_withdraw && withdrawing !== row.id && (
-                                                    <button type="button" onClick={() => setWithdrawing(row.id)} className={ROW_WARNING_ACTION}>
-                                                        {tm.withdraw ?? 'Trekk tilbake'}
-                                                    </button>
-                                                )}
+                                                <div className="flex flex-wrap justify-end gap-2">
+                                                    {onCorrect && counts && row.correction_choice && canCorrect(row.correction_choice) && (
+                                                        <button type="button" onClick={() => onCorrect(row.correction_choice)} className={ROW_ACTION}>
+                                                            {tm.correct ?? 'Korriger'}
+                                                        </button>
+                                                    )}
+                                                    {row.can_withdraw && withdrawing !== row.id && (
+                                                        <button type="button" onClick={() => setWithdrawing(row.id)} className={ROW_WARNING_ACTION}>
+                                                            {tm.withdraw ?? 'Trekk tilbake'}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                         {withdrawing === row.id && (
@@ -183,13 +192,27 @@ export default function KpiShow() {
 
     const objectiveTr = translations?.objectives ?? {};
     const tr = { ...objectiveTr, ...(objectiveTr.kpi ?? {}) };
-    const tm = { ...tr, ...(objectiveTr.measurement ?? {}) };
+    // The measurement texts on top of the KPI's, with both sets of validation messages kept.
+    const tm = { ...tr, ...(objectiveTr.measurement ?? {}), validation: { ...(tr.validation ?? {}), ...(objectiveTr.measurement?.validation ?? {}) } };
     const statusLabels = tr.statuses ?? {};
     const frequencyLabels = tr.frequencies ?? {};
     const results = tm.results ?? {};
     const baseUrl = `/app/objectives/${objective.id}/kpis/${kpi.id}`;
     // Which panel is open: 'measure', 'edit', 'retire', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
+    // The period «Korriger» opened Registrer måling on; null for a new measurement.
+    const [correcting, setCorrecting] = useState(null);
+    const deadline = kpi.deadline ?? null;
+
+    const openMeasurement = (choice = null) => {
+        setCorrecting(choice);
+        setPanel('measure');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // «Korriger» only for a choice Registrer måling offers (a period still in its list, or a day).
+    const correctable = (choice) => measurementForm !== null && (measurementForm.mode === 'date'
+        || (measurementForm.period_options ?? []).some((option) => option.key === choice));
 
     const form = useForm(initialKpiData(kpi, formOptions ?? {}));
 
@@ -225,7 +248,7 @@ export default function KpiShow() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...objectiveHelp(objectiveTr, 'kpi')} />
                         {permissions.can_measure && measurementForm && panel === null && (
-                            <button type="button" onClick={() => setPanel('measure')} className={PRIMARY_ACTION}>{tm.register ?? 'Registrer måling'}</button>
+                            <button type="button" onClick={() => openMeasurement()} className={PRIMARY_ACTION}>{tm.register ?? 'Registrer måling'}</button>
                         )}
                         {permissions.can_edit && panel === null && (
                             <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
@@ -236,11 +259,16 @@ export default function KpiShow() {
                         {permissions.can_reopen && panel === null && (
                             <button type="button" onClick={() => setPanel('reopen')} className={SECONDARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
                         )}
-                        {permissions.can_delete && (
-                            <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{tr.delete ?? 'Slett KPI'}</button>
-                        )}
                     </div>
                 </header>
+
+                {kpi.definition_problems?.length > 0 && (
+                    <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900" role="status" data-testid="kpi-definition-problems">
+                        {(tr.definition_problems ?? 'Noen tall passer ikke med enheten «:unit»: :fields.')
+                            .replace(':unit', kpi.unit_display)
+                            .replace(':fields', kpi.definition_problems.join(', '))}
+                    </p>
+                )}
 
                 <section className={CARD} aria-labelledby="kpi-result-heading">
                     <h2 id="kpi-result-heading" className="sr-only">{tm.latest_heading ?? 'Siste resultat'}</h2>
@@ -259,12 +287,21 @@ export default function KpiShow() {
                             <span data-testid="kpi-current-result">
                                 <StatusBadge tone={KPI_RESULT_TONES[kpi.result] ?? 'slate'}>{results[kpi.result] ?? kpi.result}</StatusBadge>
                             </span>
+                            <span className="mt-2 block text-base text-slate-700" data-testid="kpi-status-explanation">{kpi.status_explanation}</span>
                         </Detail>
-                        <Detail label={tr.detail_target ?? 'Målverdi'}>
-                            <span className="whitespace-nowrap font-semibold">{kpi.target_display}</span>
+                        <Detail label={tr.rule_label ?? 'Når er målet nådd?'}>
+                            <span className="block" data-testid="kpi-target-rule">{kpi.target_rule}</span>
+                            {kpi.tolerance_rule && <span className="mt-1 block text-base text-slate-600">{kpi.tolerance_rule}</span>}
                         </Detail>
-                        <Detail label={tr.detail_frequency ?? 'Målefrekvens'}>
-                            {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast målefrekvens')}
+                        <Detail label={tr.detail_goal_deadline ?? 'Frist for måloppnåelse'}>
+                            <span data-testid="kpi-deadline">
+                                {deadline
+                                    ? (tr.deadline_follows ?? ':date (målets måldato)').replace(':date', deadline.date_display)
+                                    : (tr.deadline_running ?? 'Løpende – målet har ingen måldato')}
+                            </span>
+                            {deadline?.passed && objective.status === 'active' && (
+                                <span className="block text-base text-amber-800">{tr.deadline_passed ?? 'Fristen er passert.'}</span>
+                            )}
                         </Detail>
                         <Detail label={tm.next_period ?? 'Neste måling'}>
                             <NextMeasurement kpi={kpi} tm={tm} />
@@ -276,7 +313,15 @@ export default function KpiShow() {
                 </section>
 
                 {panel === 'measure' && measurementForm && (
-                    <KpiMeasurementForm baseUrl={baseUrl} kpi={kpi} options={measurementForm} onDone={() => setPanel(null)} tr={tm} />
+                    <KpiMeasurementForm
+                        key={correcting ?? 'new'}
+                        baseUrl={baseUrl}
+                        kpi={kpi}
+                        options={measurementForm}
+                        initialChoice={correcting}
+                        onDone={() => { setPanel(null); setCorrecting(null); }}
+                        tr={tm}
+                    />
                 )}
                 {panel === 'retire' && <KpiRetireForm baseUrl={baseUrl} onDone={() => setPanel(null)} tr={tr} />}
                 {panel === 'reopen' && <KpiReopenForm baseUrl={baseUrl} onDone={() => setPanel(null)} tr={tr} />}
@@ -304,18 +349,47 @@ export default function KpiShow() {
 
                         <h2 className="mt-6 text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
                         <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="kpi-details">
-                            <Detail label={tr.detail_tolerance ?? 'Slingringsmonn'}>
+                            <Detail label={tr.detail_target ?? 'Målverdi'}>
+                                <span className="whitespace-nowrap font-semibold">{kpi.target_display}</span>
+                                <span className="block text-base text-slate-500">{tr.target_types?.[kpi.form_target_type] ?? ''}</span>
+                            </Detail>
+                            {kpi.baseline_value !== null && (
+                                <Detail label={tr.detail_baseline ?? 'Startverdi'}>
+                                    <span className="font-semibold">{kpi.baseline_display}</span>
+                                    <span className="block text-base text-slate-500">{kpi.change_display}</span>
+                                </Detail>
+                            )}
+                            <Detail label={tr.detail_tolerance ?? 'Toleranse'}>
                                 {kpi.tolerance_display ?? (tr.tolerance_none ?? 'Ingen')}
                             </Detail>
                             <Detail label={tr.detail_unit ?? 'Enhet'}>{kpi.unit_display}</Detail>
+                            <Detail label={tr.detail_frequency ?? 'Målefrekvens'}>
+                                {kpi.frequency ? (frequencyLabels[kpi.frequency] ?? kpi.frequency) : (tr.no_frequency ?? 'Ingen fast målefrekvens')}
+                            </Detail>
                             <Detail label={tr.detail_deadline ?? 'Innrapporteringsfrist'}>{kpi.deadline_display}</Detail>
                             <Detail label={tr.detail_objective ?? 'Tilhørende mål'}>
                                 <Link href={objective.url} className="font-semibold text-violet-700 hover:text-violet-900">{objective.title}</Link>
                                 {objective.area_name && <span className="block text-base text-slate-500">{objective.area_name}</span>}
                             </Detail>
                         </dl>
+
+                        {/* Deleting is for a KPI registered by mistake: kept small and out of the way. */}
+                        {permissions.can_delete && (
+                            <div className="mt-6 border-t border-slate-100 pt-4">
+                                <button type="button" onClick={destroy} className="text-base font-semibold text-rose-700 underline-offset-2 hover:underline">
+                                    {tr.delete ?? 'Slett KPI'}
+                                </button>
+                                <p className="text-base text-slate-500">{tr.delete_hint ?? 'Bare for KPI-er som er registrert ved en feil og ikke har målinger.'}</p>
+                            </div>
+                        )}
                     </section>
                 )}
+
+                <section className={CARD} aria-labelledby="kpi-trend-heading">
+                    <h2 id="kpi-trend-heading" className="text-lg font-semibold text-slate-950">{tr.trend?.heading ?? 'Utvikling over tid'}</h2>
+                    <p className="mt-1 text-base text-slate-600">{tr.trend?.intro ?? 'Gjeldende verdi for hver periode, med målverdien slik den er nå.'}</p>
+                    <KpiTrend trend={kpi.trend} kpi={kpi} tr={tr} locale={locale} />
+                </section>
 
                 {/* null, not empty: the person cannot read Kvalitet, so nothing is said about context. */}
                 {qualityContext !== null && (
@@ -328,7 +402,14 @@ export default function KpiShow() {
                     />
                 )}
 
-                <MeasurementHistory measurements={measurements} baseUrl={baseUrl} locale={locale} tm={tm} />
+                <MeasurementHistory
+                    measurements={measurements}
+                    baseUrl={baseUrl}
+                    locale={locale}
+                    tm={tm}
+                    onCorrect={permissions.can_measure && measurementForm ? openMeasurement : null}
+                    canCorrect={correctable}
+                />
 
                 <ObjectiveHistory
                     entries={statusHistory}

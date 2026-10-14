@@ -6,11 +6,13 @@ use App\Models\BusinessArea;
 use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\Kpi;
+use App\Models\KpiMeasurement;
 use App\Models\KpiStatusChange;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\Objective;
 use App\Models\User;
+use App\Services\EnterpriseWiki\Knowledge\Sources\ObjectiveKnowledgeSource;
 use App\Services\Modules\ModuleEntitlementService;
 use App\Support\CustomerPermissionCatalog;
 use DomainException;
@@ -186,7 +188,7 @@ class KpiTest extends TestCase
         $this->actingAs($user)->post($url, ['target_min' => '6', 'target_max' => '5'] + $this->payload())
             ->assertSessionHasErrors(['target_max' => '«Høyst» kan ikke være mindre enn «Minst».']);
         $this->actingAs($user)->post($url, ['tolerance' => '-1'] + $this->payload())
-            ->assertSessionHasErrors(['tolerance' => 'Slingringsmonn kan ikke være negativt.']);
+            ->assertSessionHasErrors(['tolerance' => 'Toleransen kan ikke være negativ.']);
         $this->actingAs($user)->post($url, ['target_min' => 'mye'] + $this->payload())
             ->assertSessionHasErrors(['target_min' => 'Minst må være et tall med høyst fire desimaler.']);
         $this->actingAs($user)->post($url, ['target_min' => '1.23456'] + $this->payload())
@@ -229,7 +231,7 @@ class KpiTest extends TestCase
         $this->assertSame(0, $kpi->reporting_grace_days);
         $this->assertSame(Kpi::FREQUENCY_QUARTERLY, $kpi->frequency);
 
-        $this->actingAs($user)->post($url, ['title' => 'Saker', 'unit' => 'count', 'unit_label' => ' saker ', 'frequency' => ''] + $this->payload())
+        $this->actingAs($user)->post($url, ['title' => 'Saker', 'unit' => 'count', 'unit_label' => ' saker ', 'frequency' => '', 'target_min' => '3', 'tolerance' => '1'] + $this->payload())
             ->assertRedirect();
         $count = Kpi::query()->where('title', 'Saker')->sole();
         $this->assertSame('saker', $count->unit_label);
@@ -707,7 +709,8 @@ class KpiTest extends TestCase
         $this->assertSame('App/Objectives/KpiShow', $this->actingAs($editor)->get($this->kpiUrl($kpi))->viewData('page')['component']);
         $this->assertSame(['can_edit' => true, 'can_retire' => true, 'can_reopen' => false, 'can_delete' => false, 'can_measure' => false, 'can_link_context' => false], $props['permissions']);
         $this->assertSame('Mål', $props['objective']['title']);
-        $this->assertSame('1 %', str_replace("\u{00A0}", ' ', $props['kpi']['tolerance_display']));
+        // A percent tolerance is in percentage points, never «1 %» of the målverdi.
+        $this->assertSame('1 prosentpoeng', str_replace("\u{00A0}", ' ', $props['kpi']['tolerance_display']));
         $this->assertSame('7 dager etter at perioden er slutt', $props['kpi']['deadline_display']);
         $this->assertSame('99.5', $props['kpi']['target_min']);
         $this->assertNotNull($props['form_options']);
@@ -729,6 +732,315 @@ class KpiTest extends TestCase
         $kpi->forceFill(['status' => Kpi::STATUS_RETIRED])->save();
         $props = $this->actingAs($editor)->get($this->kpiUrl($kpi))->viewData('page')['props'];
         $this->assertSame(['can_edit' => false, 'can_retire' => false, 'can_reopen' => true, 'can_delete' => false, 'can_measure' => false, 'can_link_context' => false], $props['permissions']);
+    }
+
+    // ---------------------------------------------------------------------
+    // Måltype, startverdi and the unit's rules
+    // ---------------------------------------------------------------------
+
+    /** @return array<string, array{array<string, string>, string|null, string|null, string}> */
+    public static function targetTypes(): array
+    {
+        return [
+            // Fields that do not belong to the type are dropped, whatever the form still held.
+            'minst' => [['target_type' => 'at_least', 'target_min' => '100', 'target_max' => '200'], '100.0000', null, 'at_least'],
+            'høyst' => [['target_type' => 'at_most', 'target_min' => '1', 'target_max' => '5'], null, '5.0000', 'at_most'],
+            'intervall' => [['target_type' => 'range', 'target_min' => '18', 'target_max' => '22'], '18.0000', '22.0000', 'range'],
+            'nøyaktig' => [['target_type' => 'exact', 'target_min' => '100', 'target_max' => '7'], '100.0000', '100.0000', 'exact'],
+        ];
+    }
+
+    /** @param array<string, string> $fields */
+    #[DataProvider('targetTypes')]
+    public function test_each_target_type_stores_only_its_own_bounds(array $fields, ?string $min, ?string $max, string $type): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+
+        $this->actingAs($user)->post("/app/objectives/{$objective->id}/kpis", $fields + ['unit' => 'number', 'tolerance' => ''] + $this->payload())
+            ->assertSessionHasNoErrors();
+
+        $kpi = Kpi::query()->where('objective_id', $objective->id)->sole();
+        $this->assertSame($min, $kpi->target_min);
+        $this->assertSame($max, $kpi->target_max);
+        $this->assertNull($kpi->baseline_value);
+
+        $props = $this->actingAs($user)->get($this->kpiUrl($kpi))->viewData('page')['props']['kpi'];
+        $this->assertSame($type, $props['target_type']);
+        $this->assertSame($type, $props['form_target_type']);
+    }
+
+    public function test_a_target_type_needs_its_fields_and_a_range_needs_from_below_to(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+        $url = "/app/objectives/{$objective->id}/kpis";
+        $post = fn (array $fields) => $this->actingAs($user)->post($url, $fields + ['unit' => 'number', 'tolerance' => ''] + $this->payload());
+
+        $post(['target_type' => 'at_least', 'target_min' => ''])->assertSessionHasErrors(['target_min' => 'Fyll inn målverdien.']);
+        $post(['target_type' => 'at_most', 'target_max' => ''])->assertSessionHasErrors(['target_max' => 'Fyll inn målverdien.']);
+        $post(['target_type' => 'range', 'target_min' => '18', 'target_max' => ''])->assertSessionHasErrors(['target_max' => 'Fyll inn målverdien.']);
+        $post(['target_type' => 'range', 'target_min' => '22', 'target_max' => '18'])->assertSessionHasErrors(['target_max' => '«Høyst» kan ikke være mindre enn «Minst».']);
+        $post(['target_type' => 'range', 'target_min' => '18', 'target_max' => '18'])->assertSessionHasErrors(['target_max' => '«Fra» og «Til» er like. Velg «Nøyaktig verdi» for ett bestemt tall.']);
+        $post(['target_type' => 'something'])->assertSessionHasErrors('target_type');
+
+        $this->assertSame(0, Kpi::query()->where('objective_id', $objective->id)->count());
+    }
+
+    public function test_a_growth_target_is_computed_from_the_startverdi_and_the_change_is_never_stored(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Vekst', $user);
+        $objective->forceFill(['target_date' => '2027-10-30'])->save();
+
+        $this->actingAs($user)->post("/app/objectives/{$objective->id}/kpis", [
+            'title' => 'FCV', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'growth',
+            'baseline_value' => '1 000 000', 'baseline_date' => '2026-10-01', 'change_percent' => '30',
+            'target_min' => '5', 'target_max' => '9', 'tolerance' => '',
+        ] + $this->payload())->assertSessionHasNoErrors();
+
+        $kpi = Kpi::query()->where('title', 'FCV')->sole();
+        $this->assertSame('1300000.0000', $kpi->target_min);
+        $this->assertNull($kpi->target_max);
+        $this->assertSame('1000000.0000', $kpi->baseline_value);
+        $this->assertSame('2026-10-01', $kpi->baseline_date->format('Y-m-d'));
+        $this->assertArrayNotHasKey('change_percent', $kpi->getAttributes());
+
+        $props = $this->actingAs($user)->get($this->kpiUrl($kpi))->viewData('page')['props']['kpi'];
+        $this->assertSame('growth', $props['form_target_type']);
+        $this->assertSame('at_least', $props['target_type']);
+        $this->assertSame('30', $props['change_percent']);
+        $this->assertSame('Økning på 30 %', $this->spaces($props['change_display']));
+        $this->assertSame(
+            'Målet er nådd når verdien er minst NOK 1 300 000. Det er en økning på 30 % fra startverdien NOK 1 000 000 (1. oktober 2026).',
+            $this->spaces($props['target_rule']),
+        );
+        $this->assertSame('Ingen gjeldende måling ennå. KPI-en får status når den første målingen er registrert.', $props['status_explanation']);
+        $this->assertSame('not_measured', $props['result']);
+        // The KPI follows the objective's måldato; there is no deadline of its own.
+        $this->assertSame('30. oktober 2027', $props['deadline']['date_display']);
+        $this->assertFalse($props['deadline']['passed']);
+
+        // A decrease is «Høyst».
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), [
+            'title' => 'FCV', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'growth',
+            'baseline_value' => '1000000', 'baseline_date' => '2026-10-01', 'change_percent' => '-20,5', 'tolerance' => '',
+        ] + $this->payload())->assertSessionHasNoErrors();
+        $kpi->refresh();
+        $this->assertNull($kpi->target_min);
+        $this->assertSame('795000.0000', $kpi->target_max);
+
+        // Changed to a plain «Minst», the startverdi goes.
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), [
+            'title' => 'FCV', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'at_least',
+            'target_min' => '1200000', 'baseline_value' => '1000000', 'change_percent' => '30', 'tolerance' => '',
+        ] + $this->payload())->assertSessionHasNoErrors();
+        $kpi->refresh();
+        $this->assertNull($kpi->baseline_value);
+        $this->assertNull($kpi->baseline_date);
+        $this->assertSame('1200000.0000', $kpi->target_min);
+    }
+
+    public function test_saving_a_growth_kpi_again_never_moves_its_target(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+        $kpi = $this->kpi($objective, [
+            'unit' => 'number', 'target_min' => '3.9999', 'tolerance' => null, 'baseline_value' => '3', 'baseline_date' => '2026-01-01',
+        ]);
+
+        $props = $this->actingAs($user)->get($this->kpiUrl($kpi))->viewData('page')['props']['kpi'];
+        $this->assertSame('33.33', $props['change_percent']);
+
+        // The form sends back exactly what the page gave it.
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), [
+            'title' => 'KPI', 'unit' => 'number', 'target_type' => $props['form_target_type'],
+            'baseline_value' => $props['baseline_value'], 'baseline_date' => $props['baseline_date'], 'change_percent' => $props['change_percent'], 'tolerance' => '',
+        ] + $this->payload())->assertSessionHasNoErrors();
+
+        $this->assertSame('3.9999', $kpi->fresh()->target_min);
+    }
+
+    public function test_growth_is_refused_for_percent_units_and_without_a_positive_startverdi(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+        $url = "/app/objectives/{$objective->id}/kpis";
+        $growth = ['target_type' => 'growth', 'baseline_value' => '40', 'baseline_date' => '2026-01-01', 'change_percent' => '10', 'tolerance' => ''];
+
+        $this->actingAs($user)->post($url, ['unit' => 'percent'] + $growth + $this->payload())
+            ->assertSessionHasErrors(['target_type' => 'Endring fra startverdi kan ikke brukes med prosent som enhet. Velg «Minst» eller «Høyst».']);
+        $this->actingAs($user)->post($url, ['unit' => 'number', 'baseline_value' => '0'] + $growth + $this->payload())
+            ->assertSessionHasErrors(['baseline_value' => 'Startverdien må være større enn 0.']);
+        $this->actingAs($user)->post($url, ['unit' => 'number', 'change_percent' => '0'] + $growth + $this->payload())
+            ->assertSessionHasErrors(['change_percent' => 'Endringen kan ikke være 0 %.']);
+        $this->actingAs($user)->post($url, ['unit' => 'number', 'baseline_date' => ''] + $growth + $this->payload())
+            ->assertSessionHasErrors(['baseline_date' => 'Velg dato for startverdien.']);
+        $this->actingAs($user)->post($url, ['unit' => 'count', 'baseline_value' => '7.5'] + $growth + $this->payload())
+            ->assertSessionHasErrors(['baseline_value' => 'Skriv et helt tall.']);
+
+        $this->assertSame(0, Kpi::query()->where('objective_id', $objective->id)->count());
+    }
+
+    public function test_the_model_and_the_database_keep_the_startverdi_rules(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $objective = $this->objective($customer, $hr, 'Mål');
+
+        foreach ([
+            ['unit' => 'number', 'baseline_value' => '5', 'baseline_date' => null],
+            ['unit' => 'number', 'baseline_value' => '-5', 'baseline_date' => '2026-01-01'],
+            ['unit' => 'number', 'baseline_value' => '5', 'baseline_date' => '2026-01-01', 'target_min' => '1', 'target_max' => '9'],
+            ['unit' => 'percent', 'baseline_value' => '5', 'baseline_date' => '2026-01-01'],
+        ] as $override) {
+            try {
+                $this->kpi($objective, $override);
+                $this->fail('A broken startverdi must not be saved: '.json_encode($override));
+            } catch (DomainException) {
+            }
+        }
+
+        $this->expectException(QueryException::class);
+        DB::table('kpis')->insert(['baseline_value' => '5', 'baseline_date' => '2026-01-01', 'target_max' => '9'] + $this->rawRow($customer->id, $objective->id));
+    }
+
+    public function test_numbers_must_fit_the_unit(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+        $url = "/app/objectives/{$objective->id}/kpis";
+        $post = fn (array $fields) => $this->actingAs($user)->post($url, $fields + ['tolerance' => ''] + $this->payload());
+
+        $post(['unit' => 'percent', 'target_type' => 'at_least', 'target_min' => '130'])
+            ->assertSessionHasErrors(['target_min' => 'En prosentandel er mellom 0 og 100. Måler KPI-en endring, velg enheten «Prosentvis endring».']);
+        $post(['unit' => 'count', 'target_type' => 'at_most', 'target_max' => '2.5'])->assertSessionHasErrors(['target_max' => 'Skriv et helt tall.']);
+        $post(['unit' => 'count', 'target_type' => 'at_least', 'target_min' => '3', 'tolerance' => '0.5'])->assertSessionHasErrors(['tolerance' => 'Skriv et helt tall.']);
+        $post(['unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'at_least', 'target_min' => '10.125'])
+            ->assertSessionHasErrors(['target_min' => 'Skriv høyst 2 desimaler for denne enheten.']);
+        $post(['unit' => 'hours', 'target_type' => 'at_most', 'target_max' => '-1'])->assertSessionHasErrors(['target_max' => 'Verdien kan ikke være negativ for denne enheten.']);
+        $this->assertSame(0, Kpi::query()->where('objective_id', $objective->id)->count());
+
+        // What the unit means is allowed: change above 100 %, negative amounts and numbers, a share of 99,995 %.
+        $post(['title' => 'Endring', 'unit' => 'percent_change', 'target_type' => 'range', 'target_min' => '-20', 'target_max' => '150'])->assertSessionHasNoErrors();
+        $post(['title' => 'Resultat', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'at_least', 'target_min' => '-250000.50'])->assertSessionHasNoErrors();
+        $post(['title' => 'Temperatur', 'unit' => 'number', 'target_type' => 'range', 'target_min' => '-5.5', 'target_max' => '4'])->assertSessionHasNoErrors();
+        $post(['title' => 'Oppetid', 'unit' => 'percent', 'target_type' => 'at_least', 'target_min' => '99,995', 'tolerance' => '150'])->assertSessionHasNoErrors();
+        $this->assertSame(4, Kpi::query()->where('objective_id', $objective->id)->count());
+    }
+
+    /**
+     * The real case from before måltyper: «30 % økning av FCV» saved as a share with both bounds.
+     * It stays an interval, its numbers are not touched, and the page points out what no longer
+     * fits the unit instead of guessing what was meant.
+     */
+    public function test_an_existing_kpi_with_both_bounds_stays_an_interval_and_is_pointed_out_not_changed(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+        DB::table('kpis')->insert([
+            'title' => '30% økning av FCV innen ett år fra dagens nivå.', 'target_min' => '1000000', 'target_max' => '1300000', 'tolerance' => '0',
+        ] + $this->rawRow($customer->id, $objective->id));
+        $kpi = Kpi::query()->where('objective_id', $objective->id)->sole();
+
+        $props = $this->actingAs($user)->get($this->kpiUrl($kpi))->assertOk()->viewData('page')['props']['kpi'];
+        $this->assertSame('range', $props['target_type']);
+        $this->assertSame('range', $props['form_target_type']);
+        $this->assertSame('Målet er nådd når verdien er mellom 1 000 000 % og 1 300 000 %.', $this->spaces($props['target_rule']));
+        $this->assertSame(['Minst', 'Høyst'], $props['definition_problems']);
+
+        $fresh = $kpi->fresh();
+        $this->assertSame('1000000.0000', $fresh->target_min);
+        $this->assertSame('1300000.0000', $fresh->target_max);
+        $this->assertSame('percent', $fresh->unit);
+
+        // Corrected by hand: the right unit, as a growth target.
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), [
+            'title' => 'FCV', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_type' => 'growth',
+            'baseline_value' => '1000000', 'baseline_date' => '2026-10-01', 'change_percent' => '30', 'tolerance' => '',
+        ] + $this->payload())->assertSessionHasNoErrors();
+        $props = $this->actingAs($user)->get($this->kpiUrl($kpi))->viewData('page')['props']['kpi'];
+        $this->assertSame([], $props['definition_problems']);
+        $this->assertSame('1300000.0000', $kpi->fresh()->target_min);
+    }
+
+    public function test_a_form_without_a_target_type_is_read_by_its_bounds_as_before(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+
+        $this->actingAs($user)->post("/app/objectives/{$objective->id}/kpis", ['unit' => 'number', 'target_min' => '2', 'target_max' => '5', 'tolerance' => ''] + $this->payload())
+            ->assertSessionHasNoErrors();
+
+        $kpi = Kpi::query()->where('objective_id', $objective->id)->sole();
+        $this->assertSame(['2.0000', '5.0000'], [$kpi->target_min, $kpi->target_max]);
+    }
+
+    public function test_a_kpi_with_measurements_may_swap_share_and_change_but_no_other_unit(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Mål', $user);
+        $kpi = $this->kpi($objective, ['tolerance' => null]);
+        KpiMeasurement::query()->create([
+            'customer_id' => $customer->id, 'kpi_id' => $kpi->id, 'period_start' => '2026-01-01', 'period_end' => '2026-01-31',
+            'value' => '99.7', 'target_min' => '99.5', 'recorded_at' => now(),
+        ]);
+        $form = ['target_type' => 'at_least', 'target_min' => '20', 'tolerance' => ''] + $this->payload();
+
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), ['unit' => 'percent_change'] + $form)->assertSessionHasNoErrors();
+        $this->assertSame('percent_change', $kpi->fresh()->unit);
+
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), ['unit' => 'percent'] + $form)->assertSessionHasNoErrors();
+        $this->assertSame('percent', $kpi->fresh()->unit);
+
+        $this->actingAs($user)->patch($this->kpiUrl($kpi), ['unit' => 'number'] + $form)->assertSessionHasErrors('unit');
+        $this->assertSame('percent', $kpi->fresh()->unit);
+    }
+
+    public function test_the_wiki_draft_reads_the_kpi_like_its_page(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $user = $this->editor($customer, $hr);
+        $objective = $this->objective($customer, $hr, 'Vekst', $user);
+        $interval = $this->kpi($objective, ['title' => 'Omsetning', 'unit' => 'currency', 'currency_code' => 'NOK', 'target_min' => '1000000', 'target_max' => '1300000', 'tolerance' => null]);
+        $this->kpi($objective, ['title' => 'Ikke målt', 'unit' => 'days', 'target_min' => null, 'target_max' => '5', 'tolerance' => null]);
+        KpiMeasurement::query()->create([
+            'customer_id' => $customer->id, 'kpi_id' => $interval->id, 'period_start' => '2026-09-01', 'period_end' => '2026-09-30',
+            'value' => '1400000', 'target_min' => '1000000', 'target_max' => '1300000', 'recorded_at' => now(),
+        ]);
+
+        app()->setLocale('no');
+        $lines = collect(app(ObjectiveKnowledgeSource::class)->draft($user, $objective)->sections)->firstWhere('key', 'kpis')->lines;
+
+        $this->assertSame([
+            'Omsetning — Målet er nådd når verdien er mellom NOK 1 000 000 og NOK 1 300 000. — Siste måling: NOK 1 400 000 (September 2026) — Status: Utenfor mål',
+            'Ikke målt — Målet er nådd når verdien er høyst 5 dager. — Status: Ikke målt',
+        ], array_map(fn (string $line): string => $this->spaces($line), $lines));
+        $this->assertStringNotContainsString('.0000', implode(' ', $lines));
+    }
+
+    private function spaces(string $value): string
+    {
+        return str_replace("\u{00A0}", ' ', $value);
     }
 
     // ---------------------------------------------------------------------

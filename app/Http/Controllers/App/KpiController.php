@@ -7,14 +7,17 @@ use App\Models\Kpi;
 use App\Models\KpiStatusChange;
 use App\Models\Objective;
 use App\Models\User;
+use App\Services\Objectives\KpiGrowth;
 use App\Services\Objectives\KpiLifecycleService;
 use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\KpiTarget;
+use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Objectives\KpiPresenter;
 use App\Support\Objectives\ObjectiveValidationMessages;
+use Brick\Math\BigDecimal;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -41,6 +44,9 @@ use Inertia\Response;
 class KpiController extends Controller
 {
     private const DECIMAL = '/^-?\d{1,16}(\.\d{1,4})?$/';
+
+    /** The fifth way to set a målverdi: as change from a startverdi (KpiGrowth). Not a KpiTarget type. */
+    private const TYPE_GROWTH = 'growth';
 
     public function __construct(
         private readonly CustomerContext $customerContext,
@@ -141,7 +147,7 @@ class KpiController extends Controller
             return back()->with('error', __('procynia.objectives.kpi.validation.reopen_before_edit'));
         }
 
-        $attributes = $this->validated($request, $objective);
+        $attributes = $this->validated($request, $objective, $kpi);
         $this->guardUnitDefinition($kpi, $attributes);
 
         $kpi->fill($attributes + ['updated_by' => $user->id])->save();
@@ -247,12 +253,21 @@ class KpiController extends Controller
      * currency code and unit label belong, and the bounds and tolerance are checked together by
      * KpiTarget — the same rules the model enforces before saving. Status is not among them.
      *
+     * MÅLTYPE. target_type says which fields the målverdi is read from, and the rest are dropped:
+     *  - at_least: target_min · at_most: target_max · range: both, min below max
+     *  - exact: target_min, stored as both bounds
+     *  - growth: baseline_value, baseline_date and change_percent; the målverdi is computed (KpiGrowth)
+     * Without target_type the bounds are taken as they come, as before the type existed.
+     *
+     * Every number must fit the unit (KpiUnitRules) — the målverdi, the startverdi and, for its
+     * precision, the tolerance.
+     *
      * @return array<string, mixed>
      */
-    private function validated(Request $request, Objective $objective): array
+    private function validated(Request $request, Objective $objective, ?Kpi $kpi = null): array
     {
         // Norwegian decimals are written with a comma, and pasted numbers may carry spaces.
-        $request->merge(collect(['target_min', 'target_max', 'tolerance'])
+        $request->merge(collect(['target_min', 'target_max', 'tolerance', 'baseline_value', 'change_percent'])
             ->filter(fn (string $field): bool => is_string($request->input($field)))
             ->mapWithKeys(fn (string $field): array => [
                 $field => str_replace([',', ' ', "\u{00A0}"], ['.', '', ''], trim((string) $request->input($field))),
@@ -266,9 +281,13 @@ class KpiController extends Controller
             'unit' => ['required', 'string', Rule::in(Kpi::UNITS)],
             'unit_label' => ['nullable', 'string', 'max:60'],
             'currency_code' => ['nullable', 'string'],
+            'target_type' => ['nullable', 'string', Rule::in([...KpiTarget::TYPES, self::TYPE_GROWTH])],
             'target_min' => ['nullable', 'string', 'regex:'.self::DECIMAL],
             'target_max' => ['nullable', 'string', 'regex:'.self::DECIMAL],
             'tolerance' => ['nullable', 'string', 'regex:'.self::DECIMAL],
+            'baseline_value' => ['nullable', 'string', 'regex:'.self::DECIMAL],
+            'baseline_date' => ['nullable', 'date_format:Y-m-d'],
+            'change_percent' => ['nullable', 'string', 'regex:'.self::DECIMAL],
             'frequency' => ['nullable', 'string', Rule::in(Kpi::FREQUENCIES)],
             'reporting_grace_days' => ['required', 'integer', 'min:0', 'max:365'],
         ], [
@@ -293,12 +312,26 @@ class KpiController extends Controller
             $errors['unit_label'] = __('procynia.objectives.kpi.validation.unit_label_not_allowed');
         }
 
-        $min = $this->normalizedText($validated['target_min'] ?? null);
-        $max = $this->normalizedText($validated['target_max'] ?? null);
-        $tolerance = $this->normalizedText($validated['tolerance'] ?? null);
+        $target = $this->targetFields($validated, $unit, $kpi);
+        $errors += $target['errors'];
 
-        foreach (KpiTarget::errorsFor($min, $max, $tolerance) as $field => $code) {
-            $errors[$field] = __("procynia.objectives.kpi.validation.{$code}");
+        if ($target['errors'] === []) {
+            foreach (KpiTarget::errorsFor($target['min'], $target['max'], $target['tolerance']) as $field => $code) {
+                $errors[$field] ??= __("procynia.objectives.kpi.validation.{$code}");
+            }
+        }
+
+        foreach (['target_min' => $target['min'], 'target_max' => $target['max'], 'baseline_value' => $target['baseline']] as $field => $value) {
+            $message = $value !== null ? KpiUnitRules::message($unit, BigDecimal::of($value)) : null;
+
+            if ($message !== null) {
+                // A computed målverdi is reported where it was typed: the startverdi and the change.
+                $errors[$target['baseline'] !== null && $field !== 'baseline_value' ? 'change_percent' : $field] ??= $message;
+            }
+        }
+
+        if ($target['tolerance'] !== null && ($message = KpiUnitRules::message($unit, BigDecimal::of($target['tolerance']), true)) !== null) {
+            $errors['tolerance'] ??= $message;
         }
 
         $ownerId = isset($validated['owner_user_id']) ? (int) $validated['owner_user_id'] : null;
@@ -318,17 +351,97 @@ class KpiController extends Controller
             'unit' => $unit,
             'unit_label' => $unitLabel,
             'currency_code' => $currencyCode,
-            'target_min' => $min,
-            'target_max' => $max,
-            'tolerance' => $tolerance,
+            'target_min' => $target['min'],
+            'target_max' => $target['max'],
+            'tolerance' => $target['tolerance'],
+            'baseline_value' => $target['baseline'],
+            'baseline_date' => $target['baseline'] !== null ? $target['baseline_date'] : null,
             'frequency' => $validated['frequency'] ?? null,
             'reporting_grace_days' => (int) $validated['reporting_grace_days'],
         ];
     }
 
     /**
+     * The målverdi as the chosen type reads it: the bounds to store, the startverdi when there is one,
+     * and what is missing, keyed by field.
+     *
+     * A growth målverdi is computed from the startverdi and the change. Saved again with the same
+     * startverdi and the change the page showed, the stored målverdi is kept as it is — the change
+     * shown is rounded to two decimals, and recomputing from it must not move the target.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array{min: ?string, max: ?string, tolerance: ?string, baseline: ?string, baseline_date: ?string, errors: array<string, string>}
+     */
+    private function targetFields(array $validated, string $unit, ?Kpi $kpi): array
+    {
+        $type = $validated['target_type'] ?? null;
+        $min = $this->normalizedText($validated['target_min'] ?? null);
+        $max = $this->normalizedText($validated['target_max'] ?? null);
+        $tolerance = $this->normalizedText($validated['tolerance'] ?? null);
+        $result = ['min' => $min, 'max' => $max, 'tolerance' => $tolerance, 'baseline' => null, 'baseline_date' => null, 'errors' => []];
+        $missing = fn (string $field): array => [$field => __('procynia.objectives.kpi.validation.target_required')];
+
+        switch ($type) {
+            case KpiTarget::TYPE_AT_LEAST:
+                $result['max'] = null;
+                $result['errors'] = $min === null ? $missing('target_min') : [];
+                break;
+
+            case KpiTarget::TYPE_AT_MOST:
+                $result['min'] = null;
+                $result['errors'] = $max === null ? $missing('target_max') : [];
+                break;
+
+            case KpiTarget::TYPE_RANGE:
+                $result['errors'] = ($min === null ? $missing('target_min') : []) + ($max === null ? $missing('target_max') : []);
+
+                if ($result['errors'] === [] && BigDecimal::of($min)->isEqualTo($max)) {
+                    $result['errors'] = ['target_max' => __('procynia.objectives.kpi.validation.range_equal')];
+                }
+                break;
+
+            case KpiTarget::TYPE_EXACT:
+                $result['max'] = $min;
+                $result['errors'] = $min === null ? $missing('target_min') : [];
+                break;
+
+            case self::TYPE_GROWTH:
+                $baseline = KpiTarget::decimal($this->normalizedText($validated['baseline_value'] ?? null));
+                $date = $validated['baseline_date'] ?? null;
+                $change = KpiTarget::decimal($this->normalizedText($validated['change_percent'] ?? null));
+                $errors = KpiGrowth::errors($unit, $baseline, $date, $change);
+
+                if ($errors !== []) {
+                    $result['errors'] = array_map(fn (string $code): string => __("procynia.objectives.kpi.validation.{$code}"), $errors);
+                    break;
+                }
+
+                $computed = KpiGrowth::target($unit, $baseline, $change);
+                $stored = $kpi?->hasBaseline() ? KpiTarget::decimal($kpi->target_min ?? $kpi->target_max) : null;
+
+                if ($stored !== null
+                    && $kpi->unit === $unit
+                    && KpiTarget::decimal($kpi->baseline_value)->isEqualTo($baseline)
+                    && KpiGrowth::bound($change) === ($kpi->target_min !== null ? 'target_min' : 'target_max')
+                    && KpiGrowth::changePercent($baseline, $stored)->isEqualTo($change)) {
+                    $computed = $stored;
+                }
+
+                $bound = (string) $computed->strippedOfTrailingZeros();
+                $result['min'] = KpiGrowth::bound($change) === 'target_min' ? $bound : null;
+                $result['max'] = KpiGrowth::bound($change) === 'target_max' ? $bound : null;
+                $result['baseline'] = (string) $baseline->strippedOfTrailingZeros();
+                $result['baseline_date'] = $date;
+                break;
+        }
+
+        return $result;
+    }
+
+    /**
      * Once a measurement exists, what its numbers mean — unit, unit label, currency — is fixed, or
-     * the history would change meaning. The target and tolerance stay editable: each measurement
+     * the history would change meaning. Prosentandel and prosentvis endring may still be swapped:
+     * both are written in per cent. The target and tolerance stay editable: each measurement
      * keeps a snapshot of the ones it was registered against. The model refuses the same.
      *
      * @param  array<string, mixed>  $attributes
@@ -340,7 +453,7 @@ class KpiController extends Controller
             fn (string $field): bool => ($attributes[$field] ?? null) !== $kpi->getAttribute($field),
         );
 
-        if ($changed !== [] && $kpi->hasMeasurementHistory()) {
+        if ($changed !== [] && $kpi->unitDefinitionChanges($attributes) && $kpi->hasMeasurementHistory()) {
             throw ValidationException::withMessages(array_fill_keys(
                 array_values($changed),
                 __('procynia.objectives.kpi.validation.unit_locked'),

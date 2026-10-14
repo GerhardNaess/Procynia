@@ -46,7 +46,7 @@ test('a KPI is measured, corrected, withdrawn and judged against today\'s and th
     const kpiSection = page.locator('section', { has: page.getByRole('heading', { name: 'KPI-er', exact: true }) });
     await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
     await page.locator('#kpi-title').fill(kpiTitle);
-    await page.locator('#kpi-unit').selectOption({ label: 'Prosent' });
+    await page.locator('#kpi-unit').selectOption({ label: 'Prosentandel' });
     await page.locator('#kpi-target-min').fill('98');
     await page.locator('#kpi-frequency').selectOption({ label: 'Månedlig' });
     await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();
@@ -71,7 +71,7 @@ test('a KPI is measured, corrected, withdrawn and judged against today\'s and th
     await page.getByRole('button', { name: 'Registrer måling', exact: true }).last().click();
     await expect(page.locator('#measurement-value-error')).toContainText('«1.500» kan bety både');
     await expect(value).toHaveAttribute('aria-invalid', 'true');
-    await expect(page.getByText('Målingen er registrert.')).toHaveCount(0);
+    await expect(page.getByText('Målingen er registrert.', { exact: true })).toHaveCount(0);
     await value.fill('98,7');
     await expect(page.locator('#measurement-value-error')).toHaveCount(0);
     await expect(page.getByTestId('measurement-value-suffix')).toHaveText('%');
@@ -134,12 +134,13 @@ test('a KPI is measured, corrected, withdrawn and judged against today\'s and th
 
     // Endre target: the unit is locked, the target is not. Today's status changes, the history's does not.
     await page.getByRole('button', { name: 'Rediger' }).click();
-    await expect(page.locator('#kpi-unit')).toBeDisabled();
-    await expect(page.getByText('Enheten er låst fordi KPI-en har målinger.')).toBeVisible();
+    // Locked to per cent: only Prosentandel and Prosentvis endring are left to choose between.
+    await expect(page.locator('#kpi-unit option:not([value=""])')).toHaveText(['Prosentandel', 'Prosentvis endring']);
+    await expect(page.getByText('Enheten er låst fordi KPI-en har målinger.', { exact: false })).toBeVisible();
     await page.locator('#kpi-target-min').fill('99,5');
     await page.getByRole('button', { name: 'Lagre', exact: true }).click();
     await expect(page.getByText('KPI-en er oppdatert.')).toBeVisible();
-    await expect(page.getByTestId('kpi-result')).toContainText('≥ 99,5 %');
+    await expect(page.getByTestId('kpi-target-rule')).toHaveText('Målet er nådd når verdien er minst 99,5 %.');
     await expect(latestValue).toHaveText('98,7 %');
     await expect(currentResult).toHaveText('Utenfor mål');
     await expect(rows.nth(1)).toContainText('På mål');
