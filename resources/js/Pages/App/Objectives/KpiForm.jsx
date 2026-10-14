@@ -1,7 +1,9 @@
+import { usePage } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
 import { kpiUnitSuffix } from './kpiUnitSuffix';
 import UnitInput from './UnitInput';
+import { useKpiNumberFields } from './useKpiNumberFields';
 
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-700';
@@ -36,7 +38,9 @@ export function initialKpiData(kpi, options = {}) {
  * leaves that state only by being retired.
  *
  * The number fields show the unit inside them (UnitInput), updated as the unit, label or currency
- * changes; the unit is never part of the value sent.
+ * changes; the unit is never part of the value sent. The form data holds the plain values
+ * («1300000») and the fields show them in the reader's notation («1 300 000»); a value that does
+ * not read, or could mean two things, stops the form before it is sent (useKpiNumberFields).
  *
  * Once the KPI has measurements its unit, unit label and currency are locked (unitLocked): the
  * fields show what they are but cannot change, and the server refuses a change all the same.
@@ -50,6 +54,19 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
     const objectiveOwner = options.objective_owner_name;
     // The unit shown inside each number field, following the unit chosen above as it changes.
     const suffixFor = (field) => kpiUnitSuffix(form.data, tr, form.data[field]);
+    const { locale = 'no' } = usePage().props;
+    const numbers = useKpiNumberFields(form, tr, locale);
+    const numberError = (field, id) => (form.errors[field] ? `${id}-error` : null);
+
+    const submit = (event) => {
+        if (! numbers.checkBeforeSubmit()) {
+            event.preventDefault();
+
+            return;
+        }
+
+        onSubmit(event);
+    };
 
     const changeUnit = (unit) => {
         form.setData((data) => ({
@@ -60,10 +77,10 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
         }));
     };
 
-    const error = (field) => form.errors[field] && <p className="mt-1 text-base text-rose-600">{form.errors[field]}</p>;
+    const error = (field, id = undefined) => form.errors[field] && <p id={id} className="mt-1 text-base text-rose-600">{form.errors[field]}</p>;
 
     return (
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={submit} className="space-y-4">
             <div>
                 <label htmlFor="kpi-title" className={LABEL}>{tr.field_title ?? 'Tittel'}<RequiredMark /></label>
                 <p id="kpi-title-hint" className="text-base text-slate-600">
@@ -177,34 +194,33 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                         <UnitInput
                             id="kpi-target-min"
                             suffix={suffixFor('target_min')}
-                            value={form.data.target_min}
-                            onChange={(event) => form.setData('target_min', event.target.value)}
+                            describedBy={numberError('target_min', 'kpi-target-min')}
+                            {...numbers.bind('target_min')}
                             className="mt-1"
                         />
-                        {error('target_min')}
+                        {error('target_min', 'kpi-target-min-error')}
                     </div>
                     <div>
                         <label htmlFor="kpi-target-max" className={LABEL}>{tr.field_target_max ?? 'Høyst'}</label>
                         <UnitInput
                             id="kpi-target-max"
                             suffix={suffixFor('target_max')}
-                            value={form.data.target_max}
-                            onChange={(event) => form.setData('target_max', event.target.value)}
+                            describedBy={numberError('target_max', 'kpi-target-max')}
+                            {...numbers.bind('target_max')}
                             className="mt-1"
                         />
-                        {error('target_max')}
+                        {error('target_max', 'kpi-target-max-error')}
                     </div>
                     <div>
                         <label htmlFor="kpi-tolerance" className={LABEL}>{tr.field_tolerance ?? 'Slingringsmonn'}</label>
                         <UnitInput
                             id="kpi-tolerance"
                             suffix={suffixFor('tolerance')}
-                            describedBy="kpi-tolerance-hint"
-                            value={form.data.tolerance}
-                            onChange={(event) => form.setData('tolerance', event.target.value)}
+                            describedBy={['kpi-tolerance-hint', numberError('tolerance', 'kpi-tolerance')].filter(Boolean).join(' ')}
+                            {...numbers.bind('tolerance')}
                             className="mt-1"
                         />
-                        {error('tolerance')}
+                        {error('tolerance', 'kpi-tolerance-error')}
                     </div>
                 </div>
                 <p id="kpi-tolerance-hint" className="mt-2 text-base text-slate-500">

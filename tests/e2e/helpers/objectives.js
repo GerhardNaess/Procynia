@@ -91,3 +91,43 @@ export async function seedObjectiveContext(suffix, readerPassword) {
 
     return JSON.parse(match[0]);
 }
+
+/**
+ * A fresh user of the run with English as their language, who reads, edits, measures and deletes
+ * objectives in a fresh area. Returns the area's name, the user's name and email.
+ */
+export async function seedObjectiveEnglishEditor(suffix, password) {
+    const { stdout } = await tinker(`echo json_encode(\\Tests\\Support\\ObjectiveE2EFixture::seedEnglishEditor('${suffix}', '${password}'));`);
+    const match = stdout.match(/\{.*\}/);
+
+    if (! match) {
+        throw new Error(`Seeding failed: ${stdout}`);
+    }
+
+    return JSON.parse(match[0]);
+}
+
+/**
+ * Clicks (or taps) a text field in the middle of one character of the text it shows, the way a
+ * person puts the cursor inside a number: «1 300 000» with index 5 hits the space between «300» and
+ * «000». The character's place is measured with the field's own font.
+ */
+export async function clickOnCharacter(field, index, { tap = false } = {}) {
+    const x = await field.evaluate((input, at) => {
+        const style = getComputedStyle(input);
+        const context = document.createElement('canvas').getContext('2d');
+        context.font = style.font;
+        const left = context.measureText(input.value.slice(0, at)).width;
+        const width = context.measureText(input.value.charAt(at)).width;
+
+        return parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) + left + width / 2 - input.scrollLeft;
+    }, index);
+    const box = await field.boundingBox();
+    const position = { x, y: box.height / 2 };
+
+    if (tap) {
+        await field.tap({ position });
+    } else {
+        await field.click({ position });
+    }
+}

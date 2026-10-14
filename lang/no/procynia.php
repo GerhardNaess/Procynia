@@ -6754,6 +6754,11 @@ return [
                 'count' => 'stk.',
                 'nok' => 'kr',
             ],
+            // A number field whose text does not read, or could mean two things («1.500»).
+            'number_input' => [
+                'ambiguous' => '«:value» kan bety både :thousands og :decimal. Skriv :thousands_plain eller :decimal_plain.',
+                'invalid' => 'Skriv et tall, for eksempel 1 300 000 eller 12,5.',
+            ],
             'frequencies' => [
                 'weekly' => 'Ukentlig',
                 'monthly' => 'Månedlig',

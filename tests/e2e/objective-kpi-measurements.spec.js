@@ -65,9 +65,19 @@ test('a KPI is measured, corrected, withdrawn and judged against today\'s and th
     const periodLabel = (await periodSelect.locator('option:checked').textContent()).replace(/\s*\(foreslått\).*$/, '').trim();
     expect(periodLabel).toMatch(/^[A-ZÆØÅ][a-zæøå]+ \d{4}$/);
     await expect(page.getByTestId('measurement-correction')).toHaveCount(0);
-    await page.locator('#measurement-value').fill('98,7');
+    // A value that could mean two things is not registered: the field asks which was meant.
+    const value = page.locator('#measurement-value');
+    await value.fill('1.500');
+    await page.getByRole('button', { name: 'Registrer måling', exact: true }).last().click();
+    await expect(page.locator('#measurement-value-error')).toContainText('«1.500» kan bety både');
+    await expect(value).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByText('Målingen er registrert.')).toHaveCount(0);
+    await value.fill('98,7');
+    await expect(page.locator('#measurement-value-error')).toHaveCount(0);
     await expect(page.getByTestId('measurement-value-suffix')).toHaveText('%');
-    await expect(page.locator('#measurement-value')).toHaveValue('98,7');
+    await expect(value).toHaveValue('98,7');
+    await value.blur();
+    await expect(value).toHaveValue('98,7');
     await page.screenshot({ path: 'test-results/kpi-measurements-01-register.png', fullPage: true });
     await page.getByRole('button', { name: 'Registrer måling', exact: true }).last().click();
     await expect(page.getByText('Målingen er registrert.')).toBeVisible();

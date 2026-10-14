@@ -6750,6 +6750,11 @@ return [
                 'count' => 'pcs',
                 'nok' => 'NOK',
             ],
+            // A number field whose text does not read, or could mean two things («1,500»).
+            'number_input' => [
+                'ambiguous' => '«:value» could mean :thousands or :decimal. Enter :thousands_plain or :decimal_plain.',
+                'invalid' => 'Enter a number, for example 1,300,000 or 12.5.',
+            ],
             'frequencies' => [
                 'weekly' => 'Weekly',
                 'monthly' => 'Monthly',

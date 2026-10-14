@@ -1,9 +1,19 @@
 import { expect, test } from '@playwright/test';
 import { USER, loginAs } from './helpers/auth.js';
-import { cleanUpObjectiveE2eData, objectiveE2eName, objectiveE2eSuffix, seedObjectiveEditor } from './helpers/objectives.js';
+import { cleanUpObjectiveE2eData, clickOnCharacter, objectiveE2eName, objectiveE2eSuffix, seedObjectiveEditor } from './helpers/objectives.js';
 import { tinker } from './helpers/risk.js';
 
 const suffix = objectiveE2eSuffix();
+
+// Norwegian groups thousands with a non-breaking space, as the server's KpiTargetFormatter does.
+const nb = (text) => text.replaceAll(' ', '\u00A0');
+
+/** A KPI's bounds and tolerance as the database holds them, to prove nothing was rounded or changed. */
+async function storedTargets(title) {
+    const { stdout } = await tinker(`echo json_encode(\\App\\Models\\Kpi::where('title', '${title}')->firstOrFail()->only(['target_min', 'target_max', 'tolerance']));`);
+
+    return JSON.parse(stdout.match(/\{.*\}/)[0]);
+}
 cleanUpObjectiveE2eData(suffix);
 
 // After the per-test cleanup: nothing this run created may be left, KPI history included.
@@ -239,13 +249,131 @@ test('the number fields show the chosen unit inside them, outside the value', as
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({ path: 'test-results/kpis-06-unit-suffix-phone.png', fullPage: true });
 
+    // Leaving the field writes the number the Norwegian way, thousands apart, unit still beside it;
+    // coming back gives the plain number to edit, so nothing moves under the cursor.
+    await min.blur();
+    await expect(min).toHaveValue(nb('1 300 000'));
+    await expect(minSuffix).toHaveText('kr');
+    await min.focus();
+    await expect(min).toHaveValue('1300000');
+    await min.blur();
+    await expect(min).toHaveValue(nb('1 300 000'));
+
+    // A click in the middle of the number puts the cursor between the same digits: on the space
+    // between «1 300» and «000», a «5» goes in right there.
+    await clickOnCharacter(min, 5);
+    await expect(min).toBeFocused();
+    await expect(min).toHaveValue('1300000');
+    await expect.poll(() => min.evaluate((input) => [input.selectionStart, input.selectionEnd])).toEqual([4, 4]);
+    await page.keyboard.type('5');
+    await expect(min).toHaveValue('13005000');
+    await min.blur();
+    await expect(min).toHaveValue(nb('13 005 000'));
+
+    // Deleting a digit in the middle: the cursor after «13 005», Backspace takes the «5».
+    await clickOnCharacter(min, 6);
+    await page.keyboard.press('Backspace');
+    await expect(min).toHaveValue('1300000');
+    await min.blur();
+    await expect(min).toHaveValue(nb('1 300 000'));
+
+    // Selecting the whole value and typing over it replaces it, nothing of the old one left.
+    await clickOnCharacter(min, 2);
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('2500000');
+    await expect(min).toHaveValue('2500000');
+    await min.blur();
+    await expect(min).toHaveValue(nb('2 500 000'));
+
+    // Tab from the field before selects the whole value; typing replaces it.
+    await page.locator('#kpi-currency-code').focus();
+    await page.keyboard.press('Tab');
+    await expect(min).toBeFocused();
+    await expect.poll(() => min.evaluate((input) => [input.value, input.selectionStart, input.selectionEnd])).toEqual(['2500000', 0, 7]);
+    await page.keyboard.type('1300000');
+    await page.keyboard.press('Tab');
+    await expect(min).toHaveValue(nb('1 300 000'));
+    await expect(page.locator('#kpi-target-max')).toBeFocused();
+
+    // Copy gives the number without the formatting, and a paste reads as the number.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await min.focus();
+    await page.keyboard.press('ControlOrMeta+c');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('1300000');
+    await min.blur();
+
+    // A decimal keeps its comma and every decimal that matters — pasted here, thousands and unit
+    // along, from another document.
+    const max = page.locator('#kpi-target-max');
+    await page.evaluate(() => navigator.clipboard.writeText('1 500 000,25 kr'));
+    await max.focus();
+    await page.keyboard.press('ControlOrMeta+v');
+    await expect(max).toHaveValue('1 500 000,25 kr');
+    await max.blur();
+    await expect(max).toHaveValue(nb('1 500 000,25'));
+
+    // A pasted value with the field's own unit reads as the number.
+    const tolerance = page.locator('#kpi-tolerance');
+    await tolerance.fill('25 000 kr');
+    await tolerance.blur();
+    await expect(tolerance).toHaveValue(nb('25 000'));
+
+    // «1.500» could be 1 500 or 1,5: the field says so, and the form is not sent.
+    await tolerance.fill('1.500');
+    await tolerance.blur();
+    await expect(tolerance).toHaveValue('1.500');
+    await expect(page.locator('#kpi-tolerance-error')).toHaveText(`«1.500» kan bety både ${nb('1 500')} og 1,5. Skriv 1500 eller 1,5.`);
+    await expect(tolerance).toHaveAttribute('aria-invalid', 'true');
+    await expect(tolerance).toHaveAccessibleDescription(/kan bety både/);
+    await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await expect(page).not.toHaveURL(/\/kpis\/\d+$/);
+    await expect(page.locator('#kpi-tolerance-error')).toBeVisible();
+
+    // Not a number at all gets an example of one.
+    await tolerance.fill('mye');
+    await tolerance.blur();
+    await expect(page.locator('#kpi-tolerance-error')).toHaveText('Skriv et tall, for eksempel 1 300 000 eller 12,5.');
+
+    // Written plainly it reads, and the message goes.
+    await tolerance.fill('1500');
+    await expect(page.locator('#kpi-tolerance-error')).toHaveCount(0);
+    await expect(tolerance).not.toHaveAttribute('aria-invalid', 'true');
+    await tolerance.blur();
+    await expect(tolerance).toHaveValue(nb('1 500'));
+
     // What was typed is what is saved: the number alone, read back in the KPI's unit.
     await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();
     await page.waitForURL(/\/app\/objectives\/\d+\/kpis\/\d+$/);
-    await expect(page.getByTestId('kpi-result')).toContainText('≥ NOK 1 300 000');
+    await expect(page.getByTestId('kpi-result')).toContainText('NOK 1 300 000–1 500 000,25');
+    const stored = await storedTargets(kpiTitle);
+    expect(stored).toEqual({ target_min: '1300000.0000', target_max: '1500000.2500', tolerance: '1500.0000' });
 
-    // Editing shows the stored number with the unit beside it.
+    // Editing shows the stored numbers formatted with the unit beside them, and saving without
+    // touching them stores exactly the same.
     await page.getByRole('button', { name: 'Rediger' }).click();
     await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('kr');
-    await expect(page.locator('#kpi-target-min')).toHaveValue('1300000');
+    await expect(page.locator('#kpi-target-min')).toHaveValue(nb('1 300 000'));
+    await expect(page.locator('#kpi-target-max')).toHaveValue(nb('1 500 000,25'));
+    await expect(page.locator('#kpi-tolerance')).toHaveValue(nb('1 500'));
+    await page.locator('#kpi-target-max').focus();
+    await expect(page.locator('#kpi-target-max')).toHaveValue('1500000,25');
+    await page.locator('#kpi-target-max').blur();
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await expect(page.getByText('KPI-en er oppdatert.')).toBeVisible();
+    expect(await storedTargets(kpiTitle)).toEqual(stored);
+
+    // Editing a stored value in the middle: «1 500 000,25» → a «9» after «1 5», saved exactly.
+    await page.getByRole('button', { name: 'Rediger' }).click();
+    const storedMax = page.locator('#kpi-target-max');
+    await expect(storedMax).toHaveValue(nb('1 500 000,25'));
+    await clickOnCharacter(storedMax, 1);
+    await expect.poll(() => storedMax.evaluate((input) => input.selectionStart)).toBe(1);
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.type('9');
+    await expect(storedMax).toHaveValue('15900000,25');
+    await storedMax.blur();
+    await expect(storedMax).toHaveValue(nb('15 900 000,25'));
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await expect(page.getByText('KPI-en er oppdatert.')).toBeVisible();
+    expect(await storedTargets(kpiTitle)).toEqual({ ...stored, target_max: '15900000.2500' });
 });

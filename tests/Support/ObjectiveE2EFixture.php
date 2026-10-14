@@ -9,6 +9,7 @@ use App\Models\KpiActivity;
 use App\Models\KpiMeasurement;
 use App\Models\KpiProcess;
 use App\Models\KpiStatusChange;
+use App\Models\Language;
 use App\Models\Objective;
 use App\Models\ObjectiveStatusChange;
 use App\Models\User;
@@ -209,6 +210,47 @@ class ObjectiveE2EFixture
             $reader->customerRoles()->attach($readerRole->id, ['customer_id' => $customerId]);
 
             return ['area_name' => $area->name, 'reader_email' => $reader->email];
+        });
+    }
+
+    /**
+     * For the English number-format spec: one area and a fresh user of the run who reads, edits,
+     * measures and deletes objectives there and has English as their language — so the shared E2E
+     * users' language is never touched.
+     *
+     * @return array{area_name: string, user_name: string, email: string}
+     */
+    public static function seedEnglishEditor(string $suffix, string $password): array
+    {
+        $customerId = self::customerId();
+        $name = fn (string $label): string => self::PREFIX.' '.strtoupper($suffix).' '.$label;
+        $englishId = Language::query()->where('code', 'en')->value('id');
+
+        return DB::transaction(function () use ($customerId, $name, $suffix, $password, $englishId): array {
+            $area = BusinessArea::query()->create(['customer_id' => $customerId, 'name' => $name('English area')]);
+
+            $role = CustomerRole::query()->create(['customer_id' => $customerId, 'name' => $name('English editor'), 'is_active' => true]);
+            $role->syncPermissions([
+                CustomerPermissionCatalog::OBJECTIVE_VIEW,
+                CustomerPermissionCatalog::OBJECTIVE_EDIT,
+                CustomerPermissionCatalog::OBJECTIVE_MEASURE,
+                CustomerPermissionCatalog::OBJECTIVE_DELETE,
+            ]);
+            $role->syncBusinessAreas(false, [$area->id]);
+
+            $user = User::query()->create([
+                'name' => $name('English user'),
+                'email' => 'e2e.mal.'.strtolower($suffix).'.english@procynia.test',
+                'password' => bcrypt($password),
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $customerId,
+                'preferred_language_id' => $englishId,
+                'is_active' => true,
+            ]);
+            $user->customerRoles()->attach($role->id, ['customer_id' => $customerId]);
+
+            return ['area_name' => $area->name, 'user_name' => $user->name, 'email' => $user->email];
         });
     }
 
