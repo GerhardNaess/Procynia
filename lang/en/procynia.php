@@ -926,6 +926,12 @@ return [
         'previous' => 'Previous',
         'next' => 'Next',
     ],
+    // Shared accessibility strings: names that only assistive technology hears, and labels of the
+    // shared components (Components/App) that every page uses. See docs/wcag-accessibility-plan.md.
+    'a11y' => [
+        'help_eyebrow' => 'Help',
+        'help_close' => 'Close help panel',
+    ],
     'governance' => [
         'page_title' => 'Governance',
         'intro' => 'Governance brings the organisation\'s processes, risks, objectives, improvement work and requirements together in one place. Choose the area you want to work in.',

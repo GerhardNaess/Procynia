@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useTranslations } from '../../Support/useTranslations';
+import { focusElement, firstConnected } from '../../Support/focusManagement';
 
 /**
  * Slide-in help panel. Not a focus-trapping modal — the page remains interactive.
  * Closes on Escape, backdrop click, or the × button.
+ *
+ * Focus (A11Y-104): opening moves focus to the panel, so a keyboard or screen-reader user lands on
+ * the help they asked for instead of having to Tab through the page to reach it; closing returns
+ * focus to `returnFocusRef` (the Hjelp button).
  *
  * @param {string}            id        HTML id for aria-controls on the paired button.
  * @param {string}            title     Panel heading.
@@ -11,9 +17,22 @@ import { useEffect, useState } from 'react';
  * @param {Array}             sections  Array of { title?, items: [{ title?, text }] }.
  * @param {boolean}           isOpen
  * @param {function}          onClose
+ * @param {object}            [returnFocusRef] Element to focus when the panel closes.
  */
-export default function PageHelpPanel({ id, title, introTitle, intro, sections = [], isOpen, onClose }) {
+export default function PageHelpPanel({ id, title, introTitle, intro, sections = [], isOpen, onClose, returnFocusRef }) {
     const [topOffset, setTopOffset] = useState(0);
+    const panelRef = useRef(null);
+    const a11y = useTranslations().a11y ?? {};
+
+    useEffect(() => {
+        if (!isOpen) return undefined;
+
+        focusElement(panelRef.current, { preventScroll: true });
+
+        return () => {
+            focusElement(firstConnected([returnFocusRef?.current]));
+        };
+    }, [isOpen, returnFocusRef]);
 
     useEffect(() => {
         if (!isOpen) return undefined;
@@ -48,16 +67,18 @@ export default function PageHelpPanel({ id, title, introTitle, intro, sections =
             />
 
             <div
+                ref={panelRef}
                 id={id}
                 role="dialog"
                 aria-label={title}
+                tabIndex={-1}
                 style={{ top: topOffset }}
                 className="fixed right-0 bottom-0 z-50 flex w-full max-w-sm flex-col overflow-y-auto bg-white shadow-[0_0_40px_rgba(15,23,42,0.15)] sm:max-w-md"
             >
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div>
                         <div className="text-base font-semibold uppercase tracking-[0.14em] text-slate-600">
-                            Hjelp
+                            {a11y.help_eyebrow ?? 'Hjelp'}
                         </div>
                         <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-950">
                             {title}
@@ -65,9 +86,9 @@ export default function PageHelpPanel({ id, title, introTitle, intro, sections =
                     </div>
                     <button
                         type="button"
-                        aria-label="Lukk hjelpepanel"
+                        aria-label={a11y.help_close ?? 'Lukk hjelpepanel'}
                         onClick={onClose}
-                        className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                        className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
                     >
                         <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
                             <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />

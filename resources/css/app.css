@@ -15,6 +15,50 @@
         'Noto Color Emoji';
 }
 
+/*
+ * Keyboard focus (WCAG 2.4.7 Focus Visible, AA; indicator contrast per 1.4.11 Non-text Contrast, AA).
+ * See docs/wcag-accessibility-plan.md, A11Y-010.
+ *
+ * One indicator for the whole app, the one actionStyles.js already gave the primary button: a 2 px
+ * violet-600 outline (about 5.6:1 on white). On text fields it is drawn just inside the field's edge
+ * (offset -2px), so a field inside a clipped or rounded wrapper still shows it, and it reads as the
+ * field's border turning violet. Everywhere else it sits 2 px outside the control.
+ *
+ * This is the AA requirement done well. It is not a claim to 2.4.13 Focus Appearance, which is AAA.
+ */
+@layer base {
+    :focus-visible {
+        outline: 2px solid var(--color-violet-600, #7f22fe);
+        outline-offset: 2px;
+    }
+
+    :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), textarea, select):focus-visible {
+        outline-offset: -2px;
+    }
+}
+
+/*
+ * Deliberately outside @layer: un-layered rules win over every Tailwind layer, utilities included.
+ *
+ * About 240 controls set `outline-none` / `focus:outline-none` / `focus-visible:outline-none` and draw
+ * their own focus state instead. Each one was checked (Fase 1): all but three replace the outline with
+ * something under 3:1 — a violet-100/200/300 ring, or a border going from slate-200 to slate-400 or
+ * violet-300 — and in Windows high-contrast mode, where box-shadow rings are dropped, with nothing at
+ * all. Rather than editing 240 class strings across every module, the outline is restored here for
+ * keyboard focus only; the existing ring or border stays as an extra cue, and mouse focus on buttons
+ * is unchanged (`:focus-visible` does not match a mouse click on a button).
+ *
+ * An element that genuinely draws its own compliant indicator opts out with data-focus-indicator="own".
+ */
+:is(.outline-none, [class~='focus:outline-none'], [class~='focus-visible:outline-none']):not([data-focus-indicator='own']):focus-visible {
+    outline: 2px solid var(--color-violet-600, #7f22fe);
+    outline-offset: 2px;
+}
+
+:is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), textarea, select):is(.outline-none, [class~='focus:outline-none'], [class~='focus-visible:outline-none']):not([data-focus-indicator='own']):focus-visible {
+    outline-offset: -2px;
+}
+
 @layer components {
     .wiki-article {
         font-size: 1rem;

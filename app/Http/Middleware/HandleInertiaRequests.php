@@ -123,6 +123,9 @@ class HandleInertiaRequests extends Middleware
                     'history' => __('procynia.navigation.history'),
                     'breadcrumbs' => __('procynia.navigation.breadcrumbs'),
                 ],
+                // Accessible names and labels of the shared components, shared as a block: every
+                // page renders them (help panel, file picker, dialogs).
+                'a11y' => __('procynia.a11y'),
                 'home' => __('procynia.home'),
                 'governance' => __('procynia.governance'),
                 'dashboard' => __('procynia.dashboard'),

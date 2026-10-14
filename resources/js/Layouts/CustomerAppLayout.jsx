@@ -1,5 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ActionDialog from '../Components/App/ActionDialog';
 import NotificationBell from '../Components/App/NotificationBell';
 import ModuleSidebar from '../Components/App/ModuleSidebar';
@@ -7,9 +8,16 @@ import Breadcrumbs from '../Components/App/Breadcrumbs';
 import { resolveNavigation } from '../Support/appNavigation';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
+import { liveRegion } from '../Support/announcer';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
+}
+
+function portalToLiveRegion(element) {
+    const region = liveRegion('toast');
+
+    return region ? createPortal(element, region) : element;
 }
 
 function emptyNotificationsState() {
@@ -624,13 +632,17 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                         </div>
                     ) : null}
 
-                    {flash?.success && showSuccess ? (
+                    {/* The success toast is drawn into the app-wide live region (Support/announcer.js),
+                        which outlives this layout: a toast mounted here would be new on every page,
+                        and a screen reader does not read a polite region that arrives with its text. */}
+                    {flash?.success && showSuccess ? portalToLiveRegion(
                         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-base text-emerald-800 shadow-lg">
                             {flash.success}
-                        </div>
+                        </div>,
                     ) : null}
+                    {/* role="alert": a rejected action is announced the moment the message appears. */}
                     {flash?.error ? (
-                        <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800 shadow-sm">
+                        <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800 shadow-sm">
                             {flash.error}
                         </div>
                     ) : null}

@@ -930,6 +930,12 @@ return [
         'previous' => 'Forrige',
         'next' => 'Neste',
     ],
+    // Shared accessibility strings: names that only assistive technology hears, and labels of the
+    // shared components (Components/App) that every page uses. See docs/wcag-accessibility-plan.md.
+    'a11y' => [
+        'help_eyebrow' => 'Hjelp',
+        'help_close' => 'Lukk hjelpepanel',
+    ],
     'governance' => [
         'page_title' => 'Styring',
         'intro' => 'Styring samler virksomhetens prosesser, risiko, mål, forbedringsarbeid og krav på ett sted. Velg området du vil arbeide med.',

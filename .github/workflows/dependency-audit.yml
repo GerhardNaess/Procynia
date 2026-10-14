@@ -8,8 +8,9 @@ name: Dependency audit
 # unnoticed until someone runs an audit by hand.
 #
 # Deliberately narrow: no database, no Redis, no frontend build, no application boot.
-# The gate needs only the two lockfiles plus the frontend unit tests, so it stays fast and
-# cannot fail for reasons unrelated to the code and its dependencies.
+# The gate needs only the two lockfiles plus the frontend unit tests and the accessibility
+# lint, so it stays fast and cannot fail for reasons unrelated to the code and its
+# dependencies.
 #
 # The npm job also runs the frontend unit tests. They need nothing the job does not already
 # have — the same npm ci, no services, about a second of runtime — so giving them their own
@@ -94,6 +95,13 @@ jobs:
       # produces a warning is a frontend regression nobody acts on.
       - name: Frontend unit tests
         run: npm run test:unit
+
+      # Accessibility lint (eslint-plugin-jsx-a11y) for the files the WCAG plan has made clean —
+      # docs/wcag-accessibility-plan.md. Same reasoning as the unit tests: no services, the same
+      # install, seconds of runtime. Coverage is the file list in eslint.config.js, which grows phase
+      # by phase; a covered file that regresses fails the job.
+      - name: Accessibility lint
+        run: npm run lint:a11y
 
       - name: npm audit
         run: npm audit
