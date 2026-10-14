@@ -2,6 +2,8 @@ import { useForm } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
 import { existingValueFor } from './kpiStatus';
+import { kpiUnitSuffix } from './kpiUnitSuffix';
+import UnitInput from './UnitInput';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -11,6 +13,8 @@ const LABEL = 'block text-base font-semibold text-slate-700';
  * Registrer måling. The period is chosen, never typed: an ended calendar period for a KPI with a
  * frequency (the suggested one preselected), a day up to today for one without. The target is not
  * a field — the server copies the KPI's målverdi onto the measurement.
+ *
+ * The value field shows the KPI's unit inside it (UnitInput); only the number is sent.
  *
  * When the chosen period already has a value, the form says this is a correction and the comment
  * becomes required. The server checks the same again.
@@ -81,16 +85,15 @@ export function KpiMeasurementForm({ baseUrl, kpi, options, onDone, tr }) {
 
                     <div>
                         <label htmlFor="measurement-value" className={LABEL}>{tr.field_value ?? 'Verdi'}<RequiredMark /></label>
-                        <input
+                        <UnitInput
                             id="measurement-value"
-                            type="text"
-                            inputMode="decimal"
+                            suffix={kpiUnitSuffix(kpi, tr, form.data.value)}
                             required
                             aria-required="true"
-                            aria-describedby="measurement-value-hint"
+                            describedBy="measurement-value-hint"
                             value={form.data.value}
                             onChange={(event) => form.setData('value', event.target.value)}
-                            className={`mt-1 ${INPUT}`}
+                            className="mt-1"
                         />
                         <p id="measurement-value-hint" className="mt-1 text-base text-slate-500">
                             {kpi.unit_display} · {tr.detail_target ?? 'Målverdi'} {kpi.target_display}

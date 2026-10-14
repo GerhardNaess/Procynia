@@ -6749,6 +6749,11 @@ return [
                 'hours' => ['one' => 'time', 'other' => 'timer'],
                 'days' => ['one' => 'dag', 'other' => 'dager'],
             ],
+            // The unit inside a number field, when the unit itself does not give one.
+            'input_suffix' => [
+                'count' => 'stk.',
+                'nok' => 'kr',
+            ],
             'frequencies' => [
                 'weekly' => 'Ukentlig',
                 'monthly' => 'Månedlig',

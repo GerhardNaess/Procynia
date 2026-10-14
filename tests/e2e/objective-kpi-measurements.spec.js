@@ -66,6 +66,8 @@ test('a KPI is measured, corrected, withdrawn and judged against today\'s and th
     expect(periodLabel).toMatch(/^[A-ZÆØÅ][a-zæøå]+ \d{4}$/);
     await expect(page.getByTestId('measurement-correction')).toHaveCount(0);
     await page.locator('#measurement-value').fill('98,7');
+    await expect(page.getByTestId('measurement-value-suffix')).toHaveText('%');
+    await expect(page.locator('#measurement-value')).toHaveValue('98,7');
     await page.screenshot({ path: 'test-results/kpi-measurements-01-register.png', fullPage: true });
     await page.getByRole('button', { name: 'Registrer måling', exact: true }).last().click();
     await expect(page.getByText('Målingen er registrert.')).toBeVisible();

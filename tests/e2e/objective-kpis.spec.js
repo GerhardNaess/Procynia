@@ -55,6 +55,10 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await expect(page.locator('#kpi-unit-label')).toHaveCount(0);
     await page.locator('#kpi-target-min').fill('99,5');
     await page.locator('#kpi-tolerance').fill('1');
+    // The unit sits inside each number field, outside the value.
+    await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('%');
+    await expect(page.getByTestId('kpi-tolerance-suffix')).toHaveText('%');
+    await expect(page.locator('#kpi-target-min')).toHaveValue('99,5');
     await page.locator('#kpi-frequency').selectOption({ label: 'Månedlig' });
     await expect(page.locator('#kpi-grace-days')).toHaveValue('7');
     await expect(page.locator('#kpi-owner')).toHaveValue('');
@@ -96,8 +100,13 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     // Rediger: a count with a label and an upper bound, own owner.
     await page.getByRole('button', { name: 'Rediger' }).click();
     await page.locator('#kpi-title').fill(editedKpiTitle);
+    // Editing starts with the stored unit inside the fields, and follows a change of unit at once.
+    await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('%');
+    await expect(page.locator('#kpi-target-min')).toHaveValue(/^99[.,]5$/);
     await page.locator('#kpi-unit').selectOption({ label: 'Antall' });
+    await expect(page.getByTestId('kpi-target-max-suffix')).toHaveText('stk.');
     await page.locator('#kpi-unit-label').fill('hendelser');
+    await expect(page.getByTestId('kpi-target-max-suffix')).toHaveText('hendelser');
     await page.locator('#kpi-target-min').fill('');
     await page.locator('#kpi-target-max').fill('3');
     await page.locator('#kpi-tolerance').fill('');
@@ -151,4 +160,92 @@ test('a KPI is created under an objective, edited, retired, reopened and deleted
     await page.getByRole('button', { name: 'Slett mål' }).click();
     await page.waitForURL(/\/app\/objectives$/);
     await expect(page.getByText('Målet er slettet.')).toBeVisible();
+});
+
+/**
+ * The unit inside the number fields: it follows the unit as it is chosen, is never part of the
+ * value (what is typed is what is saved), is part of the field's accessible description, takes a
+ * keyboard user straight through and never overlaps the number on a phone.
+ */
+test('the number fields show the chosen unit inside them, outside the value', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const { area_name: areaName } = await seedObjectiveEditor(suffix);
+    const objectiveTitle = objectiveE2eName(suffix, 'Lønnsom vekst');
+    const kpiTitle = objectiveE2eName(suffix, 'Fri kontantstrøm');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await loginAs(page, USER.email, USER.password);
+
+    await page.goto('/app/objectives');
+    await page.getByRole('button', { name: 'Nytt mål' }).click();
+    await page.locator('#objective-title').fill(objectiveTitle);
+    await page.locator('#objective-area').selectOption({ label: areaName });
+    await page.locator('#objective-owner').selectOption({ label: 'E2E User' });
+    await page.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await page.waitForURL(/\/app\/objectives\/\d+$/);
+
+    const kpiSection = page.locator('section', { has: page.getByRole('heading', { name: 'KPI-er', exact: true }) });
+    await kpiSection.getByRole('button', { name: 'Ny KPI' }).click();
+    await page.locator('#kpi-title').fill(kpiTitle);
+
+    const min = page.locator('#kpi-target-min');
+    const minSuffix = page.getByTestId('kpi-target-min-suffix');
+
+    // No unit chosen: no suffix.
+    await expect(minSuffix).toHaveCount(0);
+
+    // Each unit, at once.
+    const unit = page.locator('#kpi-unit');
+    await unit.selectOption({ label: 'Prosent' });
+    await expect(minSuffix).toHaveText('%');
+    await unit.selectOption({ label: 'Timer' });
+    await expect(minSuffix).toHaveText('timer');
+    await min.fill('1');
+    await expect(minSuffix).toHaveText('time');
+    await unit.selectOption({ label: 'Dager' });
+    await expect(minSuffix).toHaveText('dag');
+    await unit.selectOption({ label: 'Antall' });
+    await expect(minSuffix).toHaveText('stk.');
+    await unit.selectOption({ label: 'Tall' });
+    await expect(minSuffix).toHaveCount(0);
+    await unit.selectOption({ label: 'Valuta' });
+    await expect(page.locator('#kpi-currency-code')).toHaveValue('NOK');
+    await expect(minSuffix).toHaveText('kr');
+    await page.locator('#kpi-currency-code').fill('EUR');
+    await expect(minSuffix).toHaveText('EUR');
+    await page.locator('#kpi-currency-code').fill('NOK');
+    await expect(minSuffix).toHaveText('kr');
+
+    // A keyboard user tabs into the field, types, selects and replaces; the unit is never in the value.
+    await page.locator('#kpi-currency-code').focus();
+    await page.keyboard.press('Tab');
+    await expect(min).toBeFocused();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('1 300 000');
+    await expect(min).toHaveValue('1 300 000');
+    await expect(min).toHaveAccessibleDescription(/kr/);
+    await expect(page.getByTestId('kpi-tolerance-suffix')).toHaveText('kr');
+
+    // A click on the unit puts the cursor in the field.
+    await page.getByTestId('kpi-tolerance-suffix').click();
+    await expect(page.locator('#kpi-tolerance')).toBeFocused();
+
+    // On a phone the number and the unit sit side by side, never on top of each other, and the
+    // page does not scroll sideways.
+    const inputBox = await min.boundingBox();
+    const suffixBox = await minSuffix.boundingBox();
+    expect(inputBox.x + inputBox.width).toBeLessThanOrEqual(suffixBox.x);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: 'test-results/kpis-06-unit-suffix-phone.png', fullPage: true });
+
+    // What was typed is what is saved: the number alone, read back in the KPI's unit.
+    await kpiSection.getByRole('button', { name: 'Lagre', exact: true }).click();
+    await page.waitForURL(/\/app\/objectives\/\d+\/kpis\/\d+$/);
+    await expect(page.getByTestId('kpi-result')).toContainText('≥ NOK 1 300 000');
+
+    // Editing shows the stored number with the unit beside it.
+    await page.getByRole('button', { name: 'Rediger' }).click();
+    await expect(page.getByTestId('kpi-target-min-suffix')).toHaveText('kr');
+    await expect(page.locator('#kpi-target-min')).toHaveValue('1300000');
 });

@@ -6745,6 +6745,11 @@ return [
                 'hours' => ['one' => 'hour', 'other' => 'hours'],
                 'days' => ['one' => 'day', 'other' => 'days'],
             ],
+            // The unit inside a number field, when the unit itself does not give one.
+            'input_suffix' => [
+                'count' => 'pcs',
+                'nok' => 'NOK',
+            ],
             'frequencies' => [
                 'weekly' => 'Weekly',
                 'monthly' => 'Monthly',

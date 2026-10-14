@@ -1,5 +1,7 @@
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import RequiredMark from '../Risk/RequiredMark';
+import { kpiUnitSuffix } from './kpiUnitSuffix';
+import UnitInput from './UnitInput';
 
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-700';
@@ -33,6 +35,9 @@ export function initialKpiData(kpi, options = {}) {
  * and owner are checked again on save. There is no status field: a KPI is created active and
  * leaves that state only by being retired.
  *
+ * The number fields show the unit inside them (UnitInput), updated as the unit, label or currency
+ * changes; the unit is never part of the value sent.
+ *
  * Once the KPI has measurements its unit, unit label and currency are locked (unitLocked): the
  * fields show what they are but cannot change, and the server refuses a change all the same.
  */
@@ -43,6 +48,8 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
     const showsLabel = labelledUnits.includes(form.data.unit);
     const showsCurrency = form.data.unit === 'currency';
     const objectiveOwner = options.objective_owner_name;
+    // The unit shown inside each number field, following the unit chosen above as it changes.
+    const suffixFor = (field) => kpiUnitSuffix(form.data, tr, form.data[field]);
 
     const changeUnit = (unit) => {
         form.setData((data) => ({
@@ -167,38 +174,35 @@ export default function KpiForm({ form, onSubmit, onCancel, options = {}, tr, un
                 <div className="mt-3 grid gap-4 md:grid-cols-3">
                     <div>
                         <label htmlFor="kpi-target-min" className={LABEL}>{tr.field_target_min ?? 'Minst'}</label>
-                        <input
+                        <UnitInput
                             id="kpi-target-min"
-                            type="text"
-                            inputMode="decimal"
+                            suffix={suffixFor('target_min')}
                             value={form.data.target_min}
                             onChange={(event) => form.setData('target_min', event.target.value)}
-                            className={`mt-1 ${INPUT}`}
+                            className="mt-1"
                         />
                         {error('target_min')}
                     </div>
                     <div>
                         <label htmlFor="kpi-target-max" className={LABEL}>{tr.field_target_max ?? 'Høyst'}</label>
-                        <input
+                        <UnitInput
                             id="kpi-target-max"
-                            type="text"
-                            inputMode="decimal"
+                            suffix={suffixFor('target_max')}
                             value={form.data.target_max}
                             onChange={(event) => form.setData('target_max', event.target.value)}
-                            className={`mt-1 ${INPUT}`}
+                            className="mt-1"
                         />
                         {error('target_max')}
                     </div>
                     <div>
                         <label htmlFor="kpi-tolerance" className={LABEL}>{tr.field_tolerance ?? 'Slingringsmonn'}</label>
-                        <input
+                        <UnitInput
                             id="kpi-tolerance"
-                            type="text"
-                            inputMode="decimal"
-                            aria-describedby="kpi-tolerance-hint"
+                            suffix={suffixFor('tolerance')}
+                            describedBy="kpi-tolerance-hint"
                             value={form.data.tolerance}
                             onChange={(event) => form.setData('tolerance', event.target.value)}
-                            className={`mt-1 ${INPUT}`}
+                            className="mt-1"
                         />
                         {error('tolerance')}
                     </div>
