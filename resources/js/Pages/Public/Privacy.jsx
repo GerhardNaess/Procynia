@@ -20,7 +20,7 @@ function BackToRegistration() {
                 </svg>
                 Tilbake til registrering
             </button>
-            <span className="text-slate-300">|</span>
+            <span aria-hidden="true" className="text-slate-400">|</span>
             <span className="text-sm text-blue-600">Les gjerne ferdig og trykk tilbake for å fortsette.</span>
         </div>
     );
@@ -38,7 +38,7 @@ function Section({ id, num, title, children }) {
     return (
         <section id={id} className="scroll-mt-24 border-t border-slate-100 pt-10">
             <div className="mb-5 flex items-baseline gap-3">
-                <span className="shrink-0 text-xs font-semibold uppercase tracking-widest text-slate-400">§{num}</span>
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-widest text-slate-600">§{num}</span>
                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">{title}</h2>
             </div>
             <div className="space-y-4 text-sm leading-7 text-slate-600">{children}</div>
@@ -50,14 +50,14 @@ function TOC({ items }) {
     return (
         <aside className="hidden lg:block">
             <div className="sticky top-24 space-y-1">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">Innhold</p>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">Innhold</p>
                 {items.map((item) => (
                     <a
                         key={item.id}
                         href={`#${item.id}`}
                         className="block rounded-lg px-3 py-1.5 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
                     >
-                        <span className="mr-2 text-xs text-slate-400">§{item.num}</span>
+                        <span className="mr-2 text-xs text-slate-600">§{item.num}</span>
                         {item.short}
                     </a>
                 ))}
@@ -92,7 +92,7 @@ export default function Privacy() {
                 <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-500">
                     Denne erklæringen beskriver hvordan Procynia AS behandler personopplysninger i tråd med EUs personvernforordning (GDPR) og norsk personopplysningslov.
                 </p>
-                <p className="mt-2 text-sm text-slate-400">Sist oppdatert: 24. mai 2026 · Versjon 0.1</p>
+                <p className="mt-2 text-sm text-slate-600">Sist oppdatert: 24. mai 2026 · Versjon 0.1</p>
             </div>
 
             {/* Draft warning */}
@@ -118,7 +118,7 @@ export default function Privacy() {
                         </div>
                         <p>
                             Spørsmål om behandling av personopplysninger kan rettes til{' '}
-                            <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                            <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                         </p>
                     </Section>
 
@@ -192,7 +192,7 @@ export default function Privacy() {
                                         <tr key={purpose}>
                                             <td className="py-2.5 pr-6 text-slate-700">{purpose}</td>
                                             <td className="py-2.5 pr-6 text-slate-500">{basis}</td>
-                                            <td className="py-2.5 font-mono text-xs text-slate-400">{art}</td>
+                                            <td className="py-2.5 font-mono text-xs text-slate-600">{art}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -236,7 +236,7 @@ export default function Privacy() {
                         </p>
                         <p>
                             Du kan få informasjon om hvilke overføringer som gjelder og hvilke beskyttelsesmekanismer som er brukt ved å kontakte oss på{' '}
-                            <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                            <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                         </p>
                     </Section>
 
@@ -254,7 +254,7 @@ export default function Privacy() {
                     <Section id="sikkerhet" num={9} title="Sikkerhetstiltak">
                         <p>
                             Procynia bruker tekniske og organisatoriske tiltak for å beskytte personopplysningene dine. Se{' '}
-                            <Link href="/sikkerhet" className="text-blue-600 hover:underline">sikkerhetssiden</Link>{' '}
+                            <Link href="/sikkerhet" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">sikkerhetssiden</Link>{' '}
                             for en detaljert oversikt over våre sikkerhetstiltak.
                         </p>
                         <p>
@@ -286,7 +286,7 @@ export default function Privacy() {
                         </div>
                         <p>
                             Send forespørsler om rettighetsutøvelse til{' '}
-                            <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                            <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                             Vi besvarer henvendelser innen 30 dager.
                         </p>
                     </Section>
@@ -313,12 +313,12 @@ export default function Privacy() {
                         </p>
                         <p>
                             Gjeldende versjon er alltid tilgjengelig på{' '}
-                            <Link href="/personvern" className="text-blue-600 hover:underline">procynia.no/personvern</Link>.
+                            <Link href="/personvern" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">procynia.no/personvern</Link>.
                             Dato for siste endring fremgår øverst i dokumentet.
                         </p>
                         <p>
                             Spørsmål om denne erklæringen rettes til{' '}
-                            <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                            <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                         </p>
                     </Section>
                 </div>

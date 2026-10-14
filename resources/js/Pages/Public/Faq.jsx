@@ -39,7 +39,7 @@ function FaqItem({ question, children }) {
 function FaqGroup({ title, children }) {
     return (
         <div className="mb-12">
-            <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">{title}</h2>
+            <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-600">{title}</h2>
             <div className="rounded-2xl border border-slate-100 bg-white px-6 shadow-sm">
                 {children}
             </div>
@@ -56,7 +56,7 @@ export default function Faq() {
                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Ofte stilte spørsmål</h1>
                 <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-slate-500">
                     Finner du ikke svaret? Send oss en e-post på{' '}
-                    <a href="mailto:hei@procynia.no" className="text-blue-600 hover:underline">hei@procynia.no</a>.
+                    <a href="mailto:hei@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">hei@procynia.no</a>.
                 </p>
             </div>
 
@@ -76,14 +76,14 @@ export default function Faq() {
                     <FaqItem question="Hvordan oppretter jeg konto?">
                         <p>
                             Gå til{' '}
-                            <Link href="/registrer" className="text-blue-600 hover:underline">procynia.no/registrer</Link>{' '}
+                            <Link href="/registrer" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">procynia.no/registrer</Link>{' '}
                             og fyll inn informasjon om din bedrift. Kontoen er gratis å opprette – du velger abonnement etter at kontoen er etablert. Det kreves ingen kredittkort for registrering.
                         </p>
                     </FaqItem>
                     <FaqItem question="Kan jeg prøve Procynia gratis?">
                         <p>
                             Ja. Du kan opprette konto og utforske plattformen uten å binde deg til et abonnement. Abonnement velges etter kontoetablering. Ta kontakt på{' '}
-                            <a href="mailto:hei@procynia.no" className="text-blue-600 hover:underline">hei@procynia.no</a>{' '}
+                            <a href="mailto:hei@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">hei@procynia.no</a>{' '}
                             for mer informasjon om tilgjengelige planer.
                         </p>
                     </FaqItem>
@@ -93,7 +93,7 @@ export default function Faq() {
                     <FaqItem question="Hva koster Procynia?">
                         <p>
                             Vi tilbyr ulike abonnementsplaner tilpasset teamstørrelse og bruksbehov. Se{' '}
-                            <Link href="/priser" className="text-blue-600 hover:underline">prissiden</Link>{' '}
+                            <Link href="/priser" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">prissiden</Link>{' '}
                             for oppdatert prisinformasjon.
                         </p>
                     </FaqItem>
@@ -105,7 +105,7 @@ export default function Faq() {
                     <FaqItem question="Tilbyr dere rabatt for større team eller offentlige virksomheter?">
                         <p>
                             Ja, vi tilbyr volumrabatter og tilpassede avtaler for større organisasjoner. Kontakt oss på{' '}
-                            <a href="mailto:salg@procynia.no" className="text-blue-600 hover:underline">salg@procynia.no</a>{' '}
+                            <a href="mailto:salg@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">salg@procynia.no</a>{' '}
                             for et tilbud.
                         </p>
                     </FaqItem>
@@ -136,9 +136,9 @@ export default function Faq() {
                     <FaqItem question="Brukes innholdet mitt til å trene AI-modeller?">
                         <p>
                             Nei. Innholdet du laster opp brukes kun til å levere tjenesten til deg. Vi deler ikke kundedata med tredjepart for opplæringsformål. Se{' '}
-                            <Link href="/personvern" className="text-blue-600 hover:underline">personvernerklæringen</Link>{' '}
+                            <Link href="/personvern" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvernerklæringen</Link>{' '}
                             og{' '}
-                            <Link href="/betingelser" className="text-blue-600 hover:underline">brukervilkårene</Link>{' '}
+                            <Link href="/betingelser" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">brukervilkårene</Link>{' '}
                             for detaljer.
                         </p>
                     </FaqItem>
@@ -148,21 +148,21 @@ export default function Faq() {
                     <FaqItem question="Er dataene mine trygge?">
                         <p>
                             Ja. All data er kryptert under overføring (TLS) og i ro. Tilgangskontroll sikrer at brukere kun har tilgang til sin kundes data. Se{' '}
-                            <Link href="/sikkerhet" className="text-blue-600 hover:underline">sikkerhetssiden</Link>{' '}
+                            <Link href="/sikkerhet" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">sikkerhetssiden</Link>{' '}
                             for en fullstendig oversikt over tiltak.
                         </p>
                     </FaqItem>
                     <FaqItem question="Er Procynia GDPR-kompatibel?">
                         <p>
                             Ja. Procynia opptrer som databehandler for personopplysninger i kundedata, og vi inngår databehandleravtale (DPA) som en del av kundeforholdet. Se{' '}
-                            <Link href="/personvern" className="text-blue-600 hover:underline">personvernerklæringen</Link>{' '}
+                            <Link href="/personvern" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvernerklæringen</Link>{' '}
                             for detaljer om behandlingsgrunnlag og rettigheter.
                         </p>
                     </FaqItem>
                     <FaqItem question="Kan jeg slette kontoen og dataene mine?">
                         <p>
                             Ja. Du kan be om sletting av konto og tilhørende data ved å kontakte{' '}
-                            <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                            <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                             Data slettes innen 30 dager, med unntak av data vi er lovpålagt å oppbevare (som regnskapsdata).
                         </p>
                     </FaqItem>
@@ -172,14 +172,14 @@ export default function Faq() {
                     <FaqItem question="Hvordan får jeg hjelp?">
                         <p>
                             Send oss en e-post på{' '}
-                            <a href="mailto:support@procynia.no" className="text-blue-600 hover:underline">support@procynia.no</a>.
+                            <a href="mailto:support@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">support@procynia.no</a>.
                             Vi svarer normalt innen 1–2 virkedager.
                         </p>
                     </FaqItem>
                     <FaqItem question="Tilbyr dere onboarding eller opplæring?">
                         <p>
                             Ja. Vi tilbyr onboarding for nye kunder og kan gi tilpasset opplæring for team. Ta kontakt med{' '}
-                            <a href="mailto:salg@procynia.no" className="text-blue-600 hover:underline">salg@procynia.no</a>{' '}
+                            <a href="mailto:salg@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">salg@procynia.no</a>{' '}
                             for å høre mer.
                         </p>
                     </FaqItem>

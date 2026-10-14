@@ -192,7 +192,7 @@ export default function Security() {
                         </h3>
                         <p className="text-sm leading-6 text-slate-500">{body}</p>
                         {verifyText && (
-                            <p className="mt-3 text-xs text-amber-600">⚠ {verifyText}</p>
+                            <p className="mt-3 text-xs text-amber-800">⚠ {verifyText}</p>
                         )}
                     </div>
                 ))}
@@ -203,7 +203,7 @@ export default function Security() {
                 <h2 className="mb-3 text-xl font-semibold text-slate-950">Ansvarlig varsling av sikkerhetssårbarheter</h2>
                 <p className="text-sm leading-7 text-slate-600">
                     Oppdager du en sårbarhet i Procynia? Vi setter stor pris på ansvarlig varsling. Send en beskrivelse av sårbarheten til{' '}
-                    <a href="mailto:sikkerhet@procynia.no" className="text-blue-600 hover:underline">sikkerhet@procynia.no</a>.
+                    <a href="mailto:sikkerhet@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">sikkerhet@procynia.no</a>.
                     Vi bekrefter mottak innen 2 virkedager og har som mål å rette kritiske sårbarheter innen 30 dager.
                 </p>
                 <p className="mt-3 text-sm leading-7 text-slate-600">
@@ -219,7 +219,7 @@ export default function Security() {
                 </p>
                 <p className="mt-3 text-sm leading-7 text-slate-600">
                     Spørsmål om personvern og GDPR rettes til{' '}
-                    <a href="mailto:personvern@procynia.no" className="text-blue-600 hover:underline">personvern@procynia.no</a>.
+                    <a href="mailto:personvern@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">personvern@procynia.no</a>.
                 </p>
             </div>
         </PublicLayout>

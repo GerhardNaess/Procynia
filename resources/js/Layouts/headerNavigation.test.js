@@ -74,7 +74,7 @@ describe('Oppfølging is on the rail, not in the top bar', () => {
         const order = [
             'href={askWikiNavigation.href}',
             '<NotificationBell',
-            'aria-haspopup="menu"',
+            'data-testid="user-menu-button"',
         ].map((needle) => layout.indexOf(needle));
 
         assert.ok(order.every((index) => index > -1), 'every part of the bar must be present');
@@ -202,7 +202,7 @@ describe('the navigation hierarchy is the same shape in every module', () => {
     });
 
     test('both levels are the same control, so they cannot drift apart', () => {
-        assert.match(layout, /function NavigationRow\(\{ items, activeKey, disabledHint = '' \}\)/);
+        assert.match(layout, /function NavigationRow\(\{ items, activeKey, ariaLabel, disabledHint = '' \}\)/);
         assert.match(layout, /<NavigationRow\s*\n\s*items=\{moduleNavigation\}/);
         assert.match(layout, /<NavigationRow\s*\n\s*items=\{pageNavigation\}/);
         assert.match(layout, /data-testid="module-navigation"/);
@@ -222,7 +222,7 @@ describe('the navigation hierarchy is the same shape in every module', () => {
         const row = layout.slice(layout.indexOf('data-testid="page-navigation"'));
 
         assert.match(row, /mb-6 rounded-2xl border border-slate-200\/80 bg-white/);
-        assert.match(layout, /<nav className="flex flex-wrap items-center gap-2">/);
+        assert.match(layout, /<nav aria-label=\{ariaLabel\} className="flex flex-wrap items-center gap-2">/);
     });
 
     test('the AI case hint followed the AI tabs down to the page', () => {

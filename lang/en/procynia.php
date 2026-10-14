@@ -931,6 +931,15 @@ return [
     'a11y' => [
         'help_eyebrow' => 'Help',
         'help_close' => 'Close help panel',
+        'skip_to_content' => 'Skip to main content',
+        'module_navigation' => 'Sections in this module',
+        'page_navigation' => 'Views in this section',
+        'user_menu' => 'user menu',
+        'notifications' => 'Notifications',
+        'notifications_unread' => 'Notifications, :count unread',
+        'close_message' => 'Close message',
+        'public_navigation' => 'Main menu',
+        'public_menu' => 'Menu',
     ],
     'governance' => [
         'page_title' => 'Governance',
@@ -1021,11 +1030,17 @@ return [
             'calendar' => [
                 'previous_month' => 'Previous month',
                 'next_month' => 'Next month',
-                'hover_hint' => 'Hover marked days for details',
+                'hover_hint' => 'Select a day to see its deadlines',
                 'month_label' => 'Month',
                 'year_label' => 'Year',
                 'jump_label' => 'Go to date',
                 'weekdays' => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                'deadline_count_one' => '1 deadline',
+                'deadline_count_many' => ':count deadlines',
+                'today' => 'today',
+                'selected_day_title' => 'Deadlines :date',
+                'select_day_prompt' => 'Select a day in the calendar to see its deadlines.',
+                'no_deadlines_on_day' => 'No deadlines on this day.',
             ],
             'empty_states' => [
                 'no_category_items' => 'No cases match this category yet.',
@@ -1037,7 +1052,7 @@ return [
             ],
             'info_texts' => [
                 'attention' => 'How many cases sit behind each signal waiting for an action. Select a signal to see the cases.',
-                'deadlines' => 'Deadlines and Business Reviews marked in the selected month. Hover a date for details.',
+                'deadlines' => 'Deadlines and Business Reviews marked in the selected month. Select a date for details.',
                 'management' => 'How many of the active cases have an owner assigned, and how many activities were recorded in the last 14 days.',
                 'pipeline_stages' => 'How many active cases are in each phase of the bid process.',
                 'outcomes' => 'How many closed cases there are, split by won, lost, No-Go and withdrawn.',

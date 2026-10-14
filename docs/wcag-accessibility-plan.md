@@ -1,6 +1,6 @@
 # Plan: Universell utforming (WCAG 2.2 AA)
 
-**Status: Fase 0 er ferdig. Fase 1 er implementert, automatisk verifisert og teknisk sluttkontrollert (ikke committet; manuell verifisering med skjermleser, Firefox og Safari gjenstår, se §15.8). Fase 2–7 er ikke startet.**
+**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`); manuell verifisering med skjermleser, Firefox og Safari gjenstår (§15.8). Fase 2 er implementert, automatisk verifisert og teknisk sluttkontrollert (§16.12); manuell verifisering gjenstår. Fase 3–7 er ikke startet.**
 Branch: `feature/wcag-accessibility`
 Utgangspunkt: `bc9070c2` (2026-10-14)
 Sist oppdatert: **2026-10-14**
@@ -52,8 +52,8 @@ Dette er også rammer for arbeidet:
 | Fase | Innhold | Status | Commit(s) |
 |---|---|---|---|
 | 0 | Kartlegging, funn og plan (dette dokumentet) | Ferdig 2026-10-14 | — |
-| 1 | Felles komponenter og designregler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14. Manuell verifisering gjenstår (§15.8). | Ikke committet |
-| 2 | Navigasjon, layout og standardvisninger | Ikke startet | — |
+| 1 | Felles komponenter og designregler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14. Manuell verifisering gjenstår (§15.8). | `4c594ebf` |
+| 2 | Navigasjon, layout og standardvisninger | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14 (§16.12). Manuell verifisering gjenstår (§16.8). | `feat(a11y): improve navigation and page accessibility` |
 | 3 | Skjema, tabeller, dialoger og varsler | Ikke startet | — |
 | 4 | Anbud, dokumenter og AI-arbeidsflyter | Ikke startet | — |
 | 5 | Enterprise Wiki og editor | Ikke startet | — |
@@ -73,7 +73,7 @@ Dette er også rammer for arbeidet:
 | Designregler | Ingen design-tokens. `resources/css/app.css` inneholder bare font og `.wiki-article`-typografi. Farger, fokus og skjemastiler ligger som Tailwind-klasser lokalt i hver fil. Det eneste delte stilsettet er `resources/js/Support/actionStyles.js` (knapperoller, 111 importer). `tailwind.config.js` er en v3-rest uten tokens. |
 | Skjemastiler | `INPUT`/`LABEL`/`HINT`/`ERROR`-konstanter defineres lokalt i ca. 60 filer. |
 | HTML-skall | `resources/views/app.blade.php`. `<html lang>` settes fra `app()->getLocale()` (`SetCustomerLocale`). Viewport tillater zoom. Tittel via `<title inertia>` + `<Head>` i layout. |
-| Sidetitler | `CustomerAppLayout` setter `<Head title>`, og alle 53 sidene i layouten sender `title`. Det samme gjør `PublicLayout` og `Login`. |
+| Sidetitler | `CustomerAppLayout` setter `<Head title>`, og alle 53 sidene i layouten sender `title`. Det samme gjør `PublicLayout` og `Login`. **Fase 2 fant at titlene likevel aldri ble vist** (A11Y-129): `app.blade.php` hadde `<title inertia>`, Inertia v3 skriver `<title data-inertia>`, og nettleseren brukte den første. Rettet i Fase 2. |
 | Administrasjon | Filament 5 (`app/Providers/Filament/AdminPanelProvider.php`), primærfarge `Color::Amber`, standard mørk modus. 18 sider og 14 ressurser. 23 egne Blade-visninger (ca. 5 200 linjer) i `resources/views/filament/**`. |
 | PDF | `resources/views/management-review/report.blade.php` rendres med dompdf, og PDF-en er ikke tagget. Utskriftsvennlig HTML finnes i `Pages/App/ManagementReview/Report.jsx`. |
 | Tester | PHPUnit (`composer test`, Docker). `node --test` for `resources/js/**/*.test.js` (85 filer, logikk). Playwright (`tests/e2e`, 95 spesifikasjoner, bare Chromium, `localhost:8080`). |
@@ -236,6 +236,12 @@ er bygget for kundeflaten (`Billing`).
 | A11Y-027 | `CustomerEnvironment/CustomerEnvironmentHeader.jsx:8-37`, `Quality/Item.jsx:293-310` | Fanelignende navigasjon uten `aria-current` gjør at aktiv fane bare vises visuelt. | 1.3.1, 4.1.2 | B | `<Link aria-current="page">` i `<nav aria-label>` (som `NavigationRow`). | SR |
 | A11Y-028 | `CustomerEnvironment/Index.jsx:134-151`, `AI/Show.jsx:2364, 2498, 3268`, `Wiki/Index.jsx:686-692`, `Wiki/Show.jsx:3081, 3190, 3218`, `Notices/SavedShow.jsx:1288`, `Notices/Index.jsx:2212`, `Notices/Show.jsx:73, 119`, `DiscoveryNoticeCard.jsx:201` | Disclosure-knapper uten `aria-expanded`. `Wiki/Index.jsx:688` mangler dessuten fokusstil. | 4.1.2, 2.4.7 | B | `DisclosureButton`-mønster (`aria-expanded` + `aria-controls`). | axe; SR |
 | A11Y-029 | `CustomerEnvironment/Index.jsx:363-388`, `CustomerRolesPanel.jsx:249-256` | Tilgangsmatrisen setter avkrysningsboksen `disabled` mens den lagrer automatisk, så fokus faller til `body` etter hver endring. | 2.4.3, 4.1.3 | S | `aria-disabled` + ignorer endringer under lagring, og kunngjør «Lagret». | K: Space → Tab |
+| A11Y-129 | `resources/views/app.blade.php` | `<title inertia>` ved siden av Inertia v3s `<title data-inertia>`: alle sider het «Procynia». (Funnet i Fase 2.) | 2.4.2 | B | `<title data-inertia="">`. | Rettet (§16) |
+| A11Y-130 | `DashboardCockpit.jsx` (pipeline) | Seks faser på rad: navn kuttet, sidelengs rulling ved 640–1024 px. (Fase 2.) | 1.4.10, 1.4.4 | B | Container queries. | Rettet (§16) |
+| A11Y-131 | Brukermeny, varselpanel | Panel delvis utenfor vinduet ved 320 px. (Fase 2.) | 1.4.10 | B | `useKeepInViewport`. | Rettet (§16) |
+| A11Y-132 | `CustomerAppLayout.jsx` header | Sticky header på alle bredder fyller vinduet ved 320 px / 400 %. (Fase 2.) | 1.4.10, 2.4.11 | B | Sticky fra `lg`. | Rettet (§16) |
+| A11Y-133 | `FlashMessages.jsx` + skjema med `preserveScroll` | Feilbanneret er utenfor synsfeltet etter innsending lenger ned på siden. (Fase 2.) | 3.3.1 | S | Feil ved feltet + fokus (A11Y-013). | Fase 3 |
+| A11Y-134 | `<Link>` med bare ny spørrestreng, samme tittel, uten `preserveState` | Fokus faller til `<body>`. (Fase 2.) | 2.4.3 | B | Fokus tilbake til samme kontroll etter oppdatering av samme side (`routeFocus.js`). | Rettet (§16.12) |
 
 **Moduler**
 
@@ -711,6 +717,8 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 
 | Dato | Endring |
 |---|---|
+| 2026-10-14 | Teknisk sluttkontroll av Fase 2 (§16.12): A11Y-134 rettet, tittelavlesning ved første sideskift rettet, samlet E2E-regresjon på endelig kode 161/0. |
+| 2026-10-14 | Fase 2 implementert og automatisk verifisert (§16): hopp-lenke, navngitte landemerker, fokus ved sideskift, flash/toast, mobilmeny, innlogging, dashboardkalender, kontrast, sidetitler. Nye funn A11Y-129 til A11Y-134. Ikke committet. |
 | 2026-10-14 | Teknisk sluttkontroll av Fase 1 (§15.8): to rettelser (kunngjøringer i rask rekkefølge, `descriptionId` på `ActionDialog`), E2E-timeout undersøkt, CI og avhengigheter kontrollert. Ikke committet. |
 | 2026-10-14 | Fase 1 implementert og automatisk verifisert (§15). Ikke committet. |
 | 2026-10-14 | Fase 0: kartlegging av hele kodebasen (statisk analyse av felles komponenter, alle moduler, Filament og testoppsett), funnliste og faseplan opprettet. |
@@ -988,3 +996,201 @@ I tillegg til §15.7:
 #### 15.8.10 Vurdering
 
 Fase 1 er teknisk klar for commit. Grunnlaget er bekreftet automatisk: fokus, skjemakobling, dialog, statusregioner, filvelger og CI. Tre svakheter er funnet og rettet, og ingen regresjoner er funnet. Fase 1 er **ikke** manuelt verifisert med skjermleser, ekte Safari/Firefox eller nettleserzoom, og gir ikke grunnlag for å hevde WCAG-etterlevelse. Det bør stå i commit-meldingen.
+
+---
+
+## 16. Fase 2 – gjennomføringsrapport (2026-10-14)
+
+Branch `feature/wcag-accessibility`, utgangspunkt `4c594ebf` (Fase 1). Begrepene er de samme som i §15.8: **Auto** = automatisk test i repoet, **Agent** = kontrollert av agenten i ekte nettleser (Playwright, Chromium), **Manuell** = kontrollert av en person. Ingen manuell verifisering er gjort.
+
+### 16.1 Omfang
+
+Fase 2 omfatter de felles layoutene (`CustomerAppLayout`, `PublicLayout`, `Auth/Login`), felles navigasjon (header, modulmeny, sidenavigasjon, brødsmulesti, brukermeny, varselbjelle), sideskift med Inertia, flash- og toastmeldinger og standardvisningene Hjem, Bid Status (dashboard) og Styring. Store skjemaer, egne dialoger, AI-arbeidsflaten og Wiki er ikke rørt (Fase 3–5).
+
+Funn som hørte til fasen: A11Y-012, -016 (Hjem, Dashboard, offentlige sider), -018 (header og `ModuleSidebar`), -020, -021, -022, -023, -051, -100, -101, -102, -103, -122 og -124.
+
+### 16.2 Implementert
+
+| Del | Hva | Filer | Funn | Status |
+|---|---|---|---|---|
+| A. Hopp-lenke og hovedinnhold | «Hopp til hovedinnhold» er første tabstopp i begge layoutene. Den er usynlig til den får tastaturfokus, og flytter fokus til `<main id="main-content" tabindex="-1">` i skript (URL-en i Inertia-historikken endres ikke). Virker også etter Inertia-navigasjon. Innloggingssiden har ingen gjentatt navigasjon og derfor ingen hopp-lenke. | `Components/App/SkipLink.jsx` (ny), begge layoutene | A11Y-100 | Auto |
+| B. Landemerker | Ett `banner`, ett `main`, ett `contentinfo`. Alle `nav` har navn: «Moduler» (modulmenyen), «Områder i modulen» og «Visninger i området» (`NavigationRow`), «Brødsmulesti», og «Hovedmeny» på offentlige sider. Innlogging har fått `<main>`. | `CustomerAppLayout.jsx`, `PublicLayout.jsx`, `Auth/Login.jsx` | A11Y-101, -051 | Auto (axe + E2E) |
+| C. Sideskift | Felles lytter på Inertias `navigate`-hendelse (`Support/routeFocus.js`, startet i `app.js`). Etter et reelt sideskift (ny sidekomponent, ny sti eller ny dokumenttittel) flyttes fokus til sidens h1, eller til `<main>` uten h1, uten å endre scrollposisjonen. Søk, filtre, faner og paginering med samme tittel flytter ikke fokus, og fokus blir heller ikke flyttet når siden selv har lagt det i `<main>` eller i en modal dialog. Første innlasting røres ikke. Fokusflyttingen er selve kunngjøringen – tittelen sies ikke i tillegg i en live region. `<html lang>` oppdateres fra delt `locale` ved hver navigasjon. h1 og `main` som fokusmål får ingen fokusramme (de er ikke kontroller). | `Support/routeFocus.js` (ny), `app.js`, `app.css` | A11Y-102, -124 | Auto (enhet + E2E: rail, header-pill med bare spørrestreng, filter, tilbake-knapp) |
+| D. Sidetitler | `<title inertia>` → `<title data-inertia="">` i `app.blade.php`. Før dette hadde alle sider to `<title>`-elementer og nettleseren viste «Procynia» overalt. Forsiden får «Procynia» i stedet for «Procynia · Procynia». | `resources/views/app.blade.php`, `PublicLayout.jsx` | A11Y-129 (ny), -122 | Auto |
+| E. Flash og toast | Felles `FlashMessages` for begge layoutene. Suksess er en toast som skrives inn i den vedvarende `polite`-regionen fra Fase 1 (leses én gang, avbryter ikke). Den forsvinner ikke lenger etter 3 s: den står til brukeren lukker den («Lukk melding», eller Escape når ingen dialog eller meny er åpen) eller neste side erstatter den. Lukkeknappen ligger i en egen, stille plass ved siden av live-regionen (`#procynia-toast-actions`), så navnet ikke leses opp med meldingen. Toasten ligger over headeren (z 80) og slipper klikk gjennom (bare knappen tar imot pekeren). Lukking med knappen gir fokus tilbake dit brukeren var. Feil og advarsel er bannere øverst i innholdet med `role="alert"`. Offentlige sider bruker samme komponent (før: banner uten rolle). | `Components/App/FlashMessages.jsx` (ny), `Support/announcer.js`, `app.css`, begge layoutene | A11Y-012, -020 | Auto |
+| F2. Følgerettinger | `PageHelpPanel` starter aldri over vinduet; `MultiSelectFilterDropdown` gir fokus tilbake uten å rulle (16.7). | `PageHelpPanel.jsx`, `MultiSelectFilterDropdown.jsx` | — | Auto |
+| F. Sticky header og fokus under header | Headeren er sticky bare fra `lg` (1024 px). Under det – telefon og 200–400 % zoom – ruller den bort med siden; før tok den opptil to tredjedeler av vinduet ved 320 px. Layouten måler headeren og setter `--app-header-offset`, som `scroll-padding-top` i `app.css` bruker, slik at elementer som rulles fram med Tab, hopp-lenke eller ankerlenke havner under headeren, ikke bak den. | `CustomerAppLayout.jsx`, `app.css` | A11Y-020, A11Y-132 (ny) | Auto |
+| G. Brukermeny | Disclosure i stedet for `aria-haspopup="menu"` uten menytastatur: `aria-expanded`, `aria-controls`, navn «{navn}, brukermeny». Escape lukker og gir fokus tilbake til knappen. Menyen lukkes når tastaturfokus forlater den, så den aldri dekker elementet fokus flyttes til. | `CustomerAppLayout.jsx` | A11Y-103 | Auto |
+| H. Varselbjelle | Navnet bærer antall uleste («Varsler, 3 uleste», i18n). Ikke lenger `aria-haspopup="dialog"`; panelet er en navngitt region («Varsler»). Kortene får navnet fra eget innhold (tittel, melding, alvorlighet, område og dato) i stedet for «Åpne varsel: …». Escape og fokus ut fungerer som i brukermenyen. Etter «Slett alle uleste» går fokus tilbake til bjella (`fallbackFocusRef`). Slett-ikonet har `slate-500`. | `NotificationBell.jsx`, `CustomerAppLayout.jsx` | A11Y-021, -018 | Auto |
+| I. Paneler innenfor vinduet | Brukermenyen og varselpanelet henger fra høyre kant av knappen. Ved 320 px brytes headeren, og brukermenyen begynte 32 px utenfor venstre kant. `useKeepInViewport` flytter et åpent panel inn i vinduet (16 px marg), og gjør det igjen ved endret størrelse. | `Support/useKeepInViewport.js` (ny), `CustomerAppLayout.jsx`, `NotificationBell.jsx` | A11Y-131 (ny) | Auto |
+| J. Mobilmeny på offentlige sider | Under `lg` vises «Meny» (disclosure, `aria-expanded`, `aria-controls`). Lenkene vises som en liste under headerraden, og rendres ikke når menyen er lukket, så Tab aldri havner i skjult navigasjon. Tab går fra «Meny» rett inn i menyen. Escape lukker og gir fokus til knappen. Aktiv side har `aria-current="page"`. Headerraden brytes i stedet for å skyve «Logg inn» ut av en telefon. Den falske språkvelgeren («NO ⌄», et element uten funksjon) er fjernet. | `PublicLayout.jsx` | A11Y-022, -122 | Auto |
+| K. Innlogging | `<main>`. E-post og passord er koblet til egne feil (`aria-describedby`, `aria-invalid`) med `fieldA11y` fra Fase 1, og fokus flyttes til første ugyldige felt når feilene er rendret. Microsoft-feil er `role="alert"`. «eller» og feiltekster har kontrast (`slate-600`, `rose-700`). | `Auth/Login.jsx` | A11Y-051, -013 (for innlogging) | Auto |
+| L. Dashboardkalender | Dagknappene har fullt navn (`aria-label`: «onsdag 14. oktober 2026, 2 frister, i dag»), `aria-pressed` for valgt dag og `aria-current="date"` for i dag. Lenkene ligger ikke lenger i en hover-boks inne i knappen: fristene for valgt dag vises som lenker i en liste under kalenderen. Ukedagsraden er `aria-hidden` (hver knapp sier ukedagen). «I dag» har tydeligere ring (`violet-500`) og valgt dag mørkere kant. | `DashboardCockpit.jsx`, `dashboardLogic.js` (`calendarDayLabel`), `lang/*` | A11Y-023 | Auto |
+| M. Pipeline på Bid Status | Fasene legges ut etter kortets bredde (container queries): én, to eller tre per rad, og én stripe med piler bare når alle seks navnene får plass. Før ble navnene kuttet («FORHAN…» ved 1280 px), og siden rullet sidelengs ved 640–1024 px. | `DashboardCockpit.jsx` | A11Y-130 (ny) | Auto + Agent (skjermbilder 320/640/1280) |
+| N. Kontrast | Hjem: nøkkeltallsetiketter og «Under arbeid» `slate-600`. Bid Status: tall i tomme signaler og faser `slate-500`, kalenderhint `slate-600`. `ModuleSidebar`: ikonknapper `slate-500`. Bunntekst i appen `slate-600`. Offentlige sider: tekst i `slate-300/400`, `blue-400` og `amber-600` er gjort mørkere, tekst under 12 px er hevet til 12 px, og lenker i løpende tekst er understreket (`link-in-text-block`). Ingen innhold er endret. | `Home/Index.jsx`, `DashboardCockpit.jsx`, `ModuleSidebar.jsx`, `CustomerAppLayout.jsx`, `Public/{Home,Faq,Security,Terms,Privacy}.jsx` | A11Y-016, -018 | Auto (axe) |
+| i18n | Nye strenger i `procynia.a11y.*` (hopp-lenke, navigasjonsnavn, brukermeny, varsler, lukk melding, hovedmeny, meny) og `procynia.dashboard.calendar.*` (dagnavn, valgt dag). `hover_hint` og infoteksten for kalenderen sier nå «Velg en dag» i stedet for «Hold over». | `lang/{no,en}/procynia.php` | — | Auto (`A11yTranslationsTest`) |
+| Lint | `lint:a11y` dekker nå også de 12 filene over (layoutene, `FlashMessages`, `SkipLink`, `NotificationBell`, `ModuleSidebar`, `Breadcrumbs`, `DashboardCockpit`, `Login`, Hjem, Styring, Dashboard). Ingen regel er slått av. | `eslint.config.js` | — | Auto |
+
+### 16.3 Nye funn
+
+| ID | Fil / komponent | Problem | WCAG | Status |
+|---|---|---|---|---|
+| A11Y-129 | `resources/views/app.blade.php` | `<title inertia>` (Inertia v1/v2) ved siden av v3s `<title data-inertia>`: to titler, og alle sider het «Procynia». | 2.4.2 | Rettet (auto) |
+| A11Y-130 | `DashboardCockpit.jsx` (pipeline) | Seks faser på rad fra `sm`: navn kuttet på desktop og sidelengs rulling ved 640–1024 px. | 1.4.10, 1.4.4 | Rettet (auto + agent) |
+| A11Y-131 | `CustomerAppLayout.jsx`, `NotificationBell.jsx` | Brukermeny og varselpanel kunne havne delvis utenfor vinduet ved 320 px. | 1.4.10 | Rettet (auto) |
+| A11Y-132 | `CustomerAppLayout.jsx` | Sticky header på alle bredder tok mesteparten av vinduet ved 320 px / 400 % zoom. | 1.4.10, 2.4.11 | Rettet (auto) |
+| A11Y-133 | `FlashMessages.jsx` (alle skjema med `preserveScroll`) | Feil- og advarselsbanneret ligger øverst i innholdet. Etter en innsending med `preserveScroll` lenger ned på siden er det utenfor synsfeltet for seende brukere (skjermleser får det via `role="alert"`). | 3.3.1 (seende), beste praksis | Åpent – Fase 3 (feilkobling i skjema, A11Y-013, gir feilen ved feltet) |
+| A11Y-134 | Sider med `<Link>` som bare endrer spørrestrengen, uten `preserveState`, og med samme tittel | Siden monteres på nytt og fokus faller til `<body>`. Felles sideskift-logikk flytter bevisst ikke fokus ved samme tittel (for ikke å flytte fokus ved søk og filter). | 2.4.3 | Rettet i sluttkontrollen (§16.12) |
+
+### 16.4 Tester og resultater
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | 1666 bestått, 0 feilet. Ny: `resources/js/Support/a11yNavigation.test.js` (31 tester: sideskift-regel, fokusvalg, `lang`, landemerker, brukermeny, toast-vert, kalendernavn, paneler i vinduet, hjelpepanel, dropdown-fokus). |
+| `npm run lint:a11y` (Node 22) | 0 feil, 0 advarsler (17 filer i a11y-listen). |
+| `npm run build` | Bestått. |
+| PHP, målrettet (`A11yTranslationsTest`, `SharedTranslationsLocaleTest`, `AiQuotaCustomerUxTest`, innlogging/Entra, Dashboard/Home/Governance) | 86 bestått, 0 feilet. |
+| PHP, bredere (`--filter='Public\|Inertia\|Translation\|Navigation\|Notification\|Registration'`) | 409 bestått, 4 feilet. De 4 (`WikiQualityTabRemovalTest`, `WikiSecondaryNavigationOrderTest`) leser `CustomerAppLayout.jsx` etter strenger (`wiki-pages`, Wiki-menyblokken) som flyttet til `Support/appNavigation.js` før denne branchen; strengene finnes heller ikke i HEAD-versjonen av filen. Eksisterende, ikke forårsaket av Fase 2. |
+| Pint på berørte PHP-filer | Bestått. |
+| E2E `a11y-navigation.spec.js` (ny, 8 tester) + `a11y-foundation.spec.js` (3), siste kjøring | 11 bestått, 0 feilet. |
+| Agent (Chromium) | axe på hele sidene `/`, `/funksjoner`, `/priser`, `/sikkerhet`, `/kontakt`, `/faq`, `/betingelser`, `/personvern`, `/registrer`, `/login`, `/app/dashboard`, `/app/bid-status`, `/app/governance`: 0 brudd (før rettingene: kontrast og `link-in-text-block` på fem offentlige sider, kontrast i appens bunntekst). Skjermbilder av pipeline ved 320/640/1280 px. Sidebredde målt ved 320–1440 px. |
+| E2E-regresjon, 23 spesifikasjoner (auth, app-navigation, breadcrumbs, dashboard-structure, info-hint, my-tasks-governance, my-tasks-suppliers, billing, info-center-help, wiki-navigation, compliance-library, compliance-library-frameworks, quality-page-help, live-filter-collapse, package-change, permission-sections, ai-capacity, supplier-import, quality-process-row-actions, knowledge-handoff, wiki-graph-filters, objective-kpi-target-types, wiki-tab-preservation) | Første kjøring: 138 bestått, 12 feilet. Alle 12 er undersøkt: 11 skyldtes tre regresjoner fra Fase 2 som er rettet (16.7), og 1 (`objective-kpi-target-types`, tidsavbrudd mens en navigasjon pågikk) besto ved ny kjøring uten endring og vurderes som ustabil. Etter rettingene: de 7 berørte spesifikasjonene på nytt 90 bestått / 7 feilet (de 7 var `quality-page-help` og `wiki-graph-filters`, kjørt før de to siste rettingene), deretter `quality-page-help` + `wiki-graph-filters` 54/0 og `wiki-graph-filters` alene 49/0. |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate, jf. prosjektregel). |
+
+### 16.5 Funnstatus etter Fase 2
+
+Lukket betyr: utbedret og verifisert automatisk innenfor testomfanget i 16.4. Ingen av dem er manuelt verifisert med skjermleser.
+
+| ID | Status |
+|---|---|
+| A11Y-012 | Lukket (auto). Toast uten tidsavbrudd, lukkeknapp med navn, Escape, leses én gang fra vedvarende region; feil og advarsel `role="alert"`; offentlige sider bruker samme komponent. Gjenstår manuelt: at NVDA/JAWS/VoiceOver faktisk leser toasten etter redirect. |
+| A11Y-020 | Delvis. Lukket for toast (over headeren) og fokus under headeren (`scroll-padding-top`, sticky bare fra `lg`). Gjenstår: `inert` på bakgrunnen mens en modal er åpen. `ActionDialog` dekker headeren og holder fokus (Fase 1), men skjermleserens lesemodus kan fortsatt nå bakgrunnen der `aria-modal` ikke respekteres (Fase 3, sammen med dialogmigreringen). |
+| A11Y-016 | Delvis. Lukket for Hjem, Bid Status, Styring, layoutene og de offentlige sidene (axe uten brudd). Øvrige moduler: åpent (Fase 3–6). |
+| A11Y-018 | Delvis. Lukket for `ModuleSidebar`, brukerknappens pil og bjellas slett-ikon. Prosessdiagram og KPI-graf: Fase 6. |
+| A11Y-021 | Lukket (auto). Gjenstår A11Y-105 for bjellas synlige tekster (hardkodet norsk). |
+| A11Y-022 | Lukket (auto, 320 px). |
+| A11Y-023 | Lukket (auto). Kalenderen er fortsatt 42 tabstopp (ett per dag); et rutenett med piltaster er en mulig forbedring, ikke et AA-krav. |
+| A11Y-051 | Lukket (auto). |
+| A11Y-100, -101, -102, -103, -124 | Lukket (auto). |
+| A11Y-122 | Lukket (auto): falsk språkvelger fjernet, forsidetittel rettet. |
+| A11Y-013 | Lukket for innlogging. Øvrige skjema: Fase 3–6. |
+| A11Y-129, -130, -131, -132 | Nye, lukket (auto). |
+| A11Y-133 | Ny, åpen (se 16.3 og 16.12). |
+| A11Y-134 | Ny, rettet i sluttkontrollen (16.12). |
+| A11Y-105 | Delvis: alle nye tilgjengelige navn er oversatt. Bjellas og slettedialogens synlige tekster er fortsatt hardkodet norsk. |
+| Øvrige | Uendret. |
+
+### 16.6 Synlige endringer i grensesnittet
+
+- **Toasten forsvinner ikke etter 3 sekunder.** Den har en ×-knapp og lukkes med Escape, eller når brukeren går til en annen side. Den legger seg over headeren, men klikk går gjennom den.
+- **Headeren er ikke lenger klebrig under 1024 px.** På telefon og nettbrett ruller den bort med siden.
+- **Offentlige sider:** «Meny»-knapp under 1024 px; språkpillen «NO ⌄» er borte; lenker i løpende tekst er understreket; noen grå tekster er mørkere; sidepadding på telefon er 16 px.
+- **Bid Status:** fasene vises i et rutenett (1–3 kolonner) i stedet for en kuttet stripe; fristene for en dag vises i en liste under kalenderen når dagen velges, i stedet for i en boks ved hover. Hintet sier «Velg en dag for å se fristene».
+- **Fanetittelen i nettleseren** viser nå sidens navn («Risiko · Procynia»).
+- **Hopp-lenken** synes bare når den får tastaturfokus.
+- Små kontrastjusteringer i Hjem, sidemenyen og bunnteksten.
+
+Ingen ruter, handlinger, tilganger eller data er endret.
+
+### 16.7 Regresjoner og eksisterende feil
+
+- **Funnet og rettet under fasen** (alle fanget av E2E-regresjonen, alle med vakt-test):
+  1. Skjermlesertillegget «, brukermeny» i brukerknappen var absolutt posisjonert utenfor navnets klippeboks. Med langt brukernavn ble siden bredere enn vinduet (seks spesifikasjoner med `sidewaysOverflow` feilet). Rettet med `relative` på navnet.
+  2. `PageHelpPanel` legger panelet under headerens nedre kant. Når headeren ikke lenger er sticky under `lg` og siden er rullet, ble kanten negativ og lukkeknappen havnet over vinduet (fire tester i `quality-page-help`). Rettet med `Math.max(0, …)`; ny E2E-kontroll åpner hjelpen etter rulling på 320 px.
+  3. `MultiSelectFilterDropdown` gir fokus tilbake til utløseren når et klikk utenfor lukker panelet. Med `scroll-padding-top` rullet `focus()` siden mellom `mousedown` og `mouseup`, og klikket (f.eks. «Nullstill filtre» i Wiki-grafen) bommet (to tester i `wiki-graph-filters`). Rettet med `focus({ preventScroll: true })`. Samme mønster kan finnes andre steder (`focus()` uten `preventScroll` midt i en pekerhandling); se 16.9.
+- **Testendringer som følger av bevisste endringer** (ingen skjuler en regresjon):
+  - `my-tasks-governance.spec.js`, `my-tasks-suppliers.spec.js`: bjella heter nå «Varsler, N uleste» og kortene navngis av innholdet (A11Y-021).
+  - `a11yFoundation.test.js`: flash-markupen er flyttet til `FlashMessages`; testmocken fikk `appendChild` for toast-verten.
+  - `headerNavigation.test.js`, `notificationRefresh.test.js`: `aria-label`/`id` lagt til i markup som testene låser.
+  - `cockpitLayout.test.js`: `slate-400` → `slate-500` (A11Y-016) og pipelinens nye container-oppsett (A11Y-130).
+- **Eksisterende feil, ikke fra Fase 2:** de 4 PHP-testene for Wiki-navigasjon (16.4).
+
+### 16.8 Manuell testing som gjenstår
+
+I tillegg til sjekklisten for Fase 1 (§15.8.7):
+
+1. **NVDA + Firefox/Chrome og VoiceOver + Safari:**
+   1. Hopp-lenken: Tab fra adressefeltet, Enter, og neste Tab skal være i sideinnholdet.
+   2. Bytt side fra modulmenyen: skjermleseren skal lese sidens overskrift. Søk i et register: ingenting skal leses opp utover søkeresultatet, og fokus skal bli i søkefeltet.
+   3. Lagre noe som gir suksessmelding: meldingen leses én gang, uten «Lukk melding».
+   4. Brukermenyen og bjella: navn, tilstand (utvidet/skjult), Escape tilbake til knappen. Bjella skal si antall uleste.
+   5. Landemerkeliste: banner, navigasjon (navngitt), hovedinnhold, innholdsinformasjon.
+   6. Bid Status-kalenderen: dagnavn og «trykket» ved valg; listen under kalenderen.
+2. **Ekte Safari og Firefox:** hopp-lenken, fokus ved sideskift og at fokusrammen ikke vises på h1.
+3. **Nettleserzoom 200 % og 400 %** (ikke bare smal viewport): header, mobilmeny, brukermeny, bjelle, hjelpepanel og toast.
+4. **Windows-høykontrast:** toastens kant og lukkeknapp, hopp-lenken, aktiv side i menyene.
+5. **iOS VoiceOver / Android TalkBack:** offentlig mobilmeny og app-headeren.
+
+### 16.9 Risiko og begrensninger
+
+- Fokusflytting ved sideskift bygger på en regel (komponent, sti, tittel). En side som bytter visning via spørrestreng **og** beholder tittelen, regnes som oppdatering: fokus flyttes ikke, men gjenopprettes til samme kontroll hvis det falt til `<body>` (A11Y-134, 16.12). Finnes ingen tvilling (kontrollen er borte etter oppdateringen), blir fokus stående på `<body>`. En side som endrer tittelen ved filtrering ville fått fokus flyttet; ingen slik side er funnet.
+- Toasten blir stående til den lukkes. På telefon kan den dekke deler av øverste del av siden. Klikk går gjennom den, Escape lukker den, og neste side fjerner den.
+- `scroll-padding-top` gjør at `focus()` på et element nær toppen ruller siden. Kode som flytter fokus midt i en pekerhandling (lukking ved klikk utenfor) bør bruke `preventScroll`; ett tilfelle er rettet (16.7), andre kan finnes i moduler som ikke er dekket av regresjonsutvalget.
+- `useKeepInViewport` flytter panelene med `transform` etter måling. Ved svært rask endring av vindusstørrelse kan panelet stå et øyeblikk før det flyttes.
+- Fokusfellen i dialoger og skjermleserens lesemodus: se A11Y-020.
+- E2E kjører bare i Chromium. WebKit og Firefox er ikke kjørt for Fase 2.
+- Fortsatt dokumentert fra Fase 1: ingen manuell skjermlesertest; ekte Safari og Firefox ikke testet; Windows-høykontrast ikke testet; nettleserzoom ikke testet; klippet fokusring i tabeller (Fase 3); `InfoHint` med `<div role="tooltip">` inne i `<span>` (senere fase); de 5 eksisterende npm-sårbarhetene skal håndteres separat før merge.
+
+### 16.10 Anbefalinger for Fase 3
+
+1. Gjennomfør den manuelle sjekklisten i 16.8 og §15.8.7 før Fase 3 bygger på sideskift og toast.
+2. Migrer dialogene til `ActionDialog` og legg til `inert` på bakgrunnen (A11Y-002, -020).
+3. Skjema: `FormField` + `focusFirstInvalidField` gjør A11Y-133 mindre viktig, fordi feilen da står ved feltet og fokus flyttes dit.
+4. Ta tabellrammen for fokusring (§15.8.2) og A11Y-108–110.
+5. Vurder per side om visninger via spørrestreng bør ha egen tittel, slik at de regnes som sideskift (A11Y-134 dekker fokus, ikke kunngjøring av ny visning).
+6. Oversett bjellas synlige tekster (A11Y-105).
+7. Legg til et WebKit-prosjekt for `a11y-foundation` og `a11y-navigation` med Option+Tab.
+
+### 16.11 Vurdering
+
+Fase 2 er teknisk klar for commit. Alle funn som tilhørte fasen er rettet, eller dokumentert som delvis med begrunnelse (A11Y-016, -018, -020, -105). Fire nye feil fra kartleggingen er rettet (A11Y-129–132), og to er registrert som åpne (A11Y-133, -134). Tre regresjoner som Fase 2 selv innførte, ble fanget av regresjonsutvalget og rettet med vakt-tester. Ingen ruter, tilganger, data eller forretningslogikk er endret. Fasen er **ikke** manuelt verifisert med skjermleser, ekte Safari/Firefox, nettleserzoom eller Windows-høykontrast, og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. Full E2E- og PHP-suite er merge gate og er ikke kjørt.
+
+### 16.12 Teknisk sluttkontroll av Fase 2 (2026-10-14)
+
+Kontroll på den endelige Fase 2-koden før commit. Alle resultater under er fra kjøringer **etter** siste kodeendring; ingen tidligere resultat er gjenbrukt.
+
+#### 16.12.1 Rettelser i sluttkontrollen
+
+| # | Funn | Rettelse | Filer | Test |
+|---|---|---|---|---|
+| 1 | A11Y-134: en oppdatering av samme side uten `preserveState` (f.eks. Wiki-fanene `/app/wiki?tab=…` i headeren) monterte siden på nytt, og fokus falt til `<body>`. | `routeFocus.js` beskriver kontrollen som har fokus når et besøk starter (`start`: id, eller tag + `href`/`name`/`type`/`data-testid`/`aria-label` + tekst). Når besøket er ferdig (`finish`), uten sideskift, **og bare hvis fokus er på `<body>`**, får den gjengitte tvillingen fokus (`preventScroll`). Finnes ingen tvilling, røres ingenting. Fokus som fortsatt står på en kontroll, flyttes aldri. | `Support/routeFocus.js` | Auto: 4 enhetstester + E2E (Wiki-fanen «Kjøringer» har fokus etter besøket, tittelen er uendret) |
+| 2 | Den første navigasjonen etter en full sidelasting ble tolket som sideskift: tittelen ble lest ved oppstart, før `<Head>` hadde satt den, og var fortsatt «Procynia». Fokus gikk da til h1 også ved bytte mellom faner på samme side. | Forrige sides tittel leses når et besøk starter, da er siden rendret. | `Support/routeFocus.js` | Auto (E2E over, som feilet før rettingen) |
+
+#### 16.12.2 Gjennomgang av fokus og rulling
+
+- **`routeFocus.js`.** Sideskift (komponent, sti eller tittel) → h1 eller `main`, med `preventScroll`, bare når siden ikke selv har lagt fokus i `main` eller i en modal dialog. Samme side → fokus står; bare tapt fokus gjenopprettes (rettelse 1). Historikk (tilbake/frem) går via `navigate` uten `start`/`finish` og behandles som sideskift. Polling (`router.reload`) har fokus på en kontroll eller i `<body>` ved start: i begge tilfeller flyttes ingenting.
+- **`useKeepInViewport.js`.** Nullstiller `transform`, måler og flytter bare horisontalt, også ved endret vindusstørrelse. Gjelder brukermeny og varselpanel. Ingen påvirkning på bredere skjermer der panelet passer.
+- **`scroll-padding-top` og `focus()` midt i et klikk.** Alle `focus()`-kall i komponenter med `mousedown`/`pointerdown`-håndterere er gjennomgått: `ActionDialog`, `hintTooltip`, `QualityItemActions`, `Wiki/Show` (menyen) og layoutens menyer gir fokus bare ved Escape eller tastatur. `UnitInput` fokuserer på `click` (etter `mouseup`). `SearchableMultiSelect` og `CpvSelector` fokuserer på `click`. Den eneste som fokuserte under `mousedown`, `MultiSelectFilterDropdown`, ble rettet i 16.7.
+- **Dialoger.** `ActionDialog` (z 70 over headeren 60, fokusfelle, Escape, retur, `fallbackFocusRef`) er uendret fra Fase 1; bjellas slettedialog bruker nå `fallbackFocusRef`. `PageHelpPanel` starter aldri over vinduet (16.7).
+
+#### 16.12.3 Toast og flash
+
+Verifisert i E2E på endelig kode: suksessmeldingen står i den vedvarende `polite`-regionen og finnes én gang i DOM; lukkeknappen («Lukk melding») ligger utenfor live-regionen; toasten er der etter 4 s; vertens `z-index` er 80 og `pointer-events: none`, og knappen er det øverste elementet på sitt punkt; Escape lukker uten å flytte fokus; knappen med tastatur gir fokus tilbake dit brukeren var. Feil og advarsel er `role="alert"`. Ikke verifisert: at skjermlesere faktisk leser toasten (manuelt).
+
+#### 16.12.4 A11Y-133 og A11Y-134
+
+- **A11Y-134: rettet** (16.12.1).
+- **A11Y-133: fortsatt åpent, bevisst.** Banneret ligger øverst i innholdet. Å rulle det inn i synsfeltet automatisk ville flyttet visningen bort fra skjemaet brukeren arbeider i, og ville vært en atferdsendring på tvers av alle moduler. Skjermlesere får feilen via `role="alert"`. Riktig løsning er feil ved feltet og fokus dit (`FormField` + `focusFirstInvalidField`, A11Y-013), som er Fase 3. Innloggingssiden har allerede dette.
+
+#### 16.12.5 Testresultater (endelig kode)
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | 1670 bestått, 0 feilet, 0 hoppet over |
+| `npm run lint:a11y` (Node 22) | 0 feil, 0 advarsler |
+| `npm run build` | Bestått |
+| PHP, målrettet (`A11yTranslationsTest`, `SharedTranslationsLocaleTest`, `AiQuotaCustomerUxTest`, innlogging/Entra, Dashboard/Home/Governance, offentlige sider, tilgang) | 86 bestått, 0 feilet |
+| PHP, bredere (`--filter='Public\|Inertia\|Translation\|Navigation\|Notification\|Registration'`) | 409 bestått, 4 feilet |
+| Baseline for de 4 PHP-feilene, `4c594ebf` i eget git-worktree (egen `vendor`-kopi, bekreftet med reflection at klassene lastes fra baseline) | De samme 4 feiler: `WikiQualityTabRemovalTest::the_wiki_navigation_no_longer_offers_a_quality_tab` og `WikiSecondaryNavigationOrderTest` (3 tester). De leser `CustomerAppLayout.jsx` etter Wiki-menyen, som ligger i `Support/appNavigation.js`. **Eksisterende og uavhengige av Fase 2.** (Baseline-worktreet ga i tillegg 8 HTTP-feil fordi det mangler bygget Vite-manifest; de testene består i hovedtreet.) |
+| E2E Chromium, samlet: de 23 regresjonsspesifikasjonene i 16.4 + `a11y-foundation` + `a11y-navigation` | **161 bestått, 0 feilet, 0 hoppet over** (12,9 min) |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate) |
+
+#### 16.12.6 Åpne funn og manuell verifisering
+
+- Åpne fra Fase 2: A11Y-133 (Fase 3), A11Y-020 (`inert`, Fase 3), A11Y-016/-018 utenfor Fase 2-sidene, A11Y-105 (bjellas synlige tekster).
+- Manuell verifisering etter 16.8 og §15.8.7 gjenstår i sin helhet: skjermleser (NVDA, VoiceOver, JAWS), ekte Safari og Firefox, nettleserzoom 200/400 %, Windows-høykontrast, iOS/Android.
+- Fra Fase 1, fortsatt dokumentert: klippet fokusring i tabeller (Fase 3), `InfoHint`-strukturen, de 5 npm-sårbarhetene som håndteres separat før merge.
+
+#### 16.12.7 Vurdering
+
+Ingen uavklarte regresjoner. Den eneste testfeilen (4 PHP-tester) finnes på `4c594ebf` og er uavhengig av Fase 2. Fase 2 er teknisk klar for commit. Den er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.

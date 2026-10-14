@@ -39,7 +39,9 @@ export default function PageHelpPanel({ id, title, introTitle, intro, sections =
 
         function measureHeader() {
             const header = document.querySelector('header');
-            setTopOffset(header ? Math.round(header.getBoundingClientRect().bottom) : 0);
+            // Never above the window: below lg the header is not sticky (Fase 2, A11Y-132) and scrolls
+            // away, so its bottom edge can be negative — the panel, and its close button, went with it.
+            setTopOffset(header ? Math.max(0, Math.round(header.getBoundingClientRect().bottom)) : 0);
         }
 
         function onKeyDown(event) {

@@ -233,7 +233,7 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
                 aria-label={toggleLabel}
                 title={toggleLabel}
                 className={classNames(
-                    'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500',
+                    'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500',
                     collapsed ? 'lg:hidden' : '',
                 )}
             >
@@ -393,7 +393,7 @@ export default function ModuleSidebar({ modules = {}, activeModules = [], permis
                         aria-expanded={! collapsed}
                         aria-label={toggleLabel}
                         title={toggleLabel}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                     >
                         <CollapseIcon collapsed={collapsed} />
                     </button>

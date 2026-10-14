@@ -63,9 +63,12 @@ test('work from every styringsmodul is under Mine oppgaver, filterable, and anno
     await expect(cards).toHaveCount(5);
 
     // The bell named each handover, from its module.
-    await page.getByRole('button', { name: 'Åpne varsler' }).click();
-    await expect(page.getByRole('button', { name: /^Åpne varsel: Ansvar for risiko/ })).toContainText('Risiko');
-    await expect(page.getByRole('button', { name: /^Åpne varsel: Ansvar for sak/ })).toContainText('Avvik og forbedringer');
+    // WCAG Fase 2 (A11Y-021): the bell is named «Varsler, N uleste», and a card's name is its own
+    // content (title first) rather than an «Åpne varsel: …» label that hid the rest.
+    await page.getByRole('button', { name: /^Varsler/ }).click();
+    const panel = page.getByRole('region', { name: 'Varsler' });
+    await expect(panel.getByRole('button', { name: /^Ansvar for risiko/ })).toContainText('Risiko');
+    await expect(panel.getByRole('button', { name: /^Ansvar for sak/ })).toContainText('Avvik og forbedringer');
     await page.keyboard.press('Escape');
 
     // A card opens the module's own page.

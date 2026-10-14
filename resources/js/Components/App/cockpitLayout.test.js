@@ -109,7 +109,9 @@ describe('the follow-up signals read as signals, not widgets', () => {
 
     test('a signal at zero stays on the board but recedes', () => {
         assert.match(signal, /isActive \? \(tone\[signal\.severity\] \?\? tone\.neutral\) : 'border-slate-200 bg-white'/);
-        assert.match(signal, /isActive \? 'text-slate-950' : 'text-slate-400'/);
+        // Receding stops at slate-500: slate-400 was about 2.6:1 on white, under the 4.5:1 a number
+        // that is read needs (WCAG plan A11Y-016).
+        assert.match(signal, /isActive \? 'text-slate-950' : 'text-slate-500'/);
     });
 
     test('it is still a button that reports whether it is open', () => {
@@ -121,7 +123,11 @@ describe('the follow-up signals read as signals, not widgets', () => {
 
 describe('the pipeline is one strip, not six cards', () => {
     test('the phases share a surface and are joined by chevrons', () => {
-        assert.match(source, /className="flex flex-col divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 sm:flex-row sm:items-stretch sm:divide-y-0"/);
+        // Fase 2 (WCAG 1.4.10/1.4.4): the strip is laid out by the card's width (container queries),
+        // so six names never get cut off or push the page sideways; the one strip with chevrons stays
+        // for a card wide enough to hold it.
+        assert.match(source, /<div className="@container">/);
+        assert.match(source, /className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 @sm:grid-cols-2 @xl:grid-cols-3 @5xl:flex @5xl:items-stretch @5xl:gap-0 @5xl:bg-slate-50"/);
         assert.ok(! source.includes('xl:grid-cols-6'), 'no six-card grid');
         assert.match(source, /\{index > 0 \? <PipelineChevron \/> : null\}/);
     });
@@ -130,7 +136,7 @@ describe('the pipeline is one strip, not six cards', () => {
         const chevron = region('function PipelineChevron(');
 
         assert.match(chevron, /aria-hidden="true"/);
-        assert.match(chevron, /hidden shrink-0 items-center text-slate-300 sm:flex/, 'and it goes away when the strip stacks');
+        assert.match(chevron, /hidden shrink-0 items-center bg-slate-50 text-slate-300 @5xl:flex/, 'and it goes away unless the phases form one strip');
     });
 
     test('a phase is a segment: a label, a number, and its share of the busiest phase', () => {
@@ -144,8 +150,9 @@ describe('the pipeline is one strip, not six cards', () => {
         const stage = region('function PipelineStage(');
 
         assert.match(stage, /const hasCases = count > 0;/);
-        assert.match(stage, /hasCases \? 'bg-violet-50' : ''/);
-        assert.match(stage, /hasCases \? 'text-slate-950' : 'text-slate-400'/);
+        assert.match(stage, /hasCases \? 'bg-violet-50' : 'bg-slate-50'/);
+        // slate-500, not slate-400: an empty phase's 0 is still text to read (A11Y-016).
+        assert.match(stage, /hasCases \? 'text-slate-950' : 'text-slate-500'/);
     });
 
     test('the maths behind the bar is untouched', () => {
@@ -155,8 +162,8 @@ describe('the pipeline is one strip, not six cards', () => {
         assert.match(stage, /style=\{\{ width: `\$\{Math\.max\(hasCases \? 6 : 0, width\)\}%` \}\}/);
     });
 
-    test('the strip stacks below sm, where six segments in a row would be unreadable', () => {
-        assert.match(source, /flex flex-col divide-y[^"]*sm:flex-row/);
+    test('the strip stacks where six segments in a row would be unreadable — measured on the card, not the window', () => {
+        assert.match(source, /grid grid-cols-1 gap-px[^"]*@5xl:flex/);
     });
 });
 

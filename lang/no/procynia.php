@@ -935,6 +935,15 @@ return [
     'a11y' => [
         'help_eyebrow' => 'Hjelp',
         'help_close' => 'Lukk hjelpepanel',
+        'skip_to_content' => 'Hopp til hovedinnhold',
+        'module_navigation' => 'Områder i modulen',
+        'page_navigation' => 'Visninger i området',
+        'user_menu' => 'brukermeny',
+        'notifications' => 'Varsler',
+        'notifications_unread' => 'Varsler, :count uleste',
+        'close_message' => 'Lukk melding',
+        'public_navigation' => 'Hovedmeny',
+        'public_menu' => 'Meny',
     ],
     'governance' => [
         'page_title' => 'Styring',
@@ -1025,11 +1034,17 @@ return [
             'calendar' => [
                 'previous_month' => 'Forrige måned',
                 'next_month' => 'Neste måned',
-                'hover_hint' => 'Hold over markerte dager for detaljer',
+                'hover_hint' => 'Velg en dag for å se fristene',
                 'month_label' => 'Måned',
                 'year_label' => 'År',
                 'jump_label' => 'Gå til dato',
                 'weekdays' => ['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'],
+                'deadline_count_one' => '1 frist',
+                'deadline_count_many' => ':count frister',
+                'today' => 'i dag',
+                'selected_day_title' => 'Frister :date',
+                'select_day_prompt' => 'Velg en dag i kalenderen for å se fristene den dagen.',
+                'no_deadlines_on_day' => 'Ingen frister denne dagen.',
             ],
             'empty_states' => [
                 'no_category_items' => 'Ingen saker matcher denne kategorien akkurat nå.',
@@ -1041,7 +1056,7 @@ return [
             ],
             'info_texts' => [
                 'attention' => 'Antall saker bak hvert signal som venter på en handling. Velg et signal for å se sakene.',
-                'deadlines' => 'Frister og Business Reviews markert i valgt måned. Hold over en dato for detaljer.',
+                'deadlines' => 'Frister og Business Reviews markert i valgt måned. Velg en dato for detaljer.',
                 'management' => 'Hvor mange av de aktive sakene som har ansvarlig satt, og hvor mange aktiviteter som er registrert de siste 14 dagene.',
                 'pipeline_stages' => 'Antall aktive saker i hver fase av bid-prosessen.',
                 'outcomes' => 'Antall avsluttede saker fordelt på vunnet, tapt, No-Go og trukket.',

@@ -76,10 +76,13 @@ describe('the screen-reader announcer stays quiet unless something new happened 
     });
 
     test('the success toast is drawn into the persistent live region; a flash error is an alert', () => {
-        const layout = read('..', 'Layouts', 'CustomerAppLayout.jsx');
-        assert.match(layout, /liveRegion\('toast'\)/);
-        assert.match(layout, /flash\?\.success && showSuccess \? portalToLiveRegion\(/);
-        assert.match(layout, /<div role="alert" className="mb-6 rounded-2xl border border-rose-200/);
+        // Fase 2 moved the flash rendering out of CustomerAppLayout into FlashMessages, shared by both
+        // layouts; the decisions this pins are unchanged.
+        const flash = read('..', 'Components', 'App', 'FlashMessages.jsx');
+        assert.match(read('..', 'Layouts', 'CustomerAppLayout.jsx'), /<FlashMessages flash=\{flash\}/);
+        assert.match(flash, /liveRegion\('toast'\)/);
+        assert.match(flash, /\{toast && messageRegion \? createPortal\(/);
+        assert.match(flash, /<div role="alert" className=\{`\$\{bannerClassName\} rounded-2xl border border-rose-200/);
     });
 
     test('in a rapid sequence only the last message reaches the region, and it is cleared afterwards', () => {
@@ -90,7 +93,7 @@ describe('the screen-reader announcer stays quiet unless something new happened 
         let clock = 0;
         globalThis.document = {
             body: { appendChild: (element) => elements.set(element.id, element) },
-            createElement: () => ({ id: '', className: '', textContent: '', setAttribute() {} }),
+            createElement: () => ({ id: '', className: '', textContent: '', setAttribute() {}, appendChild(child) { elements.set(child.id, child); } }),
             getElementById: (id) => elements.get(id) ?? null,
         };
         globalThis.window = {

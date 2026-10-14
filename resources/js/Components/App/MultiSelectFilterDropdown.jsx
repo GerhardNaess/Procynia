@@ -95,7 +95,10 @@ export default function MultiSelectFilterDropdown({
     const close = useCallback(() => {
         onOpenChange(false);
         setSearchQuery('');
-        buttonRef.current?.focus();
+        // preventScroll: giving focus back must not move the page. With the sticky header's
+        // scroll-padding (WCAG Fase 2) a trigger near the top would otherwise scroll the page between
+        // mousedown and mouseup when an outside click closes the panel, and that click would miss.
+        buttonRef.current?.focus({ preventScroll: true });
     }, [onOpenChange]);
 
     const recalcPosition = useCallback(() => {

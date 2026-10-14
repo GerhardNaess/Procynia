@@ -203,7 +203,7 @@ describe('the alert panel fits the screen', () => {
     });
 
     test('the heading is not restated below itself', () => {
-        assert.match(bell, /<div className="text-base font-semibold text-slate-950">Varsler<\/div>/);
+        assert.match(bell, /<div id="app-notifications-title" className="text-base font-semibold text-slate-950">Varsler<\/div>/);
         assert.ok(!bell.includes('Siste varsler for deg'));
     });
 });

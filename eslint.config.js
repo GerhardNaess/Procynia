@@ -17,6 +17,19 @@ const A11Y_CHECKED_FILES = [
     'resources/js/Components/App/FormField.jsx',
     'resources/js/Components/App/PageHelpButton.jsx',
     'resources/js/Components/App/PageHelpPanel.jsx',
+    // Fase 2 — layouts, navigation, flash messages and the standard views.
+    'resources/js/Layouts/CustomerAppLayout.jsx',
+    'resources/js/Layouts/PublicLayout.jsx',
+    'resources/js/Components/App/FlashMessages.jsx',
+    'resources/js/Components/App/SkipLink.jsx',
+    'resources/js/Components/App/NotificationBell.jsx',
+    'resources/js/Components/App/ModuleSidebar.jsx',
+    'resources/js/Components/App/Breadcrumbs.jsx',
+    'resources/js/Components/App/DashboardCockpit.jsx',
+    'resources/js/Pages/Auth/Login.jsx',
+    'resources/js/Pages/App/Home/Index.jsx',
+    'resources/js/Pages/App/Governance/Index.jsx',
+    'resources/js/Pages/App/Dashboard/Index.jsx',
 ];
 
 export default [

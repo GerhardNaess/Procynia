@@ -11,8 +11,11 @@
  *              interrupts. Use announce(message).
  *   assertive  Failures the user must act on. Interrupts, so only for errors that are not already
  *              rendered as a role="alert" element. Use announce(message, { politeness: 'assertive' }).
- *   toast      A visible container: CustomerAppLayout portals its success toast into it, so the toast
- *              the user sees is also the text the screen reader hears — once, with no hidden copy.
+ *   toast      A visible container: the layouts portal their success toast into it (FlashMessages), so
+ *              the toast the user sees is also the text the screen reader hears — once, with no hidden
+ *              copy. It sits in a host (#procynia-toast) beside a silent slot, toastActions, that holds
+ *              the toast's close button: inside the live region the button's name would be read out
+ *              with every message. resources/css/app.css stacks the two into one toast.
  *
  * The regions carry aria-live but no role. role="status"/"alert" would put three permanent landmarks
  * into the page's role tree, where pages (and their tests) look for their own status messages.
@@ -27,7 +30,11 @@ export const LIVE_REGION_IDS = {
     polite: 'procynia-live-polite',
     assertive: 'procynia-live-assertive',
     toast: 'procynia-live-toast',
+    // Not live: the toast's close button, next to the region rather than inside it.
+    toastActions: 'procynia-toast-actions',
 };
+
+export const TOAST_HOST_ID = 'procynia-toast';
 
 export const DUPLICATE_WINDOW_MS = 1500;
 
@@ -81,11 +88,33 @@ export function ensureLiveRegions(doc = document) {
             region.className = 'sr-only';
         }
 
-        doc.body.appendChild(region);
+        if (id === LIVE_REGION_IDS.toast) {
+            toastHost(doc).appendChild(region);
+        } else {
+            doc.body.appendChild(region);
+        }
+    }
+
+    if (! doc.getElementById(LIVE_REGION_IDS.toastActions)) {
+        const actions = doc.createElement('div');
+        actions.id = LIVE_REGION_IDS.toastActions;
+        toastHost(doc).appendChild(actions);
     }
 }
 
-/** The element to portal visible live content into (the toast), or null outside the browser. */
+function toastHost(doc) {
+    let host = doc.getElementById(TOAST_HOST_ID);
+
+    if (! host) {
+        host = doc.createElement('div');
+        host.id = TOAST_HOST_ID;
+        doc.body.appendChild(host);
+    }
+
+    return host;
+}
+
+/** The element to portal visible content into (the toast, or its close button), or null outside the browser. */
 export function liveRegion(name) {
     if (typeof document === 'undefined') {
         return null;

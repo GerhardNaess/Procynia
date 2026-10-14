@@ -1,23 +1,19 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import ActionDialog from '../Components/App/ActionDialog';
+import FlashMessages from '../Components/App/FlashMessages';
+import SkipLink from '../Components/App/SkipLink';
 import NotificationBell from '../Components/App/NotificationBell';
 import ModuleSidebar from '../Components/App/ModuleSidebar';
 import Breadcrumbs from '../Components/App/Breadcrumbs';
 import { resolveNavigation } from '../Support/appNavigation';
 import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 import { readModuleSidebarCollapsed, writeModuleSidebarCollapsed } from '../Support/moduleSidebarState';
-import { liveRegion } from '../Support/announcer';
+import { MAIN_CONTENT_ID } from '../Support/routeFocus';
+import { useKeepInViewport } from '../Support/useKeepInViewport';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
-}
-
-function portalToLiveRegion(element) {
-    const region = liveRegion('toast');
-
-    return region ? createPortal(element, region) : element;
 }
 
 function emptyNotificationsState() {
@@ -47,9 +43,11 @@ const NOTIFICATION_POLL_MS = 60000;
  * the two are the same control at different depths. Giving the lower one its own markup would have
  * let the pill, the active state and the disabled state drift apart between them.
  */
-function NavigationRow({ items, activeKey, disabledHint = '' }) {
+function NavigationRow({ items, activeKey, ariaLabel, disabledHint = '' }) {
+    // Named, because the page has several navigation landmarks (rail, this row, the breadcrumb trail)
+    // and a screen reader lists them by name.
     return (
-        <nav className="flex flex-wrap items-center gap-2">
+        <nav aria-label={ariaLabel} className="flex flex-wrap items-center gap-2">
             {items.map((item) => {
                 const isActive = activeKey === item.key;
                 const classes = classNames(
@@ -118,7 +116,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     // What the customer's own roles let this person do, shared on every request. The rail uses it
     // to stop offering a module they have no permission in; the routes enforce the same answer.
     const userPermissions = page.props.access?.permissions ?? [];
-    const [showSuccess, setShowSuccess] = useState(true);
+    const a11y = translations?.a11y ?? {};
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
     const [isDeleteUnreadOpen, setIsDeleteUnreadOpen] = useState(false);
@@ -127,7 +125,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     // no server pass to disagree with and no frame where the rail opens and then snaps shut.
     const [sidebarCollapsed, setSidebarCollapsed] = useState(readModuleSidebarCollapsed);
     const userMenuRef = useRef(null);
+    const userMenuButtonRef = useRef(null);
+    const userMenuPanelRef = useRef(null);
     const notificationsMenuRef = useRef(null);
+    const notificationsButtonRef = useRef(null);
+    const headerRef = useRef(null);
     const currentUrl = page.url ?? '';
     const user = auth?.user;
     const locale = page.props.locale ?? 'nb-NO';
@@ -173,6 +175,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         href: '/app/wiki/ask',
     };
 
+    // On a phone the header wraps and the user button leaves the right edge; keep its panel on screen.
+    useKeepInViewport(userMenuPanelRef, isUserMenuOpen);
+
     const toggleSidebarCollapsed = () => {
         setSidebarCollapsed((current) => {
             const next = ! current;
@@ -183,19 +188,33 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         });
     };
 
+    // How far the sticky header reaches down, for `scroll-padding-top` in app.css: whatever Tab, the
+    // skip link or an in-page link scrolls into view stops below the header, not under it (2.4.11).
+    // The header is only sticky from lg up; below that it scrolls away and the offset is 0.
     useEffect(() => {
-        if (!flash?.success) {
-            return;
+        const header = headerRef.current;
+
+        if (! header) {
+            return undefined;
         }
 
-        setShowSuccess(true);
+        const root = document.documentElement;
+        const measure = () => {
+            const sticky = window.getComputedStyle(header).position === 'sticky';
+            root.style.setProperty('--app-header-offset', `${sticky ? header.offsetHeight : 0}px`);
+        };
 
-        const timer = window.setTimeout(() => {
-            setShowSuccess(false);
-        }, 3000);
+        measure();
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+        observer?.observe(header);
+        window.addEventListener('resize', measure);
 
-        return () => window.clearTimeout(timer);
-    }, [flash?.success]);
+        return () => {
+            observer?.disconnect();
+            window.removeEventListener('resize', measure);
+            root.style.removeProperty('--app-header-offset');
+        };
+    }, []);
 
     useEffect(() => {
         setIsUserMenuOpen(false);
@@ -269,11 +288,21 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             }
         };
 
+        // Escape closes the open menu and, if focus was in it, puts focus back on the button that
+        // opened it — never on <body>, which would send the next Tab to the top of the page.
         const handleKeyDown = (event) => {
-            if (event.key === 'Escape') {
-                setIsUserMenuOpen(false);
-                setIsNotificationsOpen(false);
+            if (event.key !== 'Escape') {
+                return;
             }
+
+            const active = document.activeElement;
+            const returnTo = isUserMenuOpen && userMenuRef.current?.contains(active)
+                ? userMenuButtonRef.current
+                : (isNotificationsOpen && notificationsMenuRef.current?.contains(active) ? notificationsButtonRef.current : null);
+
+            setIsUserMenuOpen(false);
+            setIsNotificationsOpen(false);
+            returnTo?.focus();
         };
 
         document.addEventListener('mousedown', handlePointerDown);
@@ -380,8 +409,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     return (
         <>
             <Head title={title ? `${title} · ${appName}` : appName} />
+            <SkipLink label={a11y.skip_to_content ?? 'Hopp til hovedinnhold'} />
             <div className="min-h-screen bg-[#f6f7fb] text-slate-900">
-                <header className="sticky top-0 z-[60] border-b border-slate-200/80 bg-white/95 backdrop-blur-sm shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+                {/* Sticky from lg up only. On a phone, or at 200–400 % zoom, a header that stays put
+                    would take most of the window (1.4.10 Reflow); there it scrolls away with the page. */}
+                <header ref={headerRef} className="z-[60] border-b lg:sticky lg:top-0 border-slate-200/80 bg-white/95 backdrop-blur-sm shadow-[0_1px_0_rgba(15,23,42,0.04)]">
                     <div className="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
                         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
@@ -426,6 +458,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                                 <NotificationBell
                                     menuRef={notificationsMenuRef}
+                                    buttonRef={notificationsButtonRef}
+                                    label={Number(notificationState?.unread_count ?? 0) > 0
+                                        ? (a11y.notifications_unread ?? 'Varsler, :count uleste').replace(':count', String(notificationState.unread_count))
+                                        : (a11y.notifications ?? 'Varsler')}
+                                    onFocusLeave={() => setIsNotificationsOpen(false)}
                                     hint={translations.frontend.notifications_hint
                                         ?? 'Nye varsler du ikke har lest'}
                                     isOpen={isNotificationsOpen}
@@ -448,9 +485,21 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     }}
                                 />
 
-                                <div ref={userMenuRef} className="relative">
+                                {/* A disclosure, not an ARIA menu: the panel holds ordinary links and a
+                                    button, reached with Tab. It closes when focus leaves it. */}
+                                <div
+                                    ref={userMenuRef}
+                                    className="relative"
+                                    onBlur={(event) => {
+                                        if (event.relatedTarget && ! event.currentTarget.contains(event.relatedTarget)) {
+                                            setIsUserMenuOpen(false);
+                                        }
+                                    }}
+                                >
                                     <button
+                                        ref={userMenuButtonRef}
                                         type="button"
+                                        data-testid="user-menu-button"
                                         onClick={() => {
                                             setIsNotificationsOpen(false);
                                             setIsUserMenuOpen((value) => !value);
@@ -461,18 +510,25 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                                 ? 'border-violet-300 ring-4 ring-violet-100'
                                                 : 'hover:border-slate-300 hover:bg-slate-50',
                                         )}
-                                        aria-haspopup="menu"
                                         aria-expanded={isUserMenuOpen}
+                                        aria-controls="app-user-menu"
                                     >
-                                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-semibold text-slate-700">
+                                        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-semibold text-slate-700">
                                             {userInitial}
                                         </span>
-                                        <div className="min-w-0">
-                                            <div className="truncate text-base font-semibold text-slate-900">{userName}</div>
-                                        </div>
+                                        <span className="min-w-0">
+                                            {/* `relative`: the sr-only suffix is absolutely positioned, and must
+                                                be clipped by this truncating box — positioned outside it, a long name
+                                                pushed it past the window and the whole page scrolled sideways. */}
+                                            <span className="relative block truncate text-base font-semibold text-slate-900">
+                                                {userName}
+                                                {/* Heard, not seen: the name alone does not say what the button opens. */}
+                                                <span className="sr-only">, {a11y.user_menu ?? 'brukermeny'}</span>
+                                            </span>
+                                        </span>
                                         <svg
                                             className={classNames(
-                                                'h-4 w-4 shrink-0 text-slate-400 transition-transform',
+                                                'h-4 w-4 shrink-0 text-slate-500 transition-transform',
                                                 isUserMenuOpen ? 'rotate-180' : '',
                                             )}
                                             viewBox="0 0 20 20"
@@ -490,7 +546,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     </button>
 
                                     {isUserMenuOpen ? (
-                                        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
+                                        <div ref={userMenuPanelRef} id="app-user-menu" data-escape-layer="" className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
                                             <div className="space-y-1 border-b border-slate-200 px-4 py-4">
                                                 <div className="text-base font-semibold text-slate-950">{userName}</div>
                                                 <div className="break-words text-base text-slate-600">{userEmail}</div>
@@ -571,6 +627,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 <NavigationRow
                                     items={moduleNavigation}
                                     activeKey={activeModuleNavigationKey}
+                                    ariaLabel={a11y.module_navigation ?? 'Områder i modulen'}
                                 />
                             </div>
                         ) : null}
@@ -602,7 +659,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                         </div>
                     </aside>
 
-                    <main className="min-w-0 flex-1">
+                    {/* The skip link's target, and where focus goes after a page change when the page
+                        has no h1 (Support/routeFocus.js). tabIndex -1: focusable by script, not by Tab. */}
+                    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="min-w-0 flex-1">
                     {/* Where this page sits — above everything the page draws, its title included. */}
                     <Breadcrumbs
                         items={breadcrumbs}
@@ -622,6 +681,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             <NavigationRow
                                 items={pageNavigation}
                                 activeKey={activePageNavigationKey}
+                                ariaLabel={a11y.page_navigation ?? 'Visninger i området'}
                                 disabledHint={aiCaseNavigationHint}
                             />
                             {aiCaseNavigationHint !== '' ? (
@@ -632,29 +692,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                         </div>
                     ) : null}
 
-                    {/* The success toast is drawn into the app-wide live region (Support/announcer.js),
-                        which outlives this layout: a toast mounted here would be new on every page,
-                        and a screen reader does not read a polite region that arrives with its text. */}
-                    {flash?.success && showSuccess ? portalToLiveRegion(
-                        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-base text-emerald-800 shadow-lg">
-                            {flash.success}
-                        </div>,
-                    ) : null}
-                    {/* role="alert": a rejected action is announced the moment the message appears. */}
-                    {flash?.error ? (
-                        <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800 shadow-sm">
-                            {flash.error}
-                        </div>
-                    ) : null}
-                    {flash?.warning ? (
-                        <div
-                            role="status"
-                            className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900 shadow-sm"
-                            data-testid="flash-warning"
-                        >
-                            {flash.warning}
-                        </div>
-                    ) : null}
+                    <FlashMessages flash={flash} closeLabel={a11y.close_message ?? 'Lukk melding'} />
 
                     {title && showPageTitle ? (
                         <div className="mb-8">
@@ -667,7 +705,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 </div>
 
                 <footer className="bg-transparent">
-                    <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-base text-slate-500 sm:px-6 lg:px-8">
+                    <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-base text-slate-600 sm:px-6 lg:px-8">
                         {translations.frontend.customer_footer}
                     </div>
                 </footer>
@@ -679,6 +717,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             <ActionDialog
                 isOpen={isDeleteUnreadOpen}
                 onClose={() => setIsDeleteUnreadOpen(false)}
+                // The «Slett alle uleste» button that opened it sits in the bell's panel, which has
+                // closed by now; focus returns to the bell instead.
+                fallbackFocusRef={notificationsButtonRef}
                 titleId="notifications-delete-unread-title"
             >
                 <h2

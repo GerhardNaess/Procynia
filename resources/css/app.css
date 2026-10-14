@@ -59,6 +59,56 @@
     outline-offset: -2px;
 }
 
+/*
+ * Programmatic focus targets (Fase 2, A11Y-100/-102): <main> after «Hopp til hovedinnhold», and a new
+ * page's h1 after an Inertia visit (Support/routeFocus.js). They are not controls — nothing can be
+ * operated there — so 2.4.7 asks no indicator of them, and a violet frame round the page title on
+ * every keyboard navigation would only look like a fault. Tab moves on from them as from any element.
+ */
+:is(main, h1)[tabindex='-1']:focus {
+    outline: none;
+}
+
+/*
+ * The sticky app header (WCAG 2.4.11 Focus Not Obscured, AA; A11Y-020). CustomerAppLayout measures
+ * the header and sets --app-header-offset while it is sticky (from lg up), so an element scrolled into
+ * view by Tab, a skip link or an in-page link stops below the header instead of under it. Below lg the
+ * header scrolls away with the page and the offset is 0.
+ */
+html {
+    scroll-padding-top: calc(var(--app-header-offset, 0px) + 0.5rem);
+}
+
+/*
+ * The flash toast (A11Y-012, A11Y-020). Support/announcer.js creates the host once: the polite live
+ * region that receives the message, and a separate, silent slot for its close button, stacked in one
+ * grid cell so the button sits inside the toast without being read as part of the message. Above the
+ * header (60) and dialogs (70). Only the button takes the pointer: the toast never blocks a click on
+ * whatever lies under it.
+ */
+#procynia-toast {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    z-index: 80;
+    display: grid;
+    width: max-content;
+    max-width: calc(100vw - 2rem);
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+#procynia-toast > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+}
+
+#procynia-toast-actions {
+    justify-self: end;
+    align-self: center;
+    pointer-events: auto;
+}
+
 @layer components {
     .wiki-article {
         font-size: 1rem;

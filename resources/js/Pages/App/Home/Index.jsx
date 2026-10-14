@@ -63,7 +63,7 @@ function ModuleCard({ module, title, description, metrics, stateLabel, openLabel
                     data-testid={`home-module-${module.key}-state`}
                     className={classNames(
                         'rounded-full px-2.5 py-1 text-xs font-semibold',
-                        isBuilding ? 'bg-slate-100 text-slate-500' : 'bg-emerald-50 text-emerald-700',
+                        isBuilding ? 'bg-slate-100 text-slate-600' : 'bg-emerald-50 text-emerald-700',
                     )}
                 >
                     {stateLabel}
@@ -77,7 +77,7 @@ function ModuleCard({ module, title, description, metrics, stateLabel, openLabel
                 <dl className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
                     {metrics.map((metric) => (
                         <div key={metric.key} data-testid={`home-metric-${module.key}-${metric.key}`}>
-                            <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                            <dt className="text-xs font-medium uppercase tracking-wide text-slate-600">
                                 {metric.label}
                             </dt>
                             <dd className="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900">

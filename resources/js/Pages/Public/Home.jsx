@@ -179,7 +179,7 @@ export default function Home() {
                                 <ArrowIcon className="h-4 w-4" />
                             </Link>
                         </div>
-                        <div className="mt-8 flex flex-wrap justify-center gap-6 text-base text-slate-500">
+                        <div className="mt-8 flex flex-wrap justify-center gap-6 text-base text-slate-600">
                             {checklist.map((item) => (
                                 <div key={item} className="flex items-center gap-2">
                                     <CheckIcon className="h-4 w-4 text-blue-500" />
