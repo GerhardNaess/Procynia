@@ -54,7 +54,7 @@ export default function ProcessFlowChangeCard({
             </p>
 
             <label className="mt-4 block space-y-1">
-                <span className="block text-sm font-semibold text-slate-700">
+                <span className="block text-base font-semibold text-slate-700">
                     {tb.change_label ?? 'Hva skal endres?'}
                 </span>
                 <textarea
@@ -68,7 +68,7 @@ export default function ProcessFlowChangeCard({
                 />
             </label>
 
-            {error && <p className="mt-2 text-sm font-medium text-rose-700">{error}</p>}
+            {error && <p className="mt-2 text-base font-medium text-rose-700">{error}</p>}
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
                 {/* No arguments on purpose — see InterpretCard for what the click event does to an
@@ -101,13 +101,13 @@ export default function ProcessFlowChangeCard({
                     </div>
 
                     <dl className="rounded-2xl bg-slate-50 p-4 text-base leading-6">
-                        <dt className="text-sm font-semibold text-slate-500">{tb.change_instruction_label ?? 'Instruks'}</dt>
+                        <dt className="text-base font-semibold text-slate-500">{tb.change_instruction_label ?? 'Instruks'}</dt>
                         <dd className="mt-1 text-slate-900">{proposal.instruction}</dd>
                         {proposal.summary && <dd className="mt-2 text-slate-700">{proposal.summary}</dd>}
                     </dl>
 
                     {hasUnsavedChanges && (
-                        <p className="text-sm text-slate-600">
+                        <p className="text-base text-slate-600">
                             {tb.change_unsaved_notice ?? 'Forslaget er laget ut fra den lagrede arbeidsversjonen.'}
                         </p>
                     )}
@@ -130,13 +130,13 @@ export default function ProcessFlowChangeCard({
 
                                     return (
                                         <li key={index} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 p-3">
-                                            <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-sm font-semibold ${BADGE_STYLES[line.badge]}`}>
+                                            <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-base font-semibold ${BADGE_STYLES[line.badge]}`}>
                                                 {tb[`change_badge_${line.badge}`] ?? line.badge}
                                             </span>
                                             <div className="min-w-0 flex-1">
                                                 <p className="text-base font-medium text-slate-900">{line.title}</p>
                                                 {line.details.map((detail) => (
-                                                    <p key={detail} className="mt-0.5 text-sm text-slate-600">{detail}</p>
+                                                    <p key={detail} className="mt-0.5 text-base text-slate-600">{detail}</p>
                                                 ))}
                                             </div>
                                         </li>
@@ -165,13 +165,13 @@ export default function ProcessFlowChangeCard({
                     )}
 
                     {changes.length > 0 && (
-                        <p className="text-sm text-slate-600">
+                        <p className="text-base text-slate-600">
                             {tb.change_accept_help ?? 'Alle endringene i listen legges inn i arbeidsversjonen samlet. Ingenting publiseres.'}
                         </p>
                     )}
 
                     {changes.length > 0 && hasUnsavedChanges && (
-                        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-base text-amber-900">
                             {tb.change_accept_unsaved ?? 'Du har ulagrede endringer i strukturen. Forkast dem før du godtar forslaget.'}
                         </p>
                     )}

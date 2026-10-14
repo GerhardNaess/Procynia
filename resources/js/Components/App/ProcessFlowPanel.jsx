@@ -74,9 +74,9 @@ import {
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const SMALL_INPUT = 'min-h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const ROW_ADD = `inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300`;
-const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold transition ${DESTRUCTIVE_COLOURS}`;
+const SMALL_INPUT = 'min-h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const ROW_ADD = `inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300`;
+const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-base font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 const SUBHEADING = 'text-base font-semibold text-slate-900';
 
 const TEXTAREA = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base leading-6 text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
@@ -757,7 +757,7 @@ export default function ProcessFlowPanel({
                                     </button>
                                 )}
                                 {canEdit && (
-                                    <p className="text-sm text-slate-500">
+                                    <p className="text-base text-slate-500">
                                         {tb.approval_cleared_help ?? 'Endringer du lagrer, er upubliserte til flyten godkjennes og publiseres.'}
                                     </p>
                                 )}
@@ -897,7 +897,7 @@ export default function ProcessFlowPanel({
 
                 <dl className="mt-5 space-y-4">
                     <div>
-                        <dt className="text-sm font-semibold uppercase tracking-wide text-rose-700">
+                        <dt className="text-base font-semibold uppercase tracking-wide text-rose-700">
                             {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -907,7 +907,7 @@ export default function ProcessFlowPanel({
                         </dd>
                     </div>
                     <div>
-                        <dt className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                        <dt className="text-base font-semibold uppercase tracking-wide text-slate-500">
                             {tq.delete_dialog_kept_heading ?? 'Dette beholdes'}
                         </dt>
                         <dd className="mt-1 text-base leading-6 text-slate-700">
@@ -1078,7 +1078,7 @@ function StepEditDialog({
                     </h2>
 
                     {inserting && (
-                        <p className="mt-2 text-sm leading-5 text-slate-600">
+                        <p className="mt-2 text-base leading-6 text-slate-600">
                             {(tb.step_insert_between ?? 'Mellom «:from» og «:to».')
                                 .replace(':from', step.between?.[0] ?? '')
                                 .replace(':to', step.between?.[1] ?? '')}
@@ -1086,7 +1086,7 @@ function StepEditDialog({
                     )}
 
                     <label className="mt-5 block space-y-1">
-                        <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_label ?? 'Aktivitet'}</span>
+                        <span className="block text-base font-semibold text-slate-700">{tb.step_edit_label ?? 'Aktivitet'}</span>
                         <input
                             type="text"
                             className={INPUT}
@@ -1098,7 +1098,7 @@ function StepEditDialog({
                     </label>
 
                     <label className="mt-4 block space-y-1">
-                        <span className="block text-sm font-semibold text-slate-700">{tb.step_edit_lane ?? 'Ansvarlig rolle'}</span>
+                        <span className="block text-base font-semibold text-slate-700">{tb.step_edit_lane ?? 'Ansvarlig rolle'}</span>
                         <select
                             className={INPUT}
                             value={lane}
@@ -1115,8 +1115,8 @@ function StepEditDialog({
 
                     {shownBranches !== null && (
                         <fieldset className="mt-5">
-                            <legend className="block text-sm font-semibold text-slate-700">{tb.branches_heading ?? 'Grener'}</legend>
-                            <p className="mt-1 text-sm leading-5 text-slate-500">
+                            <legend className="block text-base font-semibold text-slate-700">{tb.branches_heading ?? 'Grener'}</legend>
+                            <p className="mt-1 text-base leading-6 text-slate-500">
                                 {tb.branches_help ?? 'Hvert utfall av beslutningen går til et steg som allerede finnes i flyten.'}
                             </p>
 
@@ -1125,7 +1125,7 @@ function StepEditDialog({
                                     // By position: a branch has no identity of its own until it is saved as an arrow.
                                     <li key={index} className="flex flex-wrap items-end gap-2">
                                         <label className="min-w-[8rem] flex-1 space-y-1">
-                                            <span className="block text-xs font-semibold text-slate-600">{tb.branch_label ?? 'Utfall'}</span>
+                                            <span className="block text-base font-semibold text-slate-600">{tb.branch_label ?? 'Utfall'}</span>
                                             <input
                                                 type="text"
                                                 className={INPUT}
@@ -1137,7 +1137,7 @@ function StepEditDialog({
                                             />
                                         </label>
                                         <label className="min-w-[10rem] flex-[2] space-y-1">
-                                            <span className="block text-xs font-semibold text-slate-600">{tb.branch_target ?? 'Går til'}</span>
+                                            <span className="block text-base font-semibold text-slate-600">{tb.branch_target ?? 'Går til'}</span>
                                             <select
                                                 className={INPUT}
                                                 value={branch.to}
@@ -1157,7 +1157,7 @@ function StepEditDialog({
                                         </label>
                                         <button
                                             type="button"
-                                            className="rounded-xl px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                                            className="rounded-xl px-3 py-2 text-base font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
                                             onClick={() => setBranches((current) => current.filter((_, at) => at !== index))}
                                             disabled={busy}
                                             aria-label={(tb.branch_remove ?? 'Fjern grenen «:label»').replace(':label', branch.label.trim() || String(index + 1))}
@@ -1170,7 +1170,7 @@ function StepEditDialog({
 
                             <button
                                 type="button"
-                                className="mt-3 text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                className="mt-3 text-base font-semibold text-sky-800 hover:underline disabled:opacity-40"
                                 onClick={() => setBranches((current) => [...current, { label: '', to: targets[0]?.key ?? '' }])}
                                 disabled={busy || targets.length === 0}
                             >
@@ -1178,7 +1178,7 @@ function StepEditDialog({
                             </button>
 
                             {problems.length > 0 && (
-                                <ul className="mt-3 list-disc space-y-1 rounded-xl border border-amber-200 bg-amber-50 py-2 pl-8 pr-3 text-sm text-amber-900">
+                                <ul className="mt-3 list-disc space-y-1 rounded-xl border border-amber-200 bg-amber-50 py-2 pl-8 pr-3 text-base text-amber-900">
                                     {problems.map((problem) => <li key={problem}>{problemText(problem)}</li>)}
                                 </ul>
                             )}
@@ -1192,7 +1192,7 @@ function StepEditDialog({
                         ? (
                             <button
                                 type="button"
-                                className="mt-4 text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                className="mt-4 text-base font-semibold text-sky-800 hover:underline disabled:opacity-40"
                                 onClick={() => onMove(step.key)}
                                 disabled={busy}
                             >
@@ -1200,7 +1200,7 @@ function StepEditDialog({
                             </button>
                         )
                         : (
-                            <p className="mt-4 text-sm leading-5 text-slate-500">
+                            <p className="mt-4 text-base leading-6 text-slate-500">
                                 {tb.step_move_unavailable ?? 'Dette steget kan ikke flyttes herfra. Bare aktiviteter på hovedlinjen, utenfor beslutningsgrener, kan flyttes.'}
                             </p>
                         ))}
@@ -1210,7 +1210,7 @@ function StepEditDialog({
                     {! inserting && typeof onAddControl === 'function' && (
                         <section className="mt-5" aria-labelledby="process-step-controls-title">
                             <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                <h3 id="process-step-controls-title" className="text-sm font-semibold text-slate-700">
+                                <h3 id="process-step-controls-title" className="text-base font-semibold text-slate-700">
                                     {tb.controls_heading ?? 'Kontroller'}
                                     {(controls ?? []).length > 0 && (
                                         <span className="ml-2 font-normal text-slate-500">
@@ -1223,7 +1223,7 @@ function StepEditDialog({
                                 {controls !== undefined && (
                                     <button
                                         type="button"
-                                        className="text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                                        className="text-base font-semibold text-sky-800 hover:underline disabled:opacity-40"
                                         onClick={() => onAddControl(step.key)}
                                         disabled={busy}
                                     >
@@ -1233,7 +1233,7 @@ function StepEditDialog({
                             </div>
 
                             {(controls ?? []).length === 0 ? (
-                                <p className="mt-1 text-sm text-slate-500">
+                                <p className="mt-1 text-base text-slate-500">
                                     {tb.controls_empty ?? 'Ingen kontroller på denne aktiviteten.'}
                                 </p>
                             ) : (
@@ -1242,7 +1242,7 @@ function StepEditDialog({
                                         <li key={control.id}>
                                             <Link
                                                 href={control.url}
-                                                className="text-sm font-semibold text-slate-900 underline-offset-2 hover:underline"
+                                                className="text-base font-semibold text-slate-900 underline-offset-2 hover:underline"
                                             >
                                                 {control.title}
                                             </Link>
@@ -1253,20 +1253,20 @@ function StepEditDialog({
                         </section>
                     )}
 
-                    <p className="mt-4 text-sm leading-5 text-slate-500">
+                    <p className="mt-4 text-base leading-6 text-slate-500">
                         {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
                     </p>
 
                     {/* Saving writes the working version as the editor holds it, so edits made under
                         "Rediger struktur manuelt" and not yet saved go with it. Said before the click. */}
                     {hasUnsavedChanges && (
-                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-900">
                             {tb.step_edit_unsaved_help ?? 'Du har ulagrede endringer i strukturen. De lagres sammen med dette steget.'}
                         </p>
                     )}
 
                     {error && (
-                        <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p>
+                        <p role="alert" className="mt-3 text-base font-medium text-rose-700">{error}</p>
                     )}
 
                     <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -1284,7 +1284,7 @@ function StepEditDialog({
                             step not yet added has none. */}
                         {! inserting && typeof onOpenActivity === 'function' && <button
                             type="button"
-                            className="ml-auto text-sm font-semibold text-sky-800 hover:underline disabled:opacity-40"
+                            className="ml-auto text-base font-semibold text-sky-800 hover:underline disabled:opacity-40"
                             onClick={() => onOpenActivity(step.key)}
                             disabled={busy}
                         >
@@ -1336,14 +1336,14 @@ function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onS
                     <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
                         {tb.step_move_heading ?? 'Flytt steg'}
                     </h2>
-                    <p className="mt-2 text-sm leading-5 text-slate-600">
+                    <p className="mt-2 text-base leading-6 text-slate-600">
                         {(tb.step_move_current ?? '«:label» kommer nå etter «:after».')
                             .replace(':label', step.label || step.key)
                             .replace(':after', after?.label || after?.key || '')}
                     </p>
 
                     <label className="mt-5 block space-y-1">
-                        <span className="block text-sm font-semibold text-slate-700">{tb.step_move_after ?? 'Plasser etter'}</span>
+                        <span className="block text-base font-semibold text-slate-700">{tb.step_move_after ?? 'Plasser etter'}</span>
                         <select
                             className={INPUT}
                             value={afterKey}
@@ -1361,23 +1361,23 @@ function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onS
                     </label>
 
                     {targets.length === 0 && (
-                        <p className="mt-2 text-sm leading-5 text-slate-500">
+                        <p className="mt-2 text-base leading-6 text-slate-500">
                             {tb.step_move_no_targets ?? 'Det finnes ikke noe annet sted på hovedlinjen steget kan flyttes til.'}
                         </p>
                     )}
 
-                    <p className="mt-4 text-sm leading-5 text-slate-500">
+                    <p className="mt-4 text-base leading-6 text-slate-500">
                         {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
                     </p>
 
                     {hasUnsavedChanges && (
-                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-900">
                             {tb.step_edit_unsaved_help ?? 'Du har ulagrede endringer i strukturen. De lagres sammen med dette steget.'}
                         </p>
                     )}
 
                     {error && (
-                        <p role="alert" className="mt-3 text-sm font-medium text-rose-700">{error}</p>
+                        <p role="alert" className="mt-3 text-base font-medium text-rose-700">{error}</p>
                     )}
 
                     <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -1519,7 +1519,7 @@ function SubprocessOwnPageLink({ tb, current }) {
         <p className="mt-4 border-t border-slate-100 pt-4">
             <Link
                 href={`/app/quality/items/${current.id}?tab=flow`}
-                className="text-sm text-slate-500 transition hover:text-slate-800 hover:underline"
+                className="text-base text-slate-500 transition hover:text-slate-800 hover:underline"
             >
                 {(tb.subprocess_open_page ?? 'Åpne :title som egen prosess').replace(':title', current.title)} →
             </Link>
@@ -1552,14 +1552,14 @@ function DescriptionCard({ tq, tb, item }) {
                 </p>
             )}
 
-            <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-base text-slate-500">
                 {stepCount > 0
                     ? (tb.steps_summary ?? ':count steg er beskrevet.').replace(':count', String(stepCount))
                     : (tb.steps_summary_empty ?? 'Ingen steg er beskrevet ennå.')}
             </p>
 
             {item.owner_name && (
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-base text-slate-500">
                     {(tq.field_owner ?? 'Eier')}: {item.owner_name}
                 </p>
             )}
@@ -1600,7 +1600,7 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                       * in looked like it belonged to something else.
                       */}
                     <label className="mt-4 block space-y-1">
-                        <span className="block text-sm font-semibold text-slate-700">
+                        <span className="block text-base font-semibold text-slate-700">
                             {tb.ai_label ?? 'Prosessbeskrivelse'}
                         </span>
                         <textarea
@@ -1615,7 +1615,7 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                         />
                     </label>
 
-                    {error && <p className="mt-2 text-sm font-medium text-rose-700">{error}</p>}
+                    {error && <p className="mt-2 text-base font-medium text-rose-700">{error}</p>}
 
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                         <button
@@ -1643,7 +1643,7 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                         {/* Said before the button is pressed, not after: the reassurance is only
                             worth anything to someone deciding whether to press it. */}
                         {hasFlow && (
-                            <p className="text-sm text-slate-500">
+                            <p className="text-base text-slate-500">
                                 {tb.ai_replace_warning ?? 'Du ser forslaget før noe erstattes.'}
                             </p>
                         )}
@@ -1716,7 +1716,7 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
                     {tb.proposal_intro ?? 'Ingenting er lagret ennå.'}
                 </p>
                 {replaces && (
-                    <p className="mt-2 text-sm text-sky-800">
+                    <p className="mt-2 text-base text-sky-800">
                         {tb.proposal_replaces ?? 'Flyten som er lagret nå, blir erstattet når du tar forslaget i bruk.'}
                     </p>
                 )}
@@ -1730,7 +1730,7 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-base leading-6 text-amber-900">
                         {blocking.map((question) => <li key={question}>{question}</li>)}
                     </ul>
-                    <p className="mt-2 text-sm text-amber-800">
+                    <p className="mt-2 text-base text-amber-800">
                         {tb.blocking_questions_help ?? 'Procynia har ikke gjettet på svarene.'}
                     </p>
                 </div>
@@ -1784,7 +1784,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
             <p className="text-base font-semibold text-slate-900">
                 {tb.optional_clarifications_heading ?? 'Verdt å presisere'}
             </p>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
+            <p className="mt-1 text-base leading-6 text-slate-600">
                 {tb.optional_clarifications_help ?? 'Du kan ta flyten i bruk uten å svare på dette.'}
             </p>
 
@@ -1795,7 +1795,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
 
                         {answering === question ? (
                             <div className="mt-3 space-y-2">
-                                <label className="block text-sm font-semibold text-slate-700" htmlFor="clarification-answer">
+                                <label className="block text-base font-semibold text-slate-700" htmlFor="clarification-answer">
                                     {tb.clarification_answer_label ?? 'Svar'}
                                 </label>
                                 <textarea
@@ -1806,7 +1806,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
                                     onChange={(event) => setAnswer(event.target.value)}
                                     placeholder={tb.clarification_answer_placeholder ?? ''}
                                 />
-                                <p className="text-sm text-slate-500">
+                                <p className="text-base text-slate-500">
                                     {tb.clarification_answer_help ?? 'Procynia skriver om beskrivelsen slik at svaret inngår i den, og tolker flyten på nytt. Spørsmålet blir ikke stående i beskrivelsen.'}
                                 </p>
                                 <div className="flex flex-wrap gap-2">
@@ -1881,7 +1881,7 @@ function StatusLine({ tq, blueprint, publication, isDirty, current }) {
                 <StatusBadge tone="slate">{sourceLabels?.[blueprint.source] ?? blueprint.source}</StatusBadge>
             )}
 
-            <span className="text-sm text-slate-500">
+            <span className="text-base text-slate-500">
                 {state === 'unpublished' && (tp.unpublished_help
                     ?? 'Prosessen blir gjeldende når flyten er godkjent og publisert første gang.')}
                 {state === 'retired' && current && (tp.retired_help
@@ -1894,7 +1894,7 @@ function StatusLine({ tq, blueprint, publication, isDirty, current }) {
             </span>
 
             {blueprint?.generated_at && (
-                <span className="text-sm text-slate-400">
+                <span className="text-base text-slate-400">
                     {(tb.generated_notice ?? 'Sist generert :date.').replace(':date', blueprint.generated_at)}
                 </span>
             )}
@@ -1915,7 +1915,7 @@ function RevisionHistory({ tb, revisions }) {
                         <span className="text-base font-semibold text-slate-900">
                             {(tb.history_row ?? 'Revisjon :number').replace(':number', String(revision.revision_number))}
                         </span>
-                        <span className="text-sm text-slate-500">
+                        <span className="text-base text-slate-500">
                             {(tb.history_meta ?? 'Godkjent av :name :date')
                                 .replace(':name', revision.approved_by_name ?? '—')
                                 .replace(':date', revision.approved_at ?? '—')}
@@ -1955,7 +1955,7 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canEdit }) {
             <h3 className={SUBHEADING}>{tb.lanes_heading ?? 'Roller'}</h3>
 
             {lanes.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">{tb.lanes_empty ?? 'Ingen roller er definert.'}</p>
+                <p className="mt-2 text-base text-slate-500">{tb.lanes_empty ?? 'Ingen roller er definert.'}</p>
             ) : (
                 <ul className="mt-3 space-y-2">
                     {lanes.map((lane, index) => (
@@ -2045,11 +2045,11 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
             <h3 className={SUBHEADING}>{tb.nodes_heading ?? 'Noder'}</h3>
 
             {nodes.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">{tb.nodes_empty ?? 'Ingen noder er definert.'}</p>
+                <p className="mt-2 text-base text-slate-500">{tb.nodes_empty ?? 'Ingen noder er definert.'}</p>
             ) : (
                 <div className="mt-3 overflow-x-auto">
-                    <table className={`w-full text-left text-sm ${subprocessOptions.length > 0 ? 'min-w-[820px]' : 'min-w-[640px]'}`}>
-                        <thead className="text-xs uppercase tracking-wide text-slate-500">
+                    <table className={`w-full text-left text-base ${subprocessOptions.length > 0 ? 'min-w-[820px]' : 'min-w-[640px]'}`}>
+                        <thead className="text-base uppercase tracking-wide text-slate-500">
                             <tr>
                                 <th className="pb-2 pr-3">{tb.node_label ?? 'Tekst'}</th>
                                 <th className="pb-2 pr-3">{tb.node_lane ?? 'Rolle'}</th>
@@ -2169,11 +2169,11 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
             <h3 className={SUBHEADING}>{tb.edges_heading ?? 'Forbindelser'}</h3>
 
             {edges.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">{tb.edges_empty ?? 'Ingen forbindelser er definert.'}</p>
+                <p className="mt-2 text-base text-slate-500">{tb.edges_empty ?? 'Ingen forbindelser er definert.'}</p>
             ) : (
                 <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-left text-sm">
-                        <thead className="text-xs uppercase tracking-wide text-slate-500">
+                    <table className="w-full min-w-[640px] text-left text-base">
+                        <thead className="text-base uppercase tracking-wide text-slate-500">
                             <tr>
                                 <th className="pb-2 pr-3">{tb.edge_from ?? 'Fra'}</th>
                                 <th className="pb-2 pr-3">{tb.edge_to ?? 'Til'}</th>
@@ -2427,7 +2427,7 @@ function ActivityArticlePanel({
         <ActionDialog isOpen={activity !== null} onClose={close} titleId={titleId}>
             {activity !== null && (
                 <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[24px] bg-white p-6 shadow-xl">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
                         {activity.role || (tb.default_lane ?? 'Uten angitt rolle')}
                     </p>
                     <h2 id={titleId} className="mt-1 text-xl font-semibold text-slate-950">{activity.label}</h2>
@@ -2453,7 +2453,7 @@ function ActivityArticlePanel({
                     </h3>
 
                     {articles.length === 0 ? (
-                        <p className="mt-2 text-sm text-slate-500">
+                        <p className="mt-2 text-base text-slate-500">
                             {tb.articles_empty ?? 'Denne aktiviteten har ikke gitt noen kunnskap ennå.'}
                         </p>
                     ) : (
@@ -2475,18 +2475,18 @@ function ActivityArticlePanel({
                                                     {entry.title}
                                                 </a>
                                                 {entry.publication?.state_label && (
-                                                    <p className="mt-0.5 text-xs text-slate-500">{entry.publication.state_label}</p>
+                                                    <p className="mt-0.5 text-base text-slate-500">{entry.publication.state_label}</p>
                                                 )}
                                             </div>
 
-                                            <a href={entry.url} className="text-sm font-semibold text-slate-600 hover:text-slate-950">
+                                            <a href={entry.url} className="text-base font-semibold text-slate-600 hover:text-slate-950">
                                                 {tb.articles_open_page ?? 'Åpne i Wiki'} →
                                             </a>
                                         </>
                                     ) : (
                                         <div className="min-w-0">
                                             <p className="text-base font-semibold text-slate-900">{entry.title}</p>
-                                            <p className="mt-0.5 text-xs text-slate-500">
+                                            <p className="mt-0.5 text-base text-slate-500">
                                                 {STALLED_RUN_STATUSES.includes(entry.status)
                                                     ? (tb.articles_pending_failed
                                                         ?? 'Wiki kom ikke i mål med denne artikkelen. Se Wiki → Kildedokumenter.')
@@ -2501,19 +2501,19 @@ function ActivityArticlePanel({
                     )}
 
                     {failed && (
-                        <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900">
                             {error.message}
                         </p>
                     )}
 
                     {canCreate && ! writing && (
                         <div className="mt-6 border-t border-slate-100 pt-5">
-                            <p className="text-sm leading-5 text-slate-600">
+                            <p className="text-base leading-6 text-slate-600">
                                 {tb.articles_help
                                     ?? 'Skriv ned kunnskapen bak dette steget. Procynia lager et utkast du kan rette, og artikkelen legges inn som kilde i Enterprise Wiki — som bygger kunnskapssidene av den på vanlig måte.'}
                             </p>
 
-                            <p className="mt-2 text-sm leading-5 text-slate-500">
+                            <p className="mt-2 text-base leading-6 text-slate-500">
                                 {tb.articles_structure_help
                                     ?? 'Artikkelen følger en fast struktur: Formål, Når aktiviteten utføres, Ansvar, Fremgangsmåte, Viktige vurderinger og kriterier, Dokumentasjon og resultat, Relatert prosesskontekst.'}
                             </p>
@@ -2540,17 +2540,17 @@ function ActivityArticlePanel({
 
                     {canCreate && writing && (
                         <div className="mt-6 border-t border-slate-100 pt-5">
-                            <p className="text-sm leading-5 text-slate-600">
+                            <p className="text-base leading-6 text-slate-600">
                                 {tb.articles_review_help
                                     ?? 'Les gjennom og rett teksten før du legger den inn. Det som legges inn, er det som står her — Wiki bygger kunnskapssidene av teksten og sender dem til vanlig gjennomgang.'}
                             </p>
 
-                            <p className="mt-2 text-sm leading-5 text-slate-500">
+                            <p className="mt-2 text-base leading-6 text-slate-500">
                                 {tb.articles_fill_in_help
                                     ?? 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.'}
                             </p>
 
-                            <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-title">
+                            <label className="mt-4 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-title">
                                 {tb.articles_title ?? 'Tittel'}
                             </label>
                             <input
@@ -2562,7 +2562,7 @@ function ActivityArticlePanel({
                                 onChange={(event) => setTitle(event.target.value)}
                             />
 
-                            <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-markdown">
+                            <label className="mt-4 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-markdown">
                                 {tb.articles_body ?? 'Artikkel'}
                             </label>
                             <textarea
@@ -2699,7 +2699,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
             </h3>
 
             {list.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">
+                <p className="mt-2 text-base text-slate-500">
                     {tb.controls_empty ?? 'Ingen kontroller på denne aktiviteten.'}
                 </p>
             ) : (
@@ -2717,7 +2717,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                                     {control.title}
                                 </Link>
                                 {control.criterion && (
-                                    <p className="mt-0.5 whitespace-pre-line text-sm leading-5 text-slate-600">{control.criterion}</p>
+                                    <p className="mt-0.5 whitespace-pre-line text-base leading-6 text-slate-600">{control.criterion}</p>
                                 )}
                             </div>
 
@@ -2751,15 +2751,15 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
 
             {canEdit && saved && adding === 'existing' && (
                 <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={attach}>
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-picker">
+                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-picker">
                         {tb.controls_attach_label ?? 'Eksisterende kontroller'}
                     </label>
-                    <p className="mt-1 text-sm leading-5 text-slate-600" id="activity-control-picker-help">
+                    <p className="mt-1 text-base leading-6 text-slate-600" id="activity-control-picker-help">
                         {tb.controls_attach_help ?? 'Kontrollen beholder eier, frekvens, evidens og historikk, og kan også stå på andre aktiviteter.'}
                     </p>
 
                     {pickerOptions.length === 0 ? (
-                        <p className="mt-3 text-sm text-slate-500">
+                        <p className="mt-3 text-base text-slate-500">
                             {tb.controls_attach_none ?? 'Alle kontroller som ikke er utgått, står allerede på denne aktiviteten.'}
                         </p>
                     ) : (
@@ -2779,7 +2779,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                     )}
 
                     {error && (
-                        <p className="mt-2 text-sm text-red-700" role="alert">{error}</p>
+                        <p className="mt-2 text-base text-red-700" role="alert">{error}</p>
                     )}
 
                     <div className="mt-3 flex flex-wrap justify-end gap-3">
@@ -2795,12 +2795,12 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
 
             {canEdit && saved && adding === 'new' && (
                 <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={add}>
-                    <p className="text-sm leading-5 text-slate-600">
+                    <p className="text-base leading-6 text-slate-600">
                         {tb.controls_help
                             ?? 'Hva skal kontrolleres i dette steget? En kontroll registreres også i kvalitetssystemet, der den kan få eier og frekvens.'}
                     </p>
 
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-title">
+                    <label className="mt-3 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-title">
                         {tb.controls_title ?? 'Navn på kontrollen'}
                     </label>
                     <input
@@ -2812,7 +2812,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                         onChange={(event) => setTitle(event.target.value)}
                     />
 
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-criterion">
+                    <label className="mt-3 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-criterion">
                         {tb.controls_criterion ?? 'Hva skal kontrolleres'}
                     </label>
                     <textarea
@@ -2825,7 +2825,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                     />
 
                     {error && (
-                        <p className="mt-2 text-sm text-red-700" role="alert">{error}</p>
+                        <p className="mt-2 text-base text-red-700" role="alert">{error}</p>
                     )}
 
                     <div className="mt-3 flex flex-wrap justify-end gap-3">

@@ -335,7 +335,7 @@ function ZoomControls({ tb, scale, atMin, atMax, onZoomIn, onZoomOut, onFit }) {
             role="group"
             aria-label={tb.zoom_group ?? 'Visning av diagrammet'}
         >
-            <span className="pointer-events-auto px-2 text-sm font-semibold tabular-nums text-slate-500" aria-live="polite">
+            <span className="pointer-events-auto px-2 text-base font-semibold tabular-nums text-slate-500" aria-live="polite">
                 {Math.round(scale * 100)} %
             </span>
             <ZoomButton label={zoomOut} onClick={onZoomOut} disabled={atMin}>

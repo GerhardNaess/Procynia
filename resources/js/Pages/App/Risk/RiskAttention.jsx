@@ -19,7 +19,7 @@ export default function RiskAttention({ attention, tr }) {
 
     return (
         <section aria-labelledby="risk-attention-heading" className={CARD}>
-            <p className="text-sm font-semibold text-slate-500">{scope}</p>
+            <p className="text-base font-semibold text-slate-500">{scope}</p>
             <h2 id="risk-attention-heading" className="mt-1 text-xl font-semibold text-slate-950">
                 {ta.heading ?? 'Trenger oppmerksomhet'}
             </h2>
@@ -35,7 +35,7 @@ export default function RiskAttention({ attention, tr }) {
                             ? (ta.total_one ?? '1 risiko krever oppmerksomhet')
                             : (ta.total_many ?? ':count risikoer krever oppmerksomhet').replace(':count', String(total))}
                     </p>
-                    <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                    <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
                         {ta.overlap_hint ?? 'En risiko kan ha flere funn samtidig, så kategoriene kan overlappe.'}
                     </p>
 
@@ -62,7 +62,7 @@ function AttentionCategory({ category, ta, tr }) {
                     <h3 className="text-base font-semibold text-slate-950">{ta.categories?.[category.key] ?? category.key}</h3>
                     <button
                         type="button"
-                        className="mt-1 text-sm font-semibold text-violet-700 hover:text-violet-900"
+                        className="mt-1 text-base font-semibold text-violet-700 hover:text-violet-900"
                         aria-expanded={open}
                         aria-controls={listId}
                         onClick={() => setOpen((value) => ! value)}
@@ -76,11 +76,11 @@ function AttentionCategory({ category, ta, tr }) {
                 <ul id={listId} className="mt-3 space-y-2">
                     {category.risks.map((risk) => (
                         <li key={risk.id} className="rounded-xl bg-white px-3 py-2">
-                            <Link href={risk.url} className="text-sm font-semibold text-violet-700 hover:text-violet-900">
+                            <Link href={risk.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">
                                 {risk.title}
                             </Link>
-                            {risk.area_name && <span className="ml-2 text-sm text-slate-500">{risk.area_name}</span>}
-                            <p className="mt-0.5 text-sm text-slate-600">{reason(category.key, risk.detail ?? {}, ta, tr)}</p>
+                            {risk.area_name && <span className="ml-2 text-base text-slate-500">{risk.area_name}</span>}
+                            <p className="mt-0.5 text-base text-slate-600">{reason(category.key, risk.detail ?? {}, ta, tr)}</p>
                         </li>
                     ))}
                 </ul>

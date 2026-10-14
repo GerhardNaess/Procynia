@@ -116,7 +116,7 @@ export default function RiskShow() {
                     <div className="space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{risk.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
+                            <span className="text-base font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={RISK_STATUS_TONES[risk.status] ?? 'slate'}>
                                 {statusLabels[risk.status] ?? risk.status}
                             </StatusBadge>
@@ -131,7 +131,7 @@ export default function RiskShow() {
                             )}
                             <StatusBadge tone="slate">{risk.area_name}</StatusBadge>
                         </div>
-                        <p className="text-sm text-slate-600">
+                        <p className="text-base text-slate-600">
                             {tr.status_hint ?? 'Status sier hvor risikoen er i livsløpet. Risikovurderingen sier hvor alvorlig den er.'}
                         </p>
                         {supplierOrigin && supplierOrigin.map((origin) => (
@@ -181,15 +181,15 @@ export default function RiskShow() {
                             <h2 className="text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
                             <dl className="mt-4 grid gap-4 sm:grid-cols-3">
                                 <div>
-                                    <dt className="text-sm font-semibold text-slate-600">{tr.field_owner ?? 'Risikoeier'}</dt>
+                                    <dt className="text-base font-semibold text-slate-600">{tr.field_owner ?? 'Risikoeier'}</dt>
                                     <dd className="mt-1 text-base text-slate-900">{risk.owner_name ?? '—'}</dd>
                                 </div>
                                 <div>
-                                    <dt className="text-sm font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
+                                    <dt className="text-base font-semibold text-slate-600">{tr.field_area ?? 'Fagområde'}</dt>
                                     <dd className="mt-1 text-base text-slate-900">{risk.area_name}</dd>
                                 </div>
                                 <div>
-                                    <dt className="text-sm font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
+                                    <dt className="text-base font-semibold text-slate-600">{tr.updated ?? 'Sist endret'}</dt>
                                     <dd className="mt-1 text-base text-slate-900">
                                         {risk.updated_at ? new Date(risk.updated_at).toLocaleString('nb-NO') : '—'}
                                     </dd>

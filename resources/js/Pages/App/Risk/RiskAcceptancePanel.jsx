@@ -6,7 +6,7 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles'
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString('nb-NO') : '—');
 // valid_until is a calendar day (Y-m-d); parsed as local time so it never shifts a day across time zones.
@@ -38,7 +38,7 @@ export default function RiskAcceptancePanel({ riskId, decision, canAccept, tr })
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{tx.title ?? 'Aksept av restrisiko'}</h2>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-base text-slate-600">
                         {tx.description ?? 'Formell beslutning om at restrisikoen i siste vurdering kan aksepteres. Behandlingsvalget «Akseptere» er bare retningen — det er denne beslutningen som gjelder. Risikoen følges fortsatt opp.'}
                     </p>
                 </div>
@@ -68,12 +68,12 @@ export default function RiskAcceptancePanel({ riskId, decision, canAccept, tr })
 
             {history.length > 0 && (
                 <details className="mt-6 rounded-2xl bg-slate-50 px-4 py-2">
-                    <summary className="cursor-pointer py-1 text-sm font-semibold text-slate-600">
+                    <summary className="cursor-pointer py-1 text-base font-semibold text-slate-600">
                         {(tx.history ?? 'Tidligere aksepter (:count)').replace(':count', history.length)}
                     </summary>
                     <ul className="divide-y divide-slate-200">
                         {history.map((acceptance) => (
-                            <li key={acceptance.id} className="space-y-1 py-3 text-sm text-slate-600">
+                            <li key={acceptance.id} className="space-y-1 py-3 text-base text-slate-600">
                                 <div className="flex flex-wrap items-center gap-2">
                                     <StatusBadge tone="slate">
                                         {acceptance.state === 'revoked'
@@ -124,22 +124,22 @@ function CurrentAcceptance({ acceptance, canRevoke, onRevoke, tx }) {
             </div>
             <dl className="grid gap-3 sm:grid-cols-3">
                 <div>
-                    <dt className="text-sm font-semibold text-slate-600">{tx.accepted_by_label ?? 'Akseptert av'}</dt>
+                    <dt className="text-base font-semibold text-slate-600">{tx.accepted_by_label ?? 'Akseptert av'}</dt>
                     <dd className="mt-1 text-base text-slate-900">{acceptance.accepted_by_name ?? (tx.unknown_user ?? 'ukjent bruker')}</dd>
                 </div>
                 <div>
-                    <dt className="text-sm font-semibold text-slate-600">{tx.accepted_on ?? 'Dato'}</dt>
+                    <dt className="text-base font-semibold text-slate-600">{tx.accepted_on ?? 'Dato'}</dt>
                     <dd className="mt-1 text-base text-slate-900">{formatDate(acceptance.accepted_at)}</dd>
                 </div>
                 <div>
-                    <dt className="text-sm font-semibold text-slate-600">{tx.valid_until ?? 'Gyldig til'}</dt>
+                    <dt className="text-base font-semibold text-slate-600">{tx.valid_until ?? 'Gyldig til'}</dt>
                     <dd className={`mt-1 text-base ${expired ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
                         {acceptance.valid_until ? formatDay(acceptance.valid_until) : (tx.no_valid_until ?? 'Ingen sluttdato')}
                     </dd>
                 </div>
             </dl>
             <div>
-                <p className="text-sm font-semibold text-slate-600">{tx.rationale ?? 'Begrunnelse'}</p>
+                <p className="text-base font-semibold text-slate-600">{tx.rationale ?? 'Begrunnelse'}</p>
                 <p className="mt-1 whitespace-pre-line text-base text-slate-800">{acceptance.rationale}</p>
             </div>
         </div>
@@ -170,8 +170,8 @@ function AcceptForm({ riskId, assessmentId, onDone, tx }) {
                     onChange={(event) => form.setData('rationale', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                <p className="mt-1 text-sm text-slate-500">{tx.field_rationale_hint ?? 'Hvorfor kan restrisikoen aksepteres?'}</p>
-                {form.errors.rationale && <p className="mt-1 text-sm text-rose-700">{form.errors.rationale}</p>}
+                <p className="mt-1 text-base text-slate-500">{tx.field_rationale_hint ?? 'Hvorfor kan restrisikoen aksepteres?'}</p>
+                {form.errors.rationale && <p className="mt-1 text-base text-rose-700">{form.errors.rationale}</p>}
             </div>
             <div className="max-w-xs">
                 <label htmlFor="risk-acceptance-valid-until" className={LABEL}>{tx.field_valid_until ?? 'Gyldig til (valgfritt)'}</label>
@@ -182,11 +182,11 @@ function AcceptForm({ riskId, assessmentId, onDone, tx }) {
                     onChange={(event) => form.setData('valid_until', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                <p className="mt-1 text-sm text-slate-500">{tx.field_valid_until_hint ?? 'Aksepten gjelder til og med denne dagen.'}</p>
-                {form.errors.valid_until && <p className="mt-1 text-sm text-rose-700">{form.errors.valid_until}</p>}
+                <p className="mt-1 text-base text-slate-500">{tx.field_valid_until_hint ?? 'Aksepten gjelder til og med denne dagen.'}</p>
+                {form.errors.valid_until && <p className="mt-1 text-base text-rose-700">{form.errors.valid_until}</p>}
             </div>
-            {form.errors.assessment_id && <p className="text-sm text-rose-700">{form.errors.assessment_id}</p>}
-            <p className="text-sm text-slate-500">{tx.immutable_note ?? 'En aksept kan ikke endres.'}</p>
+            {form.errors.assessment_id && <p className="text-base text-rose-700">{form.errors.assessment_id}</p>}
+            <p className="text-base text-slate-500">{tx.immutable_note ?? 'En aksept kan ikke endres.'}</p>
             <div className="flex flex-wrap gap-2">
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{tx.save ?? 'Aksepter'}</button>
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>

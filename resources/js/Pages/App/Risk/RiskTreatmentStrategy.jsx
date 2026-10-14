@@ -47,7 +47,7 @@ export default function RiskTreatmentStrategy({ strategy, decision, onEdit = nul
                         <span className="text-slate-600"> – {tt.explanations?.[strategy] ?? TREATMENT_EXPLANATIONS[strategy]}</span>
                     </p>
                     {strategy === 'accept' && (
-                        <p className={`rounded-xl px-3 py-2 text-sm ${formallyAccepted ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
+                        <p className={`rounded-xl px-3 py-2 text-base ${formallyAccepted ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
                             {formallyAccepted
                                 ? (tt.accept_formal ?? 'Restrisikoen er formelt akseptert — se Aksept av restrisiko.')
                                 : (tt.accept_pending ?? '«Akseptere» er valgt som retning. Restrisikoen er ikke akseptert før beslutningen er registrert under Aksept av restrisiko.')}

@@ -123,7 +123,7 @@ export default function RiskIndex() {
                             {tr.index_subtitle ?? 'Risikoene dere har ansvar for, samlet med eier, fagområde og status.'}
                         </p>
                         {hasAreas && (
-                            <p className="text-sm text-slate-500">
+                            <p className="text-base text-slate-500">
                                 {tr.scope_note ?? 'Du ser risikoene i fagområdene rollene dine gir deg.'}
                             </p>
                         )}
@@ -140,7 +140,7 @@ export default function RiskIndex() {
 
                 {creating && (
                     <section className={CARD}>
-                        <h2 className="mb-4 text-lg font-semibold text-slate-950">{tr.create_heading ?? 'Ny risiko'}</h2>
+                        <h2 className="mb-4 text-xl font-semibold text-slate-950">{tr.create_heading ?? 'Ny risiko'}</h2>
                         <RiskForm
                             form={form}
                             onSubmit={submitCreate}
@@ -163,7 +163,7 @@ export default function RiskIndex() {
                     <section className={CARD}>
                         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-3">
                             <div className="min-w-[16rem] flex-1">
-                                <label htmlFor="risk-search" className="block text-sm font-semibold text-slate-700">
+                                <label htmlFor="risk-search" className="block text-base font-semibold text-slate-700">
                                     {tr.search_label ?? 'Søk'}
                                 </label>
                                 <input
@@ -176,7 +176,7 @@ export default function RiskIndex() {
                                 />
                             </div>
                             <div>
-                                <label htmlFor="risk-status-filter" className="block text-sm font-semibold text-slate-700">
+                                <label htmlFor="risk-status-filter" className="block text-base font-semibold text-slate-700">
                                     {tr.status_filter ?? 'Status'}
                                 </label>
                                 <select
@@ -199,7 +199,7 @@ export default function RiskIndex() {
                             )}
                         </form>
 
-                        <p className="mt-4 text-sm text-slate-500">
+                        <p className="mt-4 text-base text-slate-500">
                             {(tr.count ?? ':count risikoer').replace(':count', String(visibleCount))}
                         </p>
 
@@ -213,7 +213,7 @@ export default function RiskIndex() {
                             <div className="mt-4 overflow-x-auto">
                                 <table className="w-full text-base">
                                     <thead>
-                                        <tr className="border-b border-slate-200 text-left text-sm font-semibold text-slate-600">
+                                        <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
                                             <th className="pb-3 pr-4">{tr.col_title ?? 'Risiko'}</th>
                                             <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
                                             <th className="px-4 pb-3">{tr.col_owner ?? 'Risikoeier'}</th>
@@ -229,9 +229,9 @@ export default function RiskIndex() {
                                                         {risk.title}
                                                     </Link>
                                                     {risk.has_structured_description ? (
-                                                        <p className="mt-0.5 line-clamp-2 max-w-xl text-sm text-slate-500">{risk.event}</p>
+                                                        <p className="mt-0.5 line-clamp-2 max-w-xl text-base text-slate-500">{risk.event}</p>
                                                     ) : (
-                                                        <p className="mt-0.5 text-sm text-amber-700">
+                                                        <p className="mt-0.5 text-base text-amber-700">
                                                             {tr.structured?.missing_short ?? 'Mangler årsak, hendelse og konsekvens'}
                                                         </p>
                                                     )}
@@ -244,7 +244,7 @@ export default function RiskIndex() {
                                                             {levelLabels[risk.residual_level] ?? risk.residual_level}
                                                         </StatusBadge>
                                                     ) : (
-                                                        <span className="text-sm text-slate-500">{tr.assessment?.residual_none ?? 'Ikke vurdert'}</span>
+                                                        <span className="text-base text-slate-500">{tr.assessment?.residual_none ?? 'Ikke vurdert'}</span>
                                                     )}
                                                 </td>
                                                 <td className="py-3 pl-4">

@@ -16,7 +16,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
     const steps = flowReadingOrder(blueprint);
 
     if (steps.length === 0) {
-        return <p className="text-sm text-slate-500">{tb.steps_list_empty ?? 'Flyten har ingen steg.'}</p>;
+        return <p className="text-base text-slate-500">{tb.steps_list_empty ?? 'Flyten har ingen steg.'}</p>;
     }
 
     const typeLabels = tb.node_types ?? {};
@@ -27,7 +27,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                 <li key={step.key} className="flex gap-4">
                     <span
                         aria-hidden="true"
-                        className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600"
+                        className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-semibold text-slate-600"
                     >
                         {index + 1}
                     </span>
@@ -36,7 +36,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                         {/* The role, or what kind of thing this is when no role performs it. A
                             decision is attributed to whoever decides, so it keeps its role and
                             gains the word "Beslutning" rather than losing one for the other. */}
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
                             {[
                                 step.type === 'decision' ? (tb.step_decision ?? 'Beslutning') : null,
                                 step.type === 'start' ? (typeLabels.start ?? 'Start') : null,
@@ -48,7 +48,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                         <p className="text-base leading-6 text-slate-900">{step.label}</p>
 
                         {step.description && (
-                            <p className="mt-1 text-sm leading-5 text-slate-600">{step.description}</p>
+                            <p className="mt-1 text-base leading-6 text-slate-600">{step.description}</p>
                         )}
 
                         {step.subprocess && (
@@ -58,14 +58,14 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                             onOpenSubprocess ? (
                                 <button
                                     type="button"
-                                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-semibold text-violet-700 transition hover:border-violet-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+                                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-base font-semibold text-violet-700 transition hover:border-violet-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
                                     onClick={() => onOpenSubprocess(step.subprocess, step)}
                                 >
                                     {subprocessLabel(tb, step.subprocess)}
                                     <span aria-hidden="true">→</span>
                                 </button>
                             ) : (
-                                <p className="mt-1 text-sm font-medium text-violet-700">
+                                <p className="mt-1 text-base font-medium text-violet-700">
                                     {subprocessLabel(tb, step.subprocess)}
                                 </p>
                             )
@@ -79,7 +79,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                                diagram the box can only do one thing, and drilling in wins there. */
                             <button
                                 type="button"
-                                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-sm font-semibold text-sky-800 transition hover:border-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-base font-semibold text-sky-800 transition hover:border-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
                                 onClick={() => onOpenActivity(step)}
                                 aria-label={(tb.articles_open ?? 'Åpne kunnskapen bak :label')
                                     .replace(':label', step.label ?? '')}
@@ -87,7 +87,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                                 {articleLabel(tb, step.articles ?? [])}
                             </button>
                         ) : (step.articles ?? []).length > 0 && (
-                            <p className="mt-1 text-sm font-medium text-sky-800">
+                            <p className="mt-1 text-base font-medium text-sky-800">
                                 {articleLabel(tb, step.articles)}
                             </p>
                         )}
@@ -98,20 +98,20 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                             onOpenActivity ? (
                                 <button
                                     type="button"
-                                    className="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-sm font-semibold text-emerald-800 transition hover:border-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+                                    className="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-base font-semibold text-emerald-800 transition hover:border-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
                                     onClick={() => onOpenActivity(step)}
                                 >
                                     {controlLabel(tb, controlsByKey[step.key])}
                                 </button>
                             ) : (
-                                <p className="mt-1 text-sm font-medium text-emerald-800">
+                                <p className="mt-1 text-base font-medium text-emerald-800">
                                     {controlLabel(tb, controlsByKey[step.key])}
                                 </p>
                             )
                         )}
 
                         {step.outcomes.length > 0 && (
-                            <p className="mt-1 text-sm text-slate-500">
+                            <p className="mt-1 text-base text-slate-500">
                                 {(tb.step_outcomes ?? 'Utfall: :outcomes').replace(':outcomes', step.outcomes.join(' / '))}
                             </p>
                         )}

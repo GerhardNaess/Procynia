@@ -6,7 +6,7 @@ import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles'
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString('nb-NO') : '—');
 // A deadline is a calendar day (Y-m-d); parsed as local time so it never shifts a day across time zones.
@@ -54,7 +54,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                         <p className={`text-base ${open ? 'font-semibold text-slate-950' : 'font-medium text-slate-700'}`}>{action.title}</p>
-                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <div className="flex flex-wrap items-center gap-2 text-base">
                             <StatusBadge tone={open ? 'violet' : 'emerald'}>
                                 {open ? (tt.status_open ?? 'Åpen') : (tt.status_completed ?? 'Fullført')}
                             </StatusBadge>
@@ -74,7 +74,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
                             )}
                         </div>
                         {action.outcome_note && (
-                            <p className="whitespace-pre-line text-sm text-slate-700">
+                            <p className="whitespace-pre-line text-base text-slate-700">
                                 <span className="font-semibold">
                                     {open ? (tt.previous_outcome_note ?? 'Tidligere resultat') : (tt.outcome_note ?? 'Resultat')}:
                                 </span> {action.outcome_note}
@@ -110,7 +110,7 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{tt.title ?? 'Tiltak'}</h2>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-base text-slate-600">
                         {tt.description ?? 'Konkrete tiltak for å håndtere risikoen, med ansvarlig og frist.'}
                     </p>
                 </div>
@@ -133,14 +133,14 @@ export default function RiskTreatmentPanel({ riskId, actions, ownerOptions, canM
 
             {openActions.length > 0 && (
                 <div className="mt-4">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{tt.open_heading ?? 'Åpne tiltak'}</h3>
+                    <h3 className="text-base font-semibold uppercase tracking-wide text-slate-500">{tt.open_heading ?? 'Åpne tiltak'}</h3>
                     <ul className="divide-y divide-slate-100">{openActions.map(renderAction)}</ul>
                 </div>
             )}
 
             {completedActions.length > 0 && (
                 <div className="mt-6 rounded-2xl bg-slate-50 px-4 py-2">
-                    <h3 className="pt-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{tt.completed_heading ?? 'Fullførte tiltak'}</h3>
+                    <h3 className="pt-2 text-base font-semibold uppercase tracking-wide text-slate-500">{tt.completed_heading ?? 'Fullførte tiltak'}</h3>
                     <ul className="divide-y divide-slate-200">{completedActions.map(renderAction)}</ul>
                 </div>
             )}
@@ -186,7 +186,7 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt, tr }) {
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.title && <p className="mt-1 text-sm text-rose-700">{form.errors.title}</p>}
+                {form.errors.title && <p className="mt-1 text-base text-rose-700">{form.errors.title}</p>}
             </div>
             <div className="grid gap-3 md:grid-cols-2">
                 <div>
@@ -203,10 +203,10 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt, tr }) {
                             <option key={owner.id} value={owner.id}>{owner.name}</option>
                         ))}
                     </select>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-base text-slate-500">
                         {tt.field_owner_hint ?? 'Bare personer som kan se denne risikoen kan være ansvarlige.'}
                     </p>
-                    {form.errors.owner_user_id && <p className="mt-1 text-sm text-rose-700">{form.errors.owner_user_id}</p>}
+                    {form.errors.owner_user_id && <p className="mt-1 text-base text-rose-700">{form.errors.owner_user_id}</p>}
                 </div>
                 <div>
                     <label htmlFor={`${prefix}-due`} className={LABEL}>{tt.field_due_at ?? 'Frist'}<RequiredMark /></label>
@@ -218,7 +218,7 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt, tr }) {
                         onChange={(event) => form.setData('due_at', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.due_at && <p className="mt-1 text-sm text-rose-700">{form.errors.due_at}</p>}
+                    {form.errors.due_at && <p className="mt-1 text-base text-rose-700">{form.errors.due_at}</p>}
                 </div>
             </div>
             {withOutcome && (
@@ -231,10 +231,10 @@ function ActionForm({ riskId, action, ownerOptions, onDone, tt, tr }) {
                         onChange={(event) => form.setData('outcome_note', event.target.value)}
                         className={`mt-1 ${INPUT}`}
                     />
-                    {form.errors.outcome_note && <p className="mt-1 text-sm text-rose-700">{form.errors.outcome_note}</p>}
+                    {form.errors.outcome_note && <p className="mt-1 text-base text-rose-700">{form.errors.outcome_note}</p>}
                 </div>
             )}
-            <p className="text-sm text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
+            <p className="text-base text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
             <div className="flex flex-wrap gap-2">
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{tt.save ?? 'Lagre tiltak'}</button>
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>
@@ -258,7 +258,7 @@ function CompleteForm({ riskId, action, onDone, tt }) {
         <form onSubmit={submit} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div>
                 <label htmlFor={id} className={LABEL}>{tt.field_outcome_note ?? 'Resultat (valgfritt)'}</label>
-                <p id={`${id}-hint`} className="text-sm text-slate-600">{tt.field_outcome_note_hint ?? 'Hva ble gjort, og hva ble resultatet?'}</p>
+                <p id={`${id}-hint`} className="text-base text-slate-600">{tt.field_outcome_note_hint ?? 'Hva ble gjort, og hva ble resultatet?'}</p>
                 <textarea
                     id={id}
                     rows={3}
@@ -267,7 +267,7 @@ function CompleteForm({ riskId, action, onDone, tt }) {
                     onChange={(event) => form.setData('outcome_note', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.outcome_note && <p className="mt-1 text-sm text-rose-700">{form.errors.outcome_note}</p>}
+                {form.errors.outcome_note && <p className="mt-1 text-base text-rose-700">{form.errors.outcome_note}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{tt.complete_confirm ?? 'Fullfør tiltak'}</button>

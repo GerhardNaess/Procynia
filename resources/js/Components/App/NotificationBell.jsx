@@ -212,7 +212,7 @@ export default function NotificationBell({
                                     type="button"
                                     onClick={onMarkAllRead}
                                     disabled={!hasUnreadItems}
-                                    className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-400"
+                                    className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-400"
                                 >
                                     Marker alle som lest
                                 </button>
@@ -221,7 +221,7 @@ export default function NotificationBell({
                                     onClick={onDeleteAllUnread}
                                     disabled={!hasUnreadItems}
                                     data-testid="notification-delete-unread"
-                                    className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                                    className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-700 disabled:cursor-not-allowed disabled:text-slate-400"
                                 >
                                     Slett alle uleste
                                 </button>
@@ -273,7 +273,7 @@ export default function NotificationBell({
                                                         {notification.title}
                                                     </span>
                                                     {!notification.is_read ? (
-                                                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-base font-semibold text-violet-700">
                                                             Ulest
                                                         </span>
                                                     ) : null}
@@ -285,7 +285,7 @@ export default function NotificationBell({
 
                                             <span
                                                 className={classNames(
-                                                    'inline-flex shrink-0 rounded-full px-2.5 py-1 text-sm font-semibold ring-1 ring-inset',
+                                                    'inline-flex shrink-0 rounded-full px-2.5 py-1 text-base font-semibold ring-1 ring-inset',
                                                     severityToneClassName(notification.severity),
                                                 )}
                                             >
@@ -293,7 +293,7 @@ export default function NotificationBell({
                                             </span>
                                         </div>
 
-                                        <div className="mt-3 flex items-center justify-between gap-3 text-sm text-slate-600">
+                                        <div className="mt-3 flex items-center justify-between gap-3 text-base text-slate-600">
                                             <div className="min-w-0 truncate">
                                                 {notificationContextLabel(notification, domainLabels)}
                                             </div>

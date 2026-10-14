@@ -22,7 +22,7 @@ export default function RiskDescription({ risk, tr }) {
                 <dl className="mt-4 grid gap-4 md:grid-cols-3">
                     {PARTS.map(({ field, label }) => (
                         <div key={field} className="rounded-2xl bg-slate-50 p-4">
-                            <dt className="text-sm font-semibold text-slate-600">{ts[`field_${field}`] ?? label}</dt>
+                            <dt className="text-base font-semibold text-slate-600">{ts[`field_${field}`] ?? label}</dt>
                             <dd className="mt-1 whitespace-pre-line text-base leading-6 text-slate-900">{risk[field]}</dd>
                         </div>
                     ))}
@@ -30,7 +30,7 @@ export default function RiskDescription({ risk, tr }) {
             ) : (
                 <div className="mt-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4">
                     <p className="text-base font-semibold text-amber-900">{ts.missing_title ?? 'Risikobeskrivelsen er ikke strukturert ennå'}</p>
-                    <p className="mt-1 text-sm text-amber-900">
+                    <p className="mt-1 text-base text-amber-900">
                         {ts.missing_hint ?? 'Årsak, hendelse og konsekvens må fylles ut neste gang risikoen redigeres.'}
                     </p>
                 </div>
@@ -38,7 +38,7 @@ export default function RiskDescription({ risk, tr }) {
 
             {risk.description && (
                 <div className="mt-5">
-                    <h3 className="text-sm font-semibold text-slate-600">{tr.field_description ?? 'Utfyllende informasjon'}</h3>
+                    <h3 className="text-base font-semibold text-slate-600">{tr.field_description ?? 'Utfyllende informasjon'}</h3>
                     <p className="mt-1 whitespace-pre-line text-base leading-6 text-slate-700">{risk.description}</p>
                 </div>
             )}

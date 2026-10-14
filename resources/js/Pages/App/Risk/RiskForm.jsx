@@ -4,7 +4,7 @@ import { ownersForArea } from './riskOwners';
 import { TREATMENT_EXPLANATIONS, TREATMENT_LABELS } from './RiskTreatmentStrategy';
 
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 // Årsak → hendelse → konsekvens: the risk description itself. The readable sentence is composed
 // from these on the server; nobody types it.
@@ -53,20 +53,20 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.title && <p className="mt-1 text-sm text-rose-600">{form.errors.title}</p>}
+                {form.errors.title && <p className="mt-1 text-base text-rose-600">{form.errors.title}</p>}
             </div>
 
             <fieldset className="space-y-4 rounded-2xl border border-slate-200 p-4">
                 <legend className="px-1 text-base font-semibold text-slate-950">{ts.heading ?? 'Risikobeskrivelse'}</legend>
                 {missingStructure && (
-                    <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <p className="rounded-xl bg-amber-50 px-3 py-2 text-base text-amber-900">
                         {ts.missing_form_note ?? 'Denne risikoen ble registrert før strukturert risikobeskrivelse. Fyll ut årsak, hendelse og konsekvens for å lagre. Tidligere tekst ligger urørt under Utfyllende informasjon.'}
                     </p>
                 )}
                 {DESCRIPTION_PARTS.map(({ field, label, hint }) => (
                     <div key={field}>
                         <label htmlFor={`risk-${field}`} className={LABEL}>{ts[`field_${field}`] ?? label}<RequiredMark /></label>
-                        <p id={`risk-${field}-hint`} className="text-sm text-slate-600">{ts[`field_${field}_hint`] ?? hint}</p>
+                        <p id={`risk-${field}-hint`} className="text-base text-slate-600">{ts[`field_${field}_hint`] ?? hint}</p>
                         <textarea
                             id={`risk-${field}`}
                             rows={2}
@@ -76,14 +76,14 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                             onChange={(event) => form.setData(field, event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        {form.errors[field] && <p className="mt-1 text-sm text-rose-600">{form.errors[field]}</p>}
+                        {form.errors[field] && <p className="mt-1 text-base text-rose-600">{form.errors[field]}</p>}
                     </div>
                 ))}
             </fieldset>
 
             <div>
                 <label htmlFor="risk-description" className={LABEL}>{tr.field_description ?? 'Utfyllende informasjon'}</label>
-                <p id="risk-description-hint" className="text-sm text-slate-600">
+                <p id="risk-description-hint" className="text-base text-slate-600">
                     {tr.field_description_hint ?? 'Valgfritt. Bakgrunn og detaljer — inngår ikke i selve risikobeskrivelsen.'}
                 </p>
                 <textarea
@@ -94,7 +94,7 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                     onChange={(event) => form.setData('description', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.description && <p className="mt-1 text-sm text-rose-600">{form.errors.description}</p>}
+                {form.errors.description && <p className="mt-1 text-base text-rose-600">{form.errors.description}</p>}
             </div>
 
             <div className={`grid gap-4 ${creating ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
@@ -112,8 +112,8 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                             <option key={area.id} value={area.id}>{area.name}</option>
                         ))}
                     </select>
-                    <p className="mt-1 text-sm text-slate-500">{tr.field_area_hint ?? 'Bestemmer hvem som kan se risikoen.'}</p>
-                    {form.errors.business_area_id && <p className="mt-1 text-sm text-rose-600">{form.errors.business_area_id}</p>}
+                    <p className="mt-1 text-base text-slate-500">{tr.field_area_hint ?? 'Bestemmer hvem som kan se risikoen.'}</p>
+                    {form.errors.business_area_id && <p className="mt-1 text-base text-rose-600">{form.errors.business_area_id}</p>}
                 </div>
 
                 <div>
@@ -129,10 +129,10 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                             <option key={owner.id} value={owner.id}>{owner.name}</option>
                         ))}
                     </select>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-base text-slate-500">
                         {tr.field_owner_hint ?? 'Bare personer som kan se risikoer i valgt område kan være eier.'}
                     </p>
-                    {form.errors.owner_user_id && <p className="mt-1 text-sm text-rose-600">{form.errors.owner_user_id}</p>}
+                    {form.errors.owner_user_id && <p className="mt-1 text-base text-rose-600">{form.errors.owner_user_id}</p>}
                 </div>
 
                 {! creating && (
@@ -149,10 +149,10 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                                 <option key={status} value={status}>{statusLabels[status] ?? status}</option>
                             ))}
                         </select>
-                        <p id="risk-status-hint" className="mt-1 text-sm text-slate-500">
+                        <p id="risk-status-hint" className="mt-1 text-base text-slate-500">
                             {tr.field_status_hint ?? 'Hvor risikoen er i livsløpet. Settes manuelt når arbeidet med risikoen går videre.'}
                         </p>
-                        {form.errors.status && <p className="mt-1 text-sm text-rose-600">{form.errors.status}</p>}
+                        {form.errors.status && <p className="mt-1 text-base text-rose-600">{form.errors.status}</p>}
                     </div>
                 )}
             </div>
@@ -172,10 +172,10 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                                 <option key={months} value={months}>{trReview.intervals?.[months] ?? months}</option>
                             ))}
                         </select>
-                        <p className="mt-1 text-sm text-slate-500">
+                        <p className="mt-1 text-base text-slate-500">
                             {trReview.field_interval_hint ?? 'Hvor ofte risikoen skal vurderes på nytt. Neste vurdering beregnes fra siste risikovurdering.'}
                         </p>
-                        {form.errors.review_interval_months && <p className="mt-1 text-sm text-rose-600">{form.errors.review_interval_months}</p>}
+                        {form.errors.review_interval_months && <p className="mt-1 text-base text-rose-600">{form.errors.review_interval_months}</p>}
                     </div>
 
                     <div className="md:col-span-2">
@@ -192,22 +192,22 @@ export default function RiskForm({ form, onSubmit, onCancel, areaOptions, ownerO
                                 <option key={key} value={key}>{tt.options?.[key] ?? TREATMENT_LABELS[key] ?? key}</option>
                             ))}
                         </select>
-                        <p id="risk-treatment-strategy-hint" className="mt-1 text-sm text-slate-500">
+                        <p id="risk-treatment-strategy-hint" className="mt-1 text-base text-slate-500">
                             {strategy
                                 ? (tt.explanations?.[strategy] ?? TREATMENT_EXPLANATIONS[strategy])
                                 : (tt.field_hint ?? 'Overordnet retning for hvordan risikoen skal håndteres. Tiltak og aksept av restrisiko registreres i egne seksjoner.')}
                         </p>
                         {strategy === 'accept' && (
-                            <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-base text-amber-900">
                                 {tt.accept_form_note ?? '«Akseptere» er bare retningen. Selve aksepten av restrisikoen registreres under Aksept av restrisiko, av en med rett til å akseptere risiko.'}
                             </p>
                         )}
-                        {form.errors.treatment_strategy && <p className="mt-1 text-sm text-rose-600">{form.errors.treatment_strategy}</p>}
+                        {form.errors.treatment_strategy && <p className="mt-1 text-base text-rose-600">{form.errors.treatment_strategy}</p>}
                     </div>
                 </div>
             )}
 
-            <p className="text-sm text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
+            <p className="text-base text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
 
             <div className="flex flex-wrap justify-end gap-3">
                 {onCancel && (

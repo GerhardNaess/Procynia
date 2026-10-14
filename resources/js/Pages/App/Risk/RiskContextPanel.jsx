@@ -4,7 +4,7 @@ import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../S
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * Kontekst: the Kvalitet processes and activities this risk belongs to. Rendered only when the
@@ -45,7 +45,7 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontekst'}</h2>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-base text-slate-600">
                         {tc.description ?? 'Prosessene og aktivitetene i Kvalitet der risikoen kan oppstå.'}
                     </p>
                 </div>
@@ -76,7 +76,7 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                     ))}
                                 </select>
                                 {form.errors.quality_item_id && (
-                                    <p className="mt-1 text-sm text-rose-700">{form.errors.quality_item_id}</p>
+                                    <p className="mt-1 text-base text-rose-700">{form.errors.quality_item_id}</p>
                                 )}
                             </div>
                             {selectedProcess && (
@@ -100,10 +100,10 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                         ))}
                                     </select>
                                     {selectedProcess.activities.length === 0 && (
-                                        <p className="mt-1 text-sm text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
+                                        <p className="mt-1 text-base text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
                                     )}
                                     {form.errors.activity_key && (
-                                        <p className="mt-1 text-sm text-rose-700">{form.errors.activity_key}</p>
+                                        <p className="mt-1 text-base text-rose-700">{form.errors.activity_key}</p>
                                     )}
                                 </div>
                             )}
@@ -134,7 +134,7 @@ export default function RiskContextPanel({ riskId, context, options, canLink, tr
                                         {label(process)}
                                     </a>
                                     {process.whole_process && (
-                                        <p className="text-sm text-slate-600">{tc.process_linked ?? 'Hele prosessen'}</p>
+                                        <p className="text-base text-slate-600">{tc.process_linked ?? 'Hele prosessen'}</p>
                                     )}
                                 </div>
                                 {canLink && process.whole_process && (

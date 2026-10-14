@@ -1,12 +1,21 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { RISK_HELP_PAGES, riskHelp } from './riskHelp.js';
 
+const here = fileURLToPath(new URL('.', import.meta.url));
 const source = (file) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
 
 const PAGE_FILES = { index: './Index.jsx' };
+
+describe('No text below 16 px in the module', () => {
+    test('no component uses text-xs, text-sm or a smaller fixed size', () => {
+        for (const file of readdirSync(here).filter((name) => name.endsWith('.jsx'))) {
+            assert.doesNotMatch(source(`./${file}`), /\btext-(xs|sm)\b|\btext-\[(\d|1[0-5])px\]/, file);
+        }
+    });
+});
 
 describe('Every Risiko page with help carries the shared PageHelp', () => {
     test('each help page is rendered by its page through PageHelpButton', () => {

@@ -41,7 +41,7 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
         <div className="mt-6 border-t border-slate-100 pt-5">
             <dl className="grid gap-4 sm:grid-cols-3">
                 <div>
-                    <dt className="text-sm font-semibold text-slate-600">{trReview.field_interval ?? 'Vurderingsintervall'}</dt>
+                    <dt className="text-base font-semibold text-slate-600">{trReview.field_interval ?? 'Vurderingsintervall'}</dt>
                     <dd className="mt-1 flex flex-wrap items-center gap-3 text-base text-slate-900">
                         <span>{intervalLabel}</span>
                         {onEdit && (
@@ -49,7 +49,7 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
                                 type="button"
                                 onClick={onEdit}
                                 aria-label={`${trReview.edit ?? 'Endre'} ${(trReview.field_interval ?? 'Vurderingsintervall').toLowerCase()}`}
-                                className="text-sm font-semibold text-violet-700 hover:text-violet-900"
+                                className="text-base font-semibold text-violet-700 hover:text-violet-900"
                             >
                                 {trReview.edit ?? 'Endre'}
                             </button>
@@ -57,18 +57,18 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
                     </dd>
                 </div>
                 <div>
-                    <dt className="text-sm font-semibold text-slate-600">{trReview.last_assessed ?? 'Sist vurdert'}</dt>
+                    <dt className="text-base font-semibold text-slate-600">{trReview.last_assessed ?? 'Sist vurdert'}</dt>
                     <dd className="mt-1 text-base text-slate-900">
                         {formatDay(schedule.last_assessed_on) ?? <span className="text-slate-500">{trReview.never_assessed ?? 'Ikke vurdert'}</span>}
                     </dd>
                 </div>
                 <div>
-                    <dt className="text-sm font-semibold text-slate-600">{trReview.next_review ?? 'Neste vurdering'}</dt>
+                    <dt className="text-base font-semibold text-slate-600">{trReview.next_review ?? 'Neste vurdering'}</dt>
                     <dd className="mt-1 text-base text-slate-900">{next}</dd>
                 </div>
             </dl>
             {interval && status === 'closed' && (
-                <p className="mt-3 text-sm text-slate-500">{trReview.closed_note ?? 'Lukket risiko følges ikke opp periodisk.'}</p>
+                <p className="mt-3 text-base text-slate-500">{trReview.closed_note ?? 'Lukket risiko følges ikke opp periodisk.'}</p>
             )}
         </div>
     );

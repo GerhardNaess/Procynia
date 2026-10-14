@@ -6,7 +6,7 @@ import { CONTROL_FILTER_THRESHOLD, controlLabel, controlOptionLabel, filterContr
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-sm font-semibold text-slate-700';
+const LABEL = 'block text-base font-semibold text-slate-700';
 
 const STATUS_TONES = { draft: 'slate', active: 'emerald', under_review: 'amber', retired: 'slate' };
 
@@ -50,7 +50,7 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h2 className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontroller som håndterer risikoen'}</h2>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-base text-slate-600">
                         {tc.description ?? 'Kontroller fra Kvalitet som bidrar til å håndtere risikoen. Ta dem med når du vurderer restrisiko.'}
                     </p>
                 </div>
@@ -79,7 +79,7 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                                         className={`mt-1 ${INPUT}`}
                                     />
                                     {shown.length === 0 && (
-                                        <p className="mt-1 text-sm text-slate-600">{tc.filter_none ?? 'Ingen kontroller passer søket.'}</p>
+                                        <p className="mt-1 text-base text-slate-600">{tc.filter_none ?? 'Ingen kontroller passer søket.'}</p>
                                     )}
                                 </div>
                             )}
@@ -98,7 +98,7 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                                 </select>
                             </div>
                             {form.errors.quality_item_id && (
-                                <p className="mt-1 text-sm text-rose-700">{form.errors.quality_item_id}</p>
+                                <p className="mt-1 text-base text-rose-700">{form.errors.quality_item_id}</p>
                             )}
                         </div>
                     )}
@@ -131,12 +131,12 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                                     </StatusBadge>
                                 </div>
                                 {control.placements?.length > 0 && (
-                                    <p className="text-sm text-slate-600">
+                                    <p className="text-base text-slate-600">
                                         <span className="font-semibold">{tc.used_in ?? 'Brukes i'}:</span> {control.placements.join('; ')}
                                     </p>
                                 )}
                                 {control.criterion && (
-                                    <p className="text-sm text-slate-600">
+                                    <p className="text-base text-slate-600">
                                         <span className="font-semibold">{tc.criterion ?? 'Kriterium'}:</span> {control.criterion}
                                     </p>
                                 )}
