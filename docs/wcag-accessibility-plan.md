@@ -1,9 +1,9 @@
 # Plan: Universell utforming (WCAG 2.2 AA)
 
-**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`); manuell verifisering med skjermleser, Firefox og Safari gjenstår (§15.8). Fase 2 er implementert, automatisk verifisert og teknisk sluttkontrollert (§16.12); manuell verifisering gjenstår. Fase 3–7 er ikke startet.**
+**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet; manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4–7 er ikke startet.**
 Branch: `feature/wcag-accessibility`
 Utgangspunkt: `bc9070c2` (2026-10-14)
-Sist oppdatert: **2026-10-14**
+Sist oppdatert: **2026-10-15**
 
 Dette dokumentet er den styrende planen for tilgjengelighetsarbeidet. Det oppdateres når en fase
 startes, fullføres eller endres. Funn-ID-ene (`A11Y-…`) er stabile og brukes i commits, tester og
@@ -53,8 +53,8 @@ Dette er også rammer for arbeidet:
 |---|---|---|---|
 | 0 | Kartlegging, funn og plan (dette dokumentet) | Ferdig 2026-10-14 | — |
 | 1 | Felles komponenter og designregler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14. Manuell verifisering gjenstår (§15.8). | `4c594ebf` |
-| 2 | Navigasjon, layout og standardvisninger | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14 (§16.12). Manuell verifisering gjenstår (§16.8). | `feat(a11y): improve navigation and page accessibility` |
-| 3 | Skjema, tabeller, dialoger og varsler | Ikke startet | — |
+| 2 | Navigasjon, layout og standardvisninger | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14 (§16.12). Manuell verifisering gjenstår (§16.8). | `683246a7` |
+| 3 | Skjema, tabeller, dialoger og varsler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§17.12). Manuell verifisering gjenstår (§17.8). Åpen før merge: OPPF-001. | `feat(a11y): improve forms dialogs and data tables` |
 | 4 | Anbud, dokumenter og AI-arbeidsflyter | Ikke startet | — |
 | 5 | Enterprise Wiki og editor | Ikke startet | — |
 | 6 | Kvalitet/GRC, administrasjon og resterende flater | Ikke startet | — |
@@ -225,7 +225,7 @@ er bygget for kundeflaten (`Billing`).
 | A11Y-016 | 139 × `text-slate-400`, 12 × `text-slate-300`, 56 × `text-[10px]/[11px]`. Eksempler: `DashboardCockpit.jsx:388, 434, 821`, `MultiSelectFilterDropdown.jsx:178, 243, 257`, `DepartmentCheckboxGroup.jsx:44`, `Users/Create.jsx:192` («Minst 8 tegn»), `InfoCenter/Index.jsx:285-399`, `Home/Index.jsx:80`, `Quality/Index.jsx:219`, `Public/Privacy.jsx`, `Public/Terms.jsx`, `Public/Faq.jsx:42`, `Wiki/*` (50) | Informasjonsbærende tekst har kontrast rundt 2,6:1. | 1.4.3 | B (beregnet) | Regel: informasjonstekst er minst `slate-600` (`slate-500` bare på hvitt). Ikke tekst under 12 px. | axe `color-contrast`; V |
 | A11Y-017 | `Wiki/Show.jsx:1732, 2354, 2264, 2962`, `Wiki/Index.jsx:2530, 2555, 2499-2512`, `GoNoGo/Templates/Index.jsx:121`, `Templates/Edit.jsx:333` (`opacity-60`) | Knapper i `emerald/sky/amber-600` med hvit tekst (3,2–4,1:1). `opacity-60` på inaktive kort. | 1.4.3 | B (beregnet) | Ett trinn mørkere (`*-700`). «Inaktiv»-merke i stedet for opacity. | axe; V |
 | A11Y-018 | `NotificationBell.jsx:315`, `ModuleSidebar.jsx:236, 396`, `CustomerAppLayout.jsx:467`, `ProcessSwimlaneDiagram.jsx:43-46, 440, 519`, `KpiTrend.jsx:70, 77` | Ikonknapper, diagramkanter og noder har kontrast under 3:1. | 1.4.11 | B (beregnet) | `slate-500`/`600` på strek og ikon. | V |
-| A11Y-019 | Inputkanter `border-slate-200` (1,23:1), ugyldig `border-rose-400` | Feltgrensene er knapt synlige. | 1.4.11 | S | Hvilekant `slate-400` (eller mørkere) i `formStyles.js`, `rose-600` for ugyldig. | V |
+| A11Y-019 | Inputkanter `border-slate-200` (1,23:1), ugyldig `border-rose-400` | Feltgrensene er knapt synlige. | 1.4.11 | S | Felles feltfarge `field-border` (3,49:1) og `rose-600` for ugyldig (§17.12). | Rettet i Fase 3-sidene og `formStyles`; øvrige moduler tar fargen i bruk i Fase 4–6 |
 | A11Y-020 | `CustomerAppLayout.jsx:376` (header `z-[60]`) mot toast `:628` og `ActionDialog.jsx:104` (`z-50`) | Toasten og dialoger ligger under den klebrige headeren. Headeren kan klikkes mens en `aria-modal`-dialog er åpen. Fokuserte elementer kan skjules under headeren. | 2.4.11, 4.1.2 | S / M | Fast z-index-skala (header 60, overlegg ≥ 70, toast 80), `scroll-padding-top` i `app.css`, og `inert` på appinnholdet mens en modal er åpen. | V + K (Shift+Tab under header) |
 | A11Y-021 | `NotificationBell.jsx:166, 194, 260` | `aria-label` overstyrer antall uleste, kortnavnet skjuler innhold og dato, og panelet mangler rolle. | 1.3.1, 4.1.2 | B | «Varsler, N uleste» (i18n), fjern overstyringen på kortet, og bruk disclosure (ikke `aria-haspopup="dialog"`) eller ekte dialog. | SR |
 | A11Y-022 | `PublicLayout.jsx:42` | Hovednavigasjonen er `hidden lg:flex` uten mobilmeny, så sidene er utilgjengelige under 1024 px eller ved 200–400 % zoom. | 1.4.10, 2.4.5 | B | Disclosure-meny under `lg`. | Z |
@@ -240,7 +240,11 @@ er bygget for kundeflaten (`Billing`).
 | A11Y-130 | `DashboardCockpit.jsx` (pipeline) | Seks faser på rad: navn kuttet, sidelengs rulling ved 640–1024 px. (Fase 2.) | 1.4.10, 1.4.4 | B | Container queries. | Rettet (§16) |
 | A11Y-131 | Brukermeny, varselpanel | Panel delvis utenfor vinduet ved 320 px. (Fase 2.) | 1.4.10 | B | `useKeepInViewport`. | Rettet (§16) |
 | A11Y-132 | `CustomerAppLayout.jsx` header | Sticky header på alle bredder fyller vinduet ved 320 px / 400 %. (Fase 2.) | 1.4.10, 2.4.11 | B | Sticky fra `lg`. | Rettet (§16) |
-| A11Y-133 | `FlashMessages.jsx` + skjema med `preserveScroll` | Feilbanneret er utenfor synsfeltet etter innsending lenger ned på siden. (Fase 2.) | 3.3.1 | S | Feil ved feltet + fokus (A11Y-013). | Fase 3 |
+| A11Y-133 | `FlashMessages.jsx` + skjema med `preserveScroll` | Feilbanneret er utenfor synsfeltet etter innsending lenger ned på siden. (Fase 2.) | 3.3.1 | S | Feil ved feltet + fokus (A11Y-013). | Delvis rettet i Fase 3 (§17.4): feltfeil i de migrerte skjemaene. Gjenstår: A11Y-137. |
+| A11Y-135 | `AI/Show.jsx:2669, 3063` (Kravtype) | `InfoHint` inne i `<label>`, samme feil som A11Y-001. (Fase 3.) | 1.3.1, 4.1.2 | B | `FormField` med `info`. | Fase 4 |
+| A11Y-136 | §10 i denne planen | Regelen «`slate-400` på hvitt er grensen» er feil i Tailwind 4: `slate-400` gir 2,63:1. `rose-600` gir 4,51:1 på hvitt og 4,31:1 på `slate-50`. (Fase 3.) | 1.4.3, 1.4.11 | B (beregnet) | §10 rettet: minst `slate-500` for kanter og ikoner, `rose-700` for feiltekst. | Rettet (§17) |
+| A11Y-137 | Radhandlinger med `preserveScroll` som svarer med flash-feil (f.eks. Deaktiver i en lang tabell) | Feilen er ikke knyttet til et felt, og banneret står øverst, utenfor synsfeltet. Skjermleser får den (`role="alert"`). (Fase 3.) | 3.3.1 (seende) | S | Feilen vises også ved knappen som ble trykket, beskrevet av knappen (`Support/rowActionError.js`). Ikke global rulling eller fokusflytting. | Rettet for Fase 3-sidene (§17.12); andre moduler tar mønsteret i bruk i Fase 4–6 |
+| A11Y-138 | `GoNoGo/Templates/Index.jsx`, `Templates/Edit.jsx`, `Billing/Index.jsx` | Siden viser flash-meldingen selv, i tillegg til layoutens `FlashMessages`. Meldingen står to ganger på skjermen (den leses én gang). (Fase 3.) | Beste praksis | B | Sidens egen kopi fjernet; layoutens `FlashMessages` er eneste kilde. | Rettet (§17.12) |
 | A11Y-134 | `<Link>` med bare ny spørrestreng, samme tittel, uten `preserveState` | Fokus faller til `<body>`. (Fase 2.) | 2.4.3 | B | Fokus tilbake til samme kontroll etter oppdatering av samme side (`routeFocus.js`). | Rettet (§16.12) |
 
 **Moduler**
@@ -630,12 +634,17 @@ axe finner typisk 30–40 % av WCAG-problemene. Følgende må testes manuelt:
 | Informasjonstekst | Minst `slate-600` på farget bakgrunn og minst `slate-500` på ren hvit. `slate-400`/`300` brukes bare for dekor eller deaktivert innhold. |
 | Tekststørrelse | Ikke under 12 px (`text-xs`). Brødtekst og felt er 16 px (følger eksisterende lesbarhetsregel). |
 | Fylte knapper med hvit tekst | `*-700` eller mørkere for emerald, sky og amber. `violet-600` er OK. |
-| Kanter og ikoner (ikke-tekst) | Minst 3:1: `slate-400` på hvitt er grensen, og `slate-500` anbefales. |
+| Kanter og ikoner (ikke-tekst) | Minst 3:1: `slate-500` (4,77:1 på hvitt). `slate-400` gir bare 2,63:1 i Tailwind 4 og holder ikke (rettet i Fase 3, A11Y-136). |
+| Feiltekst | `rose-700` (6,06:1). `rose-600` gir 4,51:1 på hvitt og 4,31:1 på `slate-50` – for knapt. |
+| Feltkant | `border-field-border` (`oklch(63% 0.042 257)`): 3,49:1 mot hvitt, 3,34:1 mot `slate-50`, 3,19:1 mot `slate-100`. Ugyldig felt: `rose-600` via `aria-invalid`-regelen i `app.css`. Deaktiverte felt er unntatt. |
+| Feil etter radhandling | `trackRowAction` + `useRowActionError`: meldingen ved knappen, knappen beskrevet av den, banneret er eneste `role="alert"`. |
 | Status | Alltid tekst (synlig eller `sr-only`) i tillegg til farge og ikon. |
 | Z-index | Header 60, overlegg og dialog 70, toast og kunngjøring 80. |
 | Trykkflate | Minst 24×24 px for interaktive mål. |
 | Skjemafelt | Alltid via `FormField`. Feil gir `aria-invalid` + `aria-describedby`. Første feil fokuseres. |
-| Dialoger | Alltid `ActionDialog`/`useConfirm`. Ingen nye `fixed inset-0`-modaler. |
+| Dialoger | Alltid `ActionDialog`. Ingen nye `fixed inset-0`-modaler. Bakgrunnen gjøres `inert` av `ActionDialog` (Fase 3). Egen header/footer: `padded={false}` + `DialogTitleBar`. |
+| Tabeller | Rullbare tabeller i `ScrollRegion` (navngitt region og tabstopp bare når de ruller, plass til fokusringen). `<th scope>`, og radhandlinger med radens navn. |
+| Skjemafeil | `useFocusFirstError` fra Inertia `onError`, eller `errorsOnMount` for skjemaer med vanlig POST. Aldri fokusflytting ved annen validering. |
 | Dynamiske endringer | Via `useAnnounce()`. Ingen live regions som monteres sammen med innholdet sitt. |
 
 ---
@@ -703,6 +712,8 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 - Tagging av PDF (forventet: ikke tagget).
 - Om polling (`router.reload`) noen gang flytter fokus eller nullstiller felt mens brukeren skriver.
 
+**Åpne oppfølgingsoppgaver:** OPPF-001 (E2E `a11y-navigation` i samlet regresjon, må lukkes før merge til `main`, §17.12.9).
+
 **Beslutninger som trengs før eller i fasene:**
 
 1. Godkjenning av dev-avhengighetene i §9.1 (før Fase 1).
@@ -717,6 +728,9 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 
 | Dato | Endring |
 |---|---|
+| 2026-10-15 | Fase 3 godkjent for commit med én kjent E2E-feil (OPPF-001, eksisterende på `683246a7`, må rettes før merge). |
+| 2026-10-15 | Teknisk sluttkontroll av Fase 3 (§17.12): A11Y-019 (feltkant 3,49:1), A11Y-137 (feil ved radhandlingen) og A11Y-138 (én flash-melding) rettet; `modalInert` sikret mot gjenværende `inert`. |
+| 2026-10-15 | Fase 3 implementert og automatisk verifisert (§17): `ActionDialog` med `inert` bakgrunn og modalstabel, 9 egne dialoger (5 komponenter) migrert, `FormField` tatt i bruk i 10 skjemaer, `useFocusFirstError`, `ScrollRegion`, `InfoHint` med gyldig HTML og pekerbro, tilgangsmatrise uten fokustap. Nye funn A11Y-135 til A11Y-138. Ikke committet. |
 | 2026-10-14 | Teknisk sluttkontroll av Fase 2 (§16.12): A11Y-134 rettet, tittelavlesning ved første sideskift rettet, samlet E2E-regresjon på endelig kode 161/0. |
 | 2026-10-14 | Fase 2 implementert og automatisk verifisert (§16): hopp-lenke, navngitte landemerker, fokus ved sideskift, flash/toast, mobilmeny, innlogging, dashboardkalender, kontrast, sidetitler. Nye funn A11Y-129 til A11Y-134. Ikke committet. |
 | 2026-10-14 | Teknisk sluttkontroll av Fase 1 (§15.8): to rettelser (kunngjøringer i rask rekkefølge, `descriptionId` på `ActionDialog`), E2E-timeout undersøkt, CI og avhengigheter kontrollert. Ikke committet. |
@@ -1194,3 +1208,255 @@ Verifisert i E2E på endelig kode: suksessmeldingen står i den vedvarende `poli
 #### 16.12.7 Vurdering
 
 Ingen uavklarte regresjoner. Den eneste testfeilen (4 PHP-tester) finnes på `4c594ebf` og er uavhengig av Fase 2. Fase 2 er teknisk klar for commit. Den er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.
+
+---
+
+## 17. Fase 3 – gjennomføringsrapport (2026-10-15)
+
+Branch `feature/wcag-accessibility`, utgangspunkt `683246a7` (Fase 2), rent arbeidstre ved start. Begrepene er de samme som i §15.8 og §16: **Kode** = implementert, **Auto** = automatisk test i repoet, **Agent** = kontrollert av agenten i ekte nettleser (Playwright, Chromium), **Manuell** = kontrollert av en person. Ingen manuell verifisering er gjort. Fase 3 er ikke committet.
+
+### 17.1 Omfang og arbeidsmåte
+
+Fase 3 omfatter felleskomponentene for skjema, dialog, tabell og status, og de sidene som ikke er modultunge: Brukere, Avdelinger, Kundemiljø (Avdelinger, Brukere, Tilganger, egne roller, fagområder), Abonnement, Go/No-go-maler, Watch Profiles, Konkurrenter og Oppfølging. AI-arbeidsflaten (Fase 4), Enterprise Wiki (Fase 5) og GRC-modulene (Fase 6) er ikke migrert. Eneste unntak er tabellrammen i Kvalitet (§17.2 F), fordi det var der den klippede fokusringen ble målt i Fase 1.
+
+Funn som hørte til fasen: A11Y-001, -002 (GoNoGo, Kundemiljø, Billing, `AiCapacityLevelDialog`), -013, -016 og -017 (på de berørte sidene), -019 (vurdert), -020 (`inert`), -025, -027, -028, -029, -041, -042, -043, -106 (delvis), -108, -109, -110, -111, -120, -121 (de migrerte skjemaene), -133 og den klippede fokusringen fra §15.8.2.
+
+Før kodeendringene ble det laget en intern oversikt per funn og per side. Hvert skjema og hver dialog er gjennomgått enkeltvis; ingenting er byttet ut mekanisk på tvers av kodebasen.
+
+### 17.2 Implementert
+
+| Del | Hva | Filer | Funn | Status |
+|---|---|---|---|---|
+| A. Inert bakgrunn og modalstabel | Når en `ActionDialog` åpnes, får alle søsken langs stien fra dialogen opp til `<body>` attributtet `inert`; dialogen selv og elementene som inneholder den forblir aktive. Dermed legges ikke `inert` på app-roten, som dialogen ligger inni. Live-regionene og toast-verten holdes utenfor, slik at statusmeldinger fortsatt leses mens en dialog er åpen. Elementer som var `inert` fra før, røres ikke. Ved lukking fjernes `inert` **før** fokus returneres (et inert element kan ikke få fokus). Nestede dialoger: en dialog som åpnes inne i et område en ytre dialog har gjort inert, frigjør det området så lenge den er åpen; bare den øverste dialogen svarer på Escape og Tab. Ikke-modale paneler (`PageHelpPanel`, menyer) er uendret. | `Support/modalInert.js` (ny), `Components/App/ActionDialog.jsx` | A11Y-020 | Kode + auto (enhet + E2E) |
+| B. Dialoger migrert | `CreateTemplateModal` og `CriterionModal` (Go/No-go-maler), `EnvironmentModal` (Kundemiljø: avdeling, rolle, fagområde), `ConfirmDialog` ×3 (Abonnement: si opp, gjenoppta, bestill/avbestill) og `AiCapacityLevelDialog` er nå `ActionDialog`. De har dialogrolle, navn fra overskriften, beskrivelse der den finnes, fokus inn ved åpning, fokusfelle, Escape, fokusretur og inert bakgrunn. «×» har fått navnet «Lukk dialog» (`DialogTitleBar`, ny eksport i `ActionDialog`). Nye størrelser `xs`/`sm` gjør at dialogene beholder bredden de hadde. Native `window.confirm` er beholdt (beslutning 3). | `Pages/App/GoNoGo/Templates/{Index,Edit}.jsx`, `Pages/App/CustomerEnvironment/Index.jsx`, `Pages/App/Billing/Index.jsx`, `Components/App/AiCapacityLevelDialog.jsx`, `Components/App/ActionDialog.jsx` | A11Y-002 | Kode + auto |
+| C. Skjemafelt | `FormField` har fått klasseoverstyring, slik at eldre sider kan ta i bruk koblingen uten å endre utseende, og to nye eksporter: `FieldsetField` (avkrysningsgruppe som `<fieldset>` navngitt med `aria-labelledby`, slik at en «i» ved spørsmålet ikke blir en del av gruppens navn) og `RequiredFieldsNote`. Tatt i bruk i: Brukere (opprett, rediger), Avdelinger (opprett, rediger), avdelingsdialogen i Kundemiljø, Watch Profile (opprett, rediger), Go/No-go-maler (ny mal, malinformasjon, vurderingspunkt). Rolle- og fagområdedialogen bruker `fieldA11y` direkte (feltene hadde allerede `htmlFor`). `DepartmentCheckboxGroup` er en navngitt gruppe. Rettighetene i rolledialogen er gruppert per modul med `fieldset`/`legend`. | `Components/App/FormField.jsx`, `Components/App/DepartmentCheckboxGroup.jsx`, sidene over | A11Y-001, -013, -041, -120, -121 | Kode + auto |
+| D. Fokus ved avvist innsending | `useFocusFirstError(containerRef, { errorsOnMount })`. Fokus flyttes til første felt med `aria-invalid`, og nettleseren ruller det inn i synsfeltet (med `scroll-padding-top` fra Fase 2). Er feilen ikke knyttet til et felt, får feiloppsummeringen (`data-form-error-summary`) fokus. Fokus flyttes bare når det bes om det: fra Inertia `onError`, eller ved innlasting når siden kommer tilbake med feil fra et vanlig POST-skjema (Brukere). Feil som dukker opp eller endres mens brukeren skriver, flytter aldri fokus. Forespørselen er en teller i state, fordi `onError` kalles før React har rendret `aria-invalid`. | `Support/focusManagement.js` | A11Y-013, -133 | Kode + auto |
+| E. `InfoHint` | Panelet er en `<span>` (gyldig inne i `label`, `h2`, `p`), ikke `<div>` i `<span>`. En usynlig `::before`-stripe dekker glippen på 8 px mellom «i» og panel, så panelet ikke lukkes på vei dit med mus. Et trykk som åpner hinten, lukker den ikke i samme bevegelse (berøring gir `mouseenter` + `click`; før åpnet og lukket ett trykk hinten). Den gamle `violet-300`-ringen (under 3:1, og dobbel med app-rammen) er fjernet; app-rammen fra Fase 1 gjelder. Alle `InfoHint` i Brukere og Watch Profile står nå utenfor `<label>`. | `Components/App/hintTooltip.jsx`, `InfoHint.jsx`, Brukere, `WatchProfileForm.jsx` | A11Y-001, -025, -106 (delvis) | Kode + auto |
+| F. Tabellramme | `ScrollRegion`: rulleboksen har 4 px luft innenfor hver kant (og tilsvarende negativ marg, så tabellen står der den sto), slik at fokusrammen på en lenke i første kolonne eller en knapp i siste ikke klippes. Bare når tabellen faktisk er bredere enn boksen, blir boksen en navngitt region i tabrekkefølgen (piltaster ruller); en tabell som passer, gir ingen ekstra tabstopp eller landemerke. Fokusrammen på selve boksen tegnes innvendig, fordi kortet rundt ofte klipper. Ingen global CSS-endring for tabeller. Tatt i bruk i Kundemiljø (avdelinger, brukere, tilgangsmatriser, egne roller, fagområder), Brukere, Avdelinger, Watch Profiles, Konkurrenter, Abonnement (fakturaer, tjenester) og de tre tabellene i Kvalitet der klippingen ble målt. | `Components/App/ScrollRegion.jsx` (ny), `resources/css/app.css`, sidene over | §15.8.2, A11Y-110 | Kode + auto + agent |
+| G. Tabellsemantikk | `<th scope="col">`, `<th scope="row">` for radens navn, `sr-only`-caption, tekst i tom handlingskolonne. Radhandlinger har radens navn («Rediger Kari Nordmann», «PDF for faktura 1042 (åpnes i ny fane)», «Vis Leverandør AS»), med synlig tekst først (2.5.3). Konkurrenter: `aria-sort` på sortert kolonne, knappenavn «Sorter etter …», pilen `aria-hidden`; sorteringsknappene er en render-funksjon og ikke en komponent laget per render, så fokus blir på knappen etter sortering. | Sidene over | A11Y-043, -108, -109 | Kode + auto |
+| H. Faner og disclosure | Kundemiljøs Avdelinger/Brukere/Tilganger er en navngitt `<nav>` med `aria-current="page"` (navigasjon, ikke ARIA-faner). Den ubrukte `CollapsibleSection` (uten `aria-expanded`) er fjernet; modulseksjonene i Tilganger brukte allerede `PermissionSection` med `aria-expanded`. | `CustomerEnvironmentHeader.jsx`, `CustomerEnvironment/Index.jsx` | A11Y-027, -028 | Kode + auto |
+| I. Tilgangsmatrisen | Avkrysningsboksen er `aria-disabled` mens raden lagres, ikke `disabled`, så fokus ikke faller til `<body>`; en endring mens raden lagres ignoreres. «Lagret» kunngjøres i den vedvarende `polite`-regionen, feil i `assertive`. Gjelder både anbudsrollematrisen og domenematrisene for egne roller. | `CustomerEnvironment/Index.jsx`, `CustomerRolesPanel.jsx` | A11Y-029 | Kode + auto |
+| J. Statusmeldinger | Ingen nye live-regioner; alt går via `announce()` fra Fase 1. Antall treff kunngjøres når brukerfiltrene i Kundemiljø har satt seg (600 ms) og etter et søk i Konkurrenter, ikke ved sortering eller paginering. Lagring, sletting og bekreftelse bruker fortsatt flash/toast fra Fase 2 (leses én gang). Feil i skjema høres når fokus flyttes til feltet (feilen er feltets beskrivelse), uten egen kunngjøring – det ville gitt to opplesninger. | `CustomerEnvironment/Index.jsx`, `Suppliers/Index.jsx` | A11Y-111 | Kode + auto |
+| K. Kontrast | Hjelpetekster `slate-400` → `slate-600` (Brukere, Avdelinger), etiketter i Oppfølging `slate-400` → `slate-600`, Konkurrenter `text-[11px] slate-500` → `text-xs slate-600`, tabellhoder `slate-500` → `slate-600` på `slate-50`, feiltekst `rose-600` → `rose-700` i de migrerte skjemaene, merker under 12 px → 12 px. Go/No-go: `opacity-60` på inaktive maler og punkter er erstattet med lys bakgrunn; «Inaktiv»-merket og overskriften «Deaktiverte punkter» sier det. Deaktiverte kontroller er ikke endret (unntatt i 1.4.3). | Sidene over | A11Y-016, -017 | Kode + beregnet |
+| L. Overskrifter | Go/No-go-maler: én h1 (`showPageTitle={false}` på listen; «Malinformasjon» er h2 under layoutens «Rediger: …»). | `GoNoGo/Templates/{Index,Edit}.jsx` | A11Y-042 | Kode + auto |
+| i18n | `procynia.a11y.*`: `close_dialog`, `required_fields`, `form_has_errors`, `saved`, `save_failed`, `results_count`, `results_none`, `environment_tabs`, `sort_by`, `sorted_ascending`, `sorted_descending`, `row_action`, `invoice_pdf`, `inactive`, `templates_list`, `table_*`. `customer_env.roles.business_areas.col_actions`. no + en. | `lang/{no,en}/procynia.php` | — | Auto (`A11yTranslationsTest`) |
+| Lint | `lint:a11y` dekker 28 nye filer (45 totalt). Ingen regel er slått av. To reelle funn i rolledialogen (etikett med tittel og hint som ett navn) er rettet: tittelen navngir boksen, hinten beskriver den. | `eslint.config.js` | — | Auto |
+
+### 17.3 Kontrast målt
+
+Tailwind 4 bruker OKLCH. Verdiene under er regnet fra `node_modules/tailwindcss/theme.css` (sRGB, WCAG-formelen):
+
+| Farge | På hvitt | På `slate-50` | Vurdering |
+|---|---|---|---|
+| `slate-200` (inputkant) | 1,23:1 | 1,18:1 | Under 3:1 (A11Y-019, se 17.6) |
+| `slate-400` | 2,63:1 | 2,51:1 | Under 3:1 også for ikke-tekst (A11Y-136) |
+| `slate-500` | 4,77:1 | 4,55:1 | Tekst OK, så vidt på `slate-50` |
+| `slate-600` | 7,56:1 | 7,23:1 | OK |
+| `rose-600` | 4,51:1 | 4,31:1 | For knapt; erstattet i migrerte skjema |
+| `rose-700` | 6,06:1 | 5,78:1 | OK |
+| `violet-600` (fokus) | 5,88:1 | 5,62:1 | OK |
+
+### 17.4 A11Y-133 – feil utenfor synsfeltet
+
+- **Rettet for feltfeil i de migrerte skjemaene.** Feilen står ved feltet, er koblet med `aria-describedby`, feltet er `aria-invalid`, og fokus flyttes dit (med rulling inn i synsfeltet) etter en avvist innsending, både med mus og tastatur. Auto: E2E for Watch Profile (knappen nederst, feltet øverst utenfor synsfeltet), Brukere (vanlig POST), avdelingsdialogen.
+- **Ikke rettet: flash-feil etter handlinger på stedet** (radhandlinger med `preserveScroll`). De er ikke knyttet til et felt. Banneret står øverst med `role="alert"`, så skjermlesere får det, men seende brukere kan ikke se det. En global løsning som ruller til banneret ble vurdert og forkastet (atferdsendring i alle moduler, flytter visningen bort fra der brukeren arbeider). Registrert som A11Y-137, beslutning i Fase 7.
+
+### 17.5 Tester og resultater
+
+Resultatene er fra kjøringer på endelig kode.
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | 1701 bestått, 0 feilet, 0 hoppet over. Ny: `resources/js/Support/a11yForms.test.js` (31 tester: inert-gangen med falsk DOM inkl. nesting og live-regioner, modalstabel, `hasErrors`, fokus til første feil, at fokus bare flyttes på forespørsel, `InfoHint` utenfor `<label>` i de migrerte skjemaene, panelet som `<span>`, trykk-regelen, dialogene på `ActionDialog`, grupper, faner, matrise, tabellramme, `aria-sort`, radnavn). Endret: `Billing/pageLayout.test.js` (dialogens bredde er nå `size="xs"`, samme `max-w-md`). |
+| `npm run lint:a11y` (Node 22) | 0 feil, 0 advarsler (45 filer). |
+| `npm run build` | Bestått. |
+| PHP, målrettet (`A11yTranslationsTest`, `SharedTranslationsLocaleTest`, Billing ×3, `BusinessAreaDeletionTest`, `CustomerDepartmentManagementTest`, `CustomerEnvironmentPageTest`, `CustomerPermissionClearingTest`, `CustomerRolePermissionTest`, `CustomerUserManagementTest`, `CustomerWatchProfileManagementTest`, `GoNoGoTemplateManagementTest`, `InfoCenterModuleMatrixTest`, `CommercialOwnerRoleTest`, leverandørhøsting) | 202 bestått, 0 feilet (1587 påstander). I tillegg `GoNoGoAssessmentTest`, `QualityPermissionTest` og to Wiki-tester som leser JSX: 48 bestått, 0 feilet. |
+| Pint på berørte PHP-filer (språkfilene) | Bestått. |
+| E2E `a11y-forms.spec.js` (ny, 9 tester) | 9 bestått, 0 feilet: avvist innsending med mus og tastatur (fokus, `aria-invalid`, beskrivelse, synlig, skriving flytter ikke fokus), vanlig POST-skjema (Brukere), avdelingsdialogen (navn, beskrivelse, fokus inn, bakgrunn inert, programmatisk fokus til headeren hindres, Tab/Shift+Tab, feil ved feltet, Escape, fokusretur, bakgrunn aktiv igjen), Go/No-go-malene (én h1, dialognavn, «Lukk dialog», fokusretur), tilgangsmatrisen (fokus beholdt, «Lagret» i `polite`-regionen, tilbakestilt), tabell på telefon (navngitt region, tabstopp, innvendig ramme, piltast ruller, ingen sidelengs rulling av siden), fokusramme i Kvalitet-tabellen (≥ 4 px luft på begge sider), Konkurrenter (etiketter, `aria-sort`, fokus etter sortering), `InfoHint` (pekerbro, `<span>`, ett trykk åpner). axe uten brudd på skjema og dialoger med og uten feil, og på tabellregionen. |
+| E2E-regresjon, 25 spesifikasjoner (`a11y-forms`, `a11y-foundation`, `a11y-navigation`, `billing`, `package-change`, `ai-capacity`, `permission-sections`, `roles-on-user-edit`, `info-hint`, `info-center-help`, `my-tasks-governance`, `my-tasks-suppliers`, `quality-process-row-actions`, `quality-page-help`, `quality-tools`, `compliance-library`, `supplier-management`, `knowledge-handoff`, `wiki-delete-awaiting-approval`, `app-navigation`, `breadcrumbs`, `dashboard-structure`, `live-filter-collapse`, `wiki-graph-filters`, `auth`) | Samlet kjøring: **168 bestått, 1 feilet, 0 hoppet over** (13,0 min). Feilen (`compliance-library`) var `net::ERR_ABORTED` på `page.goto`, ingen påstandsfeil. Den falt mens agenten endret kildefiler med Vite dev-serveren i gang (en sideomlasting avbrøt navigasjonen). Isolert på endelig kode: 1/1 bestått. Vurdert som ustabil på grunn av kjøremiljøet, ikke regresjon. Etter siste endring: `a11y-forms` + `roles-on-user-edit` 10/10. |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate, jf. prosjektregel). |
+
+### 17.6 Funnstatus etter Fase 3
+
+Lukket betyr: utbedret og verifisert automatisk innenfor testomfanget i 17.5, på sidene i Fase 3. Ingen er manuelt verifisert.
+
+| ID | Status |
+|---|---|
+| A11Y-001 | Lukket for Brukere og Watch Profiles (auto). Gjenstår i `AI/Show.jsx` (A11Y-135, Fase 4). |
+| A11Y-002 | Lukket for GoNoGo, Kundemiljø, Billing og `AiCapacityLevelDialog` (auto). Gjenstår: «Velg ansvarlig» i `AI/Show.jsx` (Fase 4) og fire Wiki-dialoger (Fase 5). |
+| A11Y-013 | Lukket for de migrerte skjemaene i Fase 3 (auto). GRC-skjemaene (Fase 6), Notices/AI (Fase 4) og Wiki (Fase 5) gjenstår. |
+| A11Y-016, -017 | Lukket på sidene i Fase 3 (beregnet + axe). Øvrige moduler: Fase 4–6. |
+| A11Y-019 | Ved implementering: vurdert, ikke endret. **Rettet i sluttkontrollen (§17.12.2).** |
+| A11Y-020 | Lukket (auto): bakgrunnen er `inert` mens en `ActionDialog` er åpen, også for de 13 dialogene fra før. Gjenstår manuelt: skjermleserens lesemodus i NVDA/JAWS/VoiceOver. |
+| A11Y-025 | Lukket (auto, mus i Chromium). |
+| A11Y-027 | Lukket for Kundemiljø (auto). `Quality/Item.jsx` gjenstår (Fase 6). |
+| A11Y-028 | Lukket for Kundemiljø (den omtalte komponenten var ubrukt og er fjernet). Øvrige steder: Fase 4–5. |
+| A11Y-029 | Lukket (auto). |
+| A11Y-041, -042, -043 | Lukket (auto). |
+| A11Y-106 | Delvis: trykk på «i» lukker ikke hinten lenger. `size="sm"` er fortsatt 20 px; avstandsunntaket i 2.5.8 må vurderes manuelt per side. |
+| A11Y-108, -109, -110 | Lukket på sidene i Fase 3 og i Kvalitets tre tabeller (auto). Øvrige tabeller: Fase 4–6, med `ScrollRegion`. |
+| A11Y-111 | Lukket for Kundemiljø (brukere) og Konkurrenter. Øvrige registre: Fase 6. |
+| A11Y-120 | Lukket for `DepartmentCheckboxGroup`, egne roller på Rediger bruker og rolledialogen. `ManagementReview`, `Wiki/Graph`: Fase 5–6. |
+| A11Y-121 | Delvis: Go/No-go-skjemaene forklarer `*`. Brukere og Avdelinger har ingen påkrevde felt merket med `*`. GRC: Fase 6. |
+| A11Y-133 | Delvis (17.4). Restdelen A11Y-137 er rettet i sluttkontrollen (§17.12.3). |
+| Klippet fokusring i tabeller (§15.8.2) | Lukket for de målte tabellene (auto: ≥ 4 px luft). |
+| A11Y-135–138 | Nye (se §7.2). A11Y-136 er rettet i §10; A11Y-137 og -138 i sluttkontrollen (§17.12). |
+
+### 17.7 Synlige endringer
+
+- **Dialoger:** samme innhold og bredde; avrundingen følger `ActionDialog` (`rounded-3xl`). AI-nivådialogen og Abonnements bekreftelser har litt mer luft (p-6 som før, `rounded-3xl` i stedet for `rounded-2xl`). Maks høyde er vinduets høyde minus 2 rem i stedet for 90/92 vh.
+- **Go/No-go-maler:** inaktive maler og punkter er ikke lenger falmet (`opacity-60`), men har lys grå bakgrunn og merket «Inaktiv»/overskriften «Deaktiverte punkter». Et lite «Felt merket med * må fylles ut» står øverst i skjemaene. Mørkere grå tekst og 12 px i stedet for 10–11 px i merker.
+- **Brukere, Avdelinger, Konkurrenter, Oppfølging:** hjelpetekster og små etiketter er mørkere grå; feiltekst litt mørkere rød.
+- **`InfoHint`:** ved tastaturfokus vises app-rammen (2 px `violet-600`) i stedet for en svak lilla ring. Hinten lukkes ikke lenger på vei fra «i» til teksten.
+- **Tabeller:** på smal skjerm kan en bred tabell få fokus (fiolett ramme innvendig) og rulles med piltaster. Ellers ingen endring.
+- Ingen ruter, handlinger, tilganger, valideringsregler eller data er endret.
+
+### 17.8 Manuell verifisering som gjenstår
+
+I tillegg til §15.8.7 og §16.8:
+
+1. **NVDA + Firefox/Chrome og VoiceOver + Safari:**
+   1. Kundemiljø → Opprett avdeling: dialogen leses med navn og beskrivelse; i lesemodus skal ikke headeren eller tabellen bak kunne nås (A11Y-020). Escape gir fokus til knappen.
+   2. Send tomt skjema (Watch Profile, Brukere, avdelingsdialogen): fokus på feltet, feilen leses som feltets beskrivelse, ingen dobbel opplesing.
+   3. Tilganger: Space på en rettighet – «Lagret» leses én gang, fokus blir på boksen.
+   4. Rediger bruker: «Brukeren tilhører disse avdelingene» leses som gruppe; Rolle har navnet «Rolle»; «Vis forklaring for Rolle» er en egen knapp.
+   5. Konkurrenter: sorteringsrekkefølgen leses fra kolonneoverskriften; antall treff leses etter søk.
+2. **Ekte Safari:** fokusfellen og `inert` sammen med Safaris standard Tab (uten full tastaturtilgang).
+3. **Berøringsskjerm (iOS/Android):** ett trykk på «i» åpner hinten og den blir stående.
+4. **Zoom 200/400 %:** dialogene i Kundemiljø og Go/No-go (rulling innenfor dialogen, «Lukk dialog» synlig).
+5. **Visuelt:** dialogenes utseende mot før (17.7) og tabellene med innvendig ramme.
+
+### 17.9 Kjente risikoer og begrensninger
+
+- `inert` legges på elementene som finnes når dialogen åpnes. Innhold som monteres senere som søsken av dialogens forfedre (svært uvanlig), blir ikke inert; fokusfellen holder likevel fokus i dialogen.
+- Innhold som en dialog portalerer til `<body>` (en nedtrekksliste), er ikke inert, men kan heller ikke få fokus (begrensning fra Fase 1, dokumentert i `ActionDialog`).
+- `useFocusFirstError` er per skjema og må kalles fra `onError` i hvert skjema som migreres. Skjema som ikke er migrert, flytter ikke fokus.
+- A11Y-137 og A11Y-019 er åpne og krever beslutning.
+- Radhandlingenes navn følger den synlige teksten i hviletilstand («Deaktiver X»). Mens handlingen pågår, viser knappen «Deaktiverer…» og navnet er uendret i det korte øyeblikket.
+- E2E kjører bare i Chromium.
+- Fortsatt fra Fase 1–2: ingen manuell skjermlesertest, ekte Safari/Firefox ikke testet, Windows-høykontrast og nettleserzoom ikke testet, de 5 eksisterende npm-sårbarhetene håndteres separat før merge.
+
+### 17.10 Anbefalinger for Fase 4
+
+1. Gjennomfør den manuelle sjekklisten i 17.8 før Fase 4 bygger videre på `inert` og `useFocusFirstError`.
+2. Bruk de nye byggesteinene direkte: `ActionDialog` (+ `DialogTitleBar`) for «Velg ansvarlig», `FormField` med `info` for Kravtype (A11Y-135), `useFocusFirstError` i kravskjemaene, `ScrollRegion` for svarbokser og tabeller i AI-arbeidsflaten.
+3. AI-status (A11Y-045, -112): én overgang, én kunngjøring via `announce()`; ingen nye live-regioner.
+4. Ta stilling til A11Y-019 (inputkant) og A11Y-137 (flash-feil etter handling på stedet) som felles beslutninger, slik at Fase 4–6 ikke løser dem hver for seg.
+5. Fjern dobbel flash (A11Y-138) når sidene berøres.
+
+### 17.11 Vurdering
+
+Alle funn som tilhørte Fase 3 er rettet eller dokumentert som delvis med begrunnelse (A11Y-001, -002, -013, -019, -106, -121, -133). Fire nye funn er registrert (A11Y-135 til -138), og ett av dem (feil kontrastregel i §10) er rettet. Ingen ruter, tilganger, valideringsregler, data eller forretningslogikk er endret. Fasen er **ikke** manuelt verifisert med skjermleser, ekte Safari/Firefox, nettleserzoom, berøringsskjerm eller Windows-høykontrast, og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. Full E2E- og PHP-suite er merge gate og er ikke kjørt.
+
+### 17.12 Teknisk sluttkontroll av Fase 3 (2026-10-15)
+
+Kontroll på den endelige Fase 3-koden før commit. Branch `feature/wcag-accessibility`, HEAD `683246a7`; alle Fase 3-endringer fra §17 er bevart, og ingen filer utenfor fasen er med. Alle resultater i 17.12.7 er fra kjøringer **etter** siste kodeendring; ingen kildefil ble endret mens E2E kjørte (jf. 17.5, der en endring under kjøringen avbrøt en navigasjon).
+
+#### 17.12.1 Kodeendringer i sluttkontrollen
+
+| # | Funn | Rettelse | Filer | Test |
+|---|---|---|---|---|
+| 1 | A11Y-019: feltkanten `slate-200` (1,23:1) | Felles feltfarge `--color-field-border` i `@theme` (utility `border-field-border`) og `rose-600` for felt med `aria-invalid` | `resources/css/app.css`, `Support/formStyles.js`, 13 komponenter og sider (17.12.2) | Enhet + E2E |
+| 2 | A11Y-137: avvist radhandling bare i banneret øverst | `Support/rowActionError.js` (ny): meldingen vises ved knappen og beskriver den | `CustomerEnvironment/Index.jsx`, `BusinessAreasPanel.jsx`, `Users/Index.jsx` | Enhet + E2E |
+| 3 | A11Y-138: flash-meldingen to ganger på skjermen | Sidenes egne kopier fjernet | `GoNoGo/Templates/{Index,Edit}.jsx`, `Billing/Index.jsx`, `Billing/pageLayout.test.js` | Enhet + E2E |
+| 4 | `modalInert`: et unntak mellom «gjør inert» og registrert opprydding ville latt siden stå inert | `ActionDialog` angrer `inert` og stabelen hvis åpningen feiler. `modalInert` holder rede på alt den har gjort inert, og frigjør resten når siste dialog lukkes; en angrefunksjon som kalles to ganger gjør ingenting andre gang; et frigjort forfedreelement gjøres bare inert igjen så lenge en ytre dialog fortsatt er åpen. | `Support/modalInert.js`, `Components/App/ActionDialog.jsx` | Enhet + E2E |
+
+#### 17.12.2 A11Y-019 – feltkant
+
+- **Hvorfor kanten trengs:** feltene er hvite på hvite eller `slate-50`-kort. Etiketten står over feltet, men kanten er det eneste som viser hvor feltet er og hvor stort det er, så 1.4.11 gjelder.
+- **Farge:** `oklch(63% 0.042 257)`, mellom `slate-400` og `slate-500` i samme fargetone, så lys som 3:1 tillater, for å bevare uttrykket. Beregnet (sRGB, WCAG-formelen): **3,49:1** mot hvitt, **3,34:1** mot `slate-50`, **3,19:1** mot `slate-100`. Til sammenligning: `slate-200` 1,23:1, `slate-300` 1,48:1, `slate-400` 2,63:1, `slate-500` 4,77:1 (for mørk for formålet).
+- **Feiltilstand:** et felt med `aria-invalid="true"` får `rose-600`-kant (4,51:1) via én regel i `app.css` (utenfor lag, så den vinner over feltets egen kantklasse). Feilen sies fortsatt med tekst; kanten viser hvor.
+- **Fokus:** uendret. Tastaturfokus er den fiolette 2 px-rammen (5,88:1), tegnet innenfor kanten. Feltenes gamle `focus:border-*` står igjen som musemarkering.
+- **Omfang:** `formStyles.js` (`INPUT`, `TEXTAREA`), `SearchableMultiSelect` (delt) og alle tekstfelt og nedtrekkslister på Fase 3-sidene: Brukere, Avdelinger, Kundemiljø (filtre, avdelings-, rolle- og fagområdedialog), Go/No-go-maler, Watch Profiles (skjema og filtre), Konkurrenter. 45 klassestrenger, hver kontrollert som felt (alle har `focus:border-*`). Ikke mekanisk på tvers av kodebasen: AI, Wiki og GRC tar fargen i bruk i sine faser.
+- **Unntak:** deaktiverte felt (e-post på Rediger bruker) og skrivebeskyttede visningsbokser beholder `slate-200` (1.4.11 gjelder ikke inaktive komponenter). Avkrysningsbokser og radioknapper tegnes av nettleseren og er ikke endret.
+- **Auto:** enhetstest (token, `formStyles`, ingen `slate-200`-felt igjen i de kontrollerte filene, `aria-invalid`-regelen rører ikke outline) og E2E (beregnet kontrast for den rendrete kanten ≥ 3:1 i hvile og ≥ 4,5:1 som ugyldig, fiolett fokusramme beholdt).
+
+#### 17.12.3 A11Y-137 – feil etter radhandlinger
+
+- **Kartlagt:** radhandlinger med `preserveScroll` som kan avvises med flash-feil: Aktiver/Deaktiver bruker i Kundemiljø og på Brukere (`UserController`: egen bruker, brukergrense nådd, siste systemeier) og Slett fagområde (`BusinessAreaController`: i bruk). «Deaktiver» for standardmalen i Go/No-go avvises også av serveren, men knappen er deaktivert i grensesnittet og kan ikke trykkes. Status-knappen på Rediger bruker bevarer ikke rulleposisjonen, så siden lastes på nytt øverst der banneret står.
+- **Løsning (i prioritert rekkefølge):**
+  1. Lokal visning: `trackRowAction(key, options)` registrerer hvilken rad og handling som ble utført; `useRowActionError(flash.error)` gir meldingen til den raden. Den vises under knappen og er knappens `aria-describedby`.
+  2. Kunngjøring via eksisterende mekanisme: banneret (`role="alert"`) er fortsatt den ene kunngjøringen. Den lokale teksten er **ikke** en live-region, så meldingen leses ikke to ganger.
+  3. Fokus: blir på knappen (Fase 2-regelen i `routeFocus.js` setter den tilbake hvis raden rendres på nytt).
+  4. Ingen rulling.
+- Lageret ligger utenfor React, fordi et Inertia-besøk som ikke er GET monterer siden på nytt. Meldingen vises bare så lenge sidens `flash.error` er den samme, så neste besøk fjerner den.
+- **Auto:** enhetstester (riktig rad, forsvinner med neste besøk, egne `onSuccess` bevares, ingen ekstra `role="alert"`) og E2E (fagområde med risiko seedet via `RiskE2EFixture`-navn: Slett gir banner + lokal melding, knappen beskrives av meldingen, fokus beholdt, rulling < 40 px, borte etter ny innlasting; data ryddet i `finally`).
+
+#### 17.12.4 A11Y-138 – doble flash-meldinger
+
+- **Årsak:** `GoNoGo/Templates/Index.jsx`, `Templates/Edit.jsx` og `Billing/Index.jsx` tegnet `flash.success`/`flash.error` selv, i tillegg til layoutens `FlashMessages` (Fase 2). Én hendelse ga to synlige meldinger. Kunngjøringen kom én gang, fordi sidenes kopi ikke var en live-region.
+- **Rettet ved kilden:** sidenes kopier er fjernet. Suksess er layoutens toast (vedvarende `polite`-region, til den lukkes eller neste side), feil er layoutens `role="alert"`-banner. Ingen meldinger er borte: alle flash-typene sidene viste, vises av layouten. Ingen andre sider i `/app` tegner flash selv (Wiki leser bare `flash.error` i en tilbakemelding).
+- **Auto:** enhetstest (ingen `flash.success`/`flash.error` i de tre sidene; layouten har toast og alert; `pageLayout.test.js` oppdatert) og E2E (egen mal seedet og slettet: Deaktiver gir toast, og teksten står én gang på siden).
+
+#### 17.12.5 Dialoger og `inert` – gjennomgang
+
+| Kontroll | Resultat |
+|---|---|
+| Én åpen modal | Søsken langs stien inert, dialogen og forfedrene aktive, live-regioner og toast aktive (enhet + E2E). |
+| To åpne modaler | Nestet dialog i inert område frigjør forfedrene; ytre dialog inert bak den; bare øverste svarer på Escape/Tab; tilbake til ytre dialogs tilstand ved lukking (enhet). Lukking i feil rekkefølge etterlater ingenting inert (enhet, ny). Ingen side i appen åpner i dag to dialoger samtidig, så dette er ikke E2E-testet. |
+| Escape og fokusretur | Escape lukker, fokus tilbake til utløseren, bakgrunnen aktiv igjen (E2E). |
+| Fokusfelle | Tab/Shift+Tab holdes inne; programmatisk fokus til headeren hindres av `inert` (E2E). |
+| Live-regioner | Ikke inert; «Lagret» og toast leses mens en dialog kan være åpen (enhet + E2E). |
+| Portaler | Innhold portalert til `<body>` etter åpning blir ikke inert, men kan ikke få fokus (begrensning fra Fase 1, dokumentert). Ingen av dialogene i appen portalerer i dag. |
+| Lukket av navigasjon | Dialog åpen, nettleserens Tilbake (Inertia-historikk): dialogen er borte, ingen `[inert]` igjen, siden kan brukes med tastatur (E2E, ny). |
+| Feil under åpning | Angres (kode + enhetstest av strukturen). |
+| Permanent `inert` | Sikringsnett: når siste dialog lukkes, frigjøres alt modulen har markert (enhet, ny). |
+
+#### 17.12.6 Tabeller og `ScrollRegion` – gjennomgang
+
+- Horisontal rulling med tastatur: brukertabellen ved 390 px er en navngitt region («Brukere»), får fokus og ruller med piltaster (E2E).
+- Synlig fokus: regionen har innvendig fiolett ramme; lenke i første og knapp i siste kolonne i Kvalitet har ≥ 4 px luft (E2E).
+- Ingen unødvendige tabstopp: avdelingstabellen på desktop er verken region eller tabstopp (E2E).
+- Tilgjengelig navn: fra tabellens navn (`a11y.table_*` eller seksjonsoverskriften); axe uten brudd (E2E).
+- Funksjon uendret: sortering (Konkurrenter, med fokus beholdt), radhandlinger (Kundemiljø, fagområder, Kvalitets radmeny i regresjonen) og matrisene (Tilganger) fungerer (E2E).
+
+#### 17.12.7 Testresultater (endelig kode)
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | **1713 bestått, 0 feilet, 0 hoppet over** (`a11yForms.test.js` har nå 43 tester) |
+| `npm run lint:a11y` (Node 22) | **0 feil, 0 advarsler** (45 filer) |
+| `npm run build` | Bestått; `border-field-border` finnes i bygd CSS |
+| PHP, målrettet (som 17.5, pluss `GoNoGoAssessmentTest` og `QualityPermissionTest`) | **220 bestått, 0 feilet** (1660 påstander) |
+| Pint (språkfilene) | Bestått |
+| E2E Chromium, samlet: de 25 spesifikasjonene fra 17.5 (inkl. `a11y-forms`, nå 13 tester), endelig kode | **172 bestått, 1 feilet, 0 hoppet over** (173 tester, 14,1 min). Feilen er `a11y-navigation.spec.js` «a real page change moves focus…» (Fase 2-test), se 17.12.8. |
+| Første samlede kjøring (forkastet) | 170 bestått, 3 feilet, 9,3 t: maskinen sov midt i kjøringen (applogg tom 05:40–14:47 UTC). To feil var innloggingstidsavbrudd i akkurat det tidsrommet (ingen «Login failed», ingen appfeil) = testmiljø. Den tredje («field borders») var en feil i den nye testen: kantfargen ble lest midt i Tailwinds 150 ms `transition`; testen venter nå på animasjonen, som `focusIndicator` gjør. Hele utvalget ble deretter kjørt på nytt med `caffeinate` (raden over). |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate) |
+
+#### 17.12.8 Gjenværende funn, manuell verifisering og risiko
+
+- **Den ene E2E-feilen (eksisterende, ikke fra Fase 3, årsak uavklart):** `a11y-navigation.spec.js:155` stopper på linje 188: etter Kunngjøringer → Saksliste har ikke sidens h1 fått fokus innen 5 s.
+  - **Baseline:** samme test mot `683246a7` i eget git-worktree (egen `vendor`-kopi, eget bygg uten Fase 3-CSS, servert med `artisan serve` på :8091): **3 av 3 feiler på samme påstand**. Feilen er altså ikke innført av Fase 3.
+  - **Sondering:** isolert, på samme baseline, får h1 («I arbeid») fokus etter navigasjonen. Feilen opptrer bare i testens lange sekvens (Styring, hopp-lenke, deretter Saksliste).
+  - **Ustabil i dag:** på Fase 3-koden gjentatt 5 ganger: 3 bestått, 2 feilet. Feilene kom på andre steg (Wiki-filteret på linje 199 og en `afterAll`-tidsavbrudd i `ComplianceE2EFixture`). Hver kjøring tok ca. 3 min mot ca. 20 s tidligere, med last rundt 6–7.
+  - **Tidligere:** testen besto i Fase 2-sluttkontrollen og i Fase 3s første regresjon.
+  - **Vurdering:** ikke rettet her. Påvirker ikke Fase 3. Bør undersøkes som egen sak: tidsavhengighet i `routeFocus` ved første navigasjon etter en hopp-lenke, eller testens faste ventetider (`waitForTimeout(300)`).
+
+- **Åpne funn etter Fase 3:** A11Y-135 (Fase 4), A11Y-106 (delvis, trykkflate 20 px, manuell vurdering), A11Y-121 (delvis), og alle funn som tilhører Fase 4–7. Feltfargen og radfeil-mønsteret skal tas i bruk i modulene i Fase 4–6.
+- **Manuell verifisering:** hele sjekklisten i 17.8 gjenstår, i tillegg til §15.8.7 og §16.8. Nytt punkt: med NVDA/VoiceOver, avvis en radhandling (Slett et fagområde som er i bruk) og kontroller at meldingen leses én gang, og at den høres som beskrivelse når fokus står på knappen.
+- **Risiko før Fase 4:**
+  - Feltfargen er en synlig endring (kantene er tydeligere) på Fase 3-sidene. Inntil Fase 4–6 er gjennomført, har de andre modulene fortsatt lysere kanter, så kantfargen varierer midlertidig mellom moduler.
+  - `trackRowAction` må tas i bruk per handling. Radhandlinger som ikke bruker det, viser fortsatt bare banneret.
+  - Det nestede dialogscenarioet er bare enhetstestet, fordi ingen side bruker det.
+  - E2E kjører bare i Chromium.
+
+#### 17.12.9 Oppfølgingsoppgave før merge: OPPF-001 – `a11y-navigation` i samlet regresjon
+
+**Status:** åpen. Commit av Fase 3 er godkjent med denne feilen kjent (beslutning 2026-10-15). Det er **ikke** en generell aksept av feilede tester. Oppgaven skal være lukket før `feature/wcag-accessibility` merges til `main`.
+
+- **Test:** `tests/e2e/a11y-navigation.spec.js:155` «a real page change moves focus to the new heading; a filter on the same page does not move it».
+- **Symptom:** feiler på linje 188 (h1 etter Kunngjøringer → Saksliste har ikke fokus innen 5 s). Ellers ustabil på linje 199 (Wiki-filteret) og i `afterAll` (tidsavbrudd i `ComplianceE2EFixture`).
+- **Kjent:** reprodusert 3/3 på `683246a7` uten Fase 3-kode (17.12.8). Isolert sondering viser at fokus havner på h1, så feilen avhenger av sekvensen i testen og/eller av miljøets hastighet.
+- **Undersøk:**
+  1. Om `routeFocus.js` kan miste fokusflyttingen ved første Inertia-navigasjon etter en hopp-lenke (fokus i `main`, regelen «siden har selv lagt fokus i `main`»).
+  2. Om testens faste ventetider (`waitForTimeout(300)`) må erstattes av hendelsesbaserte ventinger.
+  3. Om `ComplianceE2EFixture` i `afterAll` er for treg med dagens datamengde.
+- **Akseptansekriterium:** testen består **stabilt i det samlede regresjonsutvalget** (de 25 spesifikasjonene i §17.12.7), ikke bare isolert:
+  - minst tre påfølgende samlede kjøringer uten feil i denne testen;
+  - ingen økt global timeout;
+  - ingen deaktiverte eller svekkede påstander;
+  - eventuell rettelse i appen (ikke bare i testen) dokumentert med årsak.
+
+#### 17.12.10 Vurdering
+
+Sluttkontrollen fant og rettet tre registrerte funn (A11Y-019, -137, -138) og én svakhet i `modalInert` (mulig gjenværende `inert`). Ingen ruter, tilganger, valideringsregler, data eller forretningslogikk er endret. Enhetstester, lint, bygg og PHP er grønne; E2E-utvalget har én feil, og den er reprodusert på `683246a7` og dermed ikke fra Fase 3. Fase 3 er teknisk klar for commit. Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.

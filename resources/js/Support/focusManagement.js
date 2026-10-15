@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Where keyboard focus goes when something on the page appears or disappears.
@@ -63,6 +63,48 @@ export function focusFirstInvalidField(container = document) {
     const field = container?.querySelector?.('[aria-invalid="true"]');
 
     return focusElement(field);
+}
+
+/** Whether an Inertia/Laravel error bag holds anything. Pure, so it is unit-tested. */
+export function hasErrors(errors) {
+    return Boolean(errors) && Object.values(errors).some((message) => Boolean(message));
+}
+
+/**
+ * Where focus goes after a submit was turned down (3.3.1, A11Y-013, A11Y-133): the first field that
+ * says it is wrong, scrolled into view by the browser — so the error is seen and heard where it has
+ * to be fixed, not in a banner at the top of a page scrolled out of sight. When no field carries the
+ * error (it is about the form as a whole), the form's error summary takes focus instead: give it
+ * `data-form-error-summary` and it is announced by its text.
+ *
+ * It moves focus only when asked: `requestFocus` from Inertia's onError, or on mount when the page
+ * arrives with errors from a plain POST form (the redirect back *is* the answer to the submit). Errors
+ * that appear or change while someone types never move focus — that was the cause of earlier
+ * dropdown regressions, and is why this is not a global behaviour.
+ *
+ * The request is a counter in state rather than a direct call: Inertia calls onError before React
+ * has rendered the new errors, and the aria-invalid attributes exist only after that render.
+ *
+ * @param {{ current: HTMLElement|null }} containerRef The form (or the dialog holding it).
+ * @param {{ errorsOnMount?: object }} [options] The page's error bag, for forms that post natively.
+ * @returns {() => void} requestFocus
+ */
+export function useFocusFirstError(containerRef, { errorsOnMount = null } = {}) {
+    const [request, setRequest] = useState(() => (hasErrors(errorsOnMount) ? 1 : 0));
+
+    useEffect(() => {
+        if (request === 0) {
+            return;
+        }
+
+        const container = containerRef?.current;
+
+        if (! focusFirstInvalidField(container)) {
+            focusElement(container?.querySelector?.('[data-form-error-summary]'));
+        }
+    }, [request, containerRef]);
+
+    return useCallback(() => setRequest((count) => count + 1), []);
 }
 
 /**

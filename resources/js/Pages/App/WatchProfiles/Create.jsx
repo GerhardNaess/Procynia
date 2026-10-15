@@ -1,4 +1,6 @@
 import { useForm, usePage } from '@inertiajs/react';
+import { useRef } from 'react';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import WatchProfileForm from './WatchProfileForm';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -17,9 +19,12 @@ export default function WatchProfilesCreate({ ownerOptions, defaultOwnerScope, d
         cpv_codes: [],
     });
 
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+
     const submit = (event) => {
         event.preventDefault();
-        form.post(storeUrl);
+        form.post(storeUrl, { onError: focusFirstError });
     };
 
     return (
@@ -41,6 +46,7 @@ export default function WatchProfilesCreate({ ownerOptions, defaultOwnerScope, d
                 </section>
 
                 <WatchProfileForm
+                    formRef={formRef}
                     title="Legg til Watch Profile"
                     subtitle="Opprett en personlig eller avdelingsscopet watch profile som brukes direkte mot Doffin live search."
                     showHeader={false}

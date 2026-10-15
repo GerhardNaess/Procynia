@@ -1,7 +1,8 @@
-import { Link, router } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 
 function formatDate(value, locale) {
@@ -17,6 +18,8 @@ function formatDate(value, locale) {
 }
 
 export default function DepartmentsIndex({ departments }) {
+    const { translations = {} } = usePage().props;
+    const a11y = translations?.a11y ?? {};
     const [togglingDepartmentId, setTogglingDepartmentId] = useState(null);
     const locale = document.documentElement.lang || 'no';
 
@@ -83,10 +86,11 @@ export default function DepartmentsIndex({ departments }) {
                                                 {department.is_active ? 'Aktiv' : 'Inaktiv'}
                                             </span>
                                         </div>
-                                        <div className="text-xs text-slate-400">Opprettet {formatDate(department.created_at, locale)}</div>
+                                        <div className="text-xs text-slate-600">Opprettet {formatDate(department.created_at, locale)}</div>
                                         <div className="flex flex-col gap-2 sm:flex-row">
                                             <Link
                                                 href={department.edit_url}
+                                                aria-label={`Rediger ${department.name}`}
                                                 className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                             >
                                                 Rediger
@@ -94,6 +98,7 @@ export default function DepartmentsIndex({ departments }) {
                                             <button
                                                 type="button"
                                                 onClick={() => toggleActive(department)}
+                                                aria-label={department.is_active && department.is_self ? undefined : `${department.is_active ? 'Deaktiver' : 'Aktiver'} ${department.name}`}
                                                 disabled={togglingDepartmentId === department.id}
                                                 className={
                                                     department.is_active
@@ -116,21 +121,22 @@ export default function DepartmentsIndex({ departments }) {
                         </section>
 
                         <section className="hidden overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
-                            <div className="overflow-x-auto">
+                            <ScrollRegion label={a11y.table_departments ?? 'Avdelinger'} edgeRoom={false}>
                                 <table className="min-w-full divide-y divide-slate-200">
+                                    <caption className="sr-only">{a11y.table_departments ?? 'Avdelinger'}</caption>
                                     <thead className="bg-slate-50">
-                                        <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                            <th className="px-6 py-4">Navn</th>
-                                            <th className="px-6 py-4">Beskrivelse</th>
-                                            <th className="px-6 py-4">Status</th>
-                                            <th className="px-6 py-4">Opprettet</th>
-                                            <th className="px-6 py-4">Handlinger</th>
+                                        <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                            <th scope="col" className="px-6 py-4">Navn</th>
+                                            <th scope="col" className="px-6 py-4">Beskrivelse</th>
+                                            <th scope="col" className="px-6 py-4">Status</th>
+                                            <th scope="col" className="px-6 py-4">Opprettet</th>
+                                            <th scope="col" className="px-6 py-4">Handlinger</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {departments.map((department) => (
                                             <tr key={department.id} className="text-sm text-slate-700">
-                                                <td className="px-6 py-4 font-medium text-slate-950">{department.name}</td>
+                                                <th scope="row" className="px-6 py-4 text-left font-medium text-slate-950">{department.name}</th>
                                                 <td className="px-6 py-4 text-slate-500">{department.description || '—'}</td>
                                                 <td className="px-6 py-4">
                                                     <span
@@ -148,6 +154,7 @@ export default function DepartmentsIndex({ departments }) {
                                                     <div className="flex flex-wrap gap-2">
                                                         <Link
                                                             href={department.edit_url}
+                                                            aria-label={`Rediger ${department.name}`}
                                                             className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
                                                             Rediger
@@ -155,6 +162,7 @@ export default function DepartmentsIndex({ departments }) {
                                                         <button
                                                             type="button"
                                                             onClick={() => toggleActive(department)}
+                                                            aria-label={department.is_active && department.is_self ? undefined : `${department.is_active ? 'Deaktiver' : 'Aktiver'} ${department.name}`}
                                                             disabled={togglingDepartmentId === department.id}
                                                             className={
                                                                 department.is_active
@@ -176,7 +184,7 @@ export default function DepartmentsIndex({ departments }) {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </section>
                     </>
                 )}

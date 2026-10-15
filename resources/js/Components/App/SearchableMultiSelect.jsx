@@ -113,7 +113,7 @@ export default function SearchableMultiSelect({
                     onFocus={() => setOpen(true)}
                     onClick={() => setOpen(true)}
                     onKeyDown={onKeyDown}
-                    className="min-h-11 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-10 text-base text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-slate-400 focus:outline-none"
+                    className="min-h-11 w-full rounded-xl border border-field-border bg-white py-2 pl-3 pr-10 text-base text-slate-900 shadow-sm placeholder:text-slate-500 focus:border-slate-400 focus:outline-none"
                     data-testid={testId ? `${testId}-input` : undefined}
                 />
                 <svg className={`pointer-events-none absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

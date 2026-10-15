@@ -9,6 +9,15 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 
 @theme {
+    /*
+     * The resting border of a text field, select or textarea (WCAG 1.4.11 Non-text Contrast; A11Y-019).
+     * A field is white on a white or slate-50 card, so its border is the only thing that shows there
+     * is a field at all. slate-200 gave 1.23:1 and slate-400 2.63:1. This tone sits between slate-400
+     * and slate-500, as light as 3:1 allows: 3.49:1 on white, 3.34:1 on slate-50, 3.19:1 on slate-100
+     * (sRGB, WCAG formula). Use it as `border-field-border`.
+     */
+    --color-field-border: oklch(63% 0.042 257);
+
     --font-sans:
         'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
@@ -67,6 +76,25 @@
  */
 :is(main, h1)[tabindex='-1']:focus {
     outline: none;
+}
+
+/*
+ * A field that says it is wrong (aria-invalid, set by FormField/fieldA11y) gets a rose-600 border
+ * (4.51:1 on white, so above 3:1 for the boundary) on top of its error text — the text says it, the
+ * border points to where. Un-layered so it wins over the field's own border utility; the keyboard
+ * focus outline (violet-600) is untouched.
+ */
+:is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']), select, textarea)[aria-invalid='true'] {
+    border-color: var(--color-rose-600, #e11d48);
+}
+
+/*
+ * A table's scroll box (Components/App/ScrollRegion.jsx) is focusable while its table overflows. Its
+ * ring goes inside the box: the card around it usually clips (`overflow-hidden` for the rounded
+ * corners), and an outline drawn outside would be cut off there.
+ */
+[data-scroll-region]:focus-visible {
+    outline-offset: -2px;
 }
 
 /*

@@ -6,6 +6,7 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import QualityItemActions from '../../../Components/App/QualityItemActions';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import { publicationLabel, publicationTone } from '../../../Support/processPublication';
 import { itemLabel } from '../../../Support/qualityStructure';
 import { qualityHelp, qualityTabHelpPage } from './qualityHelp';
@@ -335,7 +336,7 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
             empty={items.length === 0}
             emptyText={tq.items_empty ?? 'Ingen styrende dokumenter er registrert ennå.'}
         >
-            <div className="relative mt-4 overflow-x-auto">
+            <ScrollRegion label={tq.items_heading ?? 'Styrende dokumenter'} className="mt-4">
                 <table className="w-full min-w-[720px] text-left text-base">
                     <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
@@ -384,7 +385,7 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </Section>
     );
 }
@@ -405,7 +406,7 @@ function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = nu
             empty={items.length === 0}
             emptyText={ts.processes_empty ?? 'Ingen prosesser er registrert ennå.'}
         >
-            <div className="relative mt-4 overflow-x-auto">
+            <ScrollRegion label={ts.processes_heading ?? 'Prosesser'} className="mt-4">
                 <table className="w-full min-w-[640px] text-left text-base">
                     <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
@@ -448,7 +449,7 @@ function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = nu
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </Section>
     );
 }
@@ -474,7 +475,7 @@ function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabe
             empty={items.length === 0}
             emptyText={tr.empty ?? 'Ingen kontroller er registrert ennå. Kontroller legges til på aktivitetene i en prosessflyt.'}
         >
-            <div className="relative mt-4 overflow-x-auto">
+            <ScrollRegion label={heading} className="mt-4">
                 <table className={`w-full text-left text-base ${showPlacements ? 'min-w-[1080px]' : 'min-w-[900px]'}`}>
                     <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
@@ -562,7 +563,7 @@ function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabe
                         })}
                     </tbody>
                 </table>
-            </div>
+            </ScrollRegion>
         </Section>
     );
 }

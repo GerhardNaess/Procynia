@@ -1,4 +1,6 @@
 import { useForm, usePage } from '@inertiajs/react';
+import { useRef } from 'react';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import WatchProfileForm from './WatchProfileForm';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -17,9 +19,12 @@ export default function WatchProfilesEdit({ watchProfile, ownerOptions, departme
         cpv_codes: watchProfile.cpv_codes || [],
     });
 
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+
     const submit = (event) => {
         event.preventDefault();
-        form.put(watchProfile.update_url);
+        form.put(watchProfile.update_url, { onError: focusFirstError });
     };
 
     return (
@@ -41,6 +46,7 @@ export default function WatchProfilesEdit({ watchProfile, ownerOptions, departme
                 </section>
 
                 <WatchProfileForm
+                    formRef={formRef}
                     title="Rediger Watch Profile"
                     subtitle="Oppdater eierskap, søkekriterier og status for watch profile-en uten å bruke lokal notice-matching som discovery."
                     showHeader={false}

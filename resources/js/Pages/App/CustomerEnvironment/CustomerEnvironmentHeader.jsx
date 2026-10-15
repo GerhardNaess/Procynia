@@ -5,7 +5,12 @@ function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
 
-function SectionTabs({ activeTab, onChange, showPermissions = false }) {
+/**
+ * Avdelinger | Brukere | Tilganger. Each one loads another view of the page, so this is navigation,
+ * not an ARIA tab list: a named <nav> whose current view carries aria-current="page" (A11Y-027).
+ * Before, the active view was only a violet background.
+ */
+function SectionTabs({ activeTab, onChange, showPermissions = false, label }) {
     const tabs = [
         { key: 'departments', label: 'Avdelinger' },
         { key: 'users', label: 'Brukere' },
@@ -13,7 +18,7 @@ function SectionTabs({ activeTab, onChange, showPermissions = false }) {
     ];
 
     return (
-        <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+        <nav aria-label={label} className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
             {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
 
@@ -22,6 +27,7 @@ function SectionTabs({ activeTab, onChange, showPermissions = false }) {
                         key={tab.key}
                         type="button"
                         onClick={() => onChange(tab.key)}
+                        aria-current={isActive ? 'page' : undefined}
                         className={classNames(
                             'rounded-xl px-4 py-2.5 text-base font-semibold transition',
                             isActive
@@ -33,13 +39,14 @@ function SectionTabs({ activeTab, onChange, showPermissions = false }) {
                     </button>
                 );
             })}
-        </div>
+        </nav>
     );
 }
 
 export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, showPermissions = false }) {
     const { translations = {} } = usePage().props;
     const tce = translations?.customer_env ?? {};
+    const a11y = translations?.a11y ?? {};
 
     return (
         <>
@@ -104,7 +111,7 @@ export default function CustomerEnvironmentHeader({ activeTab, onChangeTab, show
                 />
             </section>
 
-            <SectionTabs activeTab={activeTab} onChange={onChangeTab} showPermissions={showPermissions} />
+            <SectionTabs activeTab={activeTab} onChange={onChangeTab} showPermissions={showPermissions} label={a11y.environment_tabs ?? 'Kundemiljø'} />
         </>
     );
 }

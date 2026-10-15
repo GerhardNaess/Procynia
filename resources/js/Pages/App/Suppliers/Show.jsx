@@ -61,23 +61,23 @@ export default function SupplierShow({ supplier, linkedNotices = [] }) {
 
                 <section className="grid gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:grid-cols-2">
                     <div className="space-y-1">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.supplier_name_label ?? 'Leverandørnavn'}</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.supplier_name_label ?? 'Leverandørnavn'}</div>
                         <div className="text-base font-semibold text-slate-950">{supplier.supplier_name}</div>
                     </div>
                     <div className="space-y-1">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.org_number_label ?? 'Organisasjonsnummer'}</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.org_number_label ?? 'Organisasjonsnummer'}</div>
                         <div className="text-sm font-medium text-slate-900">{supplier.organization_number || '—'}</div>
                     </div>
                     <div className="space-y-1">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.normalized_name_label ?? 'Normalisert navn'}</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.normalized_name_label ?? 'Normalisert navn'}</div>
                         <div className="text-sm font-medium text-slate-900 break-all">{supplier.normalized_name}</div>
                     </div>
                     <div className="space-y-1">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.notices_label ?? 'Kunngjøringer'}</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.notices_label ?? 'Kunngjøringer'}</div>
                         <div className="text-sm font-medium text-slate-900">{supplier.notices_count}</div>
                     </div>
                     <div className="space-y-1 md:col-span-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.updated_at_label ?? 'Oppdatert'}</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.updated_at_label ?? 'Oppdatert'}</div>
                         <div className="text-sm font-medium text-slate-900">{formatDateTime(supplier.updated_at, locale)}</div>
                     </div>
                 </section>
@@ -123,7 +123,7 @@ export default function SupplierShow({ supplier, linkedNotices = [] }) {
                                                         )}
 
                                                         {notice.source ? (
-                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
                                                                 {notice.source}
                                                             </span>
                                                         ) : null}
@@ -162,12 +162,12 @@ export default function SupplierShow({ supplier, linkedNotices = [] }) {
 
                                             <div className="mt-3 grid gap-x-4 gap-y-2 md:grid-cols-2">
                                                 <div className="space-y-1">
-                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
                                                     <div className="text-sm text-slate-900">{notice.buyer_name || (ts.unknown_buyer ?? 'Ukjent oppdragsgiver')}</div>
                                                 </div>
 
                                                 <div className="space-y-1">
-                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.winner_lots_label ?? 'Vinnende delleveranser'}</div>
+                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.winner_lots_label ?? 'Vinnende delleveranser'}</div>
                                                     <div className="text-sm text-slate-900">
                                                         {notice.winner_lots.length > 0 ? notice.winner_lots.join(', ') : (ts.no_winner_lots ?? 'Ingen')}
                                                     </div>
