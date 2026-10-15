@@ -1,3 +1,5 @@
+import { useTranslations } from '../../Support/useTranslations';
+
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
@@ -49,18 +51,33 @@ function activePrimaryStepBarClassName(stepKey) {
     }
 }
 
+/**
+ * Where the case is in the bid process: six steps, the current one marked.
+ *
+ * Done, current and not yet reached used to differ only by colour (WCAG 1.4.1, A11Y-024): green for
+ * done, the step's own tint for current, grey for the rest. The steps are now an ordered list, the
+ * current step carries aria-current="step", and every step says its state in text a screen reader
+ * reads («fullført», «nåværende steg», «gjenstår») — hidden, because sighted users have the colour and
+ * the bar, and the current step is also the one that matches the status badge on the page.
+ */
 export default function BidStatusPipeline({ currentStatus }) {
     const currentPrimaryStepIndex = primaryStepIndex(currentStatus);
+    const a11y = useTranslations().a11y ?? {};
 
     return (
         <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-            <div className="grid gap-3 md:grid-cols-6">
+            <ol aria-label={a11y.pipeline_label ?? 'Saksforløp'} className="grid gap-3 md:grid-cols-6">
                 {primarySteps.map((step, index) => {
                     const isActive = currentStatus === step.key;
                     const isCompleted = currentPrimaryStepIndex >= 0 && index < currentPrimaryStepIndex;
+                    const stateText = isActive
+                        ? (a11y.step_current ?? 'nåværende steg')
+                        : isCompleted
+                            ? (a11y.step_completed ?? 'fullført')
+                            : (a11y.step_upcoming ?? 'gjenstår');
 
                     return (
-                        <div
+                        <li
                             key={step.key}
                             aria-current={isActive ? 'step' : undefined}
                             className={classNames(
@@ -72,11 +89,15 @@ export default function BidStatusPipeline({ currentStatus }) {
                                         : 'border-slate-200 bg-slate-50',
                             )}
                         >
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                Steg {index + 1}
+                            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+                                {(a11y.step_number ?? 'Steg :number').replace(':number', String(index + 1))}
                             </div>
-                            <div className="mt-2 text-sm font-semibold text-slate-950">{step.label}</div>
+                            <div className="mt-2 text-sm font-semibold text-slate-950">
+                                {step.label}
+                                <span className="sr-only">, {stateText}</span>
+                            </div>
                             <div
+                                aria-hidden="true"
                                 className={classNames(
                                     'mt-3 h-1.5 rounded-full',
                                     isActive
@@ -86,10 +107,10 @@ export default function BidStatusPipeline({ currentStatus }) {
                                             : 'bg-slate-200',
                                 )}
                             />
-                        </div>
+                        </li>
                     );
                 })}
-            </div>
+            </ol>
         </div>
     );
 }

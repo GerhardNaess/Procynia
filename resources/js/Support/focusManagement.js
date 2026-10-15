@@ -65,6 +65,38 @@ export function focusFirstInvalidField(container = document) {
     return focusElement(field);
 }
 
+/** Whether focus has fallen out of the page's controls: nothing, or <body>, has it. Pure. */
+export function focusIsLost(active, body) {
+    return ! active || active === body || active.isConnected === false;
+}
+
+/**
+ * After an action that may have disabled or removed the control that was pressed — «Godkjenn» on a
+ * requirement turns into «Til utkast», a status select is disabled while it saves — put focus on the
+ * first of `candidates` that is still in the document, but only if focus really was lost. A user who
+ * has moved on in the meantime is left where they are (2.4.3, A11Y-014).
+ *
+ * Runs after React has rendered the result (a frame and a tick later). Candidates are element ids or
+ * elements, resolved at that moment, so a control re-rendered under the same id is found.
+ *
+ * `always` is for the rare case where focus is not lost but lands somewhere misleading: a list keyed by
+ * position re-uses the pressed «Slett» for the next row, so focus would silently sit on a button that
+ * deletes something else.
+ *
+ * @param {Array<string|HTMLElement|null|undefined>} candidates In order of preference.
+ */
+export function refocusIfLost(candidates, { doc = document, win = window, always = false } = {}) {
+    win.requestAnimationFrame(() => win.setTimeout(() => {
+        if (! always && ! focusIsLost(doc.activeElement, doc.body)) {
+            return;
+        }
+
+        const resolved = candidates.map((candidate) => (typeof candidate === 'string' ? doc.getElementById(candidate) : candidate));
+
+        focusElement(firstConnected(resolved), { preventScroll: true });
+    }, 0));
+}
+
 /** Whether an Inertia/Laravel error bag holds anything. Pure, so it is unit-tested. */
 export function hasErrors(errors) {
     return Boolean(errors) && Object.values(errors).some((message) => Boolean(message));

@@ -66,10 +66,12 @@ export default function NoticeShow({ notice }) {
                             <div className="text-base text-slate-600">{notice.notice_id}</div>
                             {reasonSummary ? (
                                 <div className="text-base text-slate-600 whitespace-pre-line">
-                                    <div style={reasonSummaryStyle}>{reasonSummary}</div>
+                                    <div id="notice-reason-summary" style={reasonSummaryStyle}>{reasonSummary}</div>
                                     {shouldCollapseReasonSummary ? (
                                         <button
                                             type="button"
+                                            aria-expanded={isReasonSummaryExpanded}
+                                            aria-controls="notice-reason-summary"
                                             onClick={() => setIsReasonSummaryExpanded((current) => !current)}
                                             className="mt-2 text-base font-medium text-violet-700 transition hover:text-violet-800"
                                         >
@@ -110,12 +112,14 @@ export default function NoticeShow({ notice }) {
                     </div>
                     {notice.description ? (
                         <div className="mt-6 border-t border-slate-200 pt-6 text-base leading-7 text-slate-700">
-                            <div className="whitespace-pre-line" style={descriptionStyle}>
+                            <div id="notice-description" className="whitespace-pre-line" style={descriptionStyle}>
                                 {description}
                             </div>
                             {shouldCollapseDescription ? (
                                 <button
                                     type="button"
+                                    aria-expanded={isDescriptionExpanded}
+                                    aria-controls="notice-description"
                                     onClick={() => setIsDescriptionExpanded((current) => !current)}
                                     className="mt-2 text-base font-medium text-violet-700 transition hover:text-violet-800"
                                 >
@@ -210,12 +214,13 @@ export default function NoticeShow({ notice }) {
                         <div className="divide-y divide-slate-200">
                             {notice.documents.map((document) => (
                                 <div key={document.id} className="grid gap-4 py-4 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))]">
-                                    <div className="font-medium text-slate-950">{document.title}</div>
+                                    <div id={`notice-document-${document.id}`} className="font-medium text-slate-950">{document.title}</div>
                                     <div className="text-base text-slate-600">{document.mime_type || translations.common.not_available}</div>
                                     <div className="text-base text-slate-600">{formatFileSize(document.file_size)}</div>
                                     <div className="flex justify-start lg:justify-end">
                                         <a
                                             href={document.download_url}
+                                            aria-describedby={`notice-document-${document.id}`}
                                             className="rounded-full border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                         >
                                             {translations.common.download}

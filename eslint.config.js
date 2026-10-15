@@ -61,6 +61,18 @@ const A11Y_CHECKED_FILES = [
     'resources/js/Pages/App/WatchProfiles/Edit.jsx',
     'resources/js/Pages/App/WatchProfiles/Index.jsx',
     'resources/js/Pages/App/WatchProfiles/WatchProfileForm.jsx',
+    // Fase 4 — anbud, Go/No-go, dokumenter og AI-arbeidsflaten.
+    'resources/js/Components/App/BidStatusPipeline.jsx',
+    'resources/js/Components/App/DiscoveryNoticeCard.jsx',
+    'resources/js/Pages/App/AI/DocumentPreview.jsx',
+    'resources/js/Pages/App/AI/Index.jsx',
+    'resources/js/Pages/App/AI/Instructions.jsx',
+    'resources/js/Pages/App/AI/Show.jsx',
+    'resources/js/Pages/App/Notices/CpvSelector.jsx',
+    'resources/js/Pages/App/Notices/GoNoGoAssessment.jsx',
+    'resources/js/Pages/App/Notices/Index.jsx',
+    'resources/js/Pages/App/Notices/SavedShow.jsx',
+    'resources/js/Pages/App/Notices/Show.jsx',
 ];
 
 export default [

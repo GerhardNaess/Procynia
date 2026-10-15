@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * The box a wide table scrolls sideways in (A11Y-110, and the clipped focus ring from Fase 1 §15.8.2).
@@ -15,23 +15,41 @@ import { useEffect, useRef, useState } from 'react';
  *      named region in the Tab order (arrow keys then scroll it). A table that fits adds no tab stop
  *      and no landmark.
  *
+ * Fase 4 adds the vertical case: a box with a capped height that scrolls its content — a list of
+ * requirements, a generated answer. `axis="y"` measures height instead, adds no overflow or margin
+ * classes of its own (the caller's className already sets max-h and overflow-y-auto) and, like the
+ * horizontal box, joins the Tab order only while its content is taller than the box.
+ *
  * @param {string}  label        What the table is, e.g. «Brukere». Names the region when it scrolls.
  * @param {string}  [className]  Spacing from the surroundings (mt-4 …), or the box's own look.
  * @param {boolean} [edgeRoom]   false for a box that draws its own border and padding, where the
  *                               negative margin would move the border.
+ * @param {'x'|'y'} [axis]       Which way the box scrolls. 'x' (default) for tables.
+ * @param {object}  [innerRef]   Receives the scroll box element, for callers that read its content.
  */
-export default function ScrollRegion({ label, className = '', edgeRoom = true, children }) {
-    const ref = useRef(null);
+export default function ScrollRegion({ label, className = '', edgeRoom = true, axis = 'x', innerRef = null, children, ...rest }) {
+    const ownRef = useRef(null);
     const [scrollable, setScrollable] = useState(false);
+    const vertical = axis === 'y';
+
+    const setRef = useCallback((element) => {
+        ownRef.current = element;
+
+        if (innerRef) {
+            innerRef.current = element;
+        }
+    }, [innerRef]);
 
     useEffect(() => {
-        const element = ref.current;
+        const element = ownRef.current;
 
         if (! element) {
             return undefined;
         }
 
-        const measure = () => setScrollable(element.scrollWidth > element.clientWidth + 1);
+        const measure = () => setScrollable(vertical
+            ? element.scrollHeight > element.clientHeight + 1
+            : element.scrollWidth > element.clientWidth + 1);
         measure();
 
         if (typeof ResizeObserver === 'undefined') {
@@ -48,13 +66,34 @@ export default function ScrollRegion({ label, className = '', edgeRoom = true, c
         }
 
         return () => observer.disconnect();
-    }, []);
+    }, [vertical]);
+
+    // Content that changes without resizing the box or its first child — another requirement added to
+    // a capped list — is caught here: the parent re-rendered, so measure again.
+    useEffect(() => {
+        const element = ownRef.current;
+
+        if (! element) {
+            return;
+        }
+
+        const next = vertical
+            ? element.scrollHeight > element.clientHeight + 1
+            : element.scrollWidth > element.clientWidth + 1;
+
+        setScrollable((current) => (current === next ? current : next));
+    });
+
+    const boxClasses = vertical
+        ? className
+        : `relative overflow-x-auto ${edgeRoom ? '-mx-1 px-1' : ''} ${className}`;
 
     return (
         <div
-            ref={ref}
+            {...rest}
+            ref={setRef}
             data-scroll-region=""
-            className={`relative overflow-x-auto ${edgeRoom ? '-mx-1 px-1' : ''} ${className}`.replace(/\s+/g, ' ').trim()}
+            className={boxClasses.replace(/\s+/g, ' ').trim()}
             {...(scrollable ? { role: 'region', 'aria-label': label, tabIndex: 0 } : {})}
         >
             {children}

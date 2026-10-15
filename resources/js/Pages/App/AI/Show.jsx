@@ -6,6 +6,14 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
 import AiQuotaCompact from '../../../Components/App/AiQuotaCompact';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ActionDialog from '../../../Components/App/ActionDialog';
+import FilePickerField from '../../../Components/App/FilePickerField';
+import FormField from '../../../Components/App/FormField';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
+import { announce } from '../../../Support/announcer';
+import { focusElement, focusableWithin, refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { useTransitionAnnouncement } from '../../../Support/statusAnnouncement';
+import { extractionAnnouncement, extractionState } from './aiStatusAnnouncements';
 import {
     readRememberedAiRequirementId,
     writeRememberedAiRequirementId,
@@ -18,6 +26,25 @@ import {
     normalizeWikiAnswerText,
 } from './wikiAnswerPresentation';
 import { WikiAnswerBody } from './wikiAnswerMarkdown';
+
+/**
+ * The look the requirement fields had before they were wired through FormField (Fase 4, A11Y-135):
+ * a small uppercase caption with the «i» beside it — outside the <label>, so the field keeps its own
+ * name — and the error tied to the field below it.
+ */
+const REQUIREMENT_FIELD = {
+    className: 'block space-y-1',
+    labelClassName: 'block text-base font-semibold uppercase tracking-[0.12em] text-slate-600',
+    controlClassName: '',
+    errorClassName: 'text-base text-rose-700',
+};
+
+const REQUIREMENT_FIELD_KEYS = ['requirement_identifier', 'requirement_text', 'requirement_type'];
+
+/** An error of the form that is not about one of its fields, or null — shown once, as a summary. */
+function formLevelError(errors) {
+    return Object.entries(errors ?? {}).find(([key, message]) => message && !REQUIREMENT_FIELD_KEYS.includes(key))?.[1] ?? null;
+}
 
 const AI_STATUS_META = {
     not_started: {
@@ -869,6 +896,7 @@ export default function AiShow({
         ai_quota: aiQuota = null,
     } = usePage().props;
     const tai = translations?.ai ?? {};
+    const a11y = translations?.a11y ?? {};
     const aiQuotaText = translations?.ai_quota ?? {};
     const isEnglish = isEnglishLocale(locale);
     const documentListTexts = {
@@ -1172,11 +1200,8 @@ export default function AiShow({
         ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
         : null;
     const documentError = Object.values(documentUploadForm.errors).find(Boolean) ?? null;
-    const manualRequirementError = Object.values(manualRequirementForm.errors).find(Boolean) ?? null;
-    const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
-    const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
-        ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
-        : tai.no_files_selected;
+    const manualRequirementError = formLevelError(manualRequirementForm.errors);
+    const requirementEditError = formLevelError(requirementEditForm.errors);
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
     const activeRequirementExtractionDocumentTitle = requirementExtractionBanner?.document?.original_filename
         ?? requirementExtractionBanner?.document?.processing_status_label
@@ -1540,8 +1565,142 @@ export default function AiShow({
         setExpandedRequirementDetailsById({});
     }, [currentCaseId]);
 
-    const handleDocumentChange = (event) => {
-        documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
+    // Forms that can be turned down by the server: a rejected submit puts focus on that form's first
+    // invalid field (Fase 3's useFocusFirstError), never on a field elsewhere on the page.
+    const uploadFormRef = useRef(null);
+    const manualRequirementFormRef = useRef(null);
+    const requirementEditFormRef = useRef(null);
+    const focusUploadError = useFocusFirstError(uploadFormRef);
+    const focusManualRequirementError = useFocusFirstError(manualRequirementFormRef);
+    const focusRequirementEditError = useFocusFirstError(requirementEditFormRef);
+    const requirementsHeadingRef = useRef(null);
+    const answerHeadingRef = useRef(null);
+
+    // Requirement extraction runs in the background and is watched by polling; it is spoken when it
+    // starts, finishes or fails — once each, never per reload (A11Y-112).
+    useTransitionAnnouncement(
+        extractionState(requirementExtractionBanner),
+        (previous, next) => extractionAnnouncement(previous, next, { texts: a11y, extractedCount: extractedRequirementRows.length }),
+    );
+
+    // Choosing whose requirements to show changes the list below the filter; its size is said once.
+    useTransitionAnnouncement(selectedResponsibleUserFilterValue, () => ({
+        message: formatLocalizedTemplate(tai.showing_requirements ?? '', {
+            visible: visibleRequirementRows.length,
+            total: requirementRows.length,
+        }),
+    }));
+
+    /*
+     * Inline panels that open in place of the button that opened them (A11Y-014). Without this, the
+     * pressed button unmounts and keyboard focus falls to <body>. Each panel follows the same rule:
+     * opening moves focus into it (a confirmation to its question, a form to its first field), and
+     * closing returns focus to the button that opened it — or, when the action removed that button
+     * (the requirement was deleted), to the next sensible place. Closing only moves focus if it was
+     * actually lost; a user who has moved on is left alone.
+     */
+    const bulkConfirmPanelRef = useRef(null);
+    const rowConfirmPanelRef = useRef(null);
+    const bulkConfirmKind = showBulkDeleteConfirm ? 'delete' : (showBulkRejectConfirm ? 'reject' : null);
+    const rowConfirmKey = confirmDeleteRequirementId !== null
+        ? `delete:${confirmDeleteRequirementId}`
+        : (confirmRejectRequirementId !== null ? `reject:${confirmRejectRequirementId}` : null);
+    const previousBulkConfirmKindRef = useRef(bulkConfirmKind);
+    const previousRowConfirmKeyRef = useRef(rowConfirmKey);
+    const previousEditingRequirementIdRef = useRef(editingRequirementId);
+    const previousManualFormOpenRef = useRef(showManualRequirementForm);
+    const previousAnswerEditorOpenRef = useRef(isEditingActiveWikiAnswer);
+
+    useEffect(() => {
+        const previous = previousBulkConfirmKindRef.current;
+        previousBulkConfirmKindRef.current = bulkConfirmKind;
+
+        if (previous === bulkConfirmKind) {
+            return;
+        }
+
+        if (bulkConfirmKind !== null) {
+            focusElement(bulkConfirmPanelRef.current);
+
+            return;
+        }
+
+        refocusIfLost([`requirements-${previous}-all-trigger`, requirementsHeadingRef.current]);
+    }, [bulkConfirmKind]);
+
+    useEffect(() => {
+        const previous = previousRowConfirmKeyRef.current;
+        previousRowConfirmKeyRef.current = rowConfirmKey;
+
+        if (previous === rowConfirmKey) {
+            return;
+        }
+
+        if (rowConfirmKey !== null) {
+            focusElement(rowConfirmPanelRef.current);
+
+            return;
+        }
+
+        const [kind, requirementId] = String(previous).split(':');
+
+        refocusIfLost([`ai-req-${requirementId}-${kind}`, `ai-req-${requirementId}-open`, requirementsHeadingRef.current]);
+    }, [rowConfirmKey]);
+
+    useEffect(() => {
+        const previous = previousEditingRequirementIdRef.current;
+        previousEditingRequirementIdRef.current = editingRequirementId;
+
+        if (previous === editingRequirementId) {
+            return;
+        }
+
+        if (editingRequirementId !== null) {
+            focusElement(focusableWithin(requirementEditFormRef.current)[0] ?? requirementEditFormRef.current);
+
+            return;
+        }
+
+        refocusIfLost([`ai-req-${previous}-edit`, `ai-req-${previous}-open`, requirementsHeadingRef.current]);
+    }, [editingRequirementId]);
+
+    useEffect(() => {
+        const previous = previousManualFormOpenRef.current;
+        previousManualFormOpenRef.current = showManualRequirementForm;
+
+        if (previous === showManualRequirementForm) {
+            return;
+        }
+
+        if (showManualRequirementForm) {
+            // The form's first field, not its first control: the submit button sits above the fields.
+            focusElement(manualRequirementFormRef.current?.querySelector('input, select, textarea') ?? manualRequirementFormRef.current);
+
+            return;
+        }
+
+        refocusIfLost(['ai-manual-requirement-toggle']);
+    }, [showManualRequirementForm]);
+
+    useEffect(() => {
+        const previous = previousAnswerEditorOpenRef.current;
+        previousAnswerEditorOpenRef.current = isEditingActiveWikiAnswer;
+
+        if (previous === isEditingActiveWikiAnswer) {
+            return;
+        }
+
+        if (isEditingActiveWikiAnswer) {
+            focusElement(document.getElementById('wiki-answer-editor'));
+
+            return;
+        }
+
+        refocusIfLost(['wiki-answer-edit-button', answerHeadingRef.current]);
+    }, [isEditingActiveWikiAnswer]);
+
+    const handleDocumentChange = (files) => {
+        documentUploadForm.setData('documents', Array.isArray(files) ? files : []);
     };
 
     const resolveRequirementSourceDocument = (requirement) => {
@@ -1564,12 +1723,17 @@ export default function AiShow({
         documentUploadForm.post(documentsUploadUrl, {
             forceFormData: true,
             preserveScroll: true,
+            onError: focusUploadError,
             onSuccess: () => {
                 documentUploadForm.reset('documents');
 
                 if (fileInputRef.current) {
                     fileInputRef.current.value = '';
                 }
+
+                // The upload button is disabled again now that no file is chosen; the picker is where
+                // the next upload starts, so focus waits there rather than on <body>.
+                refocusIfLost([fileInputRef.current]);
             },
         });
     };
@@ -1583,12 +1747,13 @@ export default function AiShow({
 
         manualRequirementForm.post(requirementsStoreUrl, {
             preserveScroll: true,
+            onError: focusManualRequirementError,
             onSuccess: () => {
                 manualRequirementForm.reset();
                 manualRequirementForm.clearErrors();
                 setShowManualRequirementForm(false);
             },
-            });
+        });
     };
 
     const openResponsiblePicker = (requirement) => {
@@ -1667,6 +1832,7 @@ export default function AiShow({
             onFinish: () => {
                 setDeletingRequirementId(null);
                 setConfirmDeleteRequirementId(null);
+                refocusIfLost([`ai-req-${requirement.id}-delete`, requirementsHeadingRef.current]);
             },
         });
     };
@@ -1693,6 +1859,7 @@ export default function AiShow({
             onFinish: () => {
                 setDeletingAllRequirements(false);
                 setShowBulkDeleteConfirm(false);
+                refocusIfLost(['requirements-delete-all-trigger', requirementsHeadingRef.current]);
             },
         });
     };
@@ -1715,6 +1882,7 @@ export default function AiShow({
             preserveState: false,
             onFinish: () => {
                 setRejectingAllRequirements(false);
+                refocusIfLost(['requirements-reject-all-trigger', requirementsHeadingRef.current]);
             },
         });
     };
@@ -1751,6 +1919,7 @@ export default function AiShow({
 
         requirementEditForm.patch(editingRequirement.edit_url, {
             preserveScroll: true,
+            onError: focusRequirementEditError,
             onSuccess: () => {
                 cancelEditingRequirement();
             },
@@ -1784,6 +1953,9 @@ export default function AiShow({
         // over it holding a hand-edit of the previous answer.
         setWikiAnswerEditingRequirementId(null);
         setWikiAnswerGeneratingRequirementId(requirement.id);
+        // Generation can take up to two minutes; the user hears that it started and, below, that the
+        // draft is ready. A failure is the error box's own alert. The draft itself is not read out.
+        announce(a11y.ai_answer_generating ?? 'Svarutkastet genereres. Det kan ta opptil to minutter.');
 
         try {
             const response = await window.axios.post(requirement.wiki_answer_generate_url, {
@@ -1801,6 +1973,7 @@ export default function AiShow({
                 delete nextState[requirementKey];
                 return nextState;
             });
+            announce(a11y.ai_answer_ready ?? 'Svarutkastet er klart.');
         } catch (error) {
             setWikiAnswerError({
                 requirementId: requirement.id,
@@ -1949,6 +2122,10 @@ export default function AiShow({
             // while "the browser will not give this page the clipboard" tells them the page must
             // be opened over https or localhost — something no amount of retrying fixes.
             setWikiAnswerCopyStatus(copied ? 'copied' : `failed:${reason}`);
+
+            if (copied) {
+                announce(a11y.ai_answer_copied ?? 'Svaret er kopiert.');
+            }
         } catch (error) {
             setWikiAnswerCopyStatus('failed');
         } finally {
@@ -1995,6 +2172,7 @@ export default function AiShow({
                 [activeRequirementKey]: { text: normalizedText, isDirty: false },
             }));
             setWikiAnswerEditingRequirementId(null);
+            announce(a11y.ai_answer_saved ?? 'Svaret er lagret.');
         } catch (error) {
             setWikiAnswerError({
                 requirementId: activeRequirement.id,
@@ -2019,6 +2197,13 @@ export default function AiShow({
             preserveState: true,
             onFinish: () => {
                 setReviewingRequirementId(null);
+                // «Godkjenn» becomes «Til utkast», «Gjenopprett» becomes «Godkjenn»: the pressed button
+                // is gone. Focus goes to the same button if it is still there, else to the requirement.
+                const triggerId = reviewStatus === 'rejected'
+                    ? `ai-req-${requirement.id}-reject`
+                    : `ai-req-${requirement.id}-review-${reviewStatus}`;
+
+                refocusIfLost([triggerId, `ai-req-${requirement.id}-open`, `ai-requirement-${requirement.id}`]);
             },
         });
     };
@@ -2029,7 +2214,7 @@ export default function AiShow({
      * Returns: None.
      * Side effects: Sends a PATCH request that updates the requirement work state on the server.
      */
-    const updateRequirementWork = (requirement, workStatus, assignedUserId) => {
+    const updateRequirementWork = (requirement, workStatus, assignedUserId, triggerId = null) => {
         if (!requirement.work_update_url || requirement.approval_status !== 'approved' || requirementUpdatesLocked) {
             return;
         }
@@ -2044,6 +2229,8 @@ export default function AiShow({
             preserveState: true,
             onFinish: () => {
                 setWorkingRequirementId(null);
+                // The select is disabled while the change saves, which drops focus; it comes back.
+                refocusIfLost([triggerId, `ai-req-${requirement.id}-open`]);
             },
         });
     };
@@ -2066,6 +2253,7 @@ export default function AiShow({
             preserveState: true,
             onFinish: () => {
                 setRefreshingAssessments(false);
+                refocusIfLost(['ai-refresh-assessments']);
             },
         });
     };
@@ -2193,9 +2381,11 @@ export default function AiShow({
                 ) : null}
 
                 {requirementExtractionBanner ? (
+                    // Not a live region (A11Y-112): reloaded every 3 s while a document is processed, it
+                    // would talk on every reload that changed a number. useTransitionAnnouncement below
+                    // speaks once when extraction starts, finishes or fails.
                     <section
-                        role={requirementExtractionBanner.state === 'failed' ? 'alert' : 'status'}
-                        aria-live={requirementExtractionBanner.state === 'failed' ? 'assertive' : 'polite'}
+                        aria-labelledby="requirement-extraction-title"
                         className={
                             requirementExtractionBanner.state === 'failed'
                                 ? 'mb-5 rounded-[22px] border border-rose-200 bg-rose-50 p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]'
@@ -2239,13 +2429,13 @@ export default function AiShow({
                                         />
                                     </svg>
                                 ) : (
-                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-violet-600" />
+                                    <div aria-hidden="true" className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-violet-600" />
                                 )}
                             </div>
 
                             <div className="min-w-0 flex-1 space-y-2">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <h2 className="text-base font-semibold tracking-tight text-slate-950">
+                                    <h2 id="requirement-extraction-title" className="text-base font-semibold tracking-tight text-slate-950">
                                         {requirementExtractionBannerTitle}
                                     </h2>
                                     {activeRequirementExtractionStatusMeta ? (
@@ -2297,50 +2487,38 @@ export default function AiShow({
                         </div>
 
                         {canUseAiOffer ? (
-                            <form onSubmit={submitDocuments} className="space-y-4">
-                                <div className="space-y-2">
-                                    <label htmlFor="ai-documents" className="text-base font-medium text-slate-700">
-                                        {tai.choose_files}
-                                    </label>
-                                    <div className="flex min-h-[56px] flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                                        <label
-                                            htmlFor="ai-documents"
-                                            className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-4"
-                                        >
-                                            <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-violet-700">
-                                                {tai.choose_files}
-                                            </span>
-                                            <span className="min-w-0 flex-1 text-base text-slate-700">
-                                                {selectedDocumentsLabel}
-                                            </span>
-                                        </label>
-                                        <button
-                                            type="submit"
-                                            disabled={
-                                                documentUploadForm.processing
-                                                || !documentsUploadUrl
-                                                || documentUploadForm.data.documents.length === 0
-                                            }
-                                            className={`ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl px-5 py-3 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
-                                        >
-                                            {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
-                                        </button>
-                                        <input
+                            <form ref={uploadFormRef} onSubmit={submitDocuments} className="space-y-4">
+                                {/* FilePickerField (A11Y-011): one name («Velg filer»), the chosen files and the
+                                    allowed types as its description, the rejection as an alert tied to it,
+                                    and a visible focus ring. While the files upload it stays focusable. */}
+                                <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                    <div className="min-w-0 flex-1">
+                                        <FilePickerField
                                             id="ai-documents"
-                                            ref={fileInputRef}
-                                            type="file"
-                                            multiple
+                                            label={null}
                                             accept=".pdf,.doc,.docx,.xls,.xlsx"
+                                            multiple
+                                            files={documentUploadForm.data.documents}
+                                            inputRef={fileInputRef}
+                                            busy={documentUploadForm.processing}
+                                            buttonLabel={tai.choose_files ?? 'Velg filer'}
+                                            emptyLabel={tai.no_files_selected ?? 'Ingen filer valgt ennå.'}
+                                            help={tai.allowed_file_types}
+                                            error={documentError}
+                                            // Focus goes to the field on rejection (focusUploadError), so
+                                            // the error is heard there, once.
+                                            announceError={false}
                                             onChange={handleDocumentChange}
-                                            className="sr-only"
                                         />
                                     </div>
-                                    <p className="text-base leading-6 text-slate-600">
-                                        {tai.allowed_file_types}
-                                    </p>
-                                    {documentError ? (
-                                        <p className="text-base text-rose-700">{documentError}</p>
-                                    ) : null}
+                                    <button
+                                        type="submit"
+                                        disabled={!documentsUploadUrl || documentUploadForm.data.documents.length === 0}
+                                        aria-disabled={documentUploadForm.processing || undefined}
+                                        className={`inline-flex shrink-0 items-center justify-center rounded-2xl px-5 py-3 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                    >
+                                        {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
+                                    </button>
                                 </div>
                             </form>
                         ) : (
@@ -2350,8 +2528,8 @@ export default function AiShow({
                         )}
 
                         <div className="rounded-[18px] border border-slate-200 bg-slate-50/40">
-                            <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-3">
-                                <div className="flex items-center gap-3">
+                            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 px-4 py-3">
+                                <div className="flex min-w-0 items-center gap-3">
                                     <h3 className="text-base font-semibold tracking-tight text-slate-950">
                                         {isEnglish ? 'Uploaded case documents' : 'Opplastede saksdokumenter'}
                                     </h3>
@@ -2362,6 +2540,8 @@ export default function AiShow({
                                 <button
                                     type="button"
                                     onClick={() => setCaseDocumentsCollapsed((v) => !v)}
+                                    aria-expanded={!caseDocumentsCollapsed}
+                                    aria-controls="case-documents-list"
                                     className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {caseDocumentsCollapsed ? tai.show_documents_section ?? 'Vis dokumenter' : tai.hide_documents_section ?? 'Skjul dokumentliste'}
@@ -2369,7 +2549,7 @@ export default function AiShow({
                             </div>
 
                             {!caseDocumentsCollapsed && (
-                            <div className="p-4">
+                            <div id="case-documents-list" className="p-4">
                             {documentRows.length > 0 ? (
                                 <ul className="space-y-3">
                                     {documentRows.map((document) => {
@@ -2387,7 +2567,7 @@ export default function AiShow({
                                                 <div className="flex flex-wrap items-start justify-between gap-4">
                                                     <div className="min-w-0 space-y-2">
                                                         <div className="flex flex-wrap items-center gap-2">
-                                                            <span className="min-w-0 truncate text-base font-semibold text-slate-950">
+                                                            <span id={`case-document-${document.id}-name`} className="min-w-0 truncate text-base font-semibold text-slate-950">
                                                                 {document.original_filename ?? (isEnglish ? 'Untitled document' : 'Uten filnavn')}
                                                             </span>
                                                         </div>
@@ -2434,6 +2614,7 @@ export default function AiShow({
                                                     {document.preview_url ? (
                                                         <a
                                                             href={document.preview_url}
+                                                            aria-describedby={`case-document-${document.id}-name`}
                                                             className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                         >
                                                             {isEnglish ? 'Preview' : 'Forhåndsvis'}
@@ -2464,14 +2645,16 @@ export default function AiShow({
                     </div>
                 </section>
 
-                <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
+                {/* grid-cols-1 below lg: an implicit `auto` track grows to the widest content, and at 320 px
+                    the filter's minimum width pushed both columns past the screen (1.4.10). */}
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-stretch">
                     <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
                                 <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                     {tai.requirements_section_overline}
                                 </div>
-                                <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                <h2 ref={requirementsHeadingRef} tabIndex={-1} className="text-xl font-semibold tracking-tight text-slate-950">
                                     {tai.requirements_section_title}
                                 </h2>
                                 <p className="max-w-3xl text-base leading-6 text-slate-600">
@@ -2484,6 +2667,7 @@ export default function AiShow({
 
                             <div className="flex flex-wrap gap-2">
                                 <button
+                                    id="ai-manual-requirement-toggle"
                                     type="button"
                                     onClick={() => setShowManualRequirementForm((value) => !value)}
                                     disabled={requirementUpdatesLocked && !showManualRequirementForm}
@@ -2496,6 +2680,7 @@ export default function AiShow({
                                 <button
                                     type="button"
                                     onClick={() => setShowAdvancedAI((value) => !value)}
+                                    aria-expanded={showAdvancedAI}
                                     className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                                 >
                                     {showAdvancedAI ? tai.hide_advanced : tai.advanced}
@@ -2504,6 +2689,7 @@ export default function AiShow({
                                 {canUseAiOffer && showAdvancedAI ? (
                                     <>
                                         <button
+                                            id="ai-refresh-assessments"
                                             type="button"
                                             onClick={refreshAssessments}
                                             disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
@@ -2516,15 +2702,22 @@ export default function AiShow({
 
                                 {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsDeleteAllUrl ? (
                                     showBulkDeleteConfirm ? (
-                                        <div data-testid="requirements-delete-all-confirm" className="flex flex-col gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-base">
+                                        <div
+                                            ref={bulkConfirmPanelRef}
+                                            data-testid="requirements-delete-all-confirm"
+                                            role="group"
+                                            aria-labelledby="requirements-delete-all-title"
+                                            aria-describedby="requirements-delete-all-message"
+                                            className="flex flex-col gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-base"
+                                        >
                                             {/* The count comes from extractedRequirementRows, which excludes manual
                                                 requirements exactly as the server's ai_candidate scope does — so the
                                                 number shown is the number actually deleted. */}
-                                            <p className="font-semibold text-rose-900">
+                                            <p id="requirements-delete-all-title" className="font-semibold text-rose-900">
                                                 {(tai.requirements_delete_all_confirm_title ?? 'Slette :count ekstraherte krav permanent?')
                                                     .replace(':count', String(extractedRequirementRows.length))}
                                             </p>
-                                            <p className="text-rose-800">{tai.requirements_delete_all_confirm_message}</p>
+                                            <p id="requirements-delete-all-message" className="text-rose-800">{tai.requirements_delete_all_confirm_message}</p>
                                             <div className="flex flex-wrap gap-2">
                                                 <button
                                                     type="button"
@@ -2545,6 +2738,7 @@ export default function AiShow({
                                         </div>
                                     ) : (
                                         <button
+                                            id="requirements-delete-all-trigger"
                                             type="button"
                                             data-testid="requirements-delete-all-button"
                                             onClick={() => { setShowBulkRejectConfirm(false); setShowBulkDeleteConfirm(true); }}
@@ -2558,9 +2752,15 @@ export default function AiShow({
 
                                 {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsRejectAllUrl ? (
                                     showBulkRejectConfirm ? (
-                                        <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base">
-                                            <p className="font-semibold text-rose-800">{tai.reject_all_confirm_title}</p>
-                                            <p className="text-rose-700">{tai.reject_all_confirm_message}</p>
+                                        <div
+                                            ref={bulkConfirmPanelRef}
+                                            role="group"
+                                            aria-labelledby="requirements-reject-all-title"
+                                            aria-describedby="requirements-reject-all-message"
+                                            className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base"
+                                        >
+                                            <p id="requirements-reject-all-title" className="font-semibold text-rose-800">{tai.reject_all_confirm_title}</p>
+                                            <p id="requirements-reject-all-message" className="text-rose-700">{tai.reject_all_confirm_message}</p>
                                             <div className="flex flex-wrap gap-2">
                                                 <button
                                                     type="button"
@@ -2584,6 +2784,7 @@ export default function AiShow({
                                         </div>
                                     ) : (
                                         <button
+                                            id="requirements-reject-all-trigger"
                                             type="button"
                                             onClick={() => setShowBulkRejectConfirm(true)}
                                             disabled={requirementUpdatesLocked || rejectingAllRequirements}
@@ -2598,14 +2799,14 @@ export default function AiShow({
                         </div>
 
                         <div className="mt-4 flex flex-wrap items-end justify-between gap-3 rounded-[18px] border border-slate-200 bg-slate-50/70 px-4 py-3">
-                            <label className="block min-w-[16rem] flex-1 space-y-1">
+                            <label className="block min-w-0 flex-1 space-y-1 sm:min-w-[16rem]">
                                 <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     {tai.responsible}
                                 </span>
                                 <select
                                     value={selectedResponsibleUserFilterValue}
                                     onChange={(event) => setSelectedResponsibleUserFilter(event.target.value)}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                    className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
                                 >
                                     <option value="all">{tai.all_requirements}</option>
                                     <option value="unassigned">{tai.unassigned_requirements}</option>
@@ -2626,7 +2827,7 @@ export default function AiShow({
                         </div>
 
                         {showManualRequirementForm ? (
-                            <form onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
+                            <form ref={manualRequirementFormRef} onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="space-y-1">
                                     <div className="text-base font-medium uppercase tracking-[0.16em] text-violet-700">
@@ -2649,65 +2850,71 @@ export default function AiShow({
                             </div>
 
                             <div className="grid gap-4 md:grid-cols-2">
-                                <label className="block space-y-1">
-                                    <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                        {tai.requirement_id_label}
-                                    </span>
-                                    <input
-                                        type="text"
-                                        value={manualRequirementForm.data.requirement_identifier}
-                                        onChange={(event) => manualRequirementForm.setData('requirement_identifier', event.target.value)}
-                                        disabled={manualRequirementForm.processing || requirementUpdatesLocked}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                        placeholder={tai.requirement_id_placeholder}
-                                    />
-                                    {manualRequirementForm.errors.requirement_identifier ? (
-                                        <p className="text-base text-rose-700">{manualRequirementForm.errors.requirement_identifier}</p>
-                                    ) : null}
-                                </label>
+                                <FormField
+                                    id="manual-requirement-identifier"
+                                    label={tai.requirement_id_label}
+                                    error={manualRequirementForm.errors.requirement_identifier}
+                                    {...REQUIREMENT_FIELD}
+                                >
+                                    {(field) => (
+                                        <input
+                                            {...field}
+                                            type="text"
+                                            value={manualRequirementForm.data.requirement_identifier}
+                                            onChange={(event) => manualRequirementForm.setData('requirement_identifier', event.target.value)}
+                                            disabled={manualRequirementForm.processing || requirementUpdatesLocked}
+                                            className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            placeholder={tai.requirement_id_placeholder}
+                                        />
+                                    )}
+                                </FormField>
 
-                                <label className="block space-y-1">
-                                    <span className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                        {tai.requirement_type_label}
-                                        <InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />
-                                    </span>
-                                    <select
-                                        value={manualRequirementForm.data.requirement_type}
-                                        onChange={(event) => manualRequirementForm.setData('requirement_type', event.target.value)}
-                                        disabled={manualRequirementForm.processing || requirementUpdatesLocked}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
-                                            <option key={value} value={value}>
-                                                {meta.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {manualRequirementForm.errors.requirement_type ? (
-                                        <p className="text-base text-rose-700">{manualRequirementForm.errors.requirement_type}</p>
-                                    ) : null}
-                                </label>
+                                <FormField
+                                    id="manual-requirement-type"
+                                    label={tai.requirement_type_label}
+                                    info={<InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />}
+                                    error={manualRequirementForm.errors.requirement_type}
+                                    {...REQUIREMENT_FIELD}
+                                >
+                                    {(field) => (
+                                        <select
+                                            {...field}
+                                            value={manualRequirementForm.data.requirement_type}
+                                            onChange={(event) => manualRequirementForm.setData('requirement_type', event.target.value)}
+                                            disabled={manualRequirementForm.processing || requirementUpdatesLocked}
+                                            className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
+                                                <option key={value} value={value}>
+                                                    {meta.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </FormField>
                             </div>
 
-                            <label className="block space-y-1">
-                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {tai.requirement_text_label}
-                                </span>
-                                <textarea
-                                    value={manualRequirementForm.data.requirement_text}
-                                    onChange={(event) => manualRequirementForm.setData('requirement_text', event.target.value)}
-                                    rows={4}
-                                    disabled={manualRequirementForm.processing || requirementUpdatesLocked}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    placeholder={tai.requirement_text_placeholder}
-                                />
-                                {manualRequirementForm.errors.requirement_text ? (
-                                    <p className="text-base text-rose-700">{manualRequirementForm.errors.requirement_text}</p>
-                                ) : null}
-                            </label>
+                            <FormField
+                                id="manual-requirement-text"
+                                label={tai.requirement_text_label}
+                                error={manualRequirementForm.errors.requirement_text}
+                                {...REQUIREMENT_FIELD}
+                            >
+                                {(field) => (
+                                    <textarea
+                                        {...field}
+                                        value={manualRequirementForm.data.requirement_text}
+                                        onChange={(event) => manualRequirementForm.setData('requirement_text', event.target.value)}
+                                        rows={4}
+                                        disabled={manualRequirementForm.processing || requirementUpdatesLocked}
+                                        className="w-full rounded-2xl border border-field-border bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        placeholder={tai.requirement_text_placeholder}
+                                    />
+                                )}
+                            </FormField>
 
                             {manualRequirementError ? (
-                                <p className="text-base text-rose-700">{manualRequirementError}</p>
+                                <p data-form-error-summary="" className="text-base text-rose-700">{manualRequirementError}</p>
                             ) : null}
                         </form>
                         ) : null}
@@ -2728,7 +2935,11 @@ export default function AiShow({
                                 </div>
                             </div>
                         ) : (
-                            <div className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:min-h-0 lg:max-h-none lg:flex-1">
+                            <ScrollRegion
+                                axis="y"
+                                label={tai.requirements_section_title}
+                                className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:min-h-0 lg:max-h-none lg:flex-1"
+                            >
                                 {visibleRequirementRows.map((requirement) => {
                                     const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
                                     const approvalStatus = requirement.approval_status ?? 'draft';
@@ -2824,36 +3035,15 @@ export default function AiShow({
                                     const requirementDetailsExpanded = Boolean(expandedRequirementDetailsById[requirementKey]);
 
                                     return (
+                                        // An <article>, not a button (A11Y-044): it holds buttons, links and
+                                        // fields of its own, and a button cannot contain those. The requirement
+                                        // text is the control that opens the answer, so it can be reached and
+                                        // pressed on its own; the open one says so with aria-current and a
+                                        // ring of at least 3:1 (violet-500), not with colour alone.
                                         <article
                                             key={requirement.id}
                                             id={`ai-requirement-${requirement.id}`}
-                                            role={canOpenAnswerWorkspace ? 'button' : undefined}
-                                            tabIndex={canOpenAnswerWorkspace ? 0 : undefined}
-                                            onClick={(event) => {
-                                                if (!canOpenAnswerWorkspace) {
-                                                    return;
-                                                }
-
-                                                if (event.target instanceof Element && event.target.closest('button,a,input,select,textarea,label')) {
-                                                    return;
-                                                }
-
-                                                void openRequirementAnswerWorkspace(requirement);
-                                            }}
-                                            onKeyDown={(event) => {
-                                                if (!canOpenAnswerWorkspace) {
-                                                    return;
-                                                }
-
-                                                if (event.target instanceof Element && event.target.closest('button,a,input,select,textarea,label')) {
-                                                    return;
-                                                }
-
-                                                if (event.key === 'Enter' || event.key === ' ') {
-                                                    event.preventDefault();
-                                                    void openRequirementAnswerWorkspace(requirement);
-                                                }
-                                            }}
+                                            aria-labelledby={`ai-req-${requirement.id}-text`}
                                             className={`rounded-[22px] border p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
                                                 isApprovedRequirement
                                                     ? 'border-emerald-100 bg-emerald-50/40'
@@ -2861,10 +3051,10 @@ export default function AiShow({
                                                         ? 'border-rose-100 bg-rose-50/30'
                                                     : 'border-slate-200 bg-white'
                                             } ${
-                                                canOpenAnswerWorkspace ? 'cursor-pointer hover:border-violet-300' : ''
+                                                canOpenAnswerWorkspace ? 'hover:border-violet-300' : ''
                                             } scroll-mt-24 ${
                                                 isActiveRequirement
-                                                    ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white'
+                                                    ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-white'
                                                     : ''
                                             }`}
                                         >
@@ -2886,9 +3076,22 @@ export default function AiShow({
                                                                 {[sourceSectionTitle, sourceLocatorLabel].filter(Boolean).join(' · ')}
                                                             </div>
                                                         ) : null}
-                                                        <div className="text-base font-semibold leading-7 text-slate-950 break-words">
-                                                            {currentRequirementText}
-                                                        </div>
+                                                        {canOpenAnswerWorkspace ? (
+                                                            <button
+                                                                id={`ai-req-${requirement.id}-open`}
+                                                                type="button"
+                                                                onClick={() => { void openRequirementAnswerWorkspace(requirement); }}
+                                                                aria-current={isActiveRequirement ? 'true' : undefined}
+                                                                aria-controls="ai-answer-panel"
+                                                                className="block w-full cursor-pointer rounded-lg text-left text-base font-semibold leading-7 text-slate-950 break-words transition hover:text-violet-800"
+                                                            >
+                                                                <span id={`ai-req-${requirement.id}-text`}>{currentRequirementText}</span>
+                                                            </button>
+                                                        ) : (
+                                                            <div id={`ai-req-${requirement.id}-text`} className="text-base font-semibold leading-7 text-slate-950 break-words">
+                                                                {currentRequirementText}
+                                                            </div>
+                                                        )}
                                                         <div className="flex flex-wrap items-center gap-2 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                             <span>
                                                                 {isApprovedRequirement ? tai.workstream_approved : tai.workstream_pending}
@@ -2912,6 +3115,7 @@ export default function AiShow({
                                                         {canOpenAnswerWorkspace ? (
                                                             <>
                                                                 <button
+                                                                    id={`ai-req-${requirement.id}-prompt`}
                                                                     type="button"
                                                                     onClick={() => {
                                                                         toggleRequirementPromptEditor(requirement);
@@ -2928,15 +3132,22 @@ export default function AiShow({
                                                                 >
                                                                     {tai.prompt_button}
                                                                 </button>
+                                                                {/* aria-disabled, not disabled: pressing it starts the generation that
+                                                                    locks the list, and a disabled button would drop focus to <body>
+                                                                    (A11Y-116). No aria-pressed — it is an action, not a toggle (A11Y-115). */}
                                                                 <button
+                                                                    id={`ai-req-${requirement.id}-generate`}
                                                                     type="button"
                                                                     onClick={() => {
+                                                                        if (requirementUpdatesLocked) {
+                                                                            return;
+                                                                        }
+
                                                                         void requestWikiAnswerGeneration(requirement);
                                                                     }}
-                                                                    disabled={requirementUpdatesLocked}
-                                                                    aria-pressed={isActiveRequirement}
+                                                                    aria-disabled={requirementUpdatesLocked || undefined}
                                                                     title={tai.generate_draft_for_requirement}
-                                                                    className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                                                    className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 transition aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                 >
                                                                     {tai.create_answer}
                                                                 </button>
@@ -3004,25 +3215,32 @@ export default function AiShow({
                                                         >
                                                             {tai.requirement_prompt_title}
                                                         </label>
-                                                        <p className="mt-1 text-base leading-6 text-slate-600">
+                                                        <p id={`requirement-prompt-${requirement.id}-hint`} className="mt-1 text-base leading-6 text-slate-600">
                                                             {tai.prompt_instruction_hint}
                                                         </p>
                                                         <textarea
                                                             id={`requirement-prompt-${requirement.id}`}
+                                                            aria-describedby={`requirement-prompt-${requirement.id}-hint`}
                                                             value={requirementUserPrompt}
                                                             onChange={(event) => updateRequirementUserPrompt(requirement, event.target.value)}
                                                             maxLength={5000}
                                                             rows={4}
                                                             disabled={wikiAnswerGeneratingRequirementId === requirement.id}
-                                                            className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="mt-3 w-full resize-y rounded-2xl border border-field-border bg-white px-3 py-3 text-base leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             placeholder={tai.example_prompt_placeholder}
                                                         />
                                                         <div className="mt-3 flex justify-end">
                                                             <button
                                                                 type="button"
-                                                                onClick={() => { void requestWikiAnswerGeneration(requirement); }}
-                                                                disabled={requirementUpdatesLocked}
-                                                                className={`inline-flex rounded-full px-4 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                                                onClick={() => {
+                                                                    if (requirementUpdatesLocked) {
+                                                                        return;
+                                                                    }
+
+                                                                    void requestWikiAnswerGeneration(requirement);
+                                                                }}
+                                                                aria-disabled={requirementUpdatesLocked || undefined}
+                                                                className={`inline-flex rounded-full px-4 py-1.5 text-base font-semibold transition aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                             >
                                                                 {tai.create_answer}
                                                             </button>
@@ -3042,65 +3260,71 @@ export default function AiShow({
                                                 ) : null}
 
                                                 {isEditingThisRequirement ? (
-                                                    <form onSubmit={submitRequirementEdit} className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
+                                                    <form ref={requirementEditFormRef} onSubmit={submitRequirementEdit} className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
                                                         <div className="grid gap-4 md:grid-cols-2">
-                                                            <label className="block space-y-1">
-                                                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                    {tai.requirement_id_label}
-                                                                </span>
-                                                                <input
-                                                                    type="text"
-                                                                    value={requirementEditForm.data.requirement_identifier}
-                                                                    onChange={(event) => requirementEditForm.setData('requirement_identifier', event.target.value)}
-                                                                    disabled={requirementEditForm.processing}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                />
-                                                                {requirementEditForm.errors.requirement_identifier ? (
-                                                                    <p className="text-base text-rose-700">{requirementEditForm.errors.requirement_identifier}</p>
-                                                                ) : null}
-                                                            </label>
+                                                            <FormField
+                                                                id={`edit-requirement-${requirement.id}-identifier`}
+                                                                label={tai.requirement_id_label}
+                                                                error={requirementEditForm.errors.requirement_identifier}
+                                                                {...REQUIREMENT_FIELD}
+                                                            >
+                                                                {(field) => (
+                                                                    <input
+                                                                        {...field}
+                                                                        type="text"
+                                                                        value={requirementEditForm.data.requirement_identifier}
+                                                                        onChange={(event) => requirementEditForm.setData('requirement_identifier', event.target.value)}
+                                                                        disabled={requirementEditForm.processing}
+                                                                        className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    />
+                                                                )}
+                                                            </FormField>
 
-                                                            <label className="block space-y-1">
-                                                                <span className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                    {tai.requirement_type_label}
-                                                                    <InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />
-                                                                </span>
-                                                                <select
-                                                                    value={requirementEditForm.data.requirement_type}
-                                                                    onChange={(event) => requirementEditForm.setData('requirement_type', event.target.value)}
-                                                                    disabled={requirementEditForm.processing}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                >
-                                                                    {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
-                                                                        <option key={value} value={value}>
-                                                                            {meta.label}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                                {requirementEditForm.errors.requirement_type ? (
-                                                                    <p className="text-base text-rose-700">{requirementEditForm.errors.requirement_type}</p>
-                                                                ) : null}
-                                                            </label>
+                                                            <FormField
+                                                                id={`edit-requirement-${requirement.id}-type`}
+                                                                label={tai.requirement_type_label}
+                                                                info={<InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />}
+                                                                error={requirementEditForm.errors.requirement_type}
+                                                                {...REQUIREMENT_FIELD}
+                                                            >
+                                                                {(field) => (
+                                                                    <select
+                                                                        {...field}
+                                                                        value={requirementEditForm.data.requirement_type}
+                                                                        onChange={(event) => requirementEditForm.setData('requirement_type', event.target.value)}
+                                                                        disabled={requirementEditForm.processing}
+                                                                        className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
+                                                                            <option key={value} value={value}>
+                                                                                {meta.label}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                )}
+                                                            </FormField>
                                                         </div>
 
-                                                        <label className="block space-y-1">
-                                                            <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                {tai.requirement_text_label}
-                                                            </span>
-                                                            <textarea
-                                                                value={requirementEditForm.data.requirement_text}
-                                                                onChange={(event) => requirementEditForm.setData('requirement_text', event.target.value)}
-                                                                rows={4}
-                                                                disabled={requirementEditForm.processing}
-                                                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                            />
-                                                            {requirementEditForm.errors.requirement_text ? (
-                                                                <p className="text-base text-rose-700">{requirementEditForm.errors.requirement_text}</p>
-                                                            ) : null}
-                                                        </label>
+                                                        <FormField
+                                                            id={`edit-requirement-${requirement.id}-text`}
+                                                            label={tai.requirement_text_label}
+                                                            error={requirementEditForm.errors.requirement_text}
+                                                            {...REQUIREMENT_FIELD}
+                                                        >
+                                                            {(field) => (
+                                                                <textarea
+                                                                    {...field}
+                                                                    value={requirementEditForm.data.requirement_text}
+                                                                    onChange={(event) => requirementEditForm.setData('requirement_text', event.target.value)}
+                                                                    rows={4}
+                                                                    disabled={requirementEditForm.processing}
+                                                                    className="w-full rounded-2xl border border-field-border bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                />
+                                                            )}
+                                                        </FormField>
 
                                                         {requirementEditError ? (
-                                                            <p className="text-base text-rose-700">{requirementEditError}</p>
+                                                            <p data-form-error-summary="" className="text-base text-rose-700">{requirementEditError}</p>
                                                         ) : null}
 
                                                         <div className="flex flex-wrap gap-2">
@@ -3259,6 +3483,7 @@ export default function AiShow({
                                                         <div className="flex w-full flex-wrap justify-end gap-2">
                                                             <button
                                                                 type="button"
+                                                                aria-controls={`ai-req-${requirement.id}-details`}
                                                                 onClick={() => {
                                                                     setExpandedRequirementDetailsById((currentState) => ({
                                                                         ...currentState,
@@ -3274,16 +3499,17 @@ export default function AiShow({
                                                     ) : null}
 
                                                     {isApprovedRequirement && requirementDetailsExpanded ? (
-                                                        <div className="grid w-full gap-3 md:grid-cols-2">
+                                                        <div id={`ai-req-${requirement.id}-details`} className="grid w-full gap-3 md:grid-cols-2">
                                                             <label className="block space-y-1">
                                                                 <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.work_status_label}
                                                                 </span>
                                                                 <select
+                                                                    id={`ai-req-${requirement.id}-work-status`}
                                                                     value={workStatus}
-                                                                    onChange={(event) => updateRequirementWork(requirement, event.target.value, assignedUserId)}
+                                                                    onChange={(event) => updateRequirementWork(requirement, event.target.value, assignedUserId, `ai-req-${requirement.id}-work-status`)}
                                                                     disabled={requirementUpdatesLocked}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {WORK_STATUS_OPTIONS.map((option) => (
                                                                         <option key={option.value} value={option.value}>
@@ -3297,10 +3523,11 @@ export default function AiShow({
                                                                     {tai.assigned_to_label}
                                                                 </span>
                                                                 <select
+                                                                    id={`ai-req-${requirement.id}-assignee`}
                                                                     value={assignedUserId}
-                                                                    onChange={(event) => updateRequirementWork(requirement, workStatus, event.target.value)}
+                                                                    onChange={(event) => updateRequirementWork(requirement, workStatus, event.target.value, `ai-req-${requirement.id}-assignee`)}
                                                                     disabled={requirementUpdatesLocked}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="w-full rounded-2xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     <option value="">{tai.unassigned}</option>
                                                                     {assignedUserOptions.map((option) => (
@@ -3315,7 +3542,9 @@ export default function AiShow({
 
                                                     <div className="flex flex-wrap gap-2">
                                                         <button
+                                                            id={`ai-req-${requirement.id}-edit`}
                                                             type="button"
+                                                            aria-expanded={isEditingThisRequirement}
                                                             onClick={() => startEditingRequirement(requirement)}
                                                             disabled={requirementUpdatesLocked && !isEditingThisRequirement}
                                                             className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
@@ -3325,6 +3554,7 @@ export default function AiShow({
 
                                                         {requirement.delete_url && confirmDeleteRequirementId !== requirement.id && confirmRejectRequirementId !== requirement.id ? (
                                                             <button
+                                                                id={`ai-req-${requirement.id}-delete`}
                                                                 type="button"
                                                                 data-testid="requirement-delete-button"
                                                                 onClick={() => {
@@ -3339,9 +3569,16 @@ export default function AiShow({
                                                         ) : null}
 
                                                         {confirmDeleteRequirementId === requirement.id ? (
-                                                            <div data-testid="requirement-delete-confirm" className="flex flex-col gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-base">
-                                                                <p className="font-semibold text-rose-900">{tai.requirement_delete_confirm_title}</p>
-                                                                <p className="text-rose-800">{tai.requirement_delete_confirm_message}</p>
+                                                            <div
+                                                                ref={rowConfirmPanelRef}
+                                                                data-testid="requirement-delete-confirm"
+                                                                role="group"
+                                                                aria-labelledby={`ai-req-${requirement.id}-delete-title`}
+                                                                aria-describedby={`ai-req-${requirement.id}-delete-message`}
+                                                                className="flex flex-col gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-base"
+                                                            >
+                                                                <p id={`ai-req-${requirement.id}-delete-title`} className="font-semibold text-rose-900">{tai.requirement_delete_confirm_title}</p>
+                                                                <p id={`ai-req-${requirement.id}-delete-message`} className="text-rose-800">{tai.requirement_delete_confirm_message}</p>
                                                                 <div className="flex flex-wrap gap-2">
                                                                     <button
                                                                         type="button"
@@ -3363,9 +3600,15 @@ export default function AiShow({
                                                         ) : null}
 
                                                         {confirmRejectRequirementId === requirement.id ? (
-                                                            <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base">
-                                                                <p className="font-semibold text-rose-800">{tai.reject_confirm_title}</p>
-                                                                <p className="text-rose-700">{tai.reject_confirm_message}</p>
+                                                            <div
+                                                                ref={rowConfirmPanelRef}
+                                                                role="group"
+                                                                aria-labelledby={`ai-req-${requirement.id}-reject-title`}
+                                                                aria-describedby={`ai-req-${requirement.id}-reject-message`}
+                                                                className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base"
+                                                            >
+                                                                <p id={`ai-req-${requirement.id}-reject-title`} className="font-semibold text-rose-800">{tai.reject_confirm_title}</p>
+                                                                <p id={`ai-req-${requirement.id}-reject-message`} className="text-rose-700">{tai.reject_confirm_message}</p>
                                                                 <div className="flex flex-wrap gap-2">
                                                                     <button
                                                                         type="button"
@@ -3390,6 +3633,7 @@ export default function AiShow({
                                                         ) : approvalActions.map((action) => (
                                                             <button
                                                                 key={action.value}
+                                                                id={action.value === 'rejected' ? `ai-req-${requirement.id}-reject` : `ai-req-${requirement.id}-review-${action.value}`}
                                                                 type="button"
                                                                 onClick={() => {
                                                                     if (action.value === 'rejected') {
@@ -3410,17 +3654,21 @@ export default function AiShow({
                                         </article>
                                     );
                                 })}
-                            </div>
+                            </ScrollRegion>
                         )}
                     </section>
 
-                    <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+                    <section
+                        id="ai-answer-panel"
+                        aria-labelledby="ai-answer-panel-title"
+                        className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden"
+                    >
                         <div className="flex h-full min-h-0 flex-col gap-5">
                             <div className="space-y-2">
                                 <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                     {tai.answer_draft_overline}
                                 </div>
-                                <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                <h2 id="ai-answer-panel-title" ref={answerHeadingRef} tabIndex={-1} className="text-xl font-semibold tracking-tight text-slate-950">
                                     {tai.answer_draft_title}
                                 </h2>
                                 <p className="text-base leading-6 text-slate-600">
@@ -3444,20 +3692,26 @@ export default function AiShow({
                             ) : !canUseAiOffer ? (
                                 <AiAccessNotice aiText={tai} billingHref={billingHref} />
                             ) : (
-                                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border border-violet-200 bg-violet-50/40 p-4 pr-2">
+                                <ScrollRegion
+                                    axis="y"
+                                    label={tai.answer_draft_title}
+                                    className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border border-violet-200 bg-violet-50/40 p-4 pr-2"
+                                >
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-600">
                                             {tai.wiki_answer_for_requirement} {activeRequirementDisplayIdentifier}
                                         </div>
                                         <button
+                                            id="wiki-answer-generate-button"
                                             type="button"
                                             onClick={() => { void requestWikiAnswerGeneration(activeRequirement); }}
-                                            disabled={
-                                                !activeRequirement.wiki_answer_generate_url
-                                                || wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                            disabled={!activeRequirement.wiki_answer_generate_url}
+                                            aria-disabled={(
+                                                wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                 || wikiAnswerSavingRequirementId === activeRequirement.id
-                                            }
-                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                            ) || undefined}
+                                            aria-describedby="wiki-answer-generation-status"
+                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
                                         >
                                             {wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                 ? tai.generating_wiki_answer
@@ -3465,17 +3719,21 @@ export default function AiShow({
                                         </button>
                                     </div>
 
-                                    {wikiAnswerGeneratingRequirementId === activeRequirement.id ? (
-                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
-                                            {tai.generating_wiki_answer}
-                                        </div>
-                                    ) : null}
+                                    {/* Shown, not spoken: requestWikiAnswerGeneration announces the start and the
+                                        result once. The error is an alert — the user has to act on it. */}
+                                    <div id="wiki-answer-generation-status" className="empty:hidden">
+                                        {wikiAnswerGeneratingRequirementId === activeRequirement.id ? (
+                                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
+                                                {tai.generating_wiki_answer}
+                                            </div>
+                                        ) : null}
 
-                                    {wikiAnswerError?.requirementId === activeRequirement.id ? (
-                                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
-                                            {wikiAnswerError.message}
-                                        </div>
-                                    ) : null}
+                                        {wikiAnswerError?.requirementId === activeRequirement.id ? (
+                                            <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
+                                                {wikiAnswerError.message}
+                                            </div>
+                                        ) : null}
+                                    </div>
 
                                     {!activeRequirementWikiAnswer?.coverage_status ? (
                                         <div className="rounded-2xl border border-dashed border-violet-200 bg-white px-4 py-6 text-base leading-6 text-slate-600">
@@ -3489,9 +3747,9 @@ export default function AiShow({
                                             >
                                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                                     <div>
-                                                        <div className="text-base font-semibold uppercase tracking-[0.1em] text-violet-600">
+                                                        <h3 id="wiki-answer-expert-draft-title" className="text-base font-semibold uppercase tracking-[0.1em] text-violet-600">
                                                             {tai.wiki_answer_expert_draft_title}
-                                                        </div>
+                                                        </h3>
                                                         {activeRequirementWikiAnswer.generated_at ? (
                                                             <div className="mt-1 text-base text-slate-600">
                                                                 {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
@@ -3507,6 +3765,7 @@ export default function AiShow({
                                                     <div className="flex flex-wrap items-center gap-2">
                                                         {isEditingActiveWikiAnswer ? null : (
                                                             <button
+                                                                id="wiki-answer-edit-button"
                                                                 type="button"
                                                                 onClick={startEditingActiveWikiAnswer}
                                                                 disabled={
@@ -3523,11 +3782,9 @@ export default function AiShow({
                                                             type="button"
                                                             data-testid="wiki-answer-copy-button"
                                                             onClick={() => void copyActiveWikiAnswerContent()}
-                                                            disabled={
-                                                                !activeRequirementWikiAnswerHasText
-                                                                || wikiAnswerCopyingRequirementId === activeRequirement.id
-                                                            }
-                                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            disabled={!activeRequirementWikiAnswerHasText}
+                                                            aria-disabled={wikiAnswerCopyingRequirementId === activeRequirement.id || undefined}
+                                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
                                                         >
                                                             {wikiAnswerCopyingRequirementId === activeRequirement.id
                                                                 ? (tai.wiki_answer_copying ?? 'Kopierer...')
@@ -3539,7 +3796,7 @@ export default function AiShow({
                                                 {wikiAnswerCopyStatus === 'empty' || String(wikiAnswerCopyStatus ?? '').startsWith('failed') ? (
                                                     <div
                                                         data-testid="wiki-answer-copy-error"
-                                                        role="status"
+                                                        role="alert"
                                                         className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700"
                                                     >
                                                         {wikiAnswerCopyStatus === 'empty'
@@ -3554,7 +3811,9 @@ export default function AiShow({
                                                     <>
                                                         <div className="mt-4 flex flex-col gap-2">
                                                             <textarea
+                                                                id="wiki-answer-editor"
                                                                 aria-label={`${tai.wiki_answer_for_requirement} ${activeRequirementDisplayIdentifier}`}
+                                                                aria-describedby={activeRequirementWikiAnswerFigures.length > 0 ? 'wiki-answer-editor-hint wiki-answer-figure-edit-notice' : 'wiki-answer-editor-hint'}
                                                                 value={activeRequirementWikiAnswerText}
                                                                 onChange={(event) => updateActiveWikiAnswerText(event.target.value)}
                                                                 rows={14}
@@ -3562,14 +3821,14 @@ export default function AiShow({
                                                                     wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                                     || wikiAnswerSavingRequirementId === activeRequirement.id
                                                                 }
-                                                                className="h-[18rem] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 font-mono text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="h-[18rem] w-full resize-y overflow-y-auto rounded-2xl border border-field-border bg-white px-3 py-3 font-mono text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 placeholder={tai.answer_draft_placeholder}
                                                             />
-                                                            <p className="text-base text-slate-600">
+                                                            <p id="wiki-answer-editor-hint" className="text-base text-slate-600">
                                                                 {tai.wiki_answer_edit_markdown_hint ?? 'Teksten redigeres som Markdown. Tabeller skrives med | og vises som tabell når du lagrer.'}
                                                             </p>
                                                             {activeRequirementWikiAnswerFigures.length > 0 ? (
-                                                                <p className="text-base text-slate-600" data-testid="wiki-answer-figure-edit-notice">
+                                                                <p id="wiki-answer-figure-edit-notice" className="text-base text-slate-600" data-testid="wiki-answer-figure-edit-notice">
                                                                     {(tai.wiki_answer_edit_figures_notice ?? 'Svaret har :count figur(er) fra Wikien. De redigeres ikke her og beholdes når du lagrer.')
                                                                         .replace(':count', String(activeRequirementWikiAnswerFigures.length))}
                                                                 </p>
@@ -3595,10 +3854,12 @@ export default function AiShow({
                                                                     disabled={
                                                                         !activeRequirementWikiAnswerHasText
                                                                         || !activeRequirement.wiki_answer_update_url
-                                                                        || wikiAnswerGeneratingRequirementId === activeRequirement.id
-                                                                        || wikiAnswerSavingRequirementId === activeRequirement.id
                                                                     }
-                                                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                                                    aria-disabled={(
+                                                                        wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                                        || wikiAnswerSavingRequirementId === activeRequirement.id
+                                                                    ) || undefined}
+                                                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                 >
                                                                     {wikiAnswerSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
                                                                 </button>
@@ -3606,8 +3867,12 @@ export default function AiShow({
                                                         </div>
                                                     </>
                                                 ) : (
-                                                    <div
-                                                        ref={wikiAnswerRenderedRef}
+                                                    // Its own attributes never reach the clipboard: the copy reads only
+                                                    // this box's children (buildWikiAnswerCopyHtml).
+                                                    <ScrollRegion
+                                                        axis="y"
+                                                        innerRef={wikiAnswerRenderedRef}
+                                                        label={tai.wiki_answer_expert_draft_title}
                                                         data-testid="wiki-answer-rendered"
                                                         className="mt-4 max-h-[24rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base leading-7 text-slate-800"
                                                     >
@@ -3620,7 +3885,7 @@ export default function AiShow({
                                                         ) : (
                                                             <span className="text-slate-600">{tai.wiki_answer_none_message}</span>
                                                         )}
-                                                    </div>
+                                                    </ScrollRegion>
                                                 )}
                                             </section>
 
@@ -3628,9 +3893,9 @@ export default function AiShow({
                                                 data-testid="wiki-answer-documentation"
                                                 className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
                                             >
-                                                <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
+                                                <h3 className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
                                                     {tai.wiki_answer_documentation_and_compliance_title}
-                                                </div>
+                                                </h3>
                                                 {activeRequirementWikiAnswerIsStale ? (
                                                     <div
                                                         data-testid="wiki-answer-stale-warning"
@@ -3794,9 +4059,9 @@ export default function AiShow({
                                                 data-testid="wiki-answer-sources"
                                                 className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
                                             >
-                                                <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
+                                                <h3 className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
                                                     {tai.wiki_answer_sources_title}
-                                                </div>
+                                                </h3>
                                                 {activeRequirementWikiAnswerSources.length > 0 ? (
                                                     <ul className="mt-3 space-y-1.5">
                                                         {activeRequirementWikiAnswerSources.map((source) => (
@@ -3833,30 +4098,35 @@ export default function AiShow({
                                             </section>
                                         </div>
                                     )}
-                                </div>
+                                </ScrollRegion>
                             )}
                         </div>
                     </section>
 
                 </div>
 
-                {responsiblePickerRequirement !== null ? (
-                    <div
-                        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6"
-                        onClick={closeResponsiblePicker}
-                    >
-                        <div
-                            className="w-full max-w-2xl rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.25)]"
-                            onClick={(event) => event.stopPropagation()}
-                        >
+                {/* «Velg ansvarlig» (A11Y-002): ActionDialog gives it the dialog role and name, focus in,
+                    the trap, Escape, focus back and an inert page behind it — the hand-made overlay had
+                    none of them. The picker is not opened from the current card layout, but kept
+                    working for when it is. */}
+                <ActionDialog
+                    isOpen={responsiblePickerRequirement !== null}
+                    onClose={closeResponsiblePicker}
+                    closeDisabled={responsibleSavingRequirementId !== null}
+                    titleId="responsible-picker-title"
+                    descriptionId="responsible-picker-summary"
+                    size="lg"
+                >
+                    {responsiblePickerRequirement !== null ? (
+                        <div>
                             <div className="flex items-start justify-between gap-4">
                                 <div className="space-y-1">
                                     <div className="text-base font-semibold uppercase tracking-[0.16em] text-violet-700">
                                         {tai.choose_responsible_user}
                                     </div>
-                                    <h3 className="text-lg font-semibold tracking-tight text-slate-950">
+                                    <h2 id="responsible-picker-title" className="text-lg font-semibold tracking-tight text-slate-950">
                                         {responsiblePickerRequirement.current_requirement_text ?? responsiblePickerRequirement.requirement_text ?? tai.set_responsible}
-                                    </h3>
+                                    </h2>
                                     <p className="text-base text-slate-600">
                                         {responsiblePickerRequirement.current_requirement_identifier ?? responsiblePickerRequirement.requirement_identifier ?? '—'}
                                     </p>
@@ -3864,14 +4134,15 @@ export default function AiShow({
                                 <button
                                     type="button"
                                     onClick={closeResponsiblePicker}
+                                    aria-label={a11y.close_dialog ?? 'Lukk dialog'}
                                     className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
                                 >
-                                    ×
-                                    </button>
-                                </div>
+                                    <span aria-hidden="true">×</span>
+                                </button>
+                            </div>
 
                             <div className="mt-5 space-y-3">
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-950">
+                                <div id="responsible-picker-summary" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-950">
                                     {responsiblePickerSummary}
                                 </div>
 
@@ -3882,7 +4153,7 @@ export default function AiShow({
                                         value={responsibleUserSearch}
                                         onChange={(event) => setResponsibleUserSearch(event.target.value)}
                                         placeholder={tai.responsible_user_search_placeholder}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                        className="w-full rounded-2xl border border-field-border bg-white px-4 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
                                     />
                                 </label>
 
@@ -3967,14 +4238,14 @@ export default function AiShow({
                                 </div>
 
                                 {responsibleUpdateError ? (
-                                    <p className="text-base text-rose-700">
+                                    <p role="alert" className="text-base text-rose-700">
                                         {responsibleUpdateError}
                                     </p>
                                 ) : null}
                             </div>
                         </div>
-                    </div>
-                ) : null}
+                    ) : null}
+                </ActionDialog>
 
             </div>
         </CustomerAppLayout>

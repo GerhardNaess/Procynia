@@ -4,6 +4,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 
 const AI_STATUS_TONE = {
     not_started: 'slate',
@@ -129,26 +130,27 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
 
                         {rows.length > 0 ? (
                             <div className="overflow-hidden rounded-[22px] border border-slate-200">
-                                <div className="overflow-x-auto">
+                                <ScrollRegion label={tai.cases_ready_title ?? 'Saker klare for arbeid med AI-assistanse'} edgeRoom={false}>
                                     <table className="min-w-full divide-y divide-slate-200">
+                                        <caption className="sr-only">{tai.cases_ready_title ?? 'Saker klare for arbeid med AI-assistanse'}</caption>
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                <th scope="col" className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_case ?? 'Sak'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                <th scope="col" className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_responsible ?? 'Ansvarlig'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                <th scope="col" className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_phase ?? 'Fase'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                <th scope="col" className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_ai_status ?? 'AI-status'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                <th scope="col" className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_updated ?? 'Oppdatert'}
                                                 </th>
-                                                <th className="px-5 py-3 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                <th scope="col" className="px-5 py-3 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_action ?? 'Handling'}
                                                 </th>
                                             </tr>
@@ -163,9 +165,9 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
 
                                                 return (
                                                     <tr key={analysisCase.id} className="align-top">
-                                                        <td className="px-5 py-4">
+                                                        <th scope="row" className="px-5 py-4 text-left font-normal">
                                                             <div className="space-y-1">
-                                                                <div className="font-semibold text-slate-950">
+                                                                <div id={`ai-case-${analysisCase.id}-title`} className="font-semibold text-slate-950">
                                                                     {analysisCase.title}
                                                                 </div>
                                                                 {analysisCase.reference ? (
@@ -174,7 +176,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                                                     </div>
                                                                 ) : null}
                                                             </div>
-                                                        </td>
+                                                        </th>
                                                         <td className="px-5 py-4 text-base text-slate-600">
                                                             {analysisCase.owner_name}
                                                         </td>
@@ -192,6 +194,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                                         <td className="px-5 py-4 text-right">
                                                             <Link
                                                                 href={analysisCase.action_url}
+                                                                aria-describedby={`ai-case-${analysisCase.id}-title`}
                                                                 className="inline-flex rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {tai.open_case ?? 'Åpne sak'}
@@ -202,7 +205,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                             })}
                                         </tbody>
                                     </table>
-                                </div>
+                                </ScrollRegion>
                             </div>
                         ) : (
                             <EmptyStateBox

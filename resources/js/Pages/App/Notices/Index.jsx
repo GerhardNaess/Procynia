@@ -9,6 +9,11 @@ import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
 import { withRegisterName } from './registerName';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import ActionDialog from '../../../Components/App/ActionDialog';
+import FormField, { RequiredFieldsNote } from '../../../Components/App/FormField';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { businessReviewFocusCandidates } from './businessReviewFocus';
+import { announce } from '../../../Support/announcer';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 
 
 const noticeSummaryPreviewLimit = 280;
@@ -28,6 +33,26 @@ function classNames(...values) {
  * the grid even where a label carries extra controls — the CPV field's count and show/hide toggle.
  */
 export const FILTER_LABEL_ROW = 'flex h-9 items-center text-base font-medium text-slate-700';
+
+/**
+ * The look the work-list forms had before they were wired through FormField (Fase 4): label above,
+ * 8 px gap, error below — in rose-700 (6.06:1) instead of rose-600, which was 4.51:1 on white.
+ */
+const WORKLIST_FIELD = {
+    className: 'space-y-2',
+    labelClassName: 'text-base font-medium text-slate-700',
+    controlClassName: '',
+    hintClassName: 'text-base leading-6 text-slate-600',
+    errorClassName: 'text-base text-rose-700',
+};
+
+/** The editable details of a private request, inside its card: a compact uppercase label. */
+const CARD_FIELD = {
+    className: 'space-y-1.5',
+    labelClassName: 'text-base font-semibold uppercase tracking-[0.1em] text-slate-600',
+    controlClassName: '',
+    errorClassName: 'text-base text-rose-700',
+};
 
 function getNoticesHelpSections(nt) {
     return [
@@ -665,7 +690,9 @@ export default function NoticeIndex({
     worklist = {},
     watchAlerts = {},
 }) {
-    const { locale, translations } = usePage().props;
+    const { locale, translations, flash = {} } = usePage().props;
+    const a11y = translations?.a11y ?? {};
+    const rowActionError = useRowActionError(flash?.error ?? null);
     // Which register the results on this page came from. Named by the backend from the adapter
     // that ran the search; the raw key when the URL asked for a register Procynia has none for,
     // and Doffin outside live search, where no register is being searched at all.
@@ -905,6 +932,16 @@ export default function NoticeIndex({
     const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
     const archiveTriggerRef = useRef(null);
     const archiveTypeRef = useRef(null);
+    // One container per form, so a rejected submit lands on that form's first invalid field.
+    const privateRequestFormRef = useRef(null);
+    const editingCardRef = useRef(null);
+    const archiveFormRef = useRef(null);
+    const focusPrivateRequestError = useFocusFirstError(privateRequestFormRef);
+    const focusEditingCardError = useFocusFirstError(editingCardRef);
+    const focusArchiveError = useFocusFirstError(archiveFormRef);
+    // Set by a search, a filter or a register change the user asked for; the results it brings are
+    // then spoken once (4.1.3). Paging and the page's own reloads are not announced.
+    const announceResultsRef = useRef(false);
     const deadlineForm = useForm({
         questions_rfi_deadline_at: '',
         rfi_submission_deadline_at: '',
@@ -1049,6 +1086,19 @@ export default function NoticeIndex({
         });
     }, [isLiveMode, liveSearchCurrentPage]);
 
+    const resultsAnnouncement = isLiveMode
+        ? liveSearchHeading
+        : `${formatInteger(notices?.meta?.total ?? 0, locale)} ${noticesText.hitsSuffix ?? ''}`.trim();
+
+    useEffect(() => {
+        if (!announceResultsRef.current) {
+            return;
+        }
+
+        announceResultsRef.current = false;
+        announce(resultsAnnouncement);
+    }, [notices]);
+
     const goToNoticePage = (url) => {
         if (!url) {
             return;
@@ -1099,6 +1149,7 @@ export default function NoticeIndex({
             },
             onError: () => {
                 setIsPrivateRequestFormOpen(true);
+                focusPrivateRequestError();
             },
         });
     };
@@ -1108,9 +1159,9 @@ export default function NoticeIndex({
             return;
         }
 
-        router.delete(`/app/notices/saved/${notice.saved_notice_id}`, {
+        router.delete(`/app/notices/saved/${notice.saved_notice_id}`, trackRowAction(`notice-delete-${notice.saved_notice_id}`, {
             preserveScroll: true,
-        });
+        }));
     };
 
     const removeHistoryNotice = (notice) => {
@@ -1118,9 +1169,9 @@ export default function NoticeIndex({
             return;
         }
 
-        router.delete(`/app/notices/history/${notice.saved_notice_id}`, {
+        router.delete(`/app/notices/history/${notice.saved_notice_id}`, trackRowAction(`notice-delete-${notice.saved_notice_id}`, {
             preserveScroll: true,
-        });
+        }));
     };
 
     const toggleSavedNoticeDetails = (noticeId) => {
@@ -1163,6 +1214,7 @@ export default function NoticeIndex({
         deadlineForm.patch(`/app/notices/saved/${notice.saved_notice_id}/deadlines`, {
             preserveScroll: true,
             preserveState: true,
+            onError: focusEditingCardError,
             onSuccess: () => {
                 setEditingSavedNoticeId(null);
                 deadlineForm.reset();
@@ -1189,11 +1241,16 @@ export default function NoticeIndex({
         );
     };
 
-    const removeBusinessReview = (index) => {
+    const removeBusinessReview = (index, noticeId) => {
         deadlineForm.setData(
             'business_reviews',
             deadlineForm.data.business_reviews.filter((_, currentIndex) => currentIndex !== index),
         );
+
+        // The rows are keyed by position: removing one either drops the pressed button (focus to <body>)
+        // or hands it to the next row, where Enter again would delete that one. Either way focus goes
+        // to a date (A11Y-146).
+        refocusIfLost(businessReviewFocusCandidates(noticeId, index), { always: true });
     };
 
     const openHistoryEditor = (notice) => {
@@ -1280,6 +1337,7 @@ export default function NoticeIndex({
         historyForm.patch(`/app/notices/saved/${notice.saved_notice_id}/history-metadata`, {
             preserveScroll: true,
             preserveState: true,
+            onError: focusEditingCardError,
             onSuccess: () => {
                 setEditingHistoryNoticeId(null);
                 historyForm.reset();
@@ -1329,6 +1387,7 @@ export default function NoticeIndex({
     });
 
     const applyFilters = () => {
+        announceResultsRef.current = true;
         router.get(
             '/app/notices',
             liveSearchQuery(),
@@ -1352,6 +1411,7 @@ export default function NoticeIndex({
             return;
         }
 
+        announceResultsRef.current = true;
         router.get(
             '/app/notices',
             liveSearchQuery({ source: nextSource }),
@@ -1376,6 +1436,7 @@ export default function NoticeIndex({
         setBidStatusFilter('');
         setHistoryTypeFilter('');
 
+        announceResultsRef.current = true;
         router.get(
             '/app/notices',
             buildNoticeQuery({
@@ -1399,6 +1460,7 @@ export default function NoticeIndex({
             setBidStatusFilter(nextFilter);
         }
 
+        announceResultsRef.current = true;
         router.get(
             '/app/notices',
             buildNoticeQuery({
@@ -1449,6 +1511,7 @@ export default function NoticeIndex({
         archiveHistoryForm.clearErrors();
         archiveHistoryForm.patch(notice.actions.archive_url, {
             preserveScroll: true,
+            onError: focusArchiveError,
             onSuccess: () => {
                 setArchivingNotice(null);
                 archiveHistoryForm.reset();
@@ -1546,18 +1609,20 @@ export default function NoticeIndex({
                                                 label: noticesText.alertsDeleteLabel,
                                                 confirmMessage: noticesText.alertsDeleteConfirm,
                                         }}
-                                        actions={
+                                        headingLevel="h2"
+                                        actions={(titleId) => (
                                             notice.external_url ? (
                                                 <a
                                                     href={notice.external_url}
                                                     target="_blank"
                                                     rel="noreferrer"
+                                                    aria-describedby={titleId}
                                                     className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                 >
                                                     {watchAlertLinkLabel(notice, noticesText)}
                                                 </a>
                                             ) : null
-                                        }
+                                        )}
                                         provenanceBadges={notice.watch_profile_name ? [
                                             {
                                                 key: `${notice.id}-watch-profile`,
@@ -1603,7 +1668,7 @@ export default function NoticeIndex({
                                 <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-5">
                                 <div className="mb-3 flex flex-wrap items-start justify-between gap-x-5 gap-y-3">
                                 <div className="min-w-0">
-                                    <div className="text-base font-medium text-slate-900">{noticesText.liveTitle}</div>
+                                    <div id="live-search-title" className="text-base font-medium text-slate-900">{noticesText.liveTitle}</div>
                                     <p className="mt-1 text-base leading-6 text-slate-600">
                                         {noticesText.liveDescription}
                                     </p>
@@ -1650,16 +1715,20 @@ export default function NoticeIndex({
                                 }}
                                 className="flex"
                             >
-                                <label className="relative flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                                    <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                                {/* Named by the visible «Live søk i …» above it, not by the placeholder, which
+                                    disappears as soon as the user types (A11Y-040). The 2 px violet focus
+                                    outline from app.css is drawn inside the field's own edge. */}
+                                <div className="relative flex-1 overflow-hidden rounded-2xl border border-field-border bg-white">
+                                    <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
                                     <input
                                         type="search"
+                                        aria-labelledby="live-search-title"
                                         value={searchQuery}
                                         onChange={(event) => setSearchQuery(event.target.value)}
                                         placeholder={noticesText.liveSearchPlaceholder}
-                                        className="h-[54px] w-full border-0 bg-transparent pl-12 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:ring-0"
+                                        className="h-[54px] w-full rounded-2xl border-0 bg-transparent pl-12 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:ring-0"
                                     />
-                                </label>
+                                </div>
                             </form>
                         </section>
 
@@ -1711,7 +1780,7 @@ export default function NoticeIndex({
                                         value={selectedWatchListId}
                                         disabled={watchListOptions.length === 0}
                                         onChange={(event) => applyWatchListPrefill(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                                     >
                                         <option value="">{watchListOptions.length === 0 ? noticesText.watchListPlaceholderEmpty : noticesText.watchListPlaceholder}</option>
                                         {watchListOptions.map((item) => (
@@ -1749,7 +1818,7 @@ export default function NoticeIndex({
                                             value={organizationName}
                                             onChange={(event) => setOrganizationName(event.target.value)}
                                             placeholder={noticesText.organizationPlaceholder}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
                                     </label>
                                     <label className="space-y-2">
@@ -1762,12 +1831,14 @@ export default function NoticeIndex({
                                                 setKeywordsSource('manual');
                                             }}
                                             placeholder={noticesText.keywordsPlaceholder}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
                                         <p className="text-base leading-6 text-slate-600">{noticesText.keywordsHelp}</p>
                                     </label>
-                                    <label className="space-y-2">
-                                        <span className={FILTER_LABEL_ROW}>{noticesText.publicationDateLabel}</span>
+                                    {/* A group, not a <label>: a label wrapping the two date labels named only
+                                        the first date field, and nested labels are invalid HTML. */}
+                                    <div role="group" aria-labelledby="publication-date-label" className="space-y-2">
+                                        <span id="publication-date-label" className={FILTER_LABEL_ROW}>{noticesText.publicationDateLabel}</span>
                                         <div className="grid gap-2 sm:grid-cols-2">
                                             <label className="space-y-1">
                                                 <span className="text-base font-medium uppercase tracking-[0.1em] text-slate-600">{noticesText.fromDateLabel}</span>
@@ -1775,7 +1846,7 @@ export default function NoticeIndex({
                                                     type="date"
                                                     value={publicationDateFrom}
                                                     onChange={(event) => setPublicationDateFrom(event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                             </label>
                                             <label className="space-y-1">
@@ -1784,17 +1855,17 @@ export default function NoticeIndex({
                                                     type="date"
                                                     value={publicationDateTo}
                                                     onChange={(event) => setPublicationDateTo(event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                             </label>
                                         </div>
-                                    </label>
+                                    </div>
                                     <label className="space-y-2">
                                         <span className={FILTER_LABEL_ROW}>{common.status}</span>
                                         <select
                                             value={status}
                                             onChange={(event) => setStatus(event.target.value)}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         >
                                             {statusOptions.map((option) => (
                                                 <option key={option.value || 'empty'} value={option.value}>
@@ -1877,6 +1948,7 @@ export default function NoticeIndex({
                                     {isPrivateRequestFormOpen ? (
                                         <form
                                             id="private-request-form"
+                                            ref={privateRequestFormRef}
                                             onSubmit={(event) => {
                                                 event.preventDefault();
                                                 submitPrivateRequest();
@@ -1885,131 +1957,125 @@ export default function NoticeIndex({
                                         >
                                             <input type="hidden" name="source_type" value={privateRequestForm.data.source_type} />
 
+                                            <RequiredFieldsNote text={a11y.required_fields} />
+
                                             <div className="grid gap-3.5 md:grid-cols-2">
-                                                <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldTitle}</span>
-                                                    <input
-                                                        type="text"
-                                                        value={privateRequestForm.data.title}
-                                                        onChange={(event) => privateRequestForm.setData('title', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderTitle}
-                                                    />
-                                                    {privateRequestForm.errors.title ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.title}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_title" label={noticesText.privateRequestFieldTitle} error={privateRequestForm.errors.title} required {...WORKLIST_FIELD} className="space-y-2 md:col-span-2">
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="text"
+                                                            value={privateRequestForm.data.title}
+                                                            onChange={(event) => privateRequestForm.setData('title', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderTitle}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.buyerLabel}</span>
-                                                    <input
-                                                        type="text"
-                                                        value={privateRequestForm.data.buyer_name}
-                                                        onChange={(event) => privateRequestForm.setData('buyer_name', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderBuyerName}
-                                                    />
-                                                    {privateRequestForm.errors.buyer_name ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.buyer_name}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_buyer_name" label={noticesText.buyerLabel} error={privateRequestForm.errors.buyer_name} required {...WORKLIST_FIELD}>
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="text"
+                                                            value={privateRequestForm.data.buyer_name}
+                                                            onChange={(event) => privateRequestForm.setData('buyer_name', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderBuyerName}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2">
-                                                    <span className="text-base font-medium text-slate-700">{translations.common.deadline}</span>
-                                                    <input
-                                                        type="date"
-                                                        value={privateRequestForm.data.deadline}
-                                                        onChange={(event) => privateRequestForm.setData('deadline', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                    />
-                                                    {privateRequestForm.errors.deadline ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.deadline}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_deadline" label={translations.common.deadline} error={privateRequestForm.errors.deadline} {...WORKLIST_FIELD}>
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="date"
+                                                            value={privateRequestForm.data.deadline}
+                                                            onChange={(event) => privateRequestForm.setData('deadline', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldSummary}</span>
-                                                    <textarea
-                                                        value={privateRequestForm.data.summary}
-                                                        onChange={(event) => privateRequestForm.setData('summary', event.target.value)}
-                                                        rows={3}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderSummary}
-                                                    />
-                                                    {privateRequestForm.errors.summary ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.summary}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_summary" label={noticesText.privateRequestFieldSummary} error={privateRequestForm.errors.summary} required {...WORKLIST_FIELD} className="space-y-2 md:col-span-2">
+                                                    {(field) => (
+                                                        <textarea
+                                                            {...field}
+                                                            value={privateRequestForm.data.summary}
+                                                            onChange={(event) => privateRequestForm.setData('summary', event.target.value)}
+                                                            rows={3}
+                                                            className="w-full rounded-xl border border-field-border bg-white px-4 py-3 text-base text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderSummary}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldReference}</span>
-                                                    <input
-                                                        type="text"
-                                                        value={privateRequestForm.data.reference_number}
-                                                        onChange={(event) => privateRequestForm.setData('reference_number', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderReference}
-                                                    />
-                                                    {privateRequestForm.errors.reference_number ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.reference_number}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_reference_number" label={noticesText.privateRequestFieldReference} error={privateRequestForm.errors.reference_number} {...WORKLIST_FIELD}>
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="text"
+                                                            value={privateRequestForm.data.reference_number}
+                                                            onChange={(event) => privateRequestForm.setData('reference_number', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderReference}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldContactPerson}</span>
-                                                    <input
-                                                        type="text"
-                                                        value={privateRequestForm.data.contact_person_name}
-                                                        onChange={(event) => privateRequestForm.setData('contact_person_name', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderContactPerson}
-                                                    />
-                                                    {privateRequestForm.errors.contact_person_name ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.contact_person_name}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_contact_person_name" label={noticesText.privateRequestFieldContactPerson} error={privateRequestForm.errors.contact_person_name} {...WORKLIST_FIELD}>
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="text"
+                                                            value={privateRequestForm.data.contact_person_name}
+                                                            onChange={(event) => privateRequestForm.setData('contact_person_name', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderContactPerson}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldContactEmail}</span>
-                                                    <input
-                                                        type="email"
-                                                        value={privateRequestForm.data.contact_person_email}
-                                                        onChange={(event) => privateRequestForm.setData('contact_person_email', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderContactEmail}
-                                                    />
-                                                    {privateRequestForm.errors.contact_person_email ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.contact_person_email}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_contact_person_email" label={noticesText.privateRequestFieldContactEmail} error={privateRequestForm.errors.contact_person_email} {...WORKLIST_FIELD}>
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="email"
+                                                            value={privateRequestForm.data.contact_person_email}
+                                                            onChange={(event) => privateRequestForm.setData('contact_person_email', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderContactEmail}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldExternalUrl}</span>
-                                                    <input
-                                                        type="url"
-                                                        value={privateRequestForm.data.external_url}
-                                                        onChange={(event) => privateRequestForm.setData('external_url', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderExternalUrl}
-                                                    />
-                                                    {privateRequestForm.errors.external_url ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.external_url}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_external_url" label={noticesText.privateRequestFieldExternalUrl} error={privateRequestForm.errors.external_url} {...WORKLIST_FIELD} className="space-y-2 md:col-span-2">
+                                                    {(field) => (
+                                                        <input
+                                                            {...field}
+                                                            type="url"
+                                                            value={privateRequestForm.data.external_url}
+                                                            onChange={(event) => privateRequestForm.setData('external_url', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderExternalUrl}
+                                                        />
+                                                    )}
+                                                </FormField>
 
-                                                <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-base font-medium text-slate-700">{noticesText.privateRequestFieldNotes}</span>
-                                                    <textarea
-                                                        value={privateRequestForm.data.notes}
-                                                        onChange={(event) => privateRequestForm.setData('notes', event.target.value)}
-                                                        rows={3}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder={noticesText.privateRequestPlaceholderNotes}
-                                                    />
-                                                    {privateRequestForm.errors.notes ? (
-                                                        <p className="text-base text-rose-600">{privateRequestForm.errors.notes}</p>
-                                                    ) : null}
-                                                </label>
+                                                <FormField id="private_request_notes" label={noticesText.privateRequestFieldNotes} error={privateRequestForm.errors.notes} {...WORKLIST_FIELD} className="space-y-2 md:col-span-2">
+                                                    {(field) => (
+                                                        <textarea
+                                                            {...field}
+                                                            value={privateRequestForm.data.notes}
+                                                            onChange={(event) => privateRequestForm.setData('notes', event.target.value)}
+                                                            rows={3}
+                                                            className="w-full rounded-xl border border-field-border bg-white px-4 py-3 text-base text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            placeholder={noticesText.privateRequestPlaceholderNotes}
+                                                        />
+                                                    )}
+                                                </FormField>
+
                                             </div>
 
                                             <div className="flex flex-wrap gap-2.5">
@@ -2058,7 +2124,7 @@ export default function NoticeIndex({
                                             <select
                                                 value={worklistFilterValue}
                                                 onChange={(event) => applySavedNoticeFilter(event.target.value)}
-                                                className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="h-11 min-w-[240px] rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             >
                                                 {worklistFilterOptions.map((option) => (
                                                     <option key={option.value || 'empty'} value={option.value}>
@@ -2152,18 +2218,19 @@ export default function NoticeIndex({
                                                     canSaveToWorklist
                                                     saveButtonLabel={translations.frontend.save_button}
                                                     texts={noticesCardText}
-                                                    actions={
+                                                    actions={(titleId) => (
                                                         notice.external_url ? (
                                                             <a
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
+                                                                aria-describedby={titleId}
                                                                 className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                             >
                                                                 {noticesText.openInSourceLabel ?? noticesText.openInDoffinLabel}
                                                             </a>
                                                         ) : null
-                                                    }
+                                                    )}
                                                 />
                                             );
                                         }
@@ -2171,11 +2238,12 @@ export default function NoticeIndex({
                                         return (
                                             <article
                                                 key={notice.id}
+                                                ref={isEditingDeadlines || isEditingHistory ? editingCardRef : undefined}
                                                 className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)] transition hover:border-slate-300"
                                             >
                                                 <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                                                     <div className="min-w-0 flex-1">
-                                                        <div className="flex flex-wrap items-center gap-2.5">
+                                                        <div id={`notice-title-${notice.id}`} className="flex flex-wrap items-center gap-2.5">
                                                             {/* A card title sits inside "Registrerte kunngjøringer", so it reads
                                                                 and nests below it — at 27px it was the largest thing on the page
                                                                 after the page title, which put the section it belongs to beneath
@@ -2207,10 +2275,12 @@ export default function NoticeIndex({
                                                         ) : null}
 
                                                         <div className="mt-3 max-w-4xl text-base leading-7 text-slate-700 whitespace-pre-line">
-                                                            <div style={noticeSummaryStyle}>{summarizeText(notice.summary, noticesText)}</div>
+                                                            <div id={`notice-summary-${notice.id}`} style={noticeSummaryStyle}>{summarizeText(notice.summary, noticesText)}</div>
                                                             {isNoticeSummaryExpandable ? (
                                                                 <button
                                                                     type="button"
+                                                                    aria-expanded={isNoticeSummaryExpanded}
+                                                                    aria-controls={`notice-summary-${notice.id}`}
                                                                     onClick={() => setExpandedNoticeSummaryIds((current) => ({
                                                                         ...current,
                                                                         [notice.id]: !current[notice.id],
@@ -2255,51 +2325,39 @@ export default function NoticeIndex({
                                                                                     {notice.deadline ? formatDate(notice.deadline, locale) : noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
-                                                                            <div className="space-y-1.5">
-                                                                                <label className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`reference_number_${notice.id}`}>
-                                                                                    Referanse
-                                                                                </label>
-                                                                                <input
-                                                                                    id={`reference_number_${notice.id}`}
-                                                                                    type="text"
-                                                                                    value={deadlineForm.data.reference_number}
-                                                                                    onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                                />
-                                                                                {deadlineForm.errors.reference_number ? (
-                                                                                    <p className="text-base text-rose-600">{deadlineForm.errors.reference_number}</p>
-                                                                                ) : null}
-                                                                            </div>
-                                                                            <div className="space-y-1.5">
-                                                                                <label className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`contact_person_name_${notice.id}`}>
-                                                                                    Kontaktperson
-                                                                                </label>
-                                                                                <input
-                                                                                    id={`contact_person_name_${notice.id}`}
-                                                                                    type="text"
-                                                                                    value={deadlineForm.data.contact_person_name}
-                                                                                    onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                                />
-                                                                                {deadlineForm.errors.contact_person_name ? (
-                                                                                    <p className="text-base text-rose-600">{deadlineForm.errors.contact_person_name}</p>
-                                                                                ) : null}
-                                                                            </div>
-                                                                            <div className="space-y-1.5">
-                                                                                <label className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`contact_person_email_${notice.id}`}>
-                                                                                    Kontakt e-post
-                                                                                </label>
-                                                                                <input
-                                                                                    id={`contact_person_email_${notice.id}`}
-                                                                                    type="email"
-                                                                                    value={deadlineForm.data.contact_person_email}
-                                                                                    onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                                />
-                                                                                {deadlineForm.errors.contact_person_email ? (
-                                                                                    <p className="text-base text-rose-600">{deadlineForm.errors.contact_person_email}</p>
-                                                                                ) : null}
-                                                                            </div>
+                                                                            <FormField id={`reference_number_${notice.id}`} label={noticesText.referenceLabel ?? 'Referanse'} error={deadlineForm.errors.reference_number} {...CARD_FIELD}>
+                                                                                {(field) => (
+                                                                                    <input
+                                                                                        {...field}
+                                                                                        type="text"
+                                                                                        value={deadlineForm.data.reference_number}
+                                                                                        onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
+                                                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    />
+                                                                                )}
+                                                                            </FormField>
+                                                                            <FormField id={`contact_person_name_${notice.id}`} label={noticesText.contactPersonLabel ?? 'Kontaktperson'} error={deadlineForm.errors.contact_person_name} {...CARD_FIELD}>
+                                                                                {(field) => (
+                                                                                    <input
+                                                                                        {...field}
+                                                                                        type="text"
+                                                                                        value={deadlineForm.data.contact_person_name}
+                                                                                        onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
+                                                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    />
+                                                                                )}
+                                                                            </FormField>
+                                                                            <FormField id={`contact_person_email_${notice.id}`} label={noticesText.contactEmailLabel ?? 'Kontakt e-post'} error={deadlineForm.errors.contact_person_email} {...CARD_FIELD}>
+                                                                                {(field) => (
+                                                                                    <input
+                                                                                        {...field}
+                                                                                        type="email"
+                                                                                        value={deadlineForm.data.contact_person_email}
+                                                                                        onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
+                                                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    />
+                                                                                )}
+                                                                            </FormField>
                                                                             <div className="sm:col-span-2">
                                                                                 <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">{noticesText.externalLinkLabel}</div>
                                                                                 <div className="mt-1 text-base font-medium leading-6 text-slate-900">
@@ -2317,22 +2375,18 @@ export default function NoticeIndex({
                                                                                     )}
                                                                                 </div>
                                                                             </div>
-                                                                            <div className="sm:col-span-2 space-y-1.5">
-                                                                                <label className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`notes_${notice.id}`}>
-                                                                                    Notater
-                                                                                </label>
-                                                                                <textarea
-                                                                                    id={`notes_${notice.id}`}
-                                                                                    value={deadlineForm.data.notes}
-                                                                                    onChange={(event) => deadlineForm.setData('notes', event.target.value)}
-                                                                                    rows={4}
-                                                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                                    placeholder="Valgfritt notat"
-                                                                                />
-                                                                                {deadlineForm.errors.notes ? (
-                                                                                    <p className="text-base text-rose-600">{deadlineForm.errors.notes}</p>
-                                                                                ) : null}
-                                                                            </div>
+                                                                            <FormField id={`notes_${notice.id}`} label={noticesText.notesLabel ?? 'Notater'} error={deadlineForm.errors.notes} {...CARD_FIELD} className="space-y-1.5 sm:col-span-2">
+                                                                                {(field) => (
+                                                                                    <textarea
+                                                                                        {...field}
+                                                                                        value={deadlineForm.data.notes}
+                                                                                        onChange={(event) => deadlineForm.setData('notes', event.target.value)}
+                                                                                        rows={4}
+                                                                                        className="w-full rounded-xl border border-field-border bg-white px-3 py-2.5 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                        placeholder="Valgfritt notat"
+                                                                                    />
+                                                                                )}
+                                                                            </FormField>
                                                                         </div>
                                                                     ) : (
                                                                     <dl className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -2374,6 +2428,7 @@ export default function NoticeIndex({
                                                                                     </div>
                                                                                     <div className="relative mt-2 flex justify-center">
                                                                                         <span
+                                                                                            aria-hidden="true"
                                                                                             className={classNames(
                                                                                                 'relative z-10 h-3 w-3 rounded-full ring-4 ring-slate-50',
                                                                                                 isActive ? 'bg-violet-600' : 'bg-slate-300',
@@ -2419,6 +2474,7 @@ export default function NoticeIndex({
                                                         {isSavedOrHistoryMode && notice.show_url ? (
                                                             <Link
                                                                 href={notice.show_url}
+                                                                aria-describedby={`notice-title-${notice.id}`}
                                                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 Åpne sak
@@ -2428,6 +2484,7 @@ export default function NoticeIndex({
                                                             <button
                                                                 type="button"
                                                                 aria-expanded={isDetailsExpanded}
+                                                                aria-describedby={`notice-title-${notice.id}`}
                                                                 onClick={() => toggleHistoryEditor(notice)}
                                                                 className={classNames(
                                                                     'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-base font-semibold transition',
@@ -2442,6 +2499,8 @@ export default function NoticeIndex({
                                                         {isSavedMode ? (
                                                             <button
                                                                 type="button"
+                                                                aria-expanded={isEditingDeadlines}
+                                                                aria-describedby={`notice-title-${notice.id}`}
                                                                 onClick={() => openDeadlineEditor(notice)}
                                                                 className={classNames(
                                                                     'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-base font-semibold transition',
@@ -2478,6 +2537,7 @@ export default function NoticeIndex({
                                                         {isSavedMode ? (
                                                             <button
                                                                 type="button"
+                                                                aria-describedby={`notice-title-${notice.id}`}
                                                                 onClick={(event) => openArchiveSavedNoticeForm(notice, event)}
                                                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
@@ -2485,8 +2545,11 @@ export default function NoticeIndex({
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
+                                                            <>
                                                             <button
+                                                                id={`notice-delete-${notice.saved_notice_id}`}
                                                                 type="button"
+                                                                aria-describedby={rowActionError(`notice-delete-${notice.saved_notice_id}`) ? `notice-title-${notice.id} ${rowErrorId(`notice-delete-${notice.saved_notice_id}`)}` : `notice-title-${notice.id}`}
                                                                 onClick={() => {
                                                                     if (!notice.can_delete) {
                                                                         window.alert(noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser));
@@ -2498,10 +2561,19 @@ export default function NoticeIndex({
                                                             >
                                                                 {noticesText.delete}
                                                             </button>
+                                                            {rowActionError(`notice-delete-${notice.saved_notice_id}`) ? (
+                                                                <p id={rowErrorId(`notice-delete-${notice.saved_notice_id}`)} className="max-w-[16rem] text-base text-rose-700">
+                                                                    {rowActionError(`notice-delete-${notice.saved_notice_id}`)}
+                                                                </p>
+                                                            ) : null}
+                                                            </>
                                                         ) : null}
                                                         {isHistoryMode ? (
+                                                            <>
                                                             <button
+                                                                id={`notice-delete-${notice.saved_notice_id}`}
                                                                 type="button"
+                                                                aria-describedby={rowActionError(`notice-delete-${notice.saved_notice_id}`) ? `notice-title-${notice.id} ${rowErrorId(`notice-delete-${notice.saved_notice_id}`)}` : `notice-title-${notice.id}`}
                                                                 onClick={() => {
                                                                     if (!notice.can_delete) {
                                                                         window.alert(noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser));
@@ -2513,12 +2585,19 @@ export default function NoticeIndex({
                                                             >
                                                                 {noticesText.delete}
                                                             </button>
+                                                            {rowActionError(`notice-delete-${notice.saved_notice_id}`) ? (
+                                                                <p id={rowErrorId(`notice-delete-${notice.saved_notice_id}`)} className="max-w-[16rem] text-base text-rose-700">
+                                                                    {rowActionError(`notice-delete-${notice.saved_notice_id}`)}
+                                                                </p>
+                                                            ) : null}
+                                                            </>
                                                         ) : null}
                                                         {notice.external_url ? (
                                                             <a
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
+                                                                aria-describedby={`notice-title-${notice.id}`}
                                                                 className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                             >
                                                                 {noticeExternalLinkLabel(notice, noticesText)}
@@ -2669,57 +2748,53 @@ export default function NoticeIndex({
                                                                 className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                                             >
                                                                 <div className="space-y-3">
-                                                                    <label className="space-y-2">
-                                                                        <span className="text-base font-medium text-slate-700">{noticesText.deadlineQuestionsRfiLabel}</span>
-                                                                        <input
-                                                                            type="date"
-                                                                            value={deadlineForm.data.questions_rfi_deadline_at}
-                                                                            onChange={(event) => deadlineForm.setData('questions_rfi_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {deadlineForm.errors.questions_rfi_deadline_at ? (
-                                                                            <p className="text-base text-rose-600">{deadlineForm.errors.questions_rfi_deadline_at}</p>
-                                                                        ) : null}
-                                                                    </label>
+                                                                    <FormField id={`questions_rfi_deadline_at_${notice.id}`} label={noticesText.deadlineQuestionsRfiLabel} error={deadlineForm.errors.questions_rfi_deadline_at} {...WORKLIST_FIELD}>
+                                                                        {(field) => (
+                                                                            <input
+                                                                                {...field}
+                                                                                type="date"
+                                                                                value={deadlineForm.data.questions_rfi_deadline_at}
+                                                                                onChange={(event) => deadlineForm.setData('questions_rfi_deadline_at', event.target.value)}
+                                                                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            />
+                                                                        )}
+                                                                    </FormField>
 
-                                                                    <label className="space-y-2">
-                                                                        <span className="text-base font-medium text-slate-700">{noticesText.deadlineRfiSubmissionLabel}</span>
-                                                                        <input
-                                                                            type="date"
-                                                                            value={deadlineForm.data.rfi_submission_deadline_at}
-                                                                            onChange={(event) => deadlineForm.setData('rfi_submission_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {deadlineForm.errors.rfi_submission_deadline_at ? (
-                                                                            <p className="text-base text-rose-600">{deadlineForm.errors.rfi_submission_deadline_at}</p>
-                                                                        ) : null}
-                                                                    </label>
+                                                                    <FormField id={`rfi_submission_deadline_at_${notice.id}`} label={noticesText.deadlineRfiSubmissionLabel} error={deadlineForm.errors.rfi_submission_deadline_at} {...WORKLIST_FIELD}>
+                                                                        {(field) => (
+                                                                            <input
+                                                                                {...field}
+                                                                                type="date"
+                                                                                value={deadlineForm.data.rfi_submission_deadline_at}
+                                                                                onChange={(event) => deadlineForm.setData('rfi_submission_deadline_at', event.target.value)}
+                                                                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            />
+                                                                        )}
+                                                                    </FormField>
 
-                                                                    <label className="space-y-2">
-                                                                        <span className="text-base font-medium text-slate-700">{noticesText.deadlineQuestionsRfpLabel}</span>
-                                                                        <input
-                                                                            type="date"
-                                                                            value={deadlineForm.data.questions_rfp_deadline_at}
-                                                                            onChange={(event) => deadlineForm.setData('questions_rfp_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {deadlineForm.errors.questions_rfp_deadline_at ? (
-                                                                            <p className="text-base text-rose-600">{deadlineForm.errors.questions_rfp_deadline_at}</p>
-                                                                        ) : null}
-                                                                    </label>
+                                                                    <FormField id={`questions_rfp_deadline_at_${notice.id}`} label={noticesText.deadlineQuestionsRfpLabel} error={deadlineForm.errors.questions_rfp_deadline_at} {...WORKLIST_FIELD}>
+                                                                        {(field) => (
+                                                                            <input
+                                                                                {...field}
+                                                                                type="date"
+                                                                                value={deadlineForm.data.questions_rfp_deadline_at}
+                                                                                onChange={(event) => deadlineForm.setData('questions_rfp_deadline_at', event.target.value)}
+                                                                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            />
+                                                                        )}
+                                                                    </FormField>
 
-                                                                    <label className="space-y-2">
-                                                                        <span className="text-base font-medium text-slate-700">{noticesText.deadlineAwardDateLabel}</span>
-                                                                        <input
-                                                                            type="date"
-                                                                            value={deadlineForm.data.award_date_at}
-                                                                            onChange={(event) => deadlineForm.setData('award_date_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {deadlineForm.errors.award_date_at ? (
-                                                                            <p className="text-base text-rose-600">{deadlineForm.errors.award_date_at}</p>
-                                                                        ) : null}
-                                                                    </label>
+                                                                    <FormField id={`award_date_at_${notice.id}`} label={noticesText.deadlineAwardDateLabel} error={deadlineForm.errors.award_date_at} {...WORKLIST_FIELD}>
+                                                                        {(field) => (
+                                                                            <input
+                                                                                {...field}
+                                                                                type="date"
+                                                                                value={deadlineForm.data.award_date_at}
+                                                                                onChange={(event) => deadlineForm.setData('award_date_at', event.target.value)}
+                                                                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            />
+                                                                        )}
+                                                                    </FormField>
 
                                                                     <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 md:col-span-2">
                                                                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2734,10 +2809,11 @@ export default function NoticeIndex({
 
                                                                             <button
                                                                                 type="button"
+                                                                                id={`business-review-add-${notice.id}`}
                                                                                 onClick={addBusinessReview}
                                                                                 className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-base font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
                                                                             >
-                                                                                {noticesText.addBusinessReview}
+                                                                                {noticesText.businessReviewAdd}
                                                                             </button>
                                                                         </div>
 
@@ -2749,26 +2825,30 @@ export default function NoticeIndex({
                                                                                         className="rounded-2xl border border-blue-200 bg-white px-4 py-4"
                                                                                     >
                                                                                         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-                                                                                            <label className="min-w-0 flex-1 space-y-2">
-                                                                                                <span className="text-base font-medium text-slate-700">
-                                                                                                    {noticesText.businessReviewItemLabel} {index + 1}
-                                                                                                </span>
-                                                                                                <input
-                                                                                                    type="date"
-                                                                                                    value={review.business_review_at}
-                                                                                                    onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
-                                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                                                                                                />
-                                                                                                {deadlineForm.errors[`business_reviews.${index}.business_review_at`] ? (
-                                                                                                    <p className="text-base text-rose-600">
-                                                                                                        {deadlineForm.errors[`business_reviews.${index}.business_review_at`]}
-                                                                                                    </p>
-                                                                                                ) : null}
-                                                                                            </label>
+                                                                                            <FormField
+                                                                                                id={`business_review_${notice.id}_${index}`}
+                                                                                                label={`${noticesText.businessReviewItemLabel} ${index + 1}`}
+                                                                                                error={deadlineForm.errors[`business_reviews.${index}.business_review_at`]}
+                                                                                                {...WORKLIST_FIELD}
+                                                                                                className="min-w-0 flex-1 space-y-2"
+                                                                                            >
+                                                                                                {(field) => (
+                                                                                                    <input
+                                                                                                        {...field}
+                                                                                                        type="date"
+                                                                                                        value={review.business_review_at}
+                                                                                                        onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
+                                                                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                                                                                                    />
+                                                                                                )}
+                                                                                            </FormField>
 
                                                                                             <button
                                                                                                 type="button"
-                                                                                                onClick={() => removeBusinessReview(index)}
+                                                                                                aria-label={(a11y.row_action ?? ':action :name')
+                                                                                                    .replace(':action', noticesText.delete ?? '')
+                                                                                                    .replace(':name', `${noticesText.businessReviewItemLabel} ${index + 1}`)}
+                                                                                                onClick={() => removeBusinessReview(index, notice.id)}
                                                                                                 className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                                                             >
                                                                                                 {noticesText.delete}
@@ -2830,109 +2910,110 @@ export default function NoticeIndex({
                                                                 className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                                             >
                                                                 <div className="space-y-3">
-                                                                    <label className="space-y-2">
-                                                                        <span className="text-base font-medium text-slate-700">{noticesText.selectedSupplierLabel}</span>
-                                                                        <input
-                                                                            type="text"
-                                                                            value={historyForm.data.selected_supplier_name}
-                                                                            onChange={(event) => historyForm.setData('selected_supplier_name', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {historyForm.errors.selected_supplier_name ? (
-                                                                            <p className="text-base text-rose-600">{historyForm.errors.selected_supplier_name}</p>
-                                                                        ) : null}
-                                                                    </label>
+                                                                    <FormField id={`selected_supplier_name_${notice.id}`} label={noticesText.selectedSupplierLabel} error={historyForm.errors.selected_supplier_name} {...WORKLIST_FIELD}>
+                                                                        {(field) => (
+                                                                            <input
+                                                                                {...field}
+                                                                                type="text"
+                                                                                value={historyForm.data.selected_supplier_name}
+                                                                                onChange={(event) => historyForm.setData('selected_supplier_name', event.target.value)}
+                                                                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            />
+                                                                        )}
+                                                                    </FormField>
 
-                                                                    <label className="space-y-2">
-                                                                        <span className="text-base font-medium text-slate-700">{noticesText.contractValueLabel}</span>
-                                                                        <input
-                                                                            type="text"
-                                                                            inputMode="decimal"
-                                                                            value={formatNumberWithSpaces(historyForm.data.contract_value_mnok)}
-                                                                            onChange={(event) => historyForm.setData('contract_value_mnok', parseNumberFromSpaces(event.target.value))}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {historyForm.errors.contract_value_mnok ? (
-                                                                            <p className="text-base text-rose-600">{historyForm.errors.contract_value_mnok}</p>
-                                                                        ) : null}
-                                                                    </label>
+                                                                    <FormField id={`contract_value_mnok_${notice.id}`} label={noticesText.contractValueLabel} error={historyForm.errors.contract_value_mnok} {...WORKLIST_FIELD}>
+                                                                        {(field) => (
+                                                                            <input
+                                                                                {...field}
+                                                                                type="text"
+                                                                                inputMode="decimal"
+                                                                                value={formatNumberWithSpaces(historyForm.data.contract_value_mnok)}
+                                                                                onChange={(event) => historyForm.setData('contract_value_mnok', parseNumberFromSpaces(event.target.value))}
+                                                                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            />
+                                                                        )}
+                                                                    </FormField>
 
                                                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                                                                        <div className="space-y-2">
-                                                                            <span className="text-base font-medium text-slate-700">{noticesText.procurementTypeLabel}</span>
-                                                                            <select
-                                                                                value={historyForm.data.procurement_type}
-                                                                                onChange={(event) => updateHistoryProcurementType(event.target.value)}
-                                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                            >
-                                                                                <option value="">{noticesText.selectProcurementType}</option>
-                                                                                {historyProcurementTypeOptions.map((option) => (
-                                                                                    <option key={option.value} value={option.value}>
-                                                                                        {option.label}
-                                                                                    </option>
-                                                                                ))}
-                                                                            </select>
-                                                                            {historyForm.errors.procurement_type ? (
-                                                                                <p className="text-base text-rose-600">{historyForm.errors.procurement_type}</p>
-                                                                            ) : null}
-                                                                        </div>
-
-                                                                        {shouldShowHistoryFollowUpField ? (
-                                                                            <div className="space-y-2">
-                                                                                <span className="text-base font-medium text-slate-700">{noticesText.followUpLabel}</span>
+                                                                        {/* These three had a caption but no <label>: the selects and the
+                                                                            number field had no accessible name at all. */}
+                                                                        <FormField id={`procurement_type_${notice.id}`} label={noticesText.procurementTypeLabel} error={historyForm.errors.procurement_type} {...WORKLIST_FIELD}>
+                                                                            {(field) => (
                                                                                 <select
-                                                                                    value={historyForm.data.follow_up_mode}
-                                                                                    onChange={(event) => updateHistoryFollowUpMode(event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    {...field}
+                                                                                    value={historyForm.data.procurement_type}
+                                                                                    onChange={(event) => updateHistoryProcurementType(event.target.value)}
+                                                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                 >
-                                                                                    {historyFollowUpOptions.map((option) => (
+                                                                                    <option value="">{noticesText.selectProcurementType}</option>
+                                                                                    {historyProcurementTypeOptions.map((option) => (
                                                                                         <option key={option.value} value={option.value}>
                                                                                             {option.label}
                                                                                         </option>
                                                                                     ))}
                                                                                 </select>
-                                                                                {historyForm.errors.follow_up_mode ? (
-                                                                                    <p className="text-base text-rose-600">{historyForm.errors.follow_up_mode}</p>
-                                                                                ) : null}
-                                                                            </div>
+                                                                            )}
+                                                                        </FormField>
+
+                                                                        {shouldShowHistoryFollowUpField ? (
+                                                                            <FormField id={`follow_up_mode_${notice.id}`} label={noticesText.followUpLabel} error={historyForm.errors.follow_up_mode} {...WORKLIST_FIELD}>
+                                                                                {(field) => (
+                                                                                    <select
+                                                                                        {...field}
+                                                                                        value={historyForm.data.follow_up_mode}
+                                                                                        onChange={(event) => updateHistoryFollowUpMode(event.target.value)}
+                                                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    >
+                                                                                        {historyFollowUpOptions.map((option) => (
+                                                                                            <option key={option.value} value={option.value}>
+                                                                                                {option.label}
+                                                                                            </option>
+                                                                                        ))}
+                                                                                    </select>
+                                                                                )}
+                                                                            </FormField>
                                                                         ) : null}
 
                                                                         {isHistoryFormManualOffset ? (
-                                                                            <div className="space-y-2">
-                                                                                <span className="text-base font-medium text-slate-700">{noticesText.followUpOffsetMonthsLabel}</span>
-                                                                                <input
-                                                                                    type="number"
-                                                                                    inputMode="numeric"
-                                                                                    min="1"
-                                                                                    step="1"
-                                                                                    value={historyForm.data.follow_up_offset_months}
-                                                                                    onChange={(event) => historyForm.setData('follow_up_offset_months', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                                />
-                                                                                {historyForm.errors.follow_up_offset_months ? (
-                                                                                    <p className="text-base text-rose-600">{historyForm.errors.follow_up_offset_months}</p>
-                                                                                ) : null}
-                                                                            </div>
+                                                                            <FormField id={`follow_up_offset_months_${notice.id}`} label={noticesText.followUpOffsetMonthsLabel} error={historyForm.errors.follow_up_offset_months} {...WORKLIST_FIELD}>
+                                                                                {(field) => (
+                                                                                    <input
+                                                                                        {...field}
+                                                                                        type="number"
+                                                                                        inputMode="numeric"
+                                                                                        min="1"
+                                                                                        step="1"
+                                                                                        value={historyForm.data.follow_up_offset_months}
+                                                                                        onChange={(event) => historyForm.setData('follow_up_offset_months', event.target.value)}
+                                                                                        className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    />
+                                                                                )}
+                                                                            </FormField>
                                                                         ) : null}
                                                                     </div>
 
                                                                     {isHistoryFormRecurring ? (
-                                                                        <label className="space-y-2">
-                                                                            <span className="text-base font-medium text-slate-700">{noticesText.contractPeriodMonthsLabel}</span>
-                                                                            <input
-                                                                                type="number"
-                                                                                inputMode="numeric"
-                                                                                min="1"
-                                                                                step="1"
-                                                                                value={historyForm.data.contract_period_months}
-                                                                                onChange={(event) => historyForm.setData('contract_period_months', event.target.value)}
-                                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                            />
-                                                                            <p className="text-base leading-6 text-slate-600">{noticesText.contractPeriodHelp}</p>
-                                                                            {historyForm.errors.contract_period_months ? (
-                                                                                <p className="text-base text-rose-600">{historyForm.errors.contract_period_months}</p>
-                                                                            ) : null}
-                                                                        </label>
+                                                                        <FormField
+                                                                            id={`contract_period_months_${notice.id}`}
+                                                                            label={noticesText.contractPeriodMonthsLabel}
+                                                                            hint={noticesText.contractPeriodHelp}
+                                                                            error={historyForm.errors.contract_period_months}
+                                                                            {...WORKLIST_FIELD}
+                                                                        >
+                                                                            {(field) => (
+                                                                                <input
+                                                                                    {...field}
+                                                                                    type="number"
+                                                                                    inputMode="numeric"
+                                                                                    min="1"
+                                                                                    step="1"
+                                                                                    value={historyForm.data.contract_period_months}
+                                                                                    onChange={(event) => historyForm.setData('contract_period_months', event.target.value)}
+                                                                                    className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                />
+                                                                            )}
+                                                                        </FormField>
                                                                     ) : null}
 
                                                                     {isHistoryFormManualOffset ? (
@@ -2988,7 +3069,7 @@ export default function NoticeIndex({
                                     ? `${formatInteger(notices.meta.from, locale)}–${formatInteger(notices.meta.to, locale)} av ${formatInteger(notices.meta.total, locale)} ${noticesText.hitsSuffix}`
                                     : `${formatInteger(notices.meta.total ?? 0, locale)} ${noticesText.hitsSuffix}`}
                             </div>
-                            <div className="flex gap-3">
+                            <nav aria-label={a11y.pagination ?? 'Sidevalg'} className="flex gap-3">
                                 <button
                                     type="button"
                                     disabled={!notices.meta.prev_page_url}
@@ -3005,7 +3086,7 @@ export default function NoticeIndex({
                                 >
                                     {common.next}
                                 </button>
-                            </div>
+                            </nav>
                         </div>
 
                     </div>
@@ -3017,10 +3098,11 @@ export default function NoticeIndex({
                     onClose={cancelArchiveSavedNoticeForm}
                     closeDisabled={archiveHistoryForm.processing}
                     titleId="archive-notice-title"
+                    descriptionId="archive-notice-description"
                     initialFocusRef={archiveTypeRef}
                     returnFocusRef={archiveTriggerRef}
                 >
-                    <form onSubmit={(event) => submitArchiveSavedNotice(archivingNotice, event)}>
+                    <form ref={archiveFormRef} onSubmit={(event) => submitArchiveSavedNotice(archivingNotice, event)}>
                         <h2 id="archive-notice-title" className="text-xl font-semibold tracking-tight text-slate-950">
                             {noticesText.archiveDialogTitle}
                         </h2>
@@ -3028,7 +3110,7 @@ export default function NoticeIndex({
                             <p className="mt-1 text-base font-medium text-slate-700">{archivingNotice.title}</p>
                         ) : null}
 
-                        <p className="mt-3 text-base leading-6 text-slate-600">{noticesText.archiveDialogDescription}</p>
+                        <p id="archive-notice-description" className="mt-3 text-base leading-6 text-slate-600">{noticesText.archiveDialogDescription}</p>
 
                         {archivingNotice?.bid_status === 'no_go' ? (
                             <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-base leading-6 text-amber-900">
@@ -3044,7 +3126,8 @@ export default function NoticeIndex({
                                 value={archiveHistoryForm.data.history_type}
                                 onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
                                 aria-describedby={archiveHistoryForm.errors.history_type ? 'archive_history_type_error' : 'archive_history_type_help'}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                aria-invalid={archiveHistoryForm.errors.history_type ? true : undefined}
+                                className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             >
                                 <option value="">{noticesText.archiveDialogTypePlaceholder}</option>
                                 {historyTypeOptions.map((option) => (
@@ -3054,7 +3137,7 @@ export default function NoticeIndex({
                                 ))}
                             </select>
                             {archiveHistoryForm.errors.history_type ? (
-                                <p id="archive_history_type_error" className="text-base text-rose-600">{archiveHistoryForm.errors.history_type}</p>
+                                <p id="archive_history_type_error" className="text-base text-rose-700">{archiveHistoryForm.errors.history_type}</p>
                             ) : (
                                 <p id="archive_history_type_help" className="text-base text-slate-600">{noticesText.archiveDialogTypeHelp}</p>
                             )}

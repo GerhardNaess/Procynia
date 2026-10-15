@@ -1,6 +1,6 @@
 # Plan: Universell utforming (WCAG 2.2 AA)
 
-**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet; manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4–7 er ikke startet.**
+**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert og teknisk sluttkontrollert (§18.14), men ikke committet. Fase 5–7 er ikke startet.**
 Branch: `feature/wcag-accessibility`
 Utgangspunkt: `bc9070c2` (2026-10-14)
 Sist oppdatert: **2026-10-15**
@@ -54,8 +54,8 @@ Dette er også rammer for arbeidet:
 | 0 | Kartlegging, funn og plan (dette dokumentet) | Ferdig 2026-10-14 | — |
 | 1 | Felles komponenter og designregler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14. Manuell verifisering gjenstår (§15.8). | `4c594ebf` |
 | 2 | Navigasjon, layout og standardvisninger | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-14 (§16.12). Manuell verifisering gjenstår (§16.8). | `683246a7` |
-| 3 | Skjema, tabeller, dialoger og varsler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§17.12). Manuell verifisering gjenstår (§17.8). Åpen før merge: OPPF-001. | `feat(a11y): improve forms dialogs and data tables` |
-| 4 | Anbud, dokumenter og AI-arbeidsflyter | Ikke startet | — |
+| 3 | Skjema, tabeller, dialoger og varsler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§17.12). Manuell verifisering gjenstår (§17.8). Åpen før merge: OPPF-001. | `5559fcb9` |
+| 4 | Anbud, dokumenter og AI-arbeidsflyter | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§18.14). Manuell verifisering gjenstår (§18.9). Ikke committet. | — |
 | 5 | Enterprise Wiki og editor | Ikke startet | — |
 | 6 | Kvalitet/GRC, administrasjon og resterende flater | Ikke startet | — |
 | 7 | Samlet testing, regresjon og dokumentasjon | Ikke startet | — |
@@ -246,6 +246,15 @@ er bygget for kundeflaten (`Billing`).
 | A11Y-137 | Radhandlinger med `preserveScroll` som svarer med flash-feil (f.eks. Deaktiver i en lang tabell) | Feilen er ikke knyttet til et felt, og banneret står øverst, utenfor synsfeltet. Skjermleser får den (`role="alert"`). (Fase 3.) | 3.3.1 (seende) | S | Feilen vises også ved knappen som ble trykket, beskrevet av knappen (`Support/rowActionError.js`). Ikke global rulling eller fokusflytting. | Rettet for Fase 3-sidene (§17.12); andre moduler tar mønsteret i bruk i Fase 4–6 |
 | A11Y-138 | `GoNoGo/Templates/Index.jsx`, `Templates/Edit.jsx`, `Billing/Index.jsx` | Siden viser flash-meldingen selv, i tillegg til layoutens `FlashMessages`. Meldingen står to ganger på skjermen (den leses én gang). (Fase 3.) | Beste praksis | B | Sidens egen kopi fjernet; layoutens `FlashMessages` er eneste kilde. | Rettet (§17.12) |
 | A11Y-134 | `<Link>` med bare ny spørrestreng, samme tittel, uten `preserveState` | Fokus faller til `<body>`. (Fase 2.) | 2.4.3 | B | Fokus tilbake til samme kontroll etter oppdatering av samme side (`routeFocus.js`). | Rettet (§16.12) |
+| A11Y-139 | `Notices/SavedShow.jsx` (midtkolonnen) | Saksvisningen hadde en egen `<main>` inne i layoutens `<main>`: to hovedlandemerker. (Fase 4.) | 1.3.1 | B | `<div>`. | Rettet (§18) |
+| A11Y-140 | `Notices/Index.jsx` (publiseringsdato, historikkskjema) | En `<label>` omsluttet de to dato-etikettene (nestede etiketter, ugyldig HTML; bare første dato fikk navn). I historikkskjemaet hadde «Anskaffelsestype», «Oppfølging» og «Antall måneder» bildetekst, men ingen etikett: feltene var uten navn. (Fase 4.) | 1.3.1, 4.1.2 | B | `role="group"` med `aria-labelledby` for datoene; `FormField` for historikkfeltene. | Rettet (§18) |
+| A11Y-141 | `Notices/GoNoGoAssessment.jsx` (foreløpig beslutningsgrunnlag) | Oppsummering og «Beslutningen tas av deg» med `opacity-90`/`opacity-75` på grønn/gul/rød tone: under 4,5:1 (axe). (Fase 4.) | 1.4.3 | B (axe) | Full tekstfarge. | Rettet (§18) |
+| A11Y-142 | `GoNoGoAssessment.jsx` (vurderingsrad), `AI/Show.jsx` (kolonner, ansvarlig-filter, dokumentlistens topp) | Ved 320 px rullet siden sidelengs: vurderingsknappene lå i en boks som ikke kunne krympe, AI-sidens rutenett hadde et `auto`-spor som vokste med filterets `min-w-[16rem]`, og «Vis dokumentliste» kunne ikke bryte linjen. (Fase 4.) | 1.4.10 | B (E2E) | `min-w-0`/`flex-wrap`, `grid-cols-1` under `lg`, minimumsbredde først fra `sm`. | Rettet (§18) |
+| A11Y-143 | Knapper som starter asynkront arbeid: «Lagre vurdering», «Lag svar», «Generer», «Kopier svar», «Lagre endring», «Last opp …», «Lagre» på kunngjøringskort | Knappen ble `disabled` mens arbeidet pågikk (eller etterpå), og tastaturfokus falt til `<body>`. (Fase 4.) | 2.4.3 | B | `aria-disabled` + vakt i handleren mens arbeidet pågår; `disabled` bare for faste forutsetninger (ingen fil valgt). | Rettet (§18) |
+| A11Y-144 | `Notices/CpvSelector.jsx` | Forslagene var `button role="option"` i tabrekkefølgen (Tab gikk inn i listen og lukket den), listeboksen inneholdt overskrift, «Laster …» og «Ingen treff», og kombinasjonsboksen var `aria-expanded` med tom liste. (Fase 4.) | 4.1.2, 2.1.1 | B | `tabIndex=-1` på forslag, bare forslag i listeboksen, `aria-expanded` bare når det finnes forslag; antall treff kunngjøres. | Rettet (§18) |
+| A11Y-145 | `AI/Show.jsx` («Velg ansvarlig») | Dialogen kan ikke åpnes fra dagens kort: `openResponsiblePicker` kalles ingen steder. Kode uten bruker. (Fase 4.) | — | B | Migrert til `ActionDialog` slik at den er riktig når den tas i bruk. Beslutning 2026-10-15 (§18.14): koden beholdes, dialogen aktiveres ikke, ingen ny knapp; produktbeslutning senere. | Informasjon (utsatt produktbeslutning) |
+| A11Y-146 | `Notices/Index.jsx` (forretningsgjennomgang i fristskjemaet) | «Slett» på en gjennomgangsdato fjerner raden og knappen, og fokus faller til `<body>`. (Fase 4.) | 2.4.3 | B | Fokus til neste dato, ellers forrige, ellers «Legg til BR» (`businessReviewFocus.js`). | Rettet (§18.14) |
+| A11Y-147 | `Notices/Index.jsx` («Legg til BR» i fristskjemaet) | Knappen leste en nøkkel som ikke finnes (`noticesText.addBusinessReview`) og var tom: ingen synlig tekst og intet tilgjengelig navn. Eksisterte før Fase 4. (Sluttkontroll Fase 4.) | 4.1.2, 2.4.6 | B | Riktig nøkkel (`businessReviewAdd`, «Legg til BR»). | Rettet (§18.14) |
 
 **Moduler**
 
@@ -703,16 +712,19 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 - Rendret kontrast for OKLCH-farger, halvtransparente flater og gradienter, og Filaments amber-palett
   (A11Y-055).
 - Mørk modus i Filament (A11Y-056).
-- Reflow ved 320 px / 400 % for Notices, AI-arbeidsflaten, tilgangsmatrisen og
-  Kildedokumenter-tabellen (`table-fixed`, 1060 px).
+- Reflow ved 320 px / 400 % for tilgangsmatrisen og Kildedokumenter-tabellen (`table-fixed`, 1060 px).
+  Saksvisningen og AI-arbeidsflaten er kontrollert i Fase 4 (§18.8); Kunngjøringer/Saksliste ved 320 px er
+  ikke E2E-testet.
 - Om andre Wiki-generatorer enn ingest også starter med `# tittel`, og om GFM-tabeller forekommer i
   artikler (A11Y-046, -114).
 - Trykkflater med avstandsunntak (A11Y-106).
 - Hvordan `wire:poll` i Filament påvirker fokus og skjermleser.
 - Tagging av PDF (forventet: ikke tagget).
 - Om polling (`router.reload`) noen gang flytter fokus eller nullstiller felt mens brukeren skriver.
+  (Fase 4: AI-uttrekkets polling flytter ikke fokus i E2E; skriving under polling er ikke testet.)
+- Om skjermlesere faktisk leser kunngjøringene fra AI-arbeidsflaten én gang (§18.9).
 
-**Åpne oppfølgingsoppgaver:** OPPF-001 (E2E `a11y-navigation` i samlet regresjon, må lukkes før merge til `main`, §17.12.9).
+**Åpne oppfølgingsoppgaver:** OPPF-001 (E2E `a11y-navigation` i samlet regresjon, må lukkes før merge til `main`, §17.12.9). Fra Fase 4: A11Y-145 (utsatt produktbeslutning om ansvarlig-velgeren, §18.14).
 
 **Beslutninger som trengs før eller i fasene:**
 
@@ -728,6 +740,8 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 
 | Dato | Endring |
 |---|---|
+| 2026-10-15 | Teknisk sluttkontroll av Fase 4 (§18.14): A11Y-146 og ny A11Y-147 (tom «Legg til BR») rettet, dobbel opplesing av opplastingsfeil rettet, A11Y-145 utsatt som produktbeslutning, samlet regresjon 196/196. |
+| 2026-10-15 | Fase 4 implementert og automatisk verifisert (§18): Go/No-go med gruppe og `aria-pressed`, saksforløp med tekstlig status, alle skjemaer i Notices/AI via `FormField` med fokus til første feil, kravkortet uten `role="button"`, statusoverganger for kravuttrekk og generering via `announce()`, `FilePickerField` for AI-opplasting, «Velg ansvarlig» som `ActionDialog`, vertikal `ScrollRegion`, CPV-listeboks, reflow ved 320 px. Nye funn A11Y-139 til A11Y-146. Ikke committet. |
 | 2026-10-15 | Fase 3 godkjent for commit med én kjent E2E-feil (OPPF-001, eksisterende på `683246a7`, må rettes før merge). |
 | 2026-10-15 | Teknisk sluttkontroll av Fase 3 (§17.12): A11Y-019 (feltkant 3,49:1), A11Y-137 (feil ved radhandlingen) og A11Y-138 (én flash-melding) rettet; `modalInert` sikret mot gjenværende `inert`. |
 | 2026-10-15 | Fase 3 implementert og automatisk verifisert (§17): `ActionDialog` med `inert` bakgrunn og modalstabel, 9 egne dialoger (5 komponenter) migrert, `FormField` tatt i bruk i 10 skjemaer, `useFocusFirstError`, `ScrollRegion`, `InfoHint` med gyldig HTML og pekerbro, tilgangsmatrise uten fokustap. Nye funn A11Y-135 til A11Y-138. Ikke committet. |
@@ -1460,3 +1474,268 @@ Kontroll på den endelige Fase 3-koden før commit. Branch `feature/wcag-accessi
 #### 17.12.10 Vurdering
 
 Sluttkontrollen fant og rettet tre registrerte funn (A11Y-019, -137, -138) og én svakhet i `modalInert` (mulig gjenværende `inert`). Ingen ruter, tilganger, valideringsregler, data eller forretningslogikk er endret. Enhetstester, lint, bygg og PHP er grønne; E2E-utvalget har én feil, og den er reprodusert på `683246a7` og dermed ikke fra Fase 3. Fase 3 er teknisk klar for commit. Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.
+
+---
+
+## 18. Fase 4 – gjennomføringsrapport (2026-10-15)
+
+Branch `feature/wcag-accessibility`, utgangspunkt `5559fcb9` (Fase 3), rent arbeidstre ved start. Begrepene er de samme som i §17: **Kode** = implementert, **Auto** = automatisk test i repoet, **Agent** = kontrollert av agenten i ekte nettleser (Playwright, Chromium), **Manuell** = kontrollert av en person. Ingen manuell verifisering er gjort. Fase 4 er ikke committet.
+
+### 18.1 Omfang og arbeidsmåte
+
+Kartlagt før endringene (intern oversikt per fil og funn):
+
+| Modul | Filer | Hva som finnes |
+|---|---|---|
+| Kunngjøringer, saksliste, historikk | `Notices/Index.jsx`, `Notices/CpvSelector.jsx`, `Components/App/DiscoveryNoticeCard.jsx` | Livesøk (Doffin/TED), filtre, CPV-kombinasjonsboks, privat forespørsel, frist- og historikkskjema per sak, arkivdialog, paginering, varsler |
+| Saksvisning og Go/No-go | `Notices/SavedShow.jsx`, `Notices/GoNoGoAssessment.jsx`, `Components/App/BidStatusPipeline.jsx` | Saksforløp, fasekommentarer, informasjonssenter (aksjoner), statushandlinger med lukkeårsak, No-Go-dialog, gjenåpning, bid manager/eier (vanlig POST), saksinnsyn, arkivering, Go/No-go-vurdering |
+| Kunngjøringsdetalj | `Notices/Show.jsx` | Beskrivelse, avdelingskontekst, CPV, dokumentnedlasting |
+| AI-arbeidsflaten | `AI/Show.jsx`, `AI/Index.jsx`, `AI/Instructions.jsx`, `AI/DocumentPreview.jsx`, `AI/wikiAnswerMarkdown.js` | Dokumentopplasting, dokumentstatus og kravuttrekk med polling (3 s), kravliste med godkjenning/avvisning/sletting og arbeidsstatus, manuelt krav, redigering av krav, Wiki-svar (generering via axios, opptil 120 s), Markdown-visning og -redigering, kopiering, dokumentasjon/kilder, avansert vurdering, ansvarlig-velger |
+
+Det finnes ingen dra-og-slipp-opplasting, ingen egen spørsmål/svar-modul (spørsmål og svar er kravene og Wiki-svarene i AI-arbeidsflaten), og ingen kvalitetsscore i tall; kvalitet vises som dekning, samsvar og proveniens (merker med tekst). «Godkjenning» i disse modulene er godkjenning av krav (Godkjenn / Til utkast / Avvis / Gjenopprett) og Go/No-go-beslutningen.
+
+Endringene er gjort på presentasjonsnivå. Ingen prompter, modeller, AI-logikk, polling-intervaller, kø, parsing, ruter, kontrollere, validering, autorisasjon, data eller migrasjoner er endret. De store filene er ikke refaktorert; hver endring er avgrenset til attributter, etiketter, fokus og kunngjøringer.
+
+### 18.2 Implementert
+
+| Del | Hva | Filer | Funn | Status |
+|---|---|---|---|---|
+| A. Go/No-go | Hvert vurderingspunkts Lav/Middels/Høy er en navngitt gruppe (punktets tittel, beskrevet av kortbeskrivelsen) av veksleknapper med `aria-pressed`. Valgt verdi har hake i tillegg til farge. Et nytt trykk fjerner valget, som før (derfor ikke radio). Begrunnelsesfeltet heter «Begrunnelse for X (valgfritt)». «?» heter «Vurderingshjelp for X» og får fokus tilbake når hjelpepanelet lukkes. Foreløpig beslutningsgrunnlag kunngjøres når det dukker opp eller endres. «Lagre vurdering» forblir fokuserbar (`aria-disabled`), og en avvist lagring sier fra ved knappen (`role="alert"`). Seksjonen er en navngitt region. Fremdriftsstripen og fargeprikken er dekor (`aria-hidden`). | `Notices/GoNoGoAssessment.jsx` | A11Y-003, -104, -141, -142, -143 | Kode + auto (enhet + E2E) |
+| B. Saksforløp | Stegene er en `<ol>` («Saksforløp»), nåværende steg `aria-current="step"`, og hvert steg sier «fullført», «nåværende steg» eller «gjenstår» (skjult tekst). «Steg N» 12 px `slate-600` (var 11 px `slate-500`). | `Components/App/BidStatusPipeline.jsx` | A11Y-024, -016 | Kode + auto |
+| C. Saksvisningen | Én `main` (A11Y-139). Alle åtte skjemaer går via `FormField`: fasekommentar, ny aksjon (påkrevd beskrivelse merket), lukking av aksjon, lukkeårsak, bid manager og kommersiell eier (vanlig POST: seksjonen åpnes og feltet får fokus når siden kommer tilbake med feil), saksinnsyn, gjenåpning, No-Go og arkivering. Feil er koblet til feltet, felt er `aria-invalid`, og fokus går til første feil etter avvist innsending. Dialogene har beskrivelse (`descriptionId`). «Fjern tilgang» heter «Fjern tilgang <navn>», og fokus går videre til skjemaet når raden forsvinner. Disclosure-knapper har `aria-expanded`. | `Notices/SavedShow.jsx` | A11Y-013, -014, -028, -109, -121, -139 | Kode + auto |
+| D. Kunngjøringer og saksliste | Livesøket heter «Live søk i …» (synlig tittel), ikke bare plassholder (A11Y-040). Publiseringsdato er en gruppe, ikke nestede etiketter (A11Y-140). Privat forespørsel, frister, privat sak og historikk går via `FormField`; tre historikkfelt fikk navn; påkrevde felt er merket; feiltekst `rose-700`. Antall treff kunngjøres etter søk, filter og kildebytte (ikke ved paginering eller polling). Kortknappene («Åpne sak», «Rediger frister», «Flytt til historikk», «Slett», «Åpne i Doffin») er beskrevet av kortets tittel. Avvist sletting vises ved knappen (`rowActionError`). Paginering er en navngitt `nav`. Varsel-kortene bruker h2, søketreff h3. | `Notices/Index.jsx`, `Components/App/DiscoveryNoticeCard.jsx` | A11Y-013, -040, -109, -111, -121, -137, -140 | Kode + auto |
+| E. Kunngjøringskort | «Lagre» er `aria-disabled` når saken er lagret, og har stabil id, så fokus blir på (eller kommer tilbake til) knappen etter lagring. «Vis mer» har `aria-expanded`. | `Components/App/DiscoveryNoticeCard.jsx` | A11Y-028, -143 | Kode + auto |
+| F. CPV-velger | Forslagene er utenfor tabrekkefølgen (`aria-activedescendant` styrer), listeboksen inneholder bare forslag, `aria-expanded` bare når det finnes forslag, og antall treff kunngjøres når et søk svarer. | `Notices/CpvSelector.jsx` | A11Y-144, -111 | Kode + auto |
+| G. AI: dokumenter | Opplasting via `FilePickerField` (nytt: `multiple`, `files`, `busy`, `inputRef`, bakoverkompatibelt). Feltet heter «Velg filer», beskrives av valgte filer, tillatte filtyper og feil; feilen er `role="alert"` og feltet får fokus ved avvisning. Under opplasting er feltet og knappen `aria-disabled` (fokus beholdes). «Forhåndsvis» er beskrevet av filnavnet; dokumentlisten har `aria-expanded`. Dokumentstatus var allerede tekst («Venter på behandling», «Behandles», «Ferdigstiller krav», «Ferdig behandlet», «Feilet»), aldri bare farge. | `AI/Show.jsx`, `Components/App/FilePickerField.jsx` | A11Y-011, -028 | Kode + auto |
+| H. AI: kravuttrekk | Banneret er ikke lenger en live-region som monteres med innhold og oppdateres ved hver polling (A11Y-112). En overgang kunngjøres én gang: «Kravuttrekket er startet.», «Kravuttrekket er ferdig. N krav er hentet ut.» (polite) og «Kravuttrekket feilet.» (assertive). Tilstanden siden åpnes i, kunngjøres ikke. | `AI/Show.jsx`, `AI/aiStatusAnnouncements.js` (ny), `Support/statusAnnouncement.js` (ny) | A11Y-045, -112 | Kode + auto (enhet + E2E med ekte polling) |
+| I. AI: kravkort | Kortet er ikke lenger `role="button"` med knapper og felt inni (A11Y-044); kravteksten er knappen som åpner svaret, med `aria-current` og ring i `violet-500` (≥ 3:1) for det åpne kravet. «Lag svar» har ikke `aria-pressed` (A11Y-115) og er `aria-disabled` mens listen er låst. Rad-handlinger (godkjenn, til utkast, avvis, gjenopprett, arbeidsstatus, ansvarlig, analyser, avvis alle, slett alle, slett) gir fokus tilbake til samme kontroll eller til kravet når serveren har svart, men bare hvis fokus faktisk gikk tapt (`refocusIfLost`, ny i `focusManagement.js`). Bekreftelsespanelene (slett/avvis, enkelt og alle) får fokus ved åpning (navngitt gruppe) og gir det tilbake ved Avbryt. Redigering av krav og manuelt krav: fokus til første felt ved åpning, tilbake til knappen ved lukking. | `AI/Show.jsx`, `Support/focusManagement.js` | A11Y-014, -044, -115 | Kode + auto |
+| J. AI: skjema | Manuelt krav og redigering av krav via `FormField`; «i» for Kravtype står utenfor etiketten (A11Y-135). Feltfeil koblet, fokus til første feil, skjemafeil som ikke gjelder et felt vises én gang som oppsummering. Promptfeltet er beskrevet av hinten. AI-instrukser via `FormField`. | `AI/Show.jsx`, `AI/Instructions.jsx` | A11Y-013, -135 | Kode + auto |
+| K. AI: svar | «Svarutkastet genereres …» kunngjøres ved start og «Svarutkastet er klart.» når det er ferdig; selve teksten leses ikke opp, og fokus flyttes ikke. Feil er `role="alert"` i svarpanelet. Generer, Kopier og Lagre er `aria-disabled` mens de arbeider. «Rediger» flytter fokus til Markdown-feltet (beskrevet av hinten), Lagre/Avbryt gir det tilbake til «Rediger». «Svaret er lagret.» og «Svaret er kopiert.» kunngjøres; kopifeil er `role="alert"`. «Ekspertutkast», «Dokumentasjon og samsvar» og «Kilder» er h3 under panelets h2. Svarpanelet er en navngitt seksjon. Merker for dekning, samsvar og proveniens er tekst. | `AI/Show.jsx` | A11Y-045, -116 | Kode + auto (generering mocket) |
+| L. Rulleflater | `ScrollRegion` har fått `axis="y"` (bakoverkompatibelt): kravlisten, svarpanelet og det rendrede svaret blir navngitte, fokuserbare regioner bare mens innholdet er høyere enn boksen. Kopieringen leser fortsatt bare boksens barn, så attributtene havner ikke på utklippstavlen. AI-oversiktens tabell bruker `ScrollRegion`, `<caption>`, `scope` og radens navn på «Åpne sak». | `Components/App/ScrollRegion.jsx`, `AI/Show.jsx`, `AI/Index.jsx` | A11Y-108, -109, -110 | Kode + auto |
+| M. Dialog | «Velg ansvarlig» er `ActionDialog` (rolle, navn, beskrivelse, felle, Escape, fokusretur, inert bakgrunn, «Lukk dialog»). Merk A11Y-145: dialogen åpnes ikke fra dagens grensesnitt. | `AI/Show.jsx` | A11Y-002 | Kode + auto (enhet) |
+| N. Reflow | Go/No-go-raden kan bryte linjen; AI-sidens kolonner og filter kan ikke presse siden bredere enn 320 px; dokumentlistens topp bryter linjen. | `GoNoGoAssessment.jsx`, `AI/Show.jsx` | A11Y-142 | Kode + auto (E2E 320/640) |
+| O. Felt og kontrast | `border-field-border` på alle tekstfelt og nedtrekkslister i Fase 4-filene (vurdert enkeltvis; deaktiverte felt beholder sin stil). Feiltekst `rose-700`. Tekst under 12 px fjernet. | Fase 4-filene | A11Y-016, -019 | Kode + auto |
+| i18n | `procynia.a11y.*`: `pipeline_label`, `step_number`, `step_completed`, `step_current`, `step_upcoming`, `gonogo_comment`, `gonogo_help`, `gonogo_verdict`, `gonogo_save_failed`, `ai_extraction_started`, `ai_extraction_completed`, `ai_extraction_failed`, `ai_answer_generating`, `ai_answer_ready`, `ai_answer_saved`, `ai_answer_copied`, `pagination`. no + en. | `lang/{no,en}/procynia.php` | — | Auto |
+| Lint | `lint:a11y` dekker 11 nye filer (56 totalt). Ingen regel er slått av. De 6 reelle funnene i filene (kravkortet, egen modal, avkrysning i etikett uten tekst) er rettet. | `eslint.config.js` | — | Auto |
+
+### 18.3 AI-status og dokumentstatus
+
+- **Prinsipp:** én overgang, én kunngjøring, gjennom de faste regionene i `announcer.js`. Ingen nye live-regioner. Polling (3 s) og AI-kall (opptil 120 s) er uendret.
+- **Kravuttrekk:** tilstanden reduseres til `processing`, `failed` eller `none` (`extractionState`). `useTransitionAnnouncement` taler bare når tilstanden endres etter første visning. Agent: med et dokument i «Behandles» gikk minst to polling-runder (6,5 s) uten kunngjøring; da dokumentet ble ferdig, kom «Kravuttrekket er ferdig. 2 krav er hentet ut.» én gang.
+- **Generering:** kunngjøres ved start og ved ferdig svar fra handleren, ikke fra visningen; teksten i svaret leses ikke opp automatisk. Feil vises i panelet som `role="alert"` (ikke i tillegg kunngjort).
+- **Fokus:** flyttes ikke når resultatet kommer. Dette avviker bevisst fra den opprinnelige løsningsteksten for A11Y-045 i §7.2 («fokus til svaroverskriften når svaret er klart»): brukeren kan ha gått videre mens et svar genereres i opptil to minutter, og et fokushopp ville avbryte arbeidet. Kunngjøringen sier at svaret er klart; overskriften «Ekspertutkast» er nå en h3 som kan nås med overskriftsnavigasjon.
+- **Dokumentstatus:** var tekst fra før (`getDocumentStatusMeta`, `getRequirementStatusMeta`); statusmerkene er uendret.
+
+### 18.4 Tester og resultater
+
+Resultatene er fra kjøringer på endelig kode.
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | **1766 bestått, 0 feilet, 0 hoppet over.** Ny: `resources/js/Support/a11yPhase4.test.js` (53 tester: statusoverganger, kravuttrekk, kunngjøringer ved generering/lagring/kopiering, `aria-disabled` på arbeidsknapper, kravkortet, InfoHint utenfor etikett, Go/No-go-gruppe/`aria-pressed`/navn/fokusretur/feil/dom, én `main`, saksforløp, livesøkets navn, ingen nestede etiketter, feltnavn i historikk, fokus til første feil i alle Fase 4-skjema, CPV-listeboks, «Lagre» på kort, «Velg ansvarlig» som `ActionDialog`, `FilePickerField` med flere filer, vertikal `ScrollRegion`, reflow-klasser, `refocusIfLost`, språknøkler). Tre eksisterende kildetester (`requirementDeletion`, `filterPanelLogic`, `sectionHierarchy`) låser markup; koden ble tilpasset dem, testene er uendret. |
+| `npm run lint:a11y` (Node 22) | **0 feil, 0 advarsler** (56 filer). |
+| `npm run build` | Bestått. |
+| PHP, målrettet (`A11yTranslationsTest`, `SharedTranslationsLocaleTest`, `AiControllerTest`, `RequirementWikiAnswerControllerTest`, `RequirementDeletionTest`, `GoNoGoAssessmentTest`, `CustomerSavedNoticeWorklistTest`, `SavedNoticeSourceIdentityTest`, `LiveSearchSourceSelectionTest`, `MultiSourceOpportunity(Ui)Test`, `CommercialOwnerRoleTest`, `XlsxRequirementImportTest`, `AiQuotaCustomerUxTest`, `CustomerFrontendAccessTest`, `BidWorkflowNotificationTest`) | **355 bestått, 0 feilet** (2504 påstander). |
+| Pint (språkfilene, ny fixture) | Bestått. |
+| E2E `a11y-tenders-ai.spec.js` (ny, 9 tester, egen fixture `Tests\Support\A11yTenderAiE2EFixture`) | **9 bestått, 0 feilet.** Go/No-go med tastatur (gruppe, `aria-pressed`, hake, hjelp inn/ut, dom kunngjort, lagring med fokus beholdt, toast), saksforløp og én `main`; No-Go-dialog (fokus, påkrevd, avvist → fokus på årsak, Escape → utløser); privat forespørsel avvist → fokus, `aria-invalid`, beskrivelse; fasefilter kunngjør treff; AI-opplasting (navn, beskrivelse, ugyldig filtype avvist uten opplasting → fokus og alert), kravkortet (ingen `role="button"`, `aria-current`), manuelt krav (fokus inn, avvist → fokus), slett-bekreftelse (fokus inn og tilbake); generering mocket (kunngjort start/ferdig, fokus beholdt, `aria-disabled`), feilet generering (alert); redigering, lagring og kopiering (fokus og kunngjøring); kravuttrekk med ekte polling (ingen kunngjøring underveis, én ved ferdig); reflow 320 og 640 px. axe uten brudd på Go/No-go (urørt og utfylt), No-Go-dialog med feil, privat forespørsel med feil, opplastingsskjema, svarpanel, kravkort og manuelt krav med feil. Ingen ekte AI-kall. |
+| E2E-regresjon, 29 spesifikasjoner (195 tester) | Kjøring 2: **195 bestått, 0 feilet**. Kjøring 1: én innloggingstidsavbrudd (18.5). |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate, jf. prosjektregel). |
+
+### 18.5 Regresjon og eksisterende feil
+
+Utvalg: de 25 spesifikasjonene fra §17.12.7 pluss `a11y-tenders-ai`, `ai-answer-markdown-table`, `ai-experience` og `wiki-navigation` (29 spesifikasjoner, 195 tester), Chromium, endelig kode, Vite dev-server i gang, ingen kildeendringer under kjøringen.
+
+| Kjøring | Resultat | Merknad |
+|---|---|---|
+| 1 | **186 bestått, 1 feilet, 8 ikke kjørt** (14,0 min) | Feilen var innloggingen i `beforeEach` for første test i `a11y-tenders-ai` (blir stående på `/login` i 15 s); ingen påstand nådde Fase 4-koden. Applogg: testen rett før (`a11y-navigation`, «a rejected sign-in …») logger med vilje feil passord; den neste innloggingen ble aldri registrert, og ingen strupe-hendelse finnes. Samme symptom som innloggingstidsavbruddene i §17.12.7. De 8 ble ikke kjørt fordi specen er seriell. Specen besto deretter isolert 9/9 på samme kode. Vurdert som testmiljø, ikke regresjon. |
+| 2 | **195 bestått, 0 feilet** (16,0 min) | Hele utvalget grønt, også `a11y-navigation.spec.js:155` (OPPF-001). |
+
+- **OPPF-001:** testen besto i begge kjøringene her (to samlede kjøringer på rad). Akseptansekriteriet i §17.12.9 krever tre påfølgende samlede kjøringer på det endelige utvalget før oppgaven lukkes, og at en eventuell rettelse dokumenteres; ingen kode er endret for den. Oppgaven er fortsatt **åpen**, men har nå to grønne datapunkter.
+- **Eksisterende kildetester:** `requirementDeletion.test.js`, `filterPanelLogic.test.js` og `sectionHierarchy.test.js` låste markup som Fase 4 berørte (signaturen til `updateRequirementReviewStatus`, «Slett …» på CPV-brikker, `<h3>` uten attributter på sakskort). Koden ble tilpasset slik at testene står uendret.
+
+### 18.6 Funnstatus etter Fase 4
+
+Lukket betyr: utbedret og verifisert automatisk innenfor testomfanget i 18.4, på sidene i Fase 4. Ingen er manuelt verifisert.
+
+| ID | Status |
+|---|---|
+| A11Y-002 | «Velg ansvarlig» lukket (auto, enhet; dialogen kan ikke åpnes i dag, se A11Y-145). Gjenstår: fire Wiki-dialoger (Fase 5). |
+| A11Y-003 | Lukket (auto: enhet + E2E med tastatur og axe). |
+| A11Y-011 | Lukket for AI-opplastingen (auto). Gjenstår: `Wiki/Index.jsx` (Fase 5), `SupplierManagement/Import.jsx` (Fase 6). |
+| A11Y-013 | Lukket for alle skjemaer i Fase 4-filene (auto). GRC (Fase 6) og Wiki (Fase 5) gjenstår. |
+| A11Y-014 | Lukket for AI-arbeidsflaten (bekreftelsespaneler, redigering, radhandlinger) og saksinnsyn (auto). A11Y-146 (forretningsgjennomgang) åpen. |
+| A11Y-016, -019 | Lukket i Fase 4-filene (beregnet + axe på de testede flatene). To dekorative ikoner i `slate-400` står igjen (bygning ved oppdragsgiver), tekst følger av navnet ved siden av. |
+| A11Y-024 | Lukket for `BidStatusPipeline` (auto). Wiki-tidslinjen (Fase 5) og Ledelsens gjennomgåelse (Fase 6) gjenstår. |
+| A11Y-028 | Lukket for Notices (`Index`, `Show`, `SavedShow`), `DiscoveryNoticeCard` og AI-arbeidsflaten (auto, enhet). Wiki gjenstår (Fase 5). |
+| A11Y-040 | Lukket (auto). |
+| A11Y-044 | Lukket (auto). Synlig endring: et klikk på kortets kant åpner ikke lenger svaret; kravteksten, «Lag svar» og «Prompt» gjør. |
+| A11Y-045 | Lukket med endret løsning (18.3): kunngjøring, ikke fokusflytting (auto). |
+| A11Y-104 | Lukket for Go/No-go-hjelpen (auto). |
+| A11Y-108, -109, -110 | Lukket i AI-oversikten, kravlisten, svarpanelet og kortene i Notices (auto). |
+| A11Y-111 | Lukket for livesøk, saksliste/historikk og CPV-forslag (auto for sakslistens filter; livesøket mot Doffin er ikke E2E-testet fordi det kaller et eksternt API). |
+| A11Y-112 | Lukket for AI-kravuttrekket (auto med ekte polling). `Wiki/Index.jsx:638` gjenstår (Fase 5). |
+| A11Y-115, -116 | Lukket (auto). |
+| A11Y-121 | Delvis: påkrevde felt merket og forklart i privat forespørsel, ny aksjon, lukkeårsak, No-Go og gjenåpning. GRC (Fase 6). |
+| A11Y-133, -137 | Radfeil ved sletting av sak i saksliste og historikk (kode + enhet; avvisning er vanskelig å fremprovosere i E2E fordi knappen sjekker `can_delete` først). |
+| A11Y-135 | Lukket (auto). |
+| A11Y-139 – -144 | Nye, rettet (auto). |
+| A11Y-145 | Ny, informasjon. Utsatt produktbeslutning (§18.14); blokkerer ikke Fase 4. |
+| A11Y-146 | Rettet i sluttkontrollen (§18.14). |
+| A11Y-147 | Ny, rettet i sluttkontrollen (§18.14). |
+| A11Y-105 | Uendret delvis: hardkodet norsk står igjen i deler av Notices og AI (`DocumentPreview`, `Instructions`, CPV-tekster, `BidStatusPipeline`-etikettene, enkelte etiketter i sakskortene). Etter prosjektregelen er bare nye strenger oversatt; eksisterende sider oversettes når det bestilles. |
+
+### 18.7 Synlige endringer
+
+- **Go/No-go:** valgt vurdering har en hake foran teksten. Teksten i foreløpig beslutningsgrunnlag er ikke lenger falmet. På smal skjerm bryter vurderingsknappene linjen under punktets tittel i stedet for å presse siden bredere.
+- **Saksforløp:** «Steg N» 12 px og mørkere grå.
+- **AI-arbeidsflaten:** opplastingsfeltet er Procynias felles filvelger (sekundærknapp «Velg filer», valgte filer og tillatte filtyper under), med «Last opp …» ved siden av; den egne fiolette pillen og den doble «Velg filer»-teksten er borte. Det åpne kravet har en tydeligere ring (`violet-500` i stedet for `violet-300`). Et klikk på kortets kant åpner ikke svaret; kravteksten er klikkbar (og får fiolett tekst ved hover). Tekstfelt har tydeligere kant.
+- **Notices og saksvisning:** tekstfelt har tydeligere kant, feiltekst litt mørkere rød, påkrevde felt har * og forklaringen «Felt merket med * må fylles ut.». Livesøkets ikon er `slate-500`. Avvist sletting vises også ved knappen.
+- **Uendret:** ruter, handlinger, rekkefølgen av felt, polling, AI-svar og alle data.
+
+### 18.8 Nettleserkontroll (agent)
+
+Kontrollert i Chromium (Playwright) på `localhost:8080` med Vite dev-server:
+
+- **Bredder:** 320 px og 640 px (E2E), 1440 px (alle testene). Ved 320 px er 400 % zoom av en 1280 px-skjerm dekket; 640 px tilsvarer 200 % av 1280 px. Ingen sidelengs rulling på saksvisningen eller AI-arbeidsflaten med dokumentliste, svar og skjema åpne (etter A11Y-142).
+- **Tastatur:** Go/No-go (Space/Enter, Escape), No-Go-dialog, opplasting, kravkort, bekreftelsespaneler, svarredigering — fokus synlig (app-rammen fra Fase 1) og aldri tapt i de testede flytene.
+- **Ikke kontrollert:** nettleserens egen zoom (Ctrl/Cmd +), Firefox, Safari, forced-colors.
+
+### 18.9 Manuell testing som gjenstår
+
+I tillegg til §15.8.7, §16.8 og §17.8:
+
+1. **NVDA + Firefox/Chrome og VoiceOver + Safari:**
+   1. Go/No-go: gruppen leses med punktets navn og beskrivelse, knappene som «trykket/ikke trykket», dommen leses én gang når siste punkt vurderes.
+   2. AI: last opp et dokument og vent på uttrekket — «startet» og «ferdig» leses én gang hver, ikke ved hver polling; banneret kan leses i lesemodus.
+   3. Lag svar: «genereres» og «klart» leses, svaret leses ikke automatisk, fokus blir der brukeren er.
+   4. Kopier svar: «Svaret er kopiert.» leses; lim inn i Word og kontroller at innholdet er uendret (attributtene på rulleboksen skal ikke være med).
+   5. Kravkortet: kravteksten leses som knapp, det åpne kravet som «gjeldende».
+   6. CPV-velgeren: piltaster gjennom forslagene leses (aktiv etterkommer), Tab går videre ut av feltet.
+2. **Ekte Safari:** at `aria-disabled`-knappene (Lag svar, Generer, Kopier, Lagre vurdering) beholder fokus også der, og at de vertikale regionene kan rulles med piltaster.
+3. **Livesøk mot Doffin/TED:** at antall treff leses etter et søk (krever ekstern tjeneste, ikke E2E-testet).
+4. **Zoom 200/400 %** med nettleserens egen zoom på saksvisningen og AI-arbeidsflaten.
+5. **Visuelt:** opplastingsfeltet og ringen rundt det åpne kravet (18.7).
+
+### 18.10 Kjente risikoer og begrensninger
+
+- `refocusIfLost` og panel-fokus bygger på element-id-er (`ai-req-<id>-…`). En fremtidig endring som fjerner id-ene, gir tilbake fokustap uten at noe annet feiler; enhetstestene låser de viktigste.
+- `aria-disabled`-knappene må vokte seg selv i handleren. Det er gjort for alle som ble endret; nye knapper som kopierer mønsteret, må gjøre det samme.
+- Kunngjøring av antall treff i livesøket er ikke testet mot den eksterne tjenesten.
+- «Velg ansvarlig» (A11Y-145) er bare enhetstestet, fordi den ikke kan åpnes.
+- Polling-rekkefølge: hvis et dokument går fra «Behandles» via «Feilet» tilbake til «Behandles» (ny kjøring), kunngjøres både feil og ny start — ønsket, men ikke testet.
+- E2E kjører bare i Chromium.
+
+### 18.11 Oppfølgingsoppgaver
+
+- **OPPF-001** (fra Fase 3) er fortsatt åpen; se 18.5 for hvordan testen oppførte seg i Fase 4-regresjonen. Akseptansekriteriet i §17.12.9 gjelder uendret.
+- **A11Y-145:** produktbeslutning om ansvarlig-velgeren.
+- ~~**A11Y-146:** fokus etter «Slett» på en forretningsgjennomgang.~~ Rettet i sluttkontrollen (§18.14).
+- **A11Y-105:** oversettelse av eksisterende hardkodet norsk i Notices/AI når det bestilles.
+
+### 18.12 Anbefalinger for Fase 5
+
+1. Gjenbruk `useTransitionAnnouncement` for Wiki-kjøringene (A11Y-112 i `Wiki/Index.jsx`): reduser kjøringens status til noen få tilstander og kunngjør bare overganger.
+2. Bruk `FilePickerField` med `busy` for kildeopplastingen (A11Y-011) og `ActionDialog` for de fire dialogene (A11Y-002).
+3. Bruk `aria-disabled` + vakt for påstandsgodkjenning og publisering, og `refocusIfLost` etter `router.patch` på påstander (A11Y-014).
+4. `ScrollRegion axis="y"` for artikkel- og påstandspaneler med fast høyde.
+5. Kontroller reflow ved 320 px tidlig: Fase 4 fant tre tilfeller av «boks som ikke kan krympe» (A11Y-142).
+
+### 18.13 Vurdering
+
+Alle Fase 4-funnene fra planen er rettet eller dokumentert med begrunnelse: A11Y-003, -040, -044, -045 (endret løsning, 18.3), -112, -115, -116, -135 og Fase 4-delene av -002, -011, -013, -014, -016, -019, -024, -028, -104, -108–-111, -121, -137. Åtte nye funn er registrert (A11Y-139 til -146); seks er rettet, ett er informasjon (A11Y-145) og ett er åpent (A11Y-146). Ingen prompter, modeller, AI-logikk, polling, ruter, kontrollere, validering, tilganger, data eller migrasjoner er endret. Enhetstester, lint, bygg og målrettet PHP er grønne; den nye E2E-specen og den andre samlede regresjonen er grønne. Fase 4 er etter agentens vurdering teknisk klar for sluttkontroll, men er **ikke** sluttkontrollert, ikke manuelt verifisert med skjermleser, ekte Safari/Firefox, nettleserzoom eller Windows-høykontrast, og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. Full E2E- og PHP-suite er merge gate og er ikke kjørt.
+
+### 18.14 Teknisk sluttkontroll av Fase 4 (2026-10-15)
+
+Kontroll på Fase 4-koden før commit. Branch `feature/wcag-accessibility`, HEAD `5559fcb9`; alle Fase 4-endringer fra 18.2 er bevart, og ingen fremmede filer er med (ignorerte lokale artefakter som `public/hot`, `test-results/` og `playwright-report/` er ikke en del av endringen). Alle resultater i 18.14.6 er fra kjøringer **etter** siste kodeendring.
+
+#### 18.14.1 Kodeendringer i sluttkontrollen
+
+| # | Funn | Rettelse | Filer | Test |
+|---|---|---|---|---|
+| 1 | A11Y-146: fokus etter «Slett» på en forretningsgjennomgang | Fokus til neste dato (som nå har samme posisjon), ellers forrige, ellers «Legg til BR». `refocusIfLost` har fått et valgfritt `always`: radene har posisjonsbasert `key`, så React gjenbrukte den trykkede «Slett» for neste rad — fokus gikk ikke tapt, men sto på en knapp som ville slettet neste dato ved et nytt Enter. Ingen endring i slettingen eller i skjemaet (endringen lagres fortsatt først ved «Lagre»). | `Notices/businessReviewFocus.js` (ny), `Notices/Index.jsx`, `Support/focusManagement.js` | Enhet + E2E |
+| 2 | A11Y-147 (ny, eksisterende feil): «Legg til BR» var en tom knapp | Riktig oversettelsesnøkkel | `Notices/Index.jsx` | Enhet + E2E |
+| 3 | Dobbel opplesing av opplastingsfeil: `FilePickerField` gjør feilen til `role="alert"` (Fase 1), og Fase 4 flytter i tillegg fokus til feltet, der feilen er beskrivelsen | Nytt valg `announceError` (standard `true`, uendret for de andre filvelgerne); AI-opplastingen bruker `false`, så feilen høres én gang, ved feltet (Fase 3-regelen) | `Components/App/FilePickerField.jsx`, `AI/Show.jsx` | Enhet + E2E |
+
+Ingen andre kodeendringer. Ingen tester er svekket; Fase 1-testen som låser `role="alert"` i `FilePickerField` står uendret.
+
+#### 18.14.2 A11Y-145 – «Velg ansvarlig»
+
+Beslutning: koden beholdes, dialogen aktiveres ikke, ingen ny knapp eller navigasjon, funksjonaliteten slettes ikke. Om ansvarlig-velgeren skal tas i bruk eller fjernes, er en produktbeslutning som vurderes senere. Dialogen er `ActionDialog` og vil være tilgjengelig hvis den tas i bruk. Blokkerer ikke Fase 4.
+
+#### 18.14.3 AI-status og kunngjøringer
+
+| Kontroll | Resultat |
+|---|---|
+| Én kunngjøring per overgang | `transitionAnnouncement` taler bare når tilstanden endres og aldri for første observasjon (enhet). Kravuttrekk: ferdig kunngjort én gang etter ekte polling (E2E). |
+| Ingen gjentakelse ved polling | Minst to polling-runder (6,5 s) i «Behandles» uten noe i `polite`/`assertive` (E2E). `announce()` har i tillegg duplikatfilteret fra Fase 1. |
+| Svaret leses ikke automatisk | Bare «Svarutkastet genereres …» og «Svarutkastet er klart.» kunngjøres; svarteksten rendres utenfor live-regionene (kode + E2E). |
+| Ingen fokusflytting | Fokus blir på «Lag svar» gjennom hele genereringen og etterpå (E2E). |
+| Feil | Generering: `role="alert"` i svarpanelet (E2E). Kopiering: `role="alert"`. Uttrekk: assertive kunngjøring, banneret er ikke live. Opplasting: fokus + beskrivelse, ikke i tillegg alert (rettelse 3). |
+| Lagring og kopiering | «Svaret er lagret.» og «Svaret er kopiert.» (E2E); fokus tilbake til «Rediger» etter lagring. |
+| Ingen dobling med live-regioner | Ingen nye live-regioner; alt går gjennom `announce()`. Det gamle uttrekksbanneret (`role="status"`/`aria-live`) er fjernet. Toasten brukes bare for Inertia-flash (Go/No-go), ikke for axios-kallene. |
+
+AI-generering og polling er ikke endret.
+
+#### 18.14.4 Go/No-go og dokumentopplasting
+
+| Kontroll | Resultat |
+|---|---|
+| Valgt vurdering ikke bare farge | `aria-pressed` + hake-ikon (E2E). |
+| Navngitte grupper | `role="group"` med punktets tittel, beskrevet av kortbeskrivelsen (E2E). |
+| Flere filer | `FilePickerField multiple`: valgte filnavn vises og er feltets beskrivelse (E2E med én fil, enhet for `Array.from(files)`). Flere filer samtidig er ikke E2E-testet. |
+| Fokus under opplasting | Feltet og knappen er `aria-disabled` mens filene lastes opp, og `submitDocuments` avviser nye innsendinger (kode + enhet). En ekte opplasting er ikke E2E-testet, fordi den starter kravuttrekk med AI. |
+| Feil ved opplasting | Ugyldig filtype avvises av valideringen; feltet er `aria-invalid`, beskrevet av feilen, og får fokus (E2E). |
+| Dokumentstatus | Tekst: «Venter på behandling», «Behandles», «Ferdigstiller krav», «Ferdig behandlet», «Feilet»; kravstatus separat. Uendret. |
+| Knapper beholder fokus | «Lagre vurdering», «Lag svar», «Generer», «Kopier svar», «Lagre endring» (E2E for tre av dem, kode for resten). |
+
+Vurderingsregler, filbehandling og parsing er ikke endret.
+
+#### 18.14.5 Skjema, tabeller og dialoger
+
+- **Feil ved felt og fokus etter avvist innsending:** E2E for privat forespørsel, No-Go-dialogen, AI-opplasting og manuelt krav; enhetstest for at alle Fase 4-skjema kaller fokusrutinen.
+- **Gyldig HTML:** ingen nestede `label`, ingen InfoHint i `label`, én `main`, listeboksen inneholder bare `option` (enhet + lint + axe).
+- **Dialoger:** No-Go-dialogen har navn og beskrivelse, bakgrunnen er `inert` mens den er åpen, og ingenting er `inert` etter Escape; fokus tilbake til utløseren (E2E, ny i sluttkontrollen).
+- **Tabeller:** AI-oversikten har `caption`, `scope="col"`/`"row"` og `ScrollRegion` (kode + enhet). Ingen AI-saker i E2E-kundens oversikt ble axe-testet som tabell.
+- **Rulleregioner:** vertikale regioner er navngitte og fokuserbare bare når de ruller (enhet); axe uten `scrollable-region-focusable` på svarpanelet (E2E).
+- **Responsivt:** 320 og 640 px uten sidelengs rulling på saksvisningen og AI-arbeidsflaten med alt åpent (E2E).
+
+#### 18.14.6 Testresultater (endelig kode)
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | **1769 bestått, 0 feilet, 0 hoppet over** (`a11yPhase4.test.js`: 56 tester) |
+| `npm run lint:a11y` (Node 22) | **0 feil, 0 advarsler** (56 filer) |
+| `npm run build` | Bestått |
+| PHP, målrettet (som 18.4) | **355 bestått, 0 feilet** (2504 påstander) |
+| E2E `a11y-tenders-ai.spec.js` | **10 bestått, 0 feilet** (ny test for A11Y-146/-147; No-Go-testen kontrollerer nå beskrivelse og `inert`) |
+| E2E samlet, 29 spesifikasjoner (196 tester) | Kjøring 4: **196 bestått, 0 feilet** (14,3 min). Se 18.14.6.1 for kjøring 3. |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate) |
+
+##### 18.14.6.1 Samlede kjøringer i sluttkontrollen, og hvorfor én feilet
+
+| Kjøring | Kode | Resultat |
+|---|---|---|
+| 3 | Endelig kode, startet like etter `npm run build` | 186 bestått, 1 feilet, 9 ikke kjørt (15,9 min). Første test i `a11y-tenders-ai` (Go/No-go): «Execution context was destroyed, most likely because of a navigation» under første axe-kall. Resten av den serielle specen ble derfor ikke kjørt. |
+| 4 | Endelig kode, uten nytt bygg rett før | **196 bestått, 0 feilet** (14,3 min) |
+
+**Undersøkt årsak:** alle tre feilene i Fase 4-regresjonene (kjøring 1 i 18.5, kjøring 3 her og et eget forsøk) kom like etter `npm run build`, mens Vite dev-serveren var i gang (`public/hot`). Symptomene var en side som lastet på nytt av seg selv: innloggingen falt tilbake til `/login`, eller siden navigerte under et axe-kall. Uten bygg rett før var hver kjøring grønn: to samlede kjøringer, `a11y-navigation` + `a11y-tenders-ai` to ganger (18/18) og alle fire `a11y-*`-spesifikasjonene (34/34). Det eneste forsøket med bygg rett før feilet igjen, på samme måte. Manifest-hashen (Inertia-versjonen) var lik på vert og i container med en gang etter bygget, så en versjonskonflikt (409) er lite sannsynlig. Mest sannsynlig sender dev-serveren en forsinket full sideoppfrisking når `public/build` skrives. Den samme typen avbrudd er beskrevet i §17.5 ved kildeendringer under kjøring.
+
+**Vurdering:** testmiljø, ikke Fase 4-kode. Ingen påstand i Fase 4 feilet, og ingen test er endret for å bli grønn. **Prosedyre videre:** ikke bygg rett før eller under en E2E-kjøring mot dev-serveren, eller kjør mot bygde ressurser uten `public/hot`. Dev-serveren tilhører utviklermiljøet og er ikke stoppet av agenten.
+
+#### 18.14.7 OPPF-001
+
+`a11y-navigation.spec.js:155` besto i alle fire samlede kjøringer av regresjonsutvalget i Fase 4 (kjøring 1 og 2 i 18.5, kjøring 3 og 4 her), også i kjøringene der en annen test feilet. To av dem (3 og 4) er på helt endelig Fase 4-kode. Ingen kode og ingen ventetid er endret for testen, og årsaken til de tidligere feilene i Fase 3 er ikke funnet. Isolerte kjøringer er ikke regnet med. Oppgaven er fortsatt **åpen**. Formelt er tre påfølgende grønne samlede kjøringer oppnådd, men utvalget og koden endret seg underveis, og årsaken er uavklart. Lukking bør besluttes etter en ny serie på tre samlede kjøringer på commit-koden.
+
+#### 18.14.8 Åpne funn, manuell verifisering og risiko før Fase 5
+
+- **Åpne funn fra Fase 4:** A11Y-145 (utsatt produktbeslutning). A11Y-105 og A11Y-121 er fortsatt delvise (18.6).
+- **Manuell verifisering:** hele 18.9 gjenstår, i tillegg til §15.8.7, §16.8 og §17.8. Nytt punkt: med NVDA/VoiceOver, avvis en opplasting (feil filtype) og kontroller at feilen leses én gang.
+- **Risiko før Fase 5:**
+  - Fokusreglene i AI-arbeidsflaten og fristskjemaet avhenger av element-id-er; enhetstestene låser de viktigste.
+  - `refocusIfLost({ always: true })` brukes bare ett sted; den skal ikke bli en generell fokusmekanisme.
+  - Ekte opplasting av flere filer og livesøket mot Doffin/TED er ikke E2E-testet.
+  - E2E kjører bare i Chromium; skjermleser, Safari og Firefox er ikke testet.
+
+#### 18.14.9 Vurdering
+
+Sluttkontrollen rettet to funn (A11Y-146 og den nye A11Y-147, en tom knapp som eksisterte før Fase 4) og én dobbel opplesing av opplastingsfeil. A11Y-145 er dokumentert som utsatt produktbeslutning. Ingen ruter, tilganger, validering, data, AI-logikk, polling eller filbehandling er endret. Enhetstester, lint, bygg, målrettet PHP og den nye E2E-specen er grønne, og den siste samlede regresjonen er grønn (196/196). Feilen i kjøring 3 er undersøkt og knyttet til bygg under kjørende dev-server. Fase 4 er teknisk klar for commit. Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. OPPF-001 er åpen og må lukkes før merge til `main`.

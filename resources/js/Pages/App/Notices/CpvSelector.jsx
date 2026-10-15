@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { DISCLOSURE_INLINE } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { useTranslations } from '../../../Support/useTranslations';
 import {
     cpvSelectionSummary,
     shouldOfferCpvToggle,
@@ -16,6 +18,15 @@ function filterSelected(options, selectedItems) {
     return options.filter((item) => !selectedCodes.has(item.code));
 }
 
+/**
+ * CPV codes as a combobox: type in plain language or a code, pick from the listbox, remove as chips.
+ *
+ * Accessibility (Fase 4): focus never leaves the text field — the listbox follows it through
+ * aria-activedescendant, so its options are out of the Tab order (a Tab from the field used to walk
+ * into every suggestion and close the list on the way). Only options live in the listbox; its
+ * heading, «Laster …» and «Ingen treff» sit beside it. When a search returns, the number of hits is
+ * spoken once (4.1.3); the popular list shown on focus is not announced.
+ */
 export default function CpvSelector({
     endpoint,
     selectedItems,
@@ -26,6 +37,7 @@ export default function CpvSelector({
     const inputId = useId();
     const listboxId = useId();
     const chipsId = useId();
+    const a11y = useTranslations().a11y ?? {};
     const inputRef = useRef(null);
     const [inputValue, setInputValue] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -81,6 +93,9 @@ export default function CpvSelector({
                 const nextSuggestions = filterSelected(payload.data ?? [], selectedItems);
                 setSuggestions(nextSuggestions);
                 setActiveIndex(nextSuggestions.length > 0 ? 0 : -1);
+                announce(nextSuggestions.length > 0
+                    ? (a11y.results_count ?? ':count treff').replace(':count', String(nextSuggestions.length))
+                    : (a11y.results_none ?? 'Ingen treff'));
             })
             .catch((error) => {
                 if (error.name === 'AbortError') {
@@ -155,6 +170,8 @@ export default function CpvSelector({
     };
 
     const showEmptyState = isOpen && !isLoading && suggestions.length === 0;
+    // Expanded only while there are options to choose from: an empty or loading listbox is not one.
+    const hasOptions = isOpen && !isLoading && suggestions.length > 0;
     const showChips = shouldShowCpvChips(selectedItems.length, areChipsExpanded);
     const offerChipToggle = shouldOfferCpvToggle(selectedItems.length);
     const selectionSummary = cpvSelectionSummary(selectedItems.length, {
@@ -218,7 +235,7 @@ export default function CpvSelector({
                     ) : null}
 
                     <div className="relative mt-2">
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 transition focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
+                        <div className="rounded-xl border border-field-border bg-white px-3 py-3 transition focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
                             <div className="flex min-w-[120px] flex-1 items-center py-1">
                             <input
                                 id={inputId}
@@ -240,7 +257,7 @@ export default function CpvSelector({
                                 placeholder="Søk etter CPV med vanlig språk"
                                 className="min-w-[120px] flex-1 border-none bg-transparent p-0 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:ring-0"
                                 role="combobox"
-                                aria-expanded={isOpen}
+                                aria-expanded={hasOptions}
                                 aria-controls={listboxId}
                                 aria-autocomplete="list"
                                 aria-activedescendant={activeIndex >= 0 && suggestions[activeIndex] ? `${listboxId}-${suggestions[activeIndex].code}` : undefined}
@@ -249,13 +266,9 @@ export default function CpvSelector({
                         </div>
 
                         {isOpen ? (
-                    <div
-                        id={listboxId}
-                        role="listbox"
-                        className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-[0_16px_40px_rgba(15,23,42,0.12)]"
-                    >
+                    <div className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-[0_16px_40px_rgba(15,23,42,0.12)]">
                         {inputValue.trim() === '' ? (
-                            <div className="px-2 pb-2 text-base font-medium uppercase tracking-[0.14em] text-slate-600">
+                            <div id={`${listboxId}-heading`} className="px-2 pb-2 text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                 Populære valg
                             </div>
                         ) : null}
@@ -264,12 +277,19 @@ export default function CpvSelector({
                             <div className="px-3 py-3 text-base text-slate-600">Laster CPV-treff...</div>
                         ) : null}
 
-                        {!isLoading && suggestions.map((item, index) => (
+                        {hasOptions ? (
+                        <div
+                            id={listboxId}
+                            role="listbox"
+                            aria-labelledby={inputValue.trim() === '' ? `${listboxId}-heading` : inputId}
+                        >
+                        {suggestions.map((item, index) => (
                             <button
                                 key={item.code}
                                 id={`${listboxId}-${item.code}`}
                                 type="button"
                                 role="option"
+                                tabIndex={-1}
                                 aria-selected={index === activeIndex}
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => selectItem(item)}
@@ -282,6 +302,9 @@ export default function CpvSelector({
                                 <span className="shrink-0 text-base font-medium text-slate-600">{item.code}</span>
                             </button>
                         ))}
+
+                        </div>
+                        ) : null}
 
                         {showEmptyState ? (
                             <div className="px-3 py-3 text-base text-slate-600">Ingen CPV-treff</div>

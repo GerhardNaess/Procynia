@@ -1,8 +1,10 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
 import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import FormField from '../../../Components/App/FormField';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 
 function normalizeInstructionsText(value) {
     return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -20,6 +22,8 @@ export default function AiInstructions({
     const form = useForm({
         ai_instructions: normalizeInstructionsText(aiInstructionsProp),
     });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     useEffect(() => {
         form.setData('ai_instructions', normalizeInstructionsText(aiInstructionsProp));
@@ -38,6 +42,7 @@ export default function AiInstructions({
         form.patch(aiInstructionsUpdateUrl, {
             preserveScroll: true,
             preserveState: true,
+            onError: focusFirstError,
             onSuccess: () => {
                 form.setData('ai_instructions', normalizedInstructions);
                 form.clearErrors();
@@ -122,29 +127,37 @@ export default function AiInstructions({
                             />
                         </div>
 
-                        <form onSubmit={submit} className="space-y-4">
-                            <label className="block space-y-1">
-                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    Instruksjoner
-                                </span>
-                                <textarea
-                                    value={form.data.ai_instructions}
-                                    onChange={(event) => form.setData('ai_instructions', event.target.value)}
-                                    rows={16}
-                                    disabled={form.processing || !aiInstructionsUpdateUrl}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    placeholder="Skriv faste regler for tone, stil, terminologi og kapitalisering."
-                                />
-                                {errorMessage ? (
-                                    <p className="text-base leading-6 text-rose-700">{errorMessage}</p>
-                                ) : null}
-                            </label>
+                        <form ref={formRef} onSubmit={submit} className="space-y-4">
+                            <FormField
+                                id="ai-instructions"
+                                label="Instruksjoner"
+                                error={errorMessage}
+                                className="block space-y-1"
+                                labelClassName="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600"
+                                controlClassName=""
+                                errorClassName="text-base leading-6 text-rose-700"
+                            >
+                                {(field) => (
+                                    <textarea
+                                        {...field}
+                                        value={form.data.ai_instructions}
+                                        onChange={(event) => form.setData('ai_instructions', event.target.value)}
+                                        rows={16}
+                                        disabled={form.processing || !aiInstructionsUpdateUrl}
+                                        className="w-full rounded-2xl border border-field-border bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        placeholder="Skriv faste regler for tone, stil, terminologi og kapitalisering."
+                                    />
+                                )}
+                            </FormField>
 
                             <div className="flex justify-end">
+                                {/* Stays focusable while it saves (aria-disabled): a disabled button would
+                                    drop the keyboard focus that pressed it to <body>. */}
                                 <button
                                     type="submit"
-                                    disabled={!aiInstructionsUpdateUrl || form.processing}
-                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
+                                    disabled={!aiInstructionsUpdateUrl}
+                                    aria-disabled={form.processing || undefined}
+                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                 >
                                     {form.processing ? 'Lagrer...' : 'Lagre endring'}
                                 </button>
