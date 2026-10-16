@@ -1,13 +1,13 @@
 {{-- Per-operation statistics from AiCapacityCalibrationService::operationStatistics() — the same figures ai:capacity-analysis prints. --}}
-<div class="exp-scroll"><table class="exp-table mt-2" data-testid="{{ $testid }}">
+<div class="relative exp-scroll" @include('filament.components.scroll-region-attrs', ['labelledby' => $labelledby])><table class="exp-table mt-2" data-testid="{{ $testid }}">
     <thead>
         <tr>
-            <th>{{ $t('columns.operation') }}</th>
-            <th class="num">{{ $t('columns.calls') }} · {{ $t('columns.share') }}</th>
-            <th class="num">{{ $t('columns.cost') }} ({{ $t('columns.mean') }} · {{ $t('columns.median') }} · {{ $t('columns.p75') }} · {{ $t('columns.p95') }})</th>
-            <th class="num">{{ $t('columns.mean_estimate') }} · {{ $t('columns.ratio') }}</th>
-            <th class="num">{{ $t('columns.failure_rate') }} · {{ $t('columns.open_rate') }}</th>
-            <th>{{ $t('columns.assessment') }}</th>
+            <th scope="col">{{ $t('columns.operation') }}</th>
+            <th scope="col" class="num">{{ $t('columns.calls') }} · {{ $t('columns.share') }}</th>
+            <th scope="col" class="num">{{ $t('columns.cost') }} ({{ $t('columns.mean') }} · {{ $t('columns.median') }} · {{ $t('columns.p75') }} · {{ $t('columns.p95') }})</th>
+            <th scope="col" class="num">{{ $t('columns.mean_estimate') }} · {{ $t('columns.ratio') }}</th>
+            <th scope="col" class="num">{{ $t('columns.failure_rate') }} · {{ $t('columns.open_rate') }}</th>
+            <th scope="col">{{ $t('columns.assessment') }}</th>
         </tr>
     </thead>
     <tbody>

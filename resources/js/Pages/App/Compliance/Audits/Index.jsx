@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { usePanelFocus } from '../../../../Support/focusManagement';
+import { INPUT } from '../../../../Support/formStyles';
+import { useTransitionAnnouncement } from '../../../../Support/statusAnnouncement';
+import { filterSignature } from '../complianceA11y';
 import ComplianceAttention, { AttentionReasons } from '../Requirements/ComplianceAttention';
 import { complianceHelp } from '../Requirements/complianceHelp';
 import { countLabel } from '../Requirements/complianceRequirement';
@@ -13,7 +18,6 @@ import { PlanningRequirementSelection } from './AuditScope';
 import { AUDIT_STATUS_TONES, auditStatusLabel, auditTypeLabel, plannedPeriodLabel } from './complianceAudit';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 
 function Responsible({ item, ta }) {
@@ -51,6 +55,10 @@ export default function ComplianceAuditsIndex() {
     const [status, setStatus] = useState(filters.status ?? '');
     const [type, setType] = useState(filters.type ?? '');
     const [attentionOnly, setAttentionOnly] = useState(Boolean(filters.attention));
+    // Ny revisjon opens in place of its button: focus goes into the form, and back on Avbryt (A11Y-014).
+    const createPanelRef = useRef(null);
+    const createButtonRef = useRef(null);
+    usePanelFocus(creating, { panelRef: createPanelRef, returnFocusRef: createButtonRef });
 
     const form = useForm({
         title: '',
@@ -89,6 +97,10 @@ export default function ComplianceAuditsIndex() {
     };
 
     const filtered = Boolean(filters.search || filters.status || filters.type || filters.attention);
+    const countText = countLabel(visibleCount, ta.count_one ?? '1 revisjon', ta.count ?? ':count revisjoner');
+
+    // The count is on screen; it is also spoken once after each search (4.1.3, A11Y-111).
+    useTransitionAnnouncement(filterSignature(filters, ['search', 'status', 'type', 'attention']), () => ({ message: countText }));
 
     return (
         <CustomerAppLayout title={ta.index_title ?? 'Revisjoner'} showPageTitle={false} workView={creating ? (ta.create ?? 'Ny revisjon') : null}>
@@ -103,7 +115,7 @@ export default function ComplianceAuditsIndex() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...complianceHelp(tr, 'audit_index')} />
                         {canAudit && ! creating && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                            <button ref={createButtonRef} type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                                 {ta.create ?? 'Ny revisjon'}
                             </button>
                         )}
@@ -111,7 +123,7 @@ export default function ComplianceAuditsIndex() {
                 </header>
 
                 {creating && (
-                    <section className={CARD} aria-labelledby="compliance-audit-create-heading">
+                    <section ref={createPanelRef} className={CARD} aria-labelledby="compliance-audit-create-heading">
                         <h2 id="compliance-audit-create-heading" className="text-xl font-semibold text-slate-950">{ta.create_heading ?? 'Ny revisjon'}</h2>
                         <p className="mb-4 mt-1 text-base text-slate-600">{ta.create_hint ?? 'Beskriv hvorfor revisjonen gjennomføres og hva den omfatter, og velg kravene nå eller senere.'}</p>
                         <AuditForm
@@ -129,7 +141,8 @@ export default function ComplianceAuditsIndex() {
 
                 <ComplianceAttention attention={attention} tr={ta} testIdPrefix="compliance-audit-attention" />
 
-                <section className={CARD}>
+                <section className={CARD} aria-labelledby="compliance-audit-register-heading">
+                    <h2 id="compliance-audit-register-heading" className="sr-only">{ta.index_title ?? 'Revisjoner'}</h2>
                     <form onSubmit={submitSearch} className="grid gap-3 sm:flex sm:flex-wrap sm:items-end">
                         <div className="min-w-0 sm:min-w-[16rem] sm:flex-1">
                             <label htmlFor="compliance-audit-search" className={FILTER_LABEL}>{ta.search_label ?? 'Søk'}</label>
@@ -179,7 +192,7 @@ export default function ComplianceAuditsIndex() {
                     </form>
 
                     <p className="mt-4 text-base text-slate-600" data-testid="compliance-audit-count">
-                        {countLabel(visibleCount, ta.count_one ?? '1 revisjon', ta.count ?? ':count revisjoner')}
+                        {countText}
                     </p>
 
                     {audits.length === 0 ? (
@@ -210,28 +223,29 @@ export default function ComplianceAuditsIndex() {
                                 ))}
                             </ul>
 
-                            <div className="mt-4 hidden overflow-x-auto md:block">
+                            <ScrollRegion className="mt-4 hidden overflow-x-auto md:block" label={ta.index_title ?? 'Revisjoner'}>
                                 <table className="w-full text-base" data-testid="compliance-audit-table">
+                                    <caption className="sr-only">{ta.index_title ?? 'Revisjoner'}</caption>
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                            <th className="pb-3 pr-4">{ta.col_title ?? 'Revisjon'}</th>
-                                            <th className="px-4 pb-3">{ta.col_type ?? 'Type'}</th>
-                                            <th className="px-4 pb-3">{ta.col_responsible ?? 'Ansvarlig'}</th>
-                                            <th className="px-4 pb-3">{ta.col_period ?? 'Planlagt periode'}</th>
-                                            <th className="pb-3 pl-4">{ta.col_status ?? 'Status'}</th>
+                                            <th scope="col" className="pb-3 pr-4">{ta.col_title ?? 'Revisjon'}</th>
+                                            <th scope="col" className="px-4 pb-3">{ta.col_type ?? 'Type'}</th>
+                                            <th scope="col" className="px-4 pb-3">{ta.col_responsible ?? 'Ansvarlig'}</th>
+                                            <th scope="col" className="px-4 pb-3">{ta.col_period ?? 'Planlagt periode'}</th>
+                                            <th scope="col" className="pb-3 pl-4">{ta.col_status ?? 'Status'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {audits.map((item) => (
                                             <tr key={item.id}>
-                                                <td className="py-3 pr-4 align-top">
+                                                <th scope="row" className="py-3 pr-4 text-left align-top font-normal">
                                                     <Link href={item.url} className="font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
                                                     {(item.attention ?? []).length > 0 && (
                                                         <div className="mt-1">
                                                             <AttentionReasons reasons={item.attention} tr={ta} withLabel />
                                                         </div>
                                                     )}
-                                                </td>
+                                                </th>
                                                 <td className="px-4 py-3 align-top text-slate-700">{auditTypeLabel(item.audit_type, ta)}</td>
                                                 <td className="px-4 py-3 align-top text-slate-700"><Responsible item={item} ta={ta} /></td>
                                                 <td className="whitespace-nowrap px-4 py-3 align-top text-slate-700">{plannedPeriodLabel(item, ta)}</td>
@@ -242,7 +256,7 @@ export default function ComplianceAuditsIndex() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </>
                     )}
                 </section>

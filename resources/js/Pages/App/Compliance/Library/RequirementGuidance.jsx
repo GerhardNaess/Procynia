@@ -13,9 +13,12 @@ const VALUE = 'mt-1 break-words text-base text-slate-900';
  * @param {object} details  type/rule/documented_information/guidance/documentation/modules
  * @param {boolean} showDescription  the library tree shows the description here; the requirement
  *                                   page already shows it as Kravtekst
+ * @param {number}  headingLevel     one below the heading it sits under (1.3.1, A11Y-119): 3 on the
+ *                                   requirement page, below the clause in the library tree
  */
-export default function RequirementGuidance({ details, tr, showDescription = false, idPrefix }) {
+export default function RequirementGuidance({ details, tr, showDescription = false, idPrefix, headingLevel = 4 }) {
     const tl = tr.library ?? {};
+    const Heading = `h${Math.min(6, Math.max(2, headingLevel))}`;
     const documentation = details.documentation ?? [];
     const modules = details.modules ?? [];
 
@@ -23,7 +26,7 @@ export default function RequirementGuidance({ details, tr, showDescription = fal
         <div className="space-y-4" data-testid={`${idPrefix}-guidance`}>
             {showDescription && details.description && (
                 <div>
-                    <h4 className={TERM}>{tl.description ?? 'Hva kravet innebærer'}</h4>
+                    <Heading className={TERM}>{tl.description ?? 'Hva kravet innebærer'}</Heading>
                     <p className="mt-1 whitespace-pre-line break-words text-base leading-7 text-slate-800">{details.description}</p>
                 </div>
             )}
@@ -47,14 +50,14 @@ export default function RequirementGuidance({ details, tr, showDescription = fal
 
             {details.guidance && (
                 <div>
-                    <h4 className={TERM}>{tl.guidance ?? 'Veiledning'}</h4>
+                    <Heading className={TERM}>{tl.guidance ?? 'Veiledning'}</Heading>
                     <p className="mt-1 whitespace-pre-line break-words text-base leading-7 text-slate-800">{details.guidance}</p>
                 </div>
             )}
 
             {documentation.length > 0 && (
                 <div>
-                    <h4 className={TERM}>{tl.documentation ?? 'Forslag til dokumentasjon'}</h4>
+                    <Heading className={TERM}>{tl.documentation ?? 'Forslag til dokumentasjon'}</Heading>
                     <ul className="mt-1 list-disc space-y-1 pl-6 text-base text-slate-800">
                         {documentation.map((item) => <li key={item} className="break-words">{item}</li>)}
                     </ul>
@@ -63,7 +66,7 @@ export default function RequirementGuidance({ details, tr, showDescription = fal
 
             {modules.length > 0 && (
                 <div>
-                    <h4 className={TERM}>{tl.modules_heading ?? 'Gjøres i Procynia'}</h4>
+                    <Heading className={TERM}>{tl.modules_heading ?? 'Gjøres i Procynia'}</Heading>
                     <ul className="mt-2 flex flex-wrap gap-2" data-testid={`${idPrefix}-modules`}>
                         {modules.map((module) => (
                             <li key={module.key}>

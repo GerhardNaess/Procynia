@@ -46,6 +46,7 @@ export default function RiskReviewSchedule({ schedule, status, onEdit = null, tr
                         <span>{intervalLabel}</span>
                         {onEdit && (
                             <button
+                                id="risk-review-interval-edit"
                                 type="button"
                                 onClick={onEdit}
                                 aria-label={`${trReview.edit ?? 'Endre'} ${(trReview.field_interval ?? 'Vurderingsintervall').toLowerCase()}`}

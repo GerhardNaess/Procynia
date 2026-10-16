@@ -30,7 +30,7 @@ const UPDATED = '24. mai 2026';
 
 function Verify() {
     return (
-        <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[0.7rem] font-semibold text-amber-700">
+        <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
             ⚠ verifiseres
         </span>
     );
@@ -54,10 +54,11 @@ function TOC({ items }) {
     return (
         <aside className="hidden lg:block">
             <div className="sticky top-24 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
+                <p id="terms-toc-heading" className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
                     Innhold
                 </p>
-                <nav className="space-y-0.5">
+                {/* Named by its heading, so the landmark is not just «navigation». */}
+                <nav aria-labelledby="terms-toc-heading" className="space-y-0.5">
                     {items.map((item) => (
                         <a
                             key={item.id}
@@ -119,7 +120,7 @@ export default function Terms() {
             <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
                 <strong className="font-semibold">Utkast – må juridisk kvalitetssikres før publisering.</strong>{' '}
                 Punkter merket{' '}
-                <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-semibold text-amber-700">
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
                     ⚠ verifiseres
                 </span>{' '}
                 forutsetter teknisk eller juridisk avklaring.
@@ -128,7 +129,8 @@ export default function Terms() {
             <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[220px_1fr]">
                 <TOC items={TOC_ITEMS} />
 
-                <div>
+                {/* min-w-0: a grid item is as wide as its content by default; long words must not widen the page. */}
+                <div className="min-w-0 break-words">
                     <Section id="om-vilkarene" num="01" title="Om disse vilkårene">
                         <p>
                             Disse brukervilkårene regulerer avtaleforholdet mellom din virksomhet og

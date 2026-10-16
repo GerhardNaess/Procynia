@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
+import { focusElement, refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
 import { formatLongDate } from '../Improvements/improvementStatus';
 import SupplierAssessment from './SupplierAssessment';
 import SupplierRequirementStatus, { SupplierDecisionHistory } from './SupplierAssuranceStatus';
@@ -23,6 +24,8 @@ import SupplierEarlierComplianceLinks from './SupplierEarlierComplianceLinks';
 import SupplierRisks from './SupplierRisks';
 import { SupplierEndForm, SupplierReopenForm } from './SupplierStatusForms';
 import { supplierHelp } from './supplierHelp';
+import { inPageFocusTarget } from './supplierA11y';
+import { useInlinePanelFocus } from './supplierFocus';
 import {
     OVERVIEW_DETAILS,
     criticalitySummary,
@@ -121,12 +124,22 @@ export default function SupplierManagementShow() {
         }
     };
 
+    // The link moves focus with the view (A11Y-015): to the section's open/close button, or the row.
     useEffect(() => {
         if (scrollTo) {
-            document.getElementById(scrollTo)?.scrollIntoView?.({ block: 'start' });
+            const target = document.getElementById(scrollTo);
+            target?.scrollIntoView?.({ block: 'start' });
+            focusElement(inPageFocusTarget(target), { preventScroll: true });
             setScrollTo(null);
         }
     }, [scrollTo, tab]);
+
+    // Rediger and the status panels open in place of their buttons: focus in, and back (A11Y-014).
+    const rememberEditTrigger = useInlinePanelFocus(panel === 'edit' ? 'edit' : null, { panelId: 'supplier-edit-panel', fallbackIds: ['supplier-edit-button', 'supplier-details-heading'] });
+    const statusPanel = ['end', 'reopen', 'activate'].includes(panel) ? panel : null;
+    const rememberStatusTrigger = useInlinePanelFocus(statusPanel, { panelId: 'supplier-status-panel', fallbackIds: ['supplier-status-heading'] });
+    const editFormRef = useRef(null);
+    const focusEditError = useFocusFirstError(editFormRef);
 
     // Trenger oppfølging and Neste kontroll link to #sections; the ones on another tab are opened
     // there, and a section under «Detaljer» is opened before it scrolls in.
@@ -168,11 +181,17 @@ export default function SupplierManagementShow() {
 
     const submit = (event) => {
         event.preventDefault();
-        form.patch(`/app/supplier-management/${item.id}`, { preserveScroll: true, onSuccess: () => setPanel(null) });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.patch(`/app/supplier-management/${item.id}`, { preserveScroll: true, onSuccess: () => setPanel(null), onError: focusEditError });
     };
 
     const activate = () => {
-        router.post(`/app/supplier-management/${item.id}/activate`, {}, { preserveScroll: true });
+        // Ta i bruk removes its own button; focus goes to the status section rather than <body>.
+        router.post(`/app/supplier-management/${item.id}/activate`, {}, { preserveScroll: true, onFinish: () => refocusIfLost(['supplier-end-button', 'supplier-status-heading']) });
     };
 
     const destroy = () => {
@@ -198,10 +217,10 @@ export default function SupplierManagementShow() {
                         </div>
                         <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{item.name}</h1>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2" onClickCapture={rememberEditTrigger}>
                         <PageHelpButton {...supplierHelp(tr, 'supplier')} />
                         {permissions.can_edit && panel === null && (
-                            <button type="button" onClick={() => { openTab('overview'); setPanel('edit'); }} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
+                            <button type="button" id="supplier-edit-button" data-panel-trigger="" onClick={() => { openTab('overview'); setPanel('edit'); }} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
                         )}
                     </div>
                 </header>
@@ -234,10 +253,11 @@ export default function SupplierManagementShow() {
                         <OverviewAttention findings={attention} formatDate={date} tr={tr} />
 
                         {panel === 'edit' ? (
-                            <section className={CARD} aria-labelledby="supplier-edit-heading">
+                            <section id="supplier-edit-panel" className={CARD} aria-labelledby="supplier-edit-heading">
                                 <h2 id="supplier-edit-heading" className="mb-4 text-xl font-semibold text-slate-950">{tr.edit_heading ?? 'Rediger leverandør'}</h2>
                                 <SupplierForm
                                     form={form}
+                                    formRef={editFormRef}
                                     onSubmit={submit}
                                     onCancel={() => { setPanel(null); form.reset(); form.clearErrors(); }}
                                     categories={categories}
@@ -355,8 +375,8 @@ export default function SupplierManagementShow() {
                         <section className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-6" aria-labelledby="supplier-other-actions-heading" data-testid="supplier-other-actions">
                             <h2 id="supplier-other-actions-heading" className="text-lg font-semibold text-slate-950">{o.other_actions_heading ?? 'Andre handlinger'}</h2>
 
-                            <div className="rounded-2xl border border-slate-200 bg-white p-5" data-testid="supplier-status">
-                                <h3 className="text-lg font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h3>
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5" data-testid="supplier-status" onClickCapture={rememberStatusTrigger}>
+                                <h3 id="supplier-status-heading" className="text-lg font-semibold text-slate-950">{tr.status_heading ?? 'Status'}</h3>
                                 {/* An ended supplier says so at the top of the page, once. */}
                                 {item.status !== 'ended' && <p className="mt-2 text-base text-slate-800">{tr.status_text?.[item.status] ?? ''}</p>}
                                 {/* Ta i bruk has no form of its own; a refusal (the supplier moved on) lands here. */}
@@ -365,33 +385,40 @@ export default function SupplierManagementShow() {
                                 {panel === null && (permissions.can_activate || permissions.can_end || permissions.can_reopen) && (
                                     <div className="mt-4 flex flex-wrap gap-2">
                                         {permissions.can_activate && (
-                                            <button type="button" onClick={warnOnActivate ? () => setPanel('activate') : activate} className={PRIMARY_ACTION}>{tr.activate ?? 'Ta i bruk'}</button>
+                                            <button type="button" id="supplier-activate-button" data-panel-trigger="" onClick={warnOnActivate ? () => setPanel('activate') : activate} className={PRIMARY_ACTION}>{tr.activate ?? 'Ta i bruk'}</button>
                                         )}
                                         {permissions.can_end && (
-                                            <button type="button" onClick={() => setPanel('end')} className={WARNING_ACTION}>{tr.end ?? 'Avslutt leverandør'}</button>
+                                            <button type="button" id="supplier-end-button" data-panel-trigger="" onClick={() => setPanel('end')} className={WARNING_ACTION}>{tr.end ?? 'Avslutt leverandør'}</button>
                                         )}
                                         {permissions.can_reopen && (
-                                            <button type="button" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne leverandør'}</button>
+                                            <button type="button" id="supplier-reopen-button" data-panel-trigger="" onClick={() => setPanel('reopen')} className={PRIMARY_ACTION}>{tr.reopen ?? 'Gjenåpne leverandør'}</button>
                                         )}
                                     </div>
                                 )}
 
-                                {/* Ta i bruk warns, never blocks (plan §9.6): Procynia is not the purchasing system. */}
-                                {panel === 'activate' && (
-                                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4" role="alert" data-testid="activate-warning">
-                                        <p className="text-lg font-semibold text-slate-950">{a.activate_warning_heading ?? 'Ta i bruk leverandøren?'}</p>
-                                        {activateWarning.mandatory_open && <p className="mt-1 text-base text-slate-900">{a.activate_warning_mandatory_open ?? 'Et obligatorisk kontrollkrav er ikke dokumentert eller midlertidig akseptert.'}</p>}
-                                        {activateWarning.not_approved_on && <p className="mt-1 text-base text-slate-900">{(a.activate_warning_not_approved ?? 'Siste kontrollbeslutning som ble registrert, var «Ikke godkjent for nye kjøp» (:date).').replace(':date', date(activateWarning.not_approved_on))}</p>}
-                                        <p className="mt-1 text-base text-slate-800">{a.activate_warning_text}</p>
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            <button type="button" onClick={() => { setPanel(null); activate(); }} className={WARNING_ACTION}>{a.activate_anyway ?? 'Ta i bruk likevel'}</button>
-                                            <button type="button" onClick={() => setPanel(null)} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                                        </div>
+                                {statusPanel && (
+                                    <div id="supplier-status-panel">
+                                        {/* Ta i bruk warns, never blocks (plan §9.6): Procynia is not the purchasing system. Focus
+                                            goes to «Ta i bruk likevel», which the warning describes — no alert that mounts with its text. */}
+                                        {panel === 'activate' && (
+                                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4" role="group" aria-labelledby="supplier-activate-warning-heading" data-testid="activate-warning">
+                                                <p id="supplier-activate-warning-heading" className="text-lg font-semibold text-slate-950">{a.activate_warning_heading ?? 'Ta i bruk leverandøren?'}</p>
+                                                <div id="supplier-activate-warning-text">
+                                                    {activateWarning.mandatory_open && <p className="mt-1 text-base text-slate-900">{a.activate_warning_mandatory_open ?? 'Et obligatorisk kontrollkrav er ikke dokumentert eller midlertidig akseptert.'}</p>}
+                                                    {activateWarning.not_approved_on && <p className="mt-1 text-base text-slate-900">{(a.activate_warning_not_approved ?? 'Siste kontrollbeslutning som ble registrert, var «Ikke godkjent for nye kjøp» (:date).').replace(':date', date(activateWarning.not_approved_on))}</p>}
+                                                    <p className="mt-1 text-base text-slate-800">{a.activate_warning_text}</p>
+                                                </div>
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    <button type="button" aria-describedby="supplier-activate-warning-text" onClick={() => { setPanel(null); activate(); }} className={WARNING_ACTION}>{a.activate_anyway ?? 'Ta i bruk likevel'}</button>
+                                                    <button type="button" onClick={() => setPanel(null)} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {panel === 'end' && <SupplierEndForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                                        {panel === 'reopen' && <SupplierReopenForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
                                     </div>
                                 )}
-
-                                {panel === 'end' && <SupplierEndForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
-                                {panel === 'reopen' && <SupplierReopenForm supplierId={item.id} onDone={() => setPanel(null)} tr={tr} />}
 
                                 {panel === null && permissions.has_delete_right && (
                                     <div className="mt-6 border-t border-slate-100 pt-4" data-testid="supplier-delete">

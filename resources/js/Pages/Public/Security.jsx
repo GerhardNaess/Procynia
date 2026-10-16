@@ -169,7 +169,7 @@ export default function Security() {
             <div className="mb-10">
                 <div className="mb-3 text-sm font-semibold uppercase tracking-widest text-blue-600">Sikkerhet</div>
                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Slik beskytter vi dataene dine</h1>
-                <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-500">
+                <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
                     Procynia er bygget for å håndtere sensitive forretningsdokumenter og anbudsmateriale. Sikkerhet og personvern er en integrert del av plattformen, ikke en ettertanke.
                 </p>
             </div>
@@ -186,11 +186,12 @@ export default function Security() {
                         <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-2xl ${bg} ${color}`}>
                             <Icon />
                         </div>
-                        <h3 className="mb-2 text-base font-semibold text-slate-900">
+                        {/* h2, not h3: the cards follow the h1 directly (A11Y-119). */}
+                        <h2 className="mb-2 text-base font-semibold text-slate-900">
                             {title}
                             {verify && <Verify />}
-                        </h3>
-                        <p className="text-sm leading-6 text-slate-500">{body}</p>
+                        </h2>
+                        <p className="text-sm leading-6 text-slate-600">{body}</p>
                         {verifyText && (
                             <p className="mt-3 text-xs text-amber-800">⚠ {verifyText}</p>
                         )}

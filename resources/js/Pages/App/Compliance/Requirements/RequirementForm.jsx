@@ -1,11 +1,12 @@
+import { useRef } from 'react';
+import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import RequiredMark from '../../Risk/RequiredMark';
+import { HINT, INPUT, LABEL } from '../../../../Support/formStyles';
+import RequiredMark from '../RequiredMark';
+import FieldError from '../FieldError';
+import { fieldStateProps } from '../complianceA11y';
+import { useFocusOnRejectedSubmit } from '../useComplianceFocus';
 import { reviewIntervalLabel } from './complianceRequirement';
-
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
-const HINT = 'mt-1 text-base text-slate-600';
-const ERROR = 'mt-1 text-base text-rose-700';
 
 /**
  * The fields of a requirement, shared by Nytt krav and Rediger. The source and owner lists come from
@@ -15,8 +16,11 @@ const ERROR = 'mt-1 text-base text-rose-700';
  * the person responsible and the review interval are the customer's to change.
  */
 export default function RequirementForm({ form, onSubmit, onCancel, sourceOptions = [], ownerOptions = [], reviewIntervals = [], fromLibrary = false, tr }) {
+    const formRef = useRef(null);
+    useFocusOnRejectedSubmit(form, formRef);
+
     return (
-        <form onSubmit={onSubmit} className="space-y-5">
+        <form ref={formRef} onSubmit={onSubmit} className="space-y-5">
             {/* A requirement from Kravbiblioteket: source, reference, title and text follow the library. */}
             {fromLibrary ? (
                 <p className="text-base text-slate-700" data-testid="compliance-library-owned-fields">
@@ -31,7 +35,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                                 id="compliance-requirement-source"
                                 required
                                 aria-required="true"
-                                aria-describedby="compliance-requirement-source-hint"
+                                {...fieldStateProps('compliance-requirement-source', form.errors.source_id, ['compliance-requirement-source-hint'])}
                                 value={form.data.source_id}
                                 onChange={(event) => form.setData('source_id', event.target.value)}
                                 className={`mt-1 ${INPUT}`}
@@ -42,7 +46,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                                 ))}
                             </select>
                             <p id="compliance-requirement-source-hint" className={HINT}>{tr.field_source_hint ?? 'Hvor kravet kommer fra.'}</p>
-                            {form.errors.source_id && <p className={ERROR}>{form.errors.source_id}</p>}
+                            <FieldError field="compliance-requirement-source" message={form.errors.source_id} />
                         </div>
 
                         <div>
@@ -51,7 +55,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                                 id="compliance-requirement-reference"
                                 type="text"
                                 maxLength={100}
-                                aria-describedby="compliance-requirement-reference-hint"
+                                {...fieldStateProps('compliance-requirement-reference', form.errors.reference, ['compliance-requirement-reference-hint'])}
                                 value={form.data.reference}
                                 onChange={(event) => form.setData('reference', event.target.value)}
                                 className={`mt-1 ${INPUT}`}
@@ -59,7 +63,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                             <p id="compliance-requirement-reference-hint" className={HINT}>
                                 {tr.field_reference_hint ?? 'Valgfritt. For eksempel «A.5.1» eller «§ 4-2». Må være unik innen kravkilden.'}
                             </p>
-                            {form.errors.reference && <p className={ERROR}>{form.errors.reference}</p>}
+                            <FieldError field="compliance-requirement-reference" message={form.errors.reference} />
                         </div>
                     </div>
 
@@ -71,12 +75,12 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                             type="text"
                             required
                             aria-required="true"
-                            aria-describedby="compliance-requirement-title-hint"
+                            {...fieldStateProps('compliance-requirement-title', form.errors.title, ['compliance-requirement-title-hint'])}
                             value={form.data.title}
                             onChange={(event) => form.setData('title', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
+                        <FieldError field="compliance-requirement-title" message={form.errors.title} />
                     </div>
 
                     <div>
@@ -87,12 +91,12 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                             rows={5}
                             required
                             aria-required="true"
-                            aria-describedby="compliance-requirement-text-hint"
+                            {...fieldStateProps('compliance-requirement-text', form.errors.requirement_text, ['compliance-requirement-text-hint'])}
                             value={form.data.requirement_text}
                             onChange={(event) => form.setData('requirement_text', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        {form.errors.requirement_text && <p className={ERROR}>{form.errors.requirement_text}</p>}
+                        <FieldError field="compliance-requirement-text" message={form.errors.requirement_text} />
                     </div>
                 </>
             )}
@@ -102,7 +106,7 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                     <label htmlFor="compliance-requirement-owner" className={LABEL}>{tr.field_owner_optional ?? 'Ansvarlig (valgfritt)'}</label>
                     <select
                         id="compliance-requirement-owner"
-                        aria-describedby="compliance-requirement-owner-hint"
+                        {...fieldStateProps('compliance-requirement-owner', form.errors.owner_user_id, ['compliance-requirement-owner-hint'])}
                         value={form.data.owner_user_id}
                         onChange={(event) => form.setData('owner_user_id', event.target.value)}
                         className={`mt-1 ${INPUT}`}
@@ -115,14 +119,14 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                     <p id="compliance-requirement-owner-hint" className={HINT}>
                         {tr.field_owner_hint ?? 'Valgfritt. Ansvaret følger arbeidet: vurderingen registrerer hvem som vurderte, revisjoner og avvik har egne ansvarlige.'}
                     </p>
-                    {form.errors.owner_user_id && <p className={ERROR}>{form.errors.owner_user_id}</p>}
+                    <FieldError field="compliance-requirement-owner" message={form.errors.owner_user_id} />
                 </div>
 
                 <div>
                     <label htmlFor="compliance-requirement-review" className={LABEL}>{tr.field_review ?? 'Revurderingsintervall'}</label>
                     <select
                         id="compliance-requirement-review"
-                        aria-describedby="compliance-requirement-review-hint"
+                        {...fieldStateProps('compliance-requirement-review', form.errors.review_interval_months, ['compliance-requirement-review-hint'])}
                         value={form.data.review_interval_months}
                         onChange={(event) => form.setData('review_interval_months', event.target.value)}
                         className={`mt-1 ${INPUT}`}
@@ -133,11 +137,11 @@ export default function RequirementForm({ form, onSubmit, onCancel, sourceOption
                         ))}
                     </select>
                     <p id="compliance-requirement-review-hint" className={HINT}>{tr.field_review_hint ?? 'Hvor ofte kravet skal vurderes på nytt.'}</p>
-                    {form.errors.review_interval_months && <p className={ERROR}>{form.errors.review_interval_months}</p>}
+                    <FieldError field="compliance-requirement-review" message={form.errors.review_interval_months} />
                 </div>
             </div>
 
-            <p className="text-base text-slate-600">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
             <div className="flex flex-wrap justify-end gap-3">
                 {onCancel && (

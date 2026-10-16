@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
@@ -6,6 +6,11 @@ import FilePickerField from '../../../Components/App/FilePickerField';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { focusElement, useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT } from '../../../Support/formStyles';
+import { BUSY } from './SupplierField';
+import { importFilterAnnouncement, importStepState, importStepStateText } from './supplierA11y';
 import { supplierHelp } from './supplierHelp';
 import { categoryLabel, criticalityLabel, statusLabel as supplierStatusLabel } from './supplierManagement';
 import { formatLongDate } from '../Improvements/improvementStatus';
@@ -23,25 +28,27 @@ import {
 } from './supplierImport';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const REGISTER_URL = '/app/supplier-management';
 const IMPORT_URL = '/app/supplier-management/import';
 const OUTCOME_TONES = { created: 'emerald', updated: 'sky', skipped: 'slate', rejected: 'rose' };
 
-function Steps({ step, ti }) {
+/**
+ * The steps, as a list: each says in words whether it is done, the current one or still to come —
+ * the ✓ and the colour only show it (A11Y-024) — and the current one is aria-current="step".
+ */
+function Steps({ step, ti, ta }) {
     const s = ti.steps ?? {};
     const steps = [
         ['upload', s.upload ?? 'Last opp'],
         ['review', s.review ?? 'Kontroller'],
         ['confirm', s.confirm ?? 'Bekreft'],
     ];
-    const order = { upload: 0, review: 1, confirm: 2, result: 3 };
-
     return (
         <ol aria-label={s.label ?? 'Steg i importen'} className="flex flex-wrap gap-2" data-testid="import-steps">
             {steps.map(([key, label], index) => {
-                const current = key === step;
-                const done = order[step] > index;
+                const state = importStepState(step, index);
+                const current = state === 'current';
+                const done = state === 'done';
 
                 return (
                     <li
@@ -51,7 +58,7 @@ function Steps({ step, ti }) {
                     >
                         <span aria-hidden="true">{done ? '✓' : index + 1}</span>
                         {label}
-                        {current && <span className="sr-only">({s.current ?? 'nåværende steg'})</span>}
+                        <span className="sr-only">({importStepStateText(state, s, ta)})</span>
                     </li>
                 );
             })}
@@ -63,12 +70,21 @@ function UploadStep({ ti, limits, templateUrl }) {
     const u = ti.upload ?? {};
     const form = useForm({ file: null });
     const [inputKey, setInputKey] = useState(0);
+    const formRef = useRef(null);
+    // A refused file re-mounts the input (inputKey); focus goes back to it instead of falling to
+    // <body>, and the error is both its description and an alert — as on the Wiki source upload (A11Y-011).
+    const focusError = useFocusFirstError(formRef);
 
     const submit = (event) => {
         event.preventDefault();
+
+        if (form.processing || ! form.data.file) {
+            return;
+        }
+
         form.post(IMPORT_URL, {
             forceFormData: true,
-            onError: () => { form.setData('file', null); setInputKey((key) => key + 1); },
+            onError: () => { form.setData('file', null); setInputKey((key) => key + 1); focusError(); },
         });
     };
 
@@ -90,7 +106,7 @@ function UploadStep({ ti, limits, templateUrl }) {
 
             <section className={`${CARD} space-y-4`} aria-labelledby="import-file-heading">
                 <h2 id="import-file-heading" className="text-xl font-semibold text-slate-950">{u.file_heading ?? '2. Last opp filen'}</h2>
-                <form onSubmit={submit} className="space-y-4">
+                <form ref={formRef} onSubmit={submit} className="space-y-4">
                     <FilePickerField
                         id="supplier-import-file"
                         label={u.file_label ?? 'Excel-fil (.xlsx)'}
@@ -101,10 +117,10 @@ function UploadStep({ ti, limits, templateUrl }) {
                         emptyLabel={u.no_file ?? 'Ingen fil valgt'}
                         help={fill(u.file_hint ?? 'Bare .xlsx, maks :mb MB og :rows leverandører.', { mb: limits.max_megabytes, rows: limits.max_rows })}
                         error={form.errors.file}
-                        disabled={form.processing}
+                        busy={form.processing}
                         onChange={(file) => form.setData('file', file)}
                     />
-                    <button type="submit" className={PRIMARY_ACTION} disabled={form.processing || ! form.data.file}>
+                    <button type="submit" className={`${PRIMARY_ACTION} ${BUSY}`} aria-disabled={form.processing || ! form.data.file || undefined}>
                         {form.processing ? (u.uploading ?? 'Leser filen...') : (u.submit ?? 'Last opp og kontroller')}
                     </button>
                 </form>
@@ -197,11 +213,17 @@ function RowCard({ row, ti, tr, updateExisting }) {
     );
 }
 
-function ReviewStep({ importData, ti, tr, updateExisting, setUpdateExisting, onContinue }) {
+function ReviewStep({ importData, ti, ta, tr, updateExisting, setUpdateExisting, onContinue }) {
     const r = ti.review ?? {};
     const [filter, setFilter] = useState('');
     const rows = importData.rows ?? [];
     const shown = filterRows(rows, filter);
+
+    // The filter narrows the list in place: the number of rows shown is said once per change.
+    const chooseFilter = (value) => {
+        setFilter(value);
+        announce(importFilterAnnouncement(filterRows(rows, value).length, ta));
+    };
 
     const cancel = () => {
         if (window.confirm(r.cancel_confirm ?? 'Vil du avbryte importen?')) {
@@ -226,7 +248,7 @@ function ReviewStep({ importData, ti, tr, updateExisting, setUpdateExisting, onC
             <div className="flex flex-wrap items-end gap-4">
                 <div className="min-w-0">
                     <label htmlFor="import-status-filter" className="block text-base font-semibold text-slate-700">{r.filter_label ?? 'Vis'}</label>
-                    <select id="import-status-filter" value={filter} onChange={(event) => setFilter(event.target.value)} className={`mt-1 ${INPUT}`}>
+                    <select id="import-status-filter" value={filter} onChange={(event) => chooseFilter(event.target.value)} className={`mt-1 ${INPUT}`}>
                         <option value="">{fill(r.filter_all ?? 'Alle rader (:count)', { count: rows.length })}</option>
                         {statusCounts(rows).map(({ status, count }) => (
                             <option key={status} value={status}>{`${statusLabel(status, ti)} (${count})`}</option>
@@ -237,27 +259,30 @@ function ReviewStep({ importData, ti, tr, updateExisting, setUpdateExisting, onC
 
             {(importData.summary?.existing ?? 0) > 0 && (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <label className="flex items-start gap-3 text-base text-slate-900">
+                    {/* Named by its label, described by the hint — not one long name (1.3.1). */}
+                    <div className="flex items-start gap-3 text-base text-slate-900">
                         <input
+                            id="import-update-existing"
                             type="checkbox"
                             checked={updateExisting}
                             onChange={(event) => setUpdateExisting(event.target.checked)}
                             disabled={(importData.summary?.updatable ?? 0) === 0}
-                            className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300"
+                            aria-describedby={r.update_existing_hint ? 'import-update-existing-hint' : undefined}
+                            className="mt-1 h-5 w-5 shrink-0 rounded border-slate-500"
                             data-testid="import-update-existing"
                         />
-                        <span>
-                            <span className="block font-semibold">{r.update_existing_label ?? 'Oppdater eksisterende leverandører med verdiene fra filen'}</span>
-                            <span className="block text-slate-700">{r.update_existing_hint}</span>
-                        </span>
-                    </label>
+                        <div>
+                            <label htmlFor="import-update-existing" className="block font-semibold">{r.update_existing_label ?? 'Oppdater eksisterende leverandører med verdiene fra filen'}</label>
+                            {r.update_existing_hint && <p id="import-update-existing-hint" className="text-slate-700">{r.update_existing_hint}</p>}
+                        </div>
+                    </div>
                 </div>
             )}
 
             {shown.length === 0
                 ? <p className="text-base text-slate-700">{r.no_rows_in_filter ?? 'Ingen rader med denne statusen.'}</p>
                 : (
-                    <ul className="space-y-3" data-testid="import-rows">
+                    <ul className="space-y-3" aria-label={r.heading ?? 'Kontroller radene'} data-testid="import-rows">
                         {shown.map((row) => <RowCard key={row.row} row={row} ti={ti} tr={tr} updateExisting={updateExisting} />)}
                     </ul>
                 )}
@@ -271,12 +296,13 @@ function ReviewStep({ importData, ti, tr, updateExisting, setUpdateExisting, onC
 }
 
 function ConfirmStep({ importData, ti, updateExisting, onBack }) {
+    const nothing = confirmSummary(importData.summary, updateExisting).importable === 0;
     const c = ti.confirm ?? {};
     const summary = confirmSummary(importData.summary, updateExisting);
     const [processing, setProcessing] = useState(false);
 
     const submit = () => {
-        if (processing) {
+        if (processing || nothing) {
             return;
         }
 
@@ -320,10 +346,10 @@ function ConfirmStep({ importData, ti, updateExisting, onBack }) {
                 : <p className="text-base text-slate-700">{c.no_notifications}</p>}
 
             <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
-                <button type="button" onClick={submit} className={PRIMARY_ACTION} disabled={processing || summary.importable === 0} data-testid="import-confirm">
+                <button type="button" onClick={submit} className={`${PRIMARY_ACTION} ${BUSY}`} aria-disabled={processing || nothing || undefined} data-testid="import-confirm">
                     {processing ? (c.importing ?? 'Importerer...') : (c.submit ?? 'Bekreft og importer')}
                 </button>
-                <button type="button" onClick={onBack} className={SECONDARY_ACTION} disabled={processing}>{c.back ?? 'Tilbake til kontroll'}</button>
+                <button type="button" onClick={() => { if (! processing) { onBack(); } }} className={`${SECONDARY_ACTION} ${BUSY}`} aria-disabled={processing || undefined}>{c.back ?? 'Tilbake til kontroll'}</button>
             </div>
         </section>
     );
@@ -356,7 +382,7 @@ function ResultStep({ importData, ti, locale }) {
                 ))}
             </dl>
 
-            <ul className="space-y-2" data-testid="import-result-rows">
+            <ul className="space-y-2" aria-label={r.heading ?? 'Importen er fullført'} data-testid="import-result-rows">
                 {(result.rows ?? []).map((row) => (
                     <li key={row.row} className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-2xl border border-slate-200 p-3 text-base">
                         <span className="font-semibold text-slate-600">{fill(ti.review?.row_label ?? 'Rad :row', { row: row.row })}</span>
@@ -398,9 +424,22 @@ export default function SupplierImport() {
 
     const tr = translations?.supplier_management ?? {};
     const ti = tr.import ?? {};
+    const ta = translations?.a11y ?? {};
     const [confirming, setConfirming] = useState(false);
     const [updateExisting, setUpdateExisting] = useState(false);
     const step = importStep(importData, confirming);
+    // Fortsett and Tilbake til kontroll swap the step in place: focus goes to the new step's heading,
+    // which names it — never on first load (A11Y-014).
+    const previousStep = useRef(step);
+
+    useEffect(() => {
+        if (previousStep.current === step) {
+            return;
+        }
+
+        previousStep.current = step;
+        focusElement(document.getElementById(`import-${step}-heading`));
+    }, [step]);
 
     return (
         <CustomerAppLayout title={ti.title ?? 'Importer leverandører'} showPageTitle={false}>
@@ -416,13 +455,14 @@ export default function SupplierImport() {
                     </div>
                 </header>
 
-                {step !== 'result' && <Steps step={step} ti={ti} />}
+                {step !== 'result' && <Steps step={step} ti={ti} ta={ta} />}
 
                 {step === 'upload' && <UploadStep ti={ti} limits={limits} templateUrl={templateUrl} />}
                 {step === 'review' && (
                     <ReviewStep
                         importData={importData}
                         ti={ti}
+                        ta={ta}
                         tr={tr}
                         updateExisting={updateExisting}
                         setUpdateExisting={setUpdateExisting}

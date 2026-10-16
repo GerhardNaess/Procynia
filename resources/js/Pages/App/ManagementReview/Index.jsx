@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION } from '../../../Support/actionStyles';
+import { usePanelFocus } from '../../../Support/focusManagement';
 import ReviewForm from './ReviewForm';
 import { JUDGEMENT_TONES, REVIEW_STATUS_TONES, fill, formatDay, judgementLabel, reviewHelp, sectionTitle, statusLabel } from './reviewSections';
 
@@ -34,6 +36,10 @@ export default function ManagementReviewIndex() {
     const ti = t.index ?? {};
     const tf = t.fields ?? {};
     const [creating, setCreating] = useState(false);
+    // Ny gjennomgang opens in place: focus to the title, back to the button on Avbryt (A11Y-014).
+    const createPanelRef = useRef(null);
+    const createButtonRef = useRef(null);
+    usePanelFocus(creating, { panelRef: createPanelRef, returnFocusRef: createButtonRef });
     const form = useForm({
         title: defaults?.title ?? '',
         purpose: '',
@@ -47,10 +53,10 @@ export default function ManagementReviewIndex() {
         participant_user_ids: [],
     });
 
-    const submit = (event) => {
+    const submit = (event, focusFirstError) => {
         event.preventDefault();
         form.transform((data) => ({ ...data, meeting_date: data.meeting_date || null }));
-        form.post('/app/management-reviews', { preserveScroll: true });
+        form.post('/app/management-reviews', { preserveScroll: true, onError: focusFirstError });
     };
 
     return (
@@ -64,13 +70,13 @@ export default function ManagementReviewIndex() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...reviewHelp(t, 'index')} />
                         {permissions.can_create && ! creating && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION} data-testid="mr-create">{t.create ?? 'Ny gjennomgang'}</button>
+                            <button type="button" ref={createButtonRef} onClick={() => setCreating(true)} className={PRIMARY_ACTION} data-testid="mr-create">{t.create ?? 'Ny gjennomgang'}</button>
                         )}
                     </div>
                 </header>
 
                 {creating && (
-                    <section className={CARD} aria-labelledby="mr-create-heading">
+                    <section ref={createPanelRef} className={CARD} aria-labelledby="mr-create-heading">
                         <h2 id="mr-create-heading" className="text-xl font-semibold text-slate-950">{t.create_heading ?? 'Ny ledelsens gjennomgang'}</h2>
                         <p className="mb-4 mt-1 text-base text-slate-600">{t.create_hint}</p>
                         <ReviewForm
@@ -146,22 +152,23 @@ export default function ManagementReviewIndex() {
                                     </li>
                                 ))}
                             </ul>
-                            <div className="mt-4 hidden overflow-x-auto md:block">
+                            <ScrollRegion label={ti.reviews_heading ?? 'Gjennomganger'} className="mt-4 hidden md:block">
                                 <table className="w-full text-base" data-testid="mr-review-table">
+                                    <caption className="sr-only">{ti.reviews_heading ?? 'Gjennomganger'}</caption>
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left font-semibold text-slate-600">
-                                            <th className="pb-3 pr-4">{tf.list_title ?? 'Gjennomgang'}</th>
-                                            <th className="px-4 pb-3">{tf.period ?? 'Periode'}</th>
-                                            <th className="px-4 pb-3">{tf.meeting_date ?? 'Møtedato'}</th>
-                                            <th className="px-4 pb-3">{tf.owner ?? 'Ansvarlig'}</th>
-                                            <th className="px-4 pb-3">{tf.decisions_count ?? 'Beslutninger'}</th>
-                                            <th className="pb-3 pl-4">{tf.status ?? 'Status'}</th>
+                                            <th scope="col" className="pb-3 pr-4">{tf.list_title ?? 'Gjennomgang'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tf.period ?? 'Periode'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tf.meeting_date ?? 'Møtedato'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tf.owner ?? 'Ansvarlig'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tf.decisions_count ?? 'Beslutninger'}</th>
+                                            <th scope="col" className="pb-3 pl-4">{tf.status ?? 'Status'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {reviews.map((review) => (
                                             <tr key={review.id}>
-                                                <td className="py-3 pr-4 align-top"><Link href={review.url} className="font-semibold text-violet-700 hover:text-violet-900">{review.title}</Link></td>
+                                                <th scope="row" className="py-3 pr-4 text-left align-top font-normal"><Link href={review.url} className="font-semibold text-violet-700 hover:text-violet-900">{review.title}</Link></th>
                                                 <td className="whitespace-nowrap px-4 py-3 align-top text-slate-700">{formatDay(review.period_start)}–{formatDay(review.period_end)}</td>
                                                 <td className="whitespace-nowrap px-4 py-3 align-top text-slate-700">{formatDay(review.meeting_date)}</td>
                                                 <td className="px-4 py-3 align-top text-slate-700">{review.owner_name ?? '—'}</td>
@@ -171,7 +178,7 @@ export default function ManagementReviewIndex() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </>
                     )}
                 </section>

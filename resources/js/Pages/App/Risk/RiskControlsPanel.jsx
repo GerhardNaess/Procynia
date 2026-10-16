@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { ERROR, INPUT, LABEL } from '../../../Support/formStyles';
+import { removalFocusCandidates } from './riskA11y';
 import { CONTROL_FILTER_THRESHOLD, controlLabel, controlOptionLabel, filterControls } from './riskControlOptions';
+import useInlinePanelFocus from './useInlinePanelFocus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
 
 const STATUS_TONES = { draft: 'slate', active: 'emerald', under_review: 'amber', retired: 'slate' };
 
@@ -26,43 +29,66 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
     const form = useForm({ quality_item_id: '' });
     const searchable = options.length > CONTROL_FILTER_THRESHOLD;
     const shown = searchable ? filterControls(options, query, form.data.quality_item_id) : options;
+    // «Koble kontroll» is hidden while its form is open: focus in, and back to it (A11Y-014).
+    const panelRef = useRef(null);
+    const focusFirstError = useFocusFirstError(panelRef);
+    useInlinePanelFocus(linking, { panelRef, returnIds: ['risk-control-link', 'risk-controls-heading'] });
 
     const close = () => { setLinking(false); setQuery(''); form.reset(); form.clearErrors(); };
 
     const submit = (event) => {
         event.preventDefault();
+
+        if (form.processing) {
+            return;
+        }
+
         form.post(`/app/risk/risks/${riskId}/controls`, {
             preserveScroll: true,
             onSuccess: close,
+            onError: () => focusFirstError(),
         });
     };
 
+    // The removed control's row and button go: focus to the next control's button, else the previous
+    // one, else «Koble kontroll» or the heading — never the page (2.4.3, A11Y-014).
     const unlink = (control) => {
         if (! window.confirm(tc.unlink_confirm ?? 'Fjerne koblingen? Kontrollen blir værende i Kvalitet.')) {
             return;
         }
 
-        router.delete(`/app/risk/risks/${riskId}/controls/${control.id}`, { preserveScroll: true });
+        const candidates = removalFocusCandidates(
+            controls.map((item) => `risk-control-${item.id}-unlink`),
+            `risk-control-${control.id}-unlink`,
+            ['risk-control-link', 'risk-controls-heading'],
+        );
+
+        router.delete(`/app/risk/risks/${riskId}/controls/${control.id}`, {
+            preserveScroll: true,
+            onSuccess: () => refocusIfLost(candidates),
+        });
     };
+
+    const select = fieldA11y({ id: 'risk-control', hasError: Boolean(form.errors.quality_item_id) });
 
     return (
         <section className={CARD}>
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h2 className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontroller som håndterer risikoen'}</h2>
+                    <h2 id="risk-controls-heading" className="text-lg font-semibold text-slate-950">{tc.title ?? 'Kontroller som håndterer risikoen'}</h2>
                     <p className="mt-1 text-base text-slate-600">
                         {tc.description ?? 'Kontroller fra Kvalitet som bidrar til å håndtere risikoen. Ta dem med når du vurderer restrisiko.'}
                     </p>
                 </div>
                 {canLink && ! linking && (
-                    <button type="button" onClick={() => setLinking(true)} className={SECONDARY_ACTION}>
+                    <button id="risk-control-link" type="button" onClick={() => setLinking(true)} className={SECONDARY_ACTION}>
                         {tc.link ?? 'Koble kontroll'}
                     </button>
                 )}
             </div>
 
             {linking && (
-                <form onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <form ref={panelRef} onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     {options.length === 0 ? (
                         <p className="text-base text-slate-700">{tc.no_options ?? 'Det finnes ingen flere kontroller i Kvalitet å koble til.'}</p>
                     ) : (
@@ -73,20 +99,21 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                                     <input
                                         id="risk-control-filter"
                                         type="search"
+                                        aria-describedby={shown.length === 0 ? 'risk-control-filter-none' : undefined}
                                         value={query}
                                         onChange={(event) => setQuery(event.target.value)}
                                         placeholder={tc.filter_placeholder ?? 'Navn, kode, prosess eller aktivitet'}
                                         className={`mt-1 ${INPUT}`}
                                     />
                                     {shown.length === 0 && (
-                                        <p className="mt-1 text-base text-slate-600">{tc.filter_none ?? 'Ingen kontroller passer søket.'}</p>
+                                        <p id="risk-control-filter-none" className="mt-1 text-base text-slate-600">{tc.filter_none ?? 'Ingen kontroller passer søket.'}</p>
                                     )}
                                 </div>
                             )}
                             <div>
                                 <label htmlFor="risk-control" className={LABEL}>{tc.choose ?? 'Velg kontroll'}</label>
                                 <select
-                                    id="risk-control"
+                                    {...select.controlProps}
                                     value={form.data.quality_item_id}
                                     onChange={(event) => form.setData('quality_item_id', event.target.value)}
                                     className={`mt-1 ${INPUT}`}
@@ -98,13 +125,13 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                                 </select>
                             </div>
                             {form.errors.quality_item_id && (
-                                <p className="mt-1 text-base text-rose-700">{form.errors.quality_item_id}</p>
+                                <p id={select.errorId} className={ERROR}>{form.errors.quality_item_id}</p>
                             )}
                         </div>
                     )}
                     <div className="flex flex-wrap gap-2">
                         {options.length > 0 && (
-                            <button type="submit" disabled={form.processing || form.data.quality_item_id === ''} className={PRIMARY_ACTION}>
+                            <button type="submit" disabled={form.data.quality_item_id === ''} aria-disabled={form.processing || undefined} className={PRIMARY_ACTION}>
                                 {tc.save ?? 'Koble'}
                             </button>
                         )}
@@ -123,7 +150,7 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                         <li key={control.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
                             <div className="min-w-0 space-y-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <a href={control.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">
+                                    <a id={`risk-control-${control.id}-name`} href={control.url} className="text-base font-semibold text-violet-700 hover:text-violet-900">
                                         {controlLabel(control)}
                                     </a>
                                     <StatusBadge tone={STATUS_TONES[control.status] ?? 'slate'}>
@@ -142,7 +169,13 @@ export default function RiskControlsPanel({ riskId, controls, options, canLink, 
                                 )}
                             </div>
                             {canLink && (
-                                <button type="button" onClick={() => unlink(control)} className={DESTRUCTIVE_ACTION}>
+                                <button
+                                    id={`risk-control-${control.id}-unlink`}
+                                    type="button"
+                                    aria-describedby={`risk-control-${control.id}-name`}
+                                    onClick={() => unlink(control)}
+                                    className={DESTRUCTIVE_ACTION}
+                                >
                                     {tc.unlink ?? 'Fjern kobling'}
                                 </button>
                             )}

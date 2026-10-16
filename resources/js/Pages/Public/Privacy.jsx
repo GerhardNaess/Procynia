@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@inertiajs/react';
 import PublicLayout from '../../Layouts/PublicLayout';
+import ScrollRegion from '../../Components/App/ScrollRegion';
+
+// The sentences that introduce the two tables name them: the table through aria-labelledby, its
+// scroll box (a region only while it scrolls) through ScrollRegion's label. One text, said once each.
+const CATEGORIES_INTRO = 'Vi behandler følgende kategorier av personopplysninger:';
+const BASIS_INTRO = 'Vi behandler personopplysninger basert på følgende rettslige grunnlag etter GDPR artikkel 6:';
 
 function BackToRegistration() {
     const [show, setShow] = useState(false);
@@ -50,17 +56,20 @@ function TOC({ items }) {
     return (
         <aside className="hidden lg:block">
             <div className="sticky top-24 space-y-1">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">Innhold</p>
-                {items.map((item) => (
-                    <a
-                        key={item.id}
-                        href={`#${item.id}`}
-                        className="block rounded-lg px-3 py-1.5 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
-                    >
-                        <span className="mr-2 text-xs text-slate-600">§{item.num}</span>
-                        {item.short}
-                    </a>
-                ))}
+                <p id="privacy-toc-heading" className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">Innhold</p>
+                {/* A named nav, so the table of contents is a landmark; links slate-600 on the page background (A11Y-016). */}
+                <nav aria-labelledby="privacy-toc-heading" className="space-y-1">
+                    {items.map((item) => (
+                        <a
+                            key={item.id}
+                            href={`#${item.id}`}
+                            className="block rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                        >
+                            <span className="mr-2 text-xs text-slate-600">§{item.num}</span>
+                            {item.short}
+                        </a>
+                    ))}
+                </nav>
             </div>
         </aside>
     );
@@ -88,8 +97,10 @@ export default function Privacy() {
             {/* Hero */}
             <div className="mb-10">
                 <div className="mb-3 text-sm font-semibold uppercase tracking-widest text-blue-600">Juridisk</div>
-                <h1 className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Personvernerklæring</h1>
-                <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-500">
+                {/* One 19-letter word at 36 px is wider than a 320 px screen: it may hyphenate or break there
+                    rather than push the page sideways (1.4.10). */}
+                <h1 className="break-words hyphens-auto text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Personvernerklæring</h1>
+                <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
                     Denne erklæringen beskriver hvordan Procynia AS behandler personopplysninger i tråd med EUs personvernforordning (GDPR) og norsk personopplysningslov.
                 </p>
                 <p className="mt-2 text-sm text-slate-600">Sist oppdatert: 24. mai 2026 · Versjon 0.1</p>
@@ -104,7 +115,9 @@ export default function Privacy() {
             <div className="grid grid-cols-1 gap-10 lg:grid-cols-[220px_1fr] lg:gap-16">
                 <TOC items={TOC_ITEMS} />
 
-                <div className="space-y-12">
+                {/* min-w-0: a grid item is as wide as its content by default, so a wide table pushed the
+                    whole page sideways at 320 px instead of scrolling in its own box. */}
+                <div className="min-w-0 space-y-12 break-words">
                     <Section id="behandlingsansvarlig" num={1} title="Behandlingsansvarlig">
                         <p>
                             Behandlingsansvarlig for personopplysningene som behandles i Procynia-plattformen er:
@@ -137,13 +150,13 @@ export default function Privacy() {
                     </Section>
 
                     <Section id="hva-vi-samler" num={3} title="Personopplysninger vi behandler">
-                        <p>Vi behandler følgende kategorier av personopplysninger:</p>
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full text-left text-sm">
+                        <p id="privacy-categories-intro">{CATEGORIES_INTRO}</p>
+                        <ScrollRegion label={CATEGORIES_INTRO.replace(/:$/, '')}>
+                            <table aria-labelledby="privacy-categories-intro" className="min-w-full text-left text-sm">
                                 <thead>
                                     <tr className="border-b border-slate-200">
-                                        <th className="pb-3 pr-6 font-semibold text-slate-700">Kategori</th>
-                                        <th className="pb-3 font-semibold text-slate-700">Eksempler</th>
+                                        <th scope="col" className="pb-3 pr-6 font-semibold text-slate-700">Kategori</th>
+                                        <th scope="col" className="pb-3 font-semibold text-slate-700">Eksempler</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -156,27 +169,27 @@ export default function Privacy() {
                                         ['Kommunikasjonsdata', 'E-poster og meldinger sendt til support'],
                                     ].map(([cat, ex]) => (
                                         <tr key={cat}>
-                                            <td className="py-2.5 pr-6 font-medium text-slate-700">{cat}</td>
-                                            <td className="py-2.5 text-slate-500">{ex}</td>
+                                            <th scope="row" className="py-2.5 pr-6 text-left font-medium text-slate-700">{cat}</th>
+                                            <td className="py-2.5 text-slate-600">{ex}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                         <p>
                             Vi samler ikke inn særlige kategorier av personopplysninger (sensitive opplysninger som helse, politisk overbevisning o.l.) med mindre du frivillig legger det inn i dokumenter du selv laster opp.
                         </p>
                     </Section>
 
                     <Section id="formal-grunnlag" num={4} title="Formål og rettslig grunnlag">
-                        <p>Vi behandler personopplysninger basert på følgende rettslige grunnlag etter GDPR artikkel 6:</p>
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full text-left text-sm">
+                        <p id="privacy-basis-intro">{BASIS_INTRO}</p>
+                        <ScrollRegion label={BASIS_INTRO.replace(/:$/, '')}>
+                            <table aria-labelledby="privacy-basis-intro" className="min-w-full text-left text-sm">
                                 <thead>
                                     <tr className="border-b border-slate-200">
-                                        <th className="pb-3 pr-6 font-semibold text-slate-700">Formål</th>
-                                        <th className="pb-3 pr-6 font-semibold text-slate-700">Grunnlag</th>
-                                        <th className="pb-3 font-semibold text-slate-700">Hjemmel</th>
+                                        <th scope="col" className="pb-3 pr-6 font-semibold text-slate-700">Formål</th>
+                                        <th scope="col" className="pb-3 pr-6 font-semibold text-slate-700">Grunnlag</th>
+                                        <th scope="col" className="pb-3 font-semibold text-slate-700">Hjemmel</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -190,14 +203,14 @@ export default function Privacy() {
                                         ['Overholdelse av lovpålagte krav', 'Rettslig forpliktelse', 'Art. 6(1)(c)'],
                                     ].map(([purpose, basis, art]) => (
                                         <tr key={purpose}>
-                                            <td className="py-2.5 pr-6 text-slate-700">{purpose}</td>
-                                            <td className="py-2.5 pr-6 text-slate-500">{basis}</td>
+                                            <th scope="row" className="py-2.5 pr-6 text-left font-normal text-slate-700">{purpose}</th>
+                                            <td className="py-2.5 pr-6 text-slate-600">{basis}</td>
                                             <td className="py-2.5 font-mono text-xs text-slate-600">{art}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                     </Section>
 
                     <Section id="ai-behandling" num={5} title="AI og dokumentbehandling">
@@ -280,7 +293,7 @@ export default function Privacy() {
                             ].map(([right, desc]) => (
                                 <div key={right} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
                                     <p className="font-medium text-slate-800">{right}</p>
-                                    <p className="mt-0.5 text-slate-500">{desc}</p>
+                                    <p className="mt-0.5 text-slate-600">{desc}</p>
                                 </div>
                             ))}
                         </div>

@@ -1,13 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
+import { RequiredFieldsNote } from '../../../Components/App/FormField';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { fieldA11y } from '../../../Support/formFieldA11y';
+import { ERROR, INPUT, LABEL } from '../../../Support/formStyles';
 import RequiredMark from './RequiredMark';
+import { previewAnnouncement, previewKey } from './riskA11y';
 import { RISK_LEVEL_TONES, previewLevel } from './riskLevel';
+import useInlinePanelFocus from './useInlinePanelFocus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
 
 const formatDate = (iso) => (iso ? new Date(iso).toLocaleString('nb-NO') : '—');
 
@@ -23,18 +28,22 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
     const ta = tr.assessment ?? {};
     const [creating, setCreating] = useState(false);
     const [latest, ...earlier] = assessments;
+    // «Ny vurdering» is hidden while its form is open: focus into the form, back to the button after
+    // Avbryt or a save (A11Y-014).
+    const formPanelRef = useRef(null);
+    useInlinePanelFocus(creating, { panelRef: formPanelRef, returnIds: ['risk-assessment-create', 'risk-assessment-heading'] });
 
     return (
         <section className={CARD}>
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h2 className="text-lg font-semibold text-slate-950">{ta.heading ?? 'Risikovurdering'}</h2>
+                    <h2 id="risk-assessment-heading" className="text-lg font-semibold text-slate-950">{ta.heading ?? 'Risikovurdering'}</h2>
                     <p className="mt-1 text-base text-slate-600">
                         {ta.status_note ?? 'Hvor alvorlig risikoen er. Siste vurdering gjelder.'}
                     </p>
                 </div>
                 {canAssess && ! creating && (
-                    <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                    <button id="risk-assessment-create" type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                         {ta.create ?? 'Ny vurdering'}
                     </button>
                 )}
@@ -42,6 +51,7 @@ export default function RiskAssessmentPanel({ riskId, assessments, criteria, can
 
             {creating && (
                 <AssessmentForm
+                    formRef={formPanelRef}
                     riskId={riskId}
                     criteria={criteria}
                     supersedesAcceptance={hasCurrentAcceptance}
@@ -98,16 +108,22 @@ function LevelBadge({ result, ta }) {
     );
 }
 
-function Rating({ title, hint, result, ta }) {
+/**
+ * One of the two ratings. The explanation of the term used to be a `title` tooltip — reachable only by
+ * hovering with a mouse (1.3.1, 2.1.1) — so the latest assessment now shows it as text; the earlier
+ * ones (`compact`) leave it out rather than repeat it in every entry.
+ */
+function Rating({ title, hint, result, ta, compact = false }) {
     const likelihoodLabels = ta.likelihood_labels ?? {};
     const consequenceLabels = ta.consequence_labels ?? {};
 
     return (
         <div className="rounded-2xl bg-slate-50 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-base font-semibold text-slate-700" title={hint}>{title}</span>
+                <span className="text-base font-semibold text-slate-700">{title}</span>
                 {result && <LevelBadge result={result} ta={ta} />}
             </div>
+            {! compact && hint && <p className="mt-1 text-base text-slate-600">{hint}</p>}
             {result ? (
                 <p className="mt-2 text-base text-slate-700">
                     {ta.likelihood ?? 'Sannsynlighet'}: {result.likelihood} {likelihoodLabels[result.likelihood] ?? ''}
@@ -117,7 +133,7 @@ function Rating({ title, hint, result, ta }) {
                     {(ta.score ?? 'Score :score').replace(':score', result.score)}
                 </p>
             ) : (
-                <p className="mt-2 text-base text-slate-500">{ta.residual_none ?? 'Ikke vurdert'}</p>
+                <p className="mt-2 text-base text-slate-600">{ta.residual_none ?? 'Ikke vurdert'}</p>
             )}
         </div>
     );
@@ -137,12 +153,14 @@ function AssessmentDetails({ assessment, ta, tr, compact = false }) {
                     hint={ta.inherent_hint}
                     result={assessment.inherent}
                     ta={ta}
+                    compact={compact}
                 />
                 <Rating
                     title={ta.residual ?? 'Restrisiko'}
                     hint={ta.residual_hint}
                     result={assessment.residual}
                     ta={ta}
+                    compact={compact}
                 />
             </div>
             <div>
@@ -215,25 +233,50 @@ function AssessedDescription({ description, ta, tr }) {
 }
 
 function ScaleSelect({ id, label, value, onChange, values, labels, error, required = false, ta }) {
+    const { errorId, controlProps } = fieldA11y({ id, hasError: Boolean(error), required });
+
     return (
         <div>
             <label htmlFor={id} className={LABEL}>{label}{required && <RequiredMark />}</label>
-            <select id={id} value={value} onChange={(event) => onChange(event.target.value)} aria-required={required || undefined} className={`mt-1 ${INPUT}`}>
+            <select {...controlProps} value={value} onChange={(event) => onChange(event.target.value)} className={`mt-1 ${INPUT}`}>
                 <option value="">{ta.choose ?? 'Velg'}</option>
                 {values.map((step) => (
                     <option key={step} value={String(step)}>{step} – {labels[step] ?? step}</option>
                 ))}
             </select>
-            {error && <p className="mt-1 text-base text-rose-600">{error}</p>}
+            {error && <p id={errorId} className={ERROR}>{error}</p>}
         </div>
     );
 }
 
+/**
+ * The level the chosen pair will get. It used to be an aria-live region that mounted with the form
+ * (and with Restrisiko), so what it first said could be lost; now the text is plain and a change of
+ * level is spoken once through the app's permanent region (4.1.3, A11Y-112). Choosing the first
+ * scale of a pair says nothing; the level is said once both are set, and again only if it changes.
+ */
 function Preview({ criteria, likelihood, consequence, ta }) {
     const result = previewLevel(criteria, likelihood, consequence);
+    const key = previewKey(result);
+    const lastKey = useRef(key);
+
+    useEffect(() => {
+        if (key === lastKey.current) {
+            return;
+        }
+
+        lastKey.current = key;
+
+        const message = previewAnnouncement(result, ta);
+
+        if (message) {
+            announce(message);
+        }
+        // The key carries the result: the same level and score are the same message.
+    }, [key]);
 
     return (
-        <div className="flex items-center gap-2 text-base text-slate-600" aria-live="polite">
+        <div className="flex flex-wrap items-center gap-2 text-base text-slate-600">
             <span>{ta.level_preview ?? 'Beregnet nivå'}:</span>
             {result ? (
                 <>
@@ -247,8 +290,9 @@ function Preview({ criteria, likelihood, consequence, ta }) {
     );
 }
 
-function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone }) {
+function AssessmentForm({ formRef, riskId, criteria, supersedesAcceptance, ta, tr, onDone }) {
     const [withResidual, setWithResidual] = useState(false);
+    const focusFirstError = useFocusFirstError(formRef);
     const form = useForm({
         inherent_likelihood: '',
         inherent_consequence: '',
@@ -271,6 +315,12 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
 
     const submit = (event) => {
         event.preventDefault();
+
+        // «Lagre vurdering» stays focusable while saving (aria-disabled), so the guard lives here.
+        if (form.processing) {
+            return;
+        }
+
         form.transform((data) => ({
             ...data,
             residual_likelihood: data.residual_likelihood || null,
@@ -279,11 +329,14 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
         form.post(`/app/risk/risks/${riskId}/assessments`, {
             preserveScroll: true,
             onSuccess: () => { form.reset(); onDone(); },
+            onError: () => focusFirstError(),
         });
     };
 
+    const rationale = fieldA11y({ id: 'assessment-rationale', hasHint: true, hasError: Boolean(form.errors.rationale), required: true });
+
     return (
-        <form onSubmit={submit} className="mt-6 space-y-5 rounded-2xl border border-slate-200 p-5">
+        <form ref={formRef} onSubmit={submit} className="mt-6 space-y-5 rounded-2xl border border-slate-200 p-5">
             <h3 className="text-base font-semibold text-slate-950">{ta.form_heading ?? 'Ny risikovurdering'}</h3>
             {supersedesAcceptance && (
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-base text-amber-900">
@@ -367,22 +420,21 @@ function AssessmentForm({ riskId, criteria, supersedesAcceptance, ta, tr, onDone
 
             <div>
                 <label htmlFor="assessment-rationale" className={LABEL}>{ta.field_rationale ?? 'Kort begrunnelse'}<RequiredMark /></label>
-                <p className="text-base text-slate-600">{ta.field_rationale_hint ?? 'Hva bygger vurderingen på?'}</p>
+                <p id={rationale.hintId} className="text-base text-slate-600">{ta.field_rationale_hint ?? 'Hva bygger vurderingen på?'}</p>
                 <textarea
-                    id="assessment-rationale"
+                    {...rationale.controlProps}
                     rows={3}
-                    aria-required="true"
                     value={form.data.rationale}
                     onChange={(event) => form.setData('rationale', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.rationale && <p className="mt-1 text-base text-rose-600">{form.errors.rationale}</p>}
+                {form.errors.rationale && <p id={rationale.errorId} className={ERROR}>{form.errors.rationale}</p>}
             </div>
 
-            <p className="text-base text-slate-500">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
             <div className="flex flex-wrap items-center gap-3">
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={PRIMARY_ACTION}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (ta.save ?? 'Lagre vurdering')}
                 </button>
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>

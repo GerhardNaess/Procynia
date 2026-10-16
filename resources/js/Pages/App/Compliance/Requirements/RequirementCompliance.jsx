@@ -1,14 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { useForm } from '@inertiajs/react';
+import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import RequiredMark from '../../Risk/RequiredMark';
+import { INPUT, LABEL } from '../../../../Support/formStyles';
+import RequiredMark from '../RequiredMark';
 import { formatDay } from '../../Improvements/improvementStatus';
+import FieldError from '../FieldError';
+import { fieldStateProps, radioGroupProps } from '../complianceA11y';
+import { useFocusOnRejectedSubmit } from '../useComplianceFocus';
 import { COMPLIANCE_STATUS_TONES, complianceStatusLabel, documentationLines, formatDateTime } from './complianceRequirement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
 
@@ -48,6 +51,7 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
     const ta = tr.assessment ?? {};
     const form = useForm({ result: '', rationale: '', documentation: '' });
     const ref = useRef(null);
+    useFocusOnRejectedSubmit(form, ref);
 
     // Opened from «Vurder» in the worklist the form is far down the page; bring it into view.
     useEffect(() => {
@@ -60,12 +64,12 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
     };
 
     return (
-        <form ref={ref} onSubmit={send} className="mt-4 scroll-mt-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="compliance-assess-heading" data-testid="compliance-assessment-form">
+        <form ref={ref} onSubmit={send} className="mt-4 scroll-mt-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="compliance-assess-heading" data-testid="compliance-assessment-form" data-inline-panel="assess">
             <div>
                 <h3 id="compliance-assess-heading" className="text-lg font-semibold text-slate-950">{ta.form_heading ?? 'Vurder etterlevelse'}</h3>
                 <p className="mt-1 text-base text-slate-600">{ta.form_intro ?? 'Vurderingen lagres med dagens dato og kan ikke endres etterpå. Er noe feil, registrerer du en ny vurdering.'}</p>
             </div>
-            <fieldset>
+            <fieldset {...radioGroupProps('compliance-assessment-result', form.errors.result, { required: true })}>
                 <legend className={LABEL}>{ta.field_result ?? 'Resultat'}<RequiredMark /></legend>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {results.map((value) => (
@@ -84,7 +88,7 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
                         </label>
                     ))}
                 </div>
-                {form.errors.result && <p className="mt-1 text-base text-rose-700">{form.errors.result}</p>}
+                <FieldError field="compliance-assessment-result" message={form.errors.result} />
             </fieldset>
             <div>
                 <label htmlFor="compliance-assessment-rationale" className={LABEL}>{ta.field_rationale ?? 'Begrunnelse'}<RequiredMark /></label>
@@ -96,12 +100,12 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
                     rows={4}
                     required
                     aria-required="true"
-                    aria-describedby="compliance-assessment-rationale-hint"
+                    {...fieldStateProps('compliance-assessment-rationale', form.errors.rationale, ['compliance-assessment-rationale-hint'])}
                     value={form.data.rationale}
                     onChange={(event) => form.setData('rationale', event.target.value)}
                     className={`mt-2 ${INPUT}`}
                 />
-                {form.errors.rationale && <p className="mt-1 text-base text-rose-700">{form.errors.rationale}</p>}
+                <FieldError field="compliance-assessment-rationale" message={form.errors.rationale} />
             </div>
             <div>
                 <label htmlFor="compliance-assessment-documentation" className={LABEL}>{ta.field_documentation ?? 'Dokumentasjon (valgfritt)'}</label>
@@ -111,13 +115,14 @@ function AssessmentForm({ requirementId, results, onDone, tr }) {
                 <textarea
                     id="compliance-assessment-documentation"
                     rows={3}
-                    aria-describedby="compliance-assessment-documentation-hint"
+                    {...fieldStateProps('compliance-assessment-documentation', form.errors.documentation, ['compliance-assessment-documentation-hint'])}
                     value={form.data.documentation}
                     onChange={(event) => form.setData('documentation', event.target.value)}
                     className={`mt-2 ${INPUT}`}
                 />
-                {form.errors.documentation && <p className="mt-1 text-base text-rose-700">{form.errors.documentation}</p>}
+                <FieldError field="compliance-assessment-documentation" message={form.errors.documentation} />
             </div>
+            <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                 <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
@@ -191,7 +196,7 @@ export default function RequirementCompliance({ item, compliance, assessments = 
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <h2 id="compliance-assessment-heading" className="text-xl font-semibold text-slate-950">{ta.heading ?? 'Etterlevelse'}</h2>
                 {canAssess && (
-                    <button type="button" onClick={onAssess} className={PRIMARY_ACTION}>{ta.assess ?? 'Vurder etterlevelse'}</button>
+                    <button id="compliance-assess-open" type="button" onClick={onAssess} className={PRIMARY_ACTION}>{ta.assess ?? 'Vurder etterlevelse'}</button>
                 )}
             </div>
 

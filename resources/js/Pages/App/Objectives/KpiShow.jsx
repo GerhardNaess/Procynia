@@ -1,9 +1,12 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION, WARNING_COLOURS } from '../../../Support/actionStyles';
+import { focusElement, focusableWithin, refocusIfLost } from '../../../Support/focusManagement';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 import KpiContextPanel from './KpiContextPanel';
 import KpiForm, { initialKpiData } from './KpiForm';
 import KpiTrend from './KpiTrend';
@@ -13,6 +16,7 @@ import { KpiReopenForm, KpiRetireForm } from './KpiStatusForms';
 import { KPI_RESULT_TONES, KPI_STATUS_TONES, responsibleLabel } from './kpiStatus';
 import { objectiveHelp } from './objectiveHelp';
 import { formatLongDate } from './objectiveStatus';
+import { panelCloseFocusCandidates } from './objectivesA11y';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 // A row action in a dense table: the warning colours, at the size of a badge.
@@ -67,9 +71,23 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm, onCorrect = nul
     const [withdrawing, setWithdrawing] = useState(null);
     const results = tm.results ?? {};
 
+    // Trekk tilbake opens a form in the row below: focus goes to its reason field, and back to the
+    // row's button when it closes — or, once the measurement is withdrawn and the button is gone, to
+    // the table's heading (2.4.3, A11Y-014).
+    useEffect(() => {
+        if (withdrawing !== null) {
+            focusElement(document.getElementById(`withdraw-reason-${withdrawing}`));
+        }
+    }, [withdrawing]);
+
+    const closeWithdraw = (rowId) => {
+        setWithdrawing(null);
+        refocusIfLost([`kpi-withdraw-${rowId}`, 'kpi-measurements-heading']);
+    };
+
     return (
         <section className={CARD} aria-labelledby="kpi-measurements-heading">
-            <h2 id="kpi-measurements-heading" className="text-lg font-semibold text-slate-950">{tm.history_heading ?? 'Målehistorikk'}</h2>
+            <h2 id="kpi-measurements-heading" tabIndex={-1} className="text-lg font-semibold text-slate-950">{tm.history_heading ?? 'Målehistorikk'}</h2>
             <p className="mt-1 text-base text-slate-600">
                 {tm.history_intro ?? 'Hver måling vurderes mot målverdien som gjaldt da den ble registrert. Korrigeringer og tilbaketrekkinger beholdes.'}
             </p>
@@ -77,29 +95,31 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm, onCorrect = nul
             {measurements.length === 0 ? (
                 <p className="mt-4 text-base text-slate-500">{tm.history_empty ?? 'Ingen målinger er registrert ennå.'}</p>
             ) : (
-                // relative: the header's screen-reader label is positioned, and would otherwise
-                // escape this scroll box and widen the whole page on a phone.
-                <div className="relative mt-4 overflow-x-auto">
+                // ScrollRegion is positioned: the header's screen-reader label would otherwise escape
+                // this scroll box and widen the whole page on a phone.
+                <ScrollRegion label={tm.history_heading ?? 'Målehistorikk'} className="mt-4">
                     <table className="w-full text-base" data-testid="kpi-measurements">
+                        <caption className="sr-only">{tm.history_heading ?? 'Målehistorikk'}</caption>
                         <thead>
                             <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                <th className="pb-3 pr-3">{tm.col_period ?? 'Periode'}</th>
-                                <th className="px-3 pb-3">{tm.col_value ?? 'Verdi'}</th>
-                                <th className="px-3 pb-3">{tm.col_result ?? 'Status da'}</th>
-                                <th className="px-3 pb-3">{tm.col_target ?? 'Målverdi da'}</th>
-                                <th className="px-3 pb-3">{tm.col_recorded ?? 'Registrert'}</th>
-                                <th className="px-3 pb-3">{tm.col_comment ?? 'Kommentar'}</th>
-                                <th className="pb-3 pl-3"><span className="sr-only">{tm.withdraw ?? 'Trekk tilbake'}</span></th>
+                                <th scope="col" className="pb-3 pr-3">{tm.col_period ?? 'Periode'}</th>
+                                <th scope="col" className="px-3 pb-3">{tm.col_value ?? 'Verdi'}</th>
+                                <th scope="col" className="px-3 pb-3">{tm.col_result ?? 'Status da'}</th>
+                                <th scope="col" className="px-3 pb-3">{tm.col_target ?? 'Målverdi da'}</th>
+                                <th scope="col" className="px-3 pb-3">{tm.col_recorded ?? 'Registrert'}</th>
+                                <th scope="col" className="px-3 pb-3">{tm.col_comment ?? 'Kommentar'}</th>
+                                <th scope="col" className="pb-3 pl-3"><span className="sr-only">{tm.withdraw ?? 'Trekk tilbake'}</span></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {measurements.map((row) => {
                                 const counts = row.state === 'current';
+                                const periodId = `kpi-measurement-${row.id}-period`;
 
                                 return (
                                     <Fragment key={row.id}>
-                                        <tr data-state={row.state} className={counts ? '' : 'text-slate-500'}>
-                                            <td className="whitespace-nowrap py-3 pr-3 font-semibold">{row.period_label}</td>
+                                        <tr data-state={row.state} className={counts ? '' : 'text-slate-600'}>
+                                            <th scope="row" id={periodId} className="whitespace-nowrap py-3 pr-3 text-left font-semibold">{row.period_label}</th>
                                             <td className="whitespace-nowrap px-3 py-3 align-top sm:align-middle">
                                                 <span className={row.state === 'withdrawn' ? 'line-through' : (counts ? 'font-semibold text-slate-900' : '')}>
                                                     {row.value_display}
@@ -136,12 +156,24 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm, onCorrect = nul
                                             <td className="py-3 pl-3 text-right">
                                                 <div className="flex flex-wrap justify-end gap-2">
                                                     {onCorrect && counts && row.correction_choice && canCorrect(row.correction_choice) && (
-                                                        <button type="button" onClick={() => onCorrect(row.correction_choice)} className={ROW_ACTION}>
+                                                        <button
+                                                            type="button"
+                                                            id={`kpi-correct-${row.id}`}
+                                                            onClick={(event) => onCorrect(row.correction_choice, event.currentTarget.id)}
+                                                            aria-describedby={periodId}
+                                                            className={ROW_ACTION}
+                                                        >
                                                             {tm.correct ?? 'Korriger'}
                                                         </button>
                                                     )}
                                                     {row.can_withdraw && withdrawing !== row.id && (
-                                                        <button type="button" onClick={() => setWithdrawing(row.id)} className={ROW_WARNING_ACTION}>
+                                                        <button
+                                                            type="button"
+                                                            id={`kpi-withdraw-${row.id}`}
+                                                            onClick={() => setWithdrawing(row.id)}
+                                                            aria-describedby={periodId}
+                                                            className={ROW_WARNING_ACTION}
+                                                        >
                                                             {tm.withdraw ?? 'Trekk tilbake'}
                                                         </button>
                                                     )}
@@ -151,7 +183,7 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm, onCorrect = nul
                                         {withdrawing === row.id && (
                                             <tr>
                                                 <td colSpan={7} className="pb-4">
-                                                    <KpiWithdrawForm baseUrl={baseUrl} measurement={row} onDone={() => setWithdrawing(null)} tr={tm} />
+                                                    <KpiWithdrawForm baseUrl={baseUrl} measurement={row} onDone={() => closeWithdraw(row.id)} tr={tm} />
                                                 </td>
                                             </tr>
                                         )}
@@ -160,7 +192,7 @@ function MeasurementHistory({ measurements, baseUrl, locale, tm, onCorrect = nul
                             })}
                         </tbody>
                     </table>
-                </div>
+                </ScrollRegion>
             )}
         </section>
     );
@@ -188,6 +220,7 @@ export default function KpiShow() {
         quality_context: qualityContext = null,
         quality_context_options: qualityContextOptions = [],
         locale = 'no',
+        flash = {},
     } = usePage().props;
 
     const objectiveTr = translations?.objectives ?? {};
@@ -203,10 +236,40 @@ export default function KpiShow() {
     // The period «Korriger» opened Registrer måling on; null for a new measurement.
     const [correcting, setCorrecting] = useState(null);
     const deadline = kpi.deadline ?? null;
+    const rowError = useRowActionError(flash?.error);
 
-    const openMeasurement = (choice = null) => {
+    // The open panel takes focus when it opens — its first field — and gives it back to the button
+    // that opened it when it closes; if that button is gone (a saved Avslutt KPI), to another action
+    // or the KPI's heading (2.4.3, A11Y-014). A counter, so «Korriger» on another row while Registrer
+    // måling is open moves focus into the re-opened form as well.
+    const panelRef = useRef(null);
+    const triggerRef = useRef(null);
+    const [panelFocusRequest, setPanelFocusRequest] = useState(0);
+
+    useEffect(() => {
+        if (panelFocusRequest > 0) {
+            focusElement(focusableWithin(panelRef.current).find((element) => element.matches('input, select, textarea')) ?? panelRef.current);
+        }
+    }, [panelFocusRequest]);
+
+    const openPanel = (name, triggerId) => {
+        triggerRef.current = triggerId;
+        setPanel(name);
+        setPanelFocusRequest((count) => count + 1);
+    };
+
+    const closePanel = () => {
+        setPanel(null);
+        refocusIfLost(panelCloseFocusCandidates(
+            triggerRef.current,
+            ['kpi-action-measure', 'kpi-action-edit', 'kpi-action-retire', 'kpi-action-reopen'],
+            'kpi-heading',
+        ));
+    };
+
+    const openMeasurement = (choice = null, triggerId = 'kpi-action-measure') => {
         setCorrecting(choice);
-        setPanel('measure');
+        openPanel('measure', triggerId);
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -216,18 +279,20 @@ export default function KpiShow() {
 
     const form = useForm(initialKpiData(kpi, formOptions ?? {}));
 
-    const submit = (event) => {
+    const submit = (event, focusFirstError) => {
         event.preventDefault();
-        form.patch(baseUrl, { preserveScroll: true, onSuccess: () => setPanel(null) });
+        form.patch(baseUrl, { preserveScroll: true, onSuccess: closePanel, onError: focusFirstError });
     };
 
+    // A refused delete (the KPI has measurements) is said beside the button, not only in the banner.
     const destroy = () => {
         if (! window.confirm(tr.delete_confirm ?? 'Slett KPI-en? Dette kan ikke angres.')) {
             return;
         }
 
-        router.delete(baseUrl);
+        router.delete(baseUrl, trackRowAction(`kpi-delete-${kpi.id}`, { preserveScroll: true }));
     };
+    const deleteError = rowError(`kpi-delete-${kpi.id}`);
 
     const describeChange = (entry, who) => (entry.to_status === 'active'
         ? (tr.history_reopened ?? 'Gjenåpnet av :name')
@@ -238,8 +303,8 @@ export default function KpiShow() {
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                        <p className="text-base font-semibold uppercase tracking-wide text-slate-500">{tr.col_title ?? 'KPI'}</p>
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{kpi.title}</h1>
+                        <p className="text-base font-semibold uppercase tracking-wide text-slate-600">{tr.col_title ?? 'KPI'}</p>
+                        <h1 id="kpi-heading" className="text-3xl font-semibold tracking-tight text-slate-950">{kpi.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={KPI_STATUS_TONES[kpi.status] ?? 'slate'}>{statusLabels[kpi.status] ?? kpi.status}</StatusBadge>
@@ -248,16 +313,16 @@ export default function KpiShow() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...objectiveHelp(objectiveTr, 'kpi')} />
                         {permissions.can_measure && measurementForm && panel === null && (
-                            <button type="button" onClick={() => openMeasurement()} className={PRIMARY_ACTION}>{tm.register ?? 'Registrer måling'}</button>
+                            <button type="button" id="kpi-action-measure" onClick={() => openMeasurement()} className={PRIMARY_ACTION}>{tm.register ?? 'Registrer måling'}</button>
                         )}
                         {permissions.can_edit && panel === null && (
-                            <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
+                            <button type="button" id="kpi-action-edit" onClick={() => openPanel('edit', 'kpi-action-edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
                         )}
                         {permissions.can_retire && panel === null && (
-                            <button type="button" onClick={() => setPanel('retire')} className={SECONDARY_ACTION}>{tr.retire ?? 'Avslutt KPI'}</button>
+                            <button type="button" id="kpi-action-retire" onClick={() => openPanel('retire', 'kpi-action-retire')} className={SECONDARY_ACTION}>{tr.retire ?? 'Avslutt KPI'}</button>
                         )}
                         {permissions.can_reopen && panel === null && (
-                            <button type="button" onClick={() => setPanel('reopen')} className={SECONDARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
+                            <button type="button" id="kpi-action-reopen" onClick={() => openPanel('reopen', 'kpi-action-reopen')} className={SECONDARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
                         )}
                     </div>
                 </header>
@@ -277,10 +342,10 @@ export default function KpiShow() {
                             {kpi.latest_value_display ? (
                                 <>
                                     <span className="whitespace-nowrap text-2xl font-semibold" data-testid="kpi-latest-value">{kpi.latest_value_display}</span>
-                                    <span className="block text-base text-slate-500">{kpi.latest_period_label}</span>
+                                    <span className="block text-base text-slate-600">{kpi.latest_period_label}</span>
                                 </>
                             ) : (
-                                <span className="text-slate-500">{tm.not_measured_yet ?? 'Ingen gjeldende måling ennå.'}</span>
+                                <span className="text-slate-600">{tm.not_measured_yet ?? 'Ingen gjeldende måling ennå.'}</span>
                             )}
                         </Detail>
                         <Detail label={tm.result_now ?? 'Dagens status'}>
@@ -312,27 +377,31 @@ export default function KpiShow() {
                     </dl>
                 </section>
 
-                {panel === 'measure' && measurementForm && (
-                    <KpiMeasurementForm
-                        key={correcting ?? 'new'}
-                        baseUrl={baseUrl}
-                        kpi={kpi}
-                        options={measurementForm}
-                        initialChoice={correcting}
-                        onDone={() => { setPanel(null); setCorrecting(null); }}
-                        tr={tm}
-                    />
+                {['measure', 'retire', 'reopen'].includes(panel) && (
+                    <div ref={panelRef}>
+                        {panel === 'measure' && measurementForm && (
+                            <KpiMeasurementForm
+                                key={correcting ?? 'new'}
+                                baseUrl={baseUrl}
+                                kpi={kpi}
+                                options={measurementForm}
+                                initialChoice={correcting}
+                                onDone={() => { closePanel(); setCorrecting(null); }}
+                                tr={tm}
+                            />
+                        )}
+                        {panel === 'retire' && <KpiRetireForm baseUrl={baseUrl} onDone={closePanel} tr={tr} />}
+                        {panel === 'reopen' && <KpiReopenForm baseUrl={baseUrl} onDone={closePanel} tr={tr} />}
+                    </div>
                 )}
-                {panel === 'retire' && <KpiRetireForm baseUrl={baseUrl} onDone={() => setPanel(null)} tr={tr} />}
-                {panel === 'reopen' && <KpiReopenForm baseUrl={baseUrl} onDone={() => setPanel(null)} tr={tr} />}
 
                 {panel === 'edit' && formOptions ? (
-                    <section className={CARD}>
-                        <h2 className="mb-4 text-lg font-semibold text-slate-950">{tr.edit_heading ?? 'Rediger KPI'}</h2>
+                    <section ref={panelRef} className={CARD} aria-labelledby="kpi-edit-heading">
+                        <h2 id="kpi-edit-heading" className="mb-4 text-lg font-semibold text-slate-950">{tr.edit_heading ?? 'Rediger KPI'}</h2>
                         <KpiForm
                             form={form}
                             onSubmit={submit}
-                            onCancel={() => { setPanel(null); form.reset(); form.clearErrors(); }}
+                            onCancel={() => { closePanel(); form.reset(); form.clearErrors(); }}
                             options={formOptions}
                             tr={tr}
                             unitLocked={Boolean(kpi.unit_locked)}
@@ -344,7 +413,7 @@ export default function KpiShow() {
                         {kpi.description ? (
                             <p className="mt-2 whitespace-pre-line text-base leading-7 text-slate-800">{kpi.description}</p>
                         ) : (
-                            <p className="mt-2 text-base text-slate-500">{tr.no_description ?? 'Ingen beskrivelse.'}</p>
+                            <p className="mt-2 text-base text-slate-600">{tr.no_description ?? 'Ingen beskrivelse.'}</p>
                         )}
 
                         <h2 className="mt-6 text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
@@ -376,10 +445,16 @@ export default function KpiShow() {
                         {/* Deleting is for a KPI registered by mistake: kept small and out of the way. */}
                         {permissions.can_delete && (
                             <div className="mt-6 border-t border-slate-100 pt-4">
-                                <button type="button" onClick={destroy} className="text-base font-semibold text-rose-700 underline-offset-2 hover:underline">
+                                <button
+                                    type="button"
+                                    onClick={destroy}
+                                    aria-describedby={['kpi-delete-hint', deleteError ? rowErrorId(`kpi-delete-${kpi.id}`) : null].filter(Boolean).join(' ')}
+                                    className="text-base font-semibold text-rose-700 underline-offset-2 hover:underline"
+                                >
                                     {tr.delete ?? 'Slett KPI'}
                                 </button>
-                                <p className="text-base text-slate-500">{tr.delete_hint ?? 'Bare for KPI-er som er registrert ved en feil og ikke har målinger.'}</p>
+                                <p id="kpi-delete-hint" className="text-base text-slate-600">{tr.delete_hint ?? 'Bare for KPI-er som er registrert ved en feil og ikke har målinger.'}</p>
+                                {deleteError && <p id={rowErrorId(`kpi-delete-${kpi.id}`)} className="mt-1 text-base text-rose-700">{deleteError}</p>}
                             </div>
                         )}
                     </section>
@@ -388,7 +463,7 @@ export default function KpiShow() {
                 <section className={CARD} aria-labelledby="kpi-trend-heading">
                     <h2 id="kpi-trend-heading" className="text-lg font-semibold text-slate-950">{tr.trend?.heading ?? 'Utvikling over tid'}</h2>
                     <p className="mt-1 text-base text-slate-600">{tr.trend?.intro ?? 'Gjeldende verdi for hver periode, med målverdien slik den er nå.'}</p>
-                    <KpiTrend trend={kpi.trend} kpi={kpi} tr={tr} locale={locale} />
+                    <KpiTrend trend={kpi.trend} kpi={kpi} tr={tr} locale={locale} resultLabel={results[kpi.result] ?? null} />
                 </section>
 
                 {/* null, not empty: the person cannot read Kvalitet, so nothing is said about context. */}

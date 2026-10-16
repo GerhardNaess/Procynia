@@ -72,9 +72,11 @@ function AttentionCategory({ category, ta }) {
             <div className="flex items-start gap-3">
                 <p className="text-2xl font-semibold text-amber-800" data-testid="objective-attention-count">{category.count}</p>
                 <div className="min-w-0 flex-1">
-                    <h3 className="text-base font-semibold text-slate-950">{label}</h3>
+                    <h3 id={`${listId}-label`} className="text-base font-semibold text-slate-950">{label}</h3>
+                    {/* «Vis» is said with its category: there is one per category. */}
                     <button
                         type="button"
+                        aria-describedby={`${listId}-label`}
                         className="mt-1 text-base font-semibold text-violet-700 hover:text-violet-900"
                         aria-expanded={open}
                         aria-controls={listId}

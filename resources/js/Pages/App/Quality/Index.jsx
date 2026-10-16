@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { cloneElement, useRef, useState } from 'react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
+import FormField, { RequiredFieldsNote } from '../../../Components/App/FormField';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import FilePickerField from '../../../Components/App/FilePickerField';
 import QualityItemActions from '../../../Components/App/QualityItemActions';
@@ -15,6 +16,7 @@ import {
     PRIMARY_ACTION,
     SECONDARY_ACTION,
 } from '../../../Support/actionStyles';
+import { useFocusFirstError } from '../../../Support/focusManagement';
 
 /**
  * Kvalitet — the virksomhet's styrende dokumenter, prosesser and kontroller.
@@ -48,8 +50,7 @@ const STATUS_TONES = {
 };
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
+const INPUT = 'min-h-10 w-full rounded-xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const ROW_DESTRUCTIVE = `ml-auto inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-base font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 
 export default function QualityIndex() {
@@ -70,6 +71,7 @@ export default function QualityIndex() {
     } = usePage().props;
 
     const tq = translations?.quality ?? {};
+    const ta = translations?.a11y ?? {};
     const typeLabels = tq.types ?? {};
     const statusLabels = tq.statuses ?? {};
 
@@ -104,7 +106,7 @@ export default function QualityIndex() {
                 {activeTab === 'overview' && <AttentionPanel findings={attention} tq={tq} />}
 
                 {! canChange && (
-                    <p className="text-base text-slate-500">
+                    <p className="text-base text-slate-600">
                         {tq.manage_denied ?? 'Du kan se kvalitetssystemet, men ikke endre det.'}
                     </p>
                 )}
@@ -115,6 +117,7 @@ export default function QualityIndex() {
                         {canEdit && (
                             <RegisterToolPanel
                                 tq={tq}
+                                ta={ta}
                                 categories={toolCategories}
                                 documentOptions={toolDocumentOptions}
                             />
@@ -157,6 +160,7 @@ export default function QualityIndex() {
                         {canCreate && (
                             <CreateItemPanel
                                 tq={tq}
+                                ta={ta}
                                 qualityTypes={qualityTypes}
                                 statuses={statuses}
                                 ownerOptions={ownerOptions}
@@ -217,7 +221,7 @@ function AttentionFinding({ finding, ta }) {
     return (
         <li className={`rounded-2xl border px-4 py-3 ${count > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
             <div className="flex items-start gap-3">
-                <p className={`text-2xl font-semibold ${count > 0 ? 'text-amber-800' : 'text-slate-400'}`}>{count}</p>
+                <p className={`text-2xl font-semibold ${count > 0 ? 'text-amber-800' : 'text-slate-600'}`}>{count}</p>
                 <div className="min-w-0 flex-1">
                     <h3 className="text-base font-semibold text-slate-950">{copy.title ?? finding.key}</h3>
                     <p className="mt-1 text-base leading-6 text-slate-600">{copy.help ?? ''}</p>
@@ -338,16 +342,17 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
         >
             <ScrollRegion label={tq.items_heading ?? 'Styrende dokumenter'} className="mt-4">
                 <table className="w-full min-w-[720px] text-left text-base">
+                    <caption className="sr-only">{tq.items_heading ?? 'Styrende dokumenter'}</caption>
                     <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
-                            <th className="pb-2">{table.document ?? 'Dokument'}</th>
-                            <th className="pb-2">{table.type ?? 'Type'}</th>
-                            <th className="pb-2">{table.owner ?? 'Eier'}</th>
-                            <th className="pb-2">{table.status ?? 'Status'}</th>
-                            <th className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
-                            <th className="pb-2">{table.wiki ?? 'Wiki'}</th>
+                            <th scope="col" className="pb-2">{table.document ?? 'Dokument'}</th>
+                            <th scope="col" className="pb-2">{table.type ?? 'Type'}</th>
+                            <th scope="col" className="pb-2">{table.owner ?? 'Eier'}</th>
+                            <th scope="col" className="pb-2">{table.status ?? 'Status'}</th>
+                            <th scope="col" className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
+                            <th scope="col" className="pb-2">{table.wiki ?? 'Wiki'}</th>
                             {canDelete && (
-                                <th className="pb-2 text-right">
+                                <th scope="col" className="pb-2 text-right">
                                     <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
                                 </th>
                             )}
@@ -356,11 +361,11 @@ function ItemTable({ items, tq, canDelete, activeTab, typeLabels, statusLabels }
                     <tbody className="divide-y divide-slate-100">
                         {items.map((item) => (
                             <tr key={item.id} className="align-top">
-                                <td className="py-3 pr-4">
+                                <th scope="row" className="py-3 pr-4 text-left font-normal">
                                     <Link href={item.url} className="font-semibold text-slate-950 hover:underline">
                                         {itemLabel(item)}
                                     </Link>
-                                </td>
+                                </th>
                                 <td className="py-3 pr-4">
                                     <StatusBadge tone={TYPE_TONES[item.quality_type] ?? 'slate'}>
                                         {typeLabels?.[item.quality_type] ?? item.quality_type}
@@ -408,15 +413,16 @@ function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = nu
         >
             <ScrollRegion label={ts.processes_heading ?? 'Prosesser'} className="mt-4">
                 <table className="w-full min-w-[640px] text-left text-base">
+                    <caption className="sr-only">{ts.processes_heading ?? 'Prosesser'}</caption>
                     <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
-                            <th className="pb-2">{tq.types?.process ?? 'Prosess'}</th>
-                            <th className="pb-2">{table.owner ?? 'Eier'}</th>
-                            <th className="pb-2">{table.status ?? 'Status'}</th>
-                            <th className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
-                            <th className="pb-2">{table.wiki ?? 'Wiki'}</th>
+                            <th scope="col" className="pb-2">{tq.types?.process ?? 'Prosess'}</th>
+                            <th scope="col" className="pb-2">{table.owner ?? 'Eier'}</th>
+                            <th scope="col" className="pb-2">{table.status ?? 'Status'}</th>
+                            <th scope="col" className="pb-2">{table.next_review ?? 'Neste revisjon'}</th>
+                            <th scope="col" className="pb-2">{table.wiki ?? 'Wiki'}</th>
                             {canDelete && (
-                                <th className="pb-2 text-right">
+                                <th scope="col" className="pb-2 text-right">
                                     <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
                                 </th>
                             )}
@@ -425,11 +431,11 @@ function ProcessTable({ items, tq, canDelete, activeTab, statusLabels, help = nu
                     <tbody className="divide-y divide-slate-100">
                         {items.map((item) => (
                             <tr key={item.id} className="align-top">
-                                <td className="py-3 pr-4">
+                                <th scope="row" className="py-3 pr-4 text-left font-normal">
                                     <Link href={item.url} className="font-semibold text-slate-950 hover:underline">
                                         {itemLabel(item)}
                                     </Link>
-                                </td>
+                                </th>
                                 <td className="py-3 pr-4 text-slate-700">
                                     {item.owner_name ?? (tq.no_owner ?? 'Ingen eier')}
                                 </td>
@@ -477,18 +483,19 @@ function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabe
         >
             <ScrollRegion label={heading} className="mt-4">
                 <table className={`w-full text-left text-base ${showPlacements ? 'min-w-[1080px]' : 'min-w-[900px]'}`}>
+                    <caption className="sr-only">{heading}</caption>
                     <thead className="text-base uppercase tracking-wide text-slate-500">
                         <tr>
-                            <th className="pb-2">{tr.control ?? 'Kontroll'}</th>
-                            <th className="pb-2">{tr.criterion ?? 'Hva kontrolleres'}</th>
-                            <th className="pb-2">{tr.responsibility ?? 'Ansvarlig'}</th>
-                            <th className="pb-2">{tr.frequency ?? 'Frekvens'}</th>
-                            <th className="pb-2">{tr.method ?? 'Metode'}</th>
-                            <th className="pb-2">{tq.table?.status ?? 'Status'}</th>
-                            <th className="pb-2">{tr.evidence ?? 'Evidens'}</th>
-                            {showPlacements && <th className="pb-2">{tr.used_in ?? 'Brukes i'}</th>}
+                            <th scope="col" className="pb-2">{tr.control ?? 'Kontroll'}</th>
+                            <th scope="col" className="pb-2">{tr.criterion ?? 'Hva kontrolleres'}</th>
+                            <th scope="col" className="pb-2">{tr.responsibility ?? 'Ansvarlig'}</th>
+                            <th scope="col" className="pb-2">{tr.frequency ?? 'Frekvens'}</th>
+                            <th scope="col" className="pb-2">{tr.method ?? 'Metode'}</th>
+                            <th scope="col" className="pb-2">{tq.table?.status ?? 'Status'}</th>
+                            <th scope="col" className="pb-2">{tr.evidence ?? 'Evidens'}</th>
+                            {showPlacements && <th scope="col" className="pb-2">{tr.used_in ?? 'Brukes i'}</th>}
                             {canDelete && (
-                                <th className="pb-2 text-right">
+                                <th scope="col" className="pb-2 text-right">
                                     <span className="sr-only">{tq.actions_menu ?? 'Handlinger'}</span>
                                 </th>
                             )}
@@ -505,11 +512,11 @@ function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabe
 
                             return (
                                 <tr key={item.id} className="align-top">
-                                    <td className="py-3 pr-4">
+                                    <th scope="row" className="py-3 pr-4 text-left font-normal">
                                         <Link href={item.url} className="font-semibold text-slate-950 hover:underline">
                                             {itemLabel(item)}
                                         </Link>
-                                    </td>
+                                    </th>
                                     <td className="max-w-sm py-3 pr-4 text-slate-700">
                                         {entry.criterion || <span className="text-slate-500">{tr.no_criterion ?? 'Ikke beskrevet'}</span>}
                                     </td>
@@ -543,7 +550,7 @@ function ControlRegister({ items, register, tq, canDelete, activeTab, statusLabe
                                                             <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
                                                                 {placement.process_title}
                                                             </Link>
-                                                            <span className="text-slate-400"> › </span>
+                                                            <span className="text-slate-500"> › </span>
                                                             {placement.activity_exists
                                                                 ? placement.activity_label
                                                                 : <span className="italic text-slate-500">{tr.activity_missing ?? 'Aktiviteten finnes ikke lenger'}</span>}
@@ -652,7 +659,7 @@ function ToolLibrary({ tools, tq }) {
  * Registering a tool: a name and a purpose for a file in the archive — uploaded here, or picked from
  * what the archive already holds. Either way the file is not copied.
  */
-function RegisterToolPanel({ tq, categories, documentOptions }) {
+function RegisterToolPanel({ tq, ta, categories, documentOptions }) {
     const tt = tq.tools ?? {};
     const categoryLabels = tq.tool_categories ?? {};
     const [source, setSource] = useState('upload');
@@ -664,6 +671,8 @@ function RegisterToolPanel({ tq, categories, documentOptions }) {
         file: null,
         enterprise_wiki_document_id: '',
     });
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     function submit(event) {
         event.preventDefault();
@@ -677,6 +686,7 @@ function RegisterToolPanel({ tq, categories, documentOptions }) {
                 form.reset();
                 setFileInputKey((key) => key + 1);
             },
+            onError: () => focusFirstError(),
         });
     }
 
@@ -687,8 +697,10 @@ function RegisterToolPanel({ tq, categories, documentOptions }) {
             <h2 className="text-xl font-semibold text-slate-950">{tt.add_heading ?? 'Registrer verktøy'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{tt.add_help ?? ''}</p>
 
-            <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
-                <Field label={tt.field_title ?? 'Navn'} error={form.errors.title}>
+            <form ref={formRef} onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
+                <RequiredFieldsNote text={ta.required_fields} className="text-base text-slate-600 md:col-span-2" />
+
+                <Field label={tt.field_title ?? 'Navn'} error={form.errors.title} required>
                     <input
                         className={INPUT}
                         value={form.data.title}
@@ -723,6 +735,8 @@ function RegisterToolPanel({ tq, categories, documentOptions }) {
                 </div>
 
                 <fieldset className="space-y-3 md:col-span-2">
+                    {/* The two radios are one question; the group needs its name (1.3.1, A11Y-120). */}
+                    <legend className="sr-only">{ta.quality_tool_source ?? 'Hvor dokumentet kommer fra'}</legend>
                     <div className="flex flex-wrap gap-4">
                         {['upload', 'existing'].map((option) => (
                             <label key={option} className="inline-flex items-center gap-2 text-base text-slate-800">
@@ -783,7 +797,7 @@ function RegisterToolPanel({ tq, categories, documentOptions }) {
     );
 }
 
-function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels, statusLabels }) {
+function CreateItemPanel({ tq, ta, qualityTypes, statuses, ownerOptions, typeLabels, statusLabels }) {
     const { data, setData, post, processing, errors, reset } = useForm({
         quality_type: '',
         title: '',
@@ -800,6 +814,8 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
     // set programmatically, so remounting it is the only way to stop a submitted file lingering in
     // the form after the item has been created.
     const [fileInputKey, setFileInputKey] = useState(0);
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
 
     function submit(event) {
         event.preventDefault();
@@ -812,6 +828,7 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                 reset();
                 setFileInputKey((key) => key + 1);
             },
+            onError: () => focusFirstError(),
         });
     }
 
@@ -820,8 +837,10 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
             <h2 className="text-xl font-semibold text-slate-950">{tq.create_heading ?? 'Registrer i kvalitetssystemet'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{tq.create_help ?? ''}</p>
 
-            <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
-                <Field label={tq.field_type ?? 'Type'} error={errors.quality_type}>
+            <form ref={formRef} onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
+                <RequiredFieldsNote text={ta.required_fields} className="text-base text-slate-600 md:col-span-2" />
+
+                <Field label={tq.field_type ?? 'Type'} error={errors.quality_type} required>
                     <select
                         className={INPUT}
                         value={data.quality_type}
@@ -845,7 +864,7 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                     </select>
                 </Field>
 
-                <Field label={tq.field_title ?? 'Tittel'} error={errors.title}>
+                <Field label={tq.field_title ?? 'Tittel'} error={errors.title} required>
                     <input
                         className={INPUT}
                         value={data.title}
@@ -877,12 +896,16 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                     </select>
                 </Field>
 
-                <Field label={tq.field_status ?? 'Status'} error={errors.status}>
-                    {data.quality_type === 'process' ? (
+                {/* A process has no status to pick — a sentence, not a field, so no label pointing at it. */}
+                {data.quality_type === 'process' ? (
+                    <div className="space-y-1">
+                        <p className="block text-base font-semibold text-slate-700">{tq.field_status ?? 'Status'}</p>
                         <p className="min-h-10 py-2 text-base text-slate-600">
                             {tq.publication?.create_status_help ?? 'En prosess blir gjeldende når flyten godkjennes og publiseres.'}
                         </p>
-                    ) : (
+                    </div>
+                ) : (
+                    <Field label={tq.field_status ?? 'Status'} error={errors.status}>
                         <select
                             className={INPUT}
                             value={data.status}
@@ -892,8 +915,8 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
                                 <option key={status} value={status}>{statusLabels?.[status] ?? status}</option>
                             ))}
                         </select>
-                    )}
-                </Field>
+                    </Field>
+                )}
 
                 <Field label={tq.field_review_interval ?? 'Revisjonsintervall (måneder)'} error={errors.review_interval_months}>
                     <input
@@ -953,12 +976,22 @@ function CreateItemPanel({ tq, qualityTypes, statuses, ownerOptions, typeLabels,
     );
 }
 
-function Field({ label, error, children }) {
+/**
+ * One field: the page's old `Field` look, now wired through FormField (A11Y-013, -121) — the label
+ * names the control by for/id, the error describes it and marks it invalid, `required` gives the «*»
+ * and aria-required. The single control child receives those props.
+ */
+function Field({ label, error, required = false, children }) {
     return (
-        <label className="block space-y-1">
-            <span className={LABEL}>{label}</span>
-            {children}
-            {error && <span className="block text-base text-rose-600">{error}</span>}
-        </label>
+        <FormField
+            label={label}
+            error={error}
+            required={required}
+            className="space-y-1"
+            controlClassName=""
+            errorClassName="block text-base text-rose-700"
+        >
+            {(field) => cloneElement(children, field)}
+        </FormField>
     );
 }

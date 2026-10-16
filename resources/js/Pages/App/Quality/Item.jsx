@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { cloneElement, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import FormField, { RequiredFieldsNote } from '../../../Components/App/FormField';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { publicationLabel, publicationTone } from '../../../Support/processPublication';
@@ -13,6 +14,8 @@ import {
     PRIMARY_ACTION,
     SECONDARY_ACTION,
 } from '../../../Support/actionStyles';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { positionalRemovalFocusCandidates, removalFocusCandidates } from '../../../Components/App/processFlowA11y';
 
 /**
  * One styrende dokument.
@@ -55,7 +58,7 @@ const STATUS_TONES = {
 };
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const INPUT = 'min-h-10 w-full rounded-xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-700';
 const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-base font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 /** Matches the active tab on the Kvalitet index, so one tab strip does not read as two kinds. */
@@ -105,6 +108,7 @@ export default function QualityItem() {
 
     const tq = translations?.quality ?? {};
     const td = tq.detail ?? {};
+    const ta = translations?.a11y ?? {};
     const typeLabels = tq.types ?? {};
     const statusLabels = tq.statuses ?? {};
     // One flag per permission the controller gates on. Attaching a Wiki page or a file the
@@ -138,7 +142,7 @@ export default function QualityItem() {
                                     {statusLabels?.[item.status] ?? item.status}
                                 </StatusBadge>
                             )}
-                            {item.code && <span className="text-base text-slate-500">{item.code}</span>}
+                            {item.code && <span className="text-base text-slate-600">{item.code}</span>}
                         </div>
                         {/* No handlingsmeny here. Deleting a whole process is done from the Kvalitet
                             list, where the process is one row among the others and the consequence is
@@ -154,7 +158,7 @@ export default function QualityItem() {
                     <PageHelpButton {...qualityHelp(tq, qualityItemHelpPage(item.quality_type))} />
                 </header>
 
-                {hasFlow && <DetailTabs td={td} item={item} activeTab={activeTab} />}
+                {hasFlow && <DetailTabs td={td} ta={ta} item={item} activeTab={activeTab} />}
 
                 {hasFlow && activeTab === 'flow' ? (
                     <ProcessFlowPanel
@@ -186,6 +190,7 @@ export default function QualityItem() {
                         <MetadataPanel
                             tq={tq}
                             td={td}
+                            ta={ta}
                             item={item}
                             canEdit={canEdit}
                             statuses={statuses}
@@ -240,6 +245,7 @@ export default function QualityItem() {
                         {item.quality_type === 'control' && (
                             <ControlEvidencePanel
                                 td={td}
+                                ta={ta}
                                 item={item}
                                 canEdit={canEdit}
                                 evidence={controlEvidence}
@@ -290,19 +296,21 @@ export default function QualityItem() {
  * send. The cost is a round trip per tab switch, which is the trade the module's own tabs already
  * make on the Kvalitet index.
  */
-function DetailTabs({ td, item, activeTab }) {
+function DetailTabs({ td, ta = {}, item, activeTab }) {
     const tabs = [
         ['document', td.tab_document ?? 'Dokument'],
         ['flow', td.tab_flow ?? 'Flyt'],
     ];
 
+    // Links, not ARIA tabs: the active one is said with aria-current, not only by its colour (A11Y-027).
     return (
-        <nav className="flex flex-wrap gap-2">
+        <nav className="flex flex-wrap gap-2" aria-label={ta.quality_item_views ?? 'Visninger av prosessen'}>
             {tabs.map(([key, label]) => (
                 <Link
                     key={key}
                     href={`/app/quality/items/${item.id}?tab=${key}`}
                     className={key === activeTab ? TAB_ACTIVE : SECONDARY_ACTION}
+                    aria-current={key === activeTab ? 'page' : undefined}
                 >
                     {label}
                 </Link>
@@ -325,6 +333,10 @@ function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
     const [chosen, setChosen] = useState([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const headingRef = useRef(null);
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const removeId = (placement) => `control-placement-remove-${placement.id}`;
     const retired = item.status === 'retired';
 
     const placed = new Set(placements.map((placement) => `${placement.process_id}:${placement.activity_key}`));
@@ -352,22 +364,25 @@ function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
         router.post('/app/quality/activity-controls', { placements: placementsToSave }, {
             preserveScroll: true,
             onSuccess: () => setChosen([]),
-            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onError: (errors) => {
+                setError(Object.values(errors)[0] ?? null);
+                focusFirstError();
+            },
             onFinish: () => setBusy(false),
         });
     }
 
-    function remove(placement) {
+    function remove(placement, index) {
         if (! window.confirm(td.control_placements_remove_confirm ?? 'Fjerne kontrollen fra aktiviteten? Kontrollen, evidensen og historikken beholdes.')) {
             return;
         }
 
-        router.delete(`/app/quality/activity-controls/${placement.id}`, { preserveScroll: true });
+        removeRow(`/app/quality/activity-controls/${placement.id}`, placements.map(removeId), index, headingRef);
     }
 
     return (
         <section className={CARD} data-testid="control-placements">
-            <h2 className="text-xl font-semibold text-slate-950">{td.control_placements_heading ?? 'Brukes i prosessaktiviteter'}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{td.control_placements_heading ?? 'Brukes i prosessaktiviteter'}</h2>
             {canEdit && (
                 <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.control_placements_help ?? ''}</p>
             )}
@@ -378,18 +393,19 @@ function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {placements.map((placement) => (
+                    {placements.map((placement, index) => (
                         <li key={placement.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-base">
                             <Link href={placement.url} className="font-semibold text-slate-950 hover:underline">
                                 {placement.process_title}
                             </Link>
-                            <span className="text-slate-400">›</span>
+                            <span className="text-slate-500">›</span>
                             <ActivityName td={td} placement={placement} />
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={removeId(placement)}
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
-                                    onClick={() => remove(placement)}
+                                    onClick={() => remove(placement, index)}
                                     aria-label={(td.control_placements_remove_label ?? 'Fjern kontrollen fra :activity')
                                         .replace(':activity', `${placement.process_title} › ${placement.activity_label ?? ''}`)}
                                 >
@@ -403,15 +419,15 @@ function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
 
             {canEdit && (
                 retired ? (
-                    <p className="mt-4 text-base text-slate-500">
+                    <p className="mt-4 text-base text-slate-600">
                         {td.control_placements_retired ?? 'Kontrollen er utgått og kan ikke knyttes til nye aktiviteter.'}
                     </p>
                 ) : pickerOptions.length === 0 ? (
-                    <p className="mt-4 text-base text-slate-500">
+                    <p className="mt-4 text-base text-slate-600">
                         {td.control_placements_no_options ?? 'Det finnes ingen flere aktiviteter å velge.'}
                     </p>
                 ) : (
-                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-start gap-3">
+                    <form ref={formRef} onSubmit={submit} className="mt-6 flex flex-wrap items-start gap-3">
                         <div className="min-w-0 flex-1 basis-64">
                             <label htmlFor="control-placement-picker" className={LABEL}>
                                 {td.control_placements_add ?? 'Knytt til aktivitet'}
@@ -426,9 +442,11 @@ function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
                                 noResultsLabel={td.control_placements_no_results ?? 'Ingen aktiviteter passer søket.'}
                                 removeLabel={td.control_placements_deselect ?? 'Fjern :name fra utvalget'}
                                 selectedLabel={td.control_placements_selected ?? 'Valgt'}
+                                describedBy={error ? 'control-placement-error' : undefined}
+                                invalid={Boolean(error)}
                                 testId="control-placement-picker"
                             />
-                            {error && <p className="mt-1 text-base text-rose-600" role="alert">{error}</p>}
+                            {error && <p id="control-placement-error" className="mt-1 text-base text-rose-700" role="alert">{error}</p>}
                         </div>
                         <button type="submit" className={`mt-8 ${PRIMARY_ACTION}`} disabled={busy || chosen.length === 0}>
                             {td.control_placements_submit ?? 'Knytt til'}
@@ -447,20 +465,25 @@ function ControlPlacementsPanel({ td, item, canEdit, placements, options }) {
  * its own, because evidence is often recorded before (or without) a file. The file, when there is
  * one, is picked from what the store already holds; removing evidence never removes the file.
  */
-function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) {
+function ControlEvidencePanel({ td, ta = {}, item, canEdit, evidence, documentOptions }) {
     const form = useForm({ title: '', description: '', enterprise_wiki_document_id: '' });
+    const formRef = useRef(null);
+    const headingRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const removeId = (entry) => `control-evidence-remove-${entry.id}`;
 
     function submit(event) {
         event.preventDefault();
         form.post(`/app/quality/items/${item.id}/evidence`, {
             preserveScroll: true,
             onSuccess: () => form.reset(),
+            onError: () => focusFirstError(),
         });
     }
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{td.evidence_heading ?? 'Evidens'}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{td.evidence_heading ?? 'Evidens'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.evidence_help ?? ''}</p>
 
             {evidence.length === 0 ? (
@@ -469,14 +492,14 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {evidence.map((entry) => (
+                    {evidence.map((entry, index) => (
                         <li key={entry.id} className="flex flex-wrap items-start gap-3 py-3">
                             <div className="min-w-0 flex-1 space-y-1">
                                 <p className="font-semibold text-slate-950">{entry.title}</p>
                                 {entry.description && (
                                     <p className="whitespace-pre-line text-base text-slate-700">{entry.description}</p>
                                 )}
-                                <p className="text-base text-slate-500">
+                                <p className="text-base text-slate-600">
                                     {entry.download_url && (
                                         <>
                                             <a
@@ -506,10 +529,12 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={removeId(entry)}
                                     className={ROW_DESTRUCTIVE}
+                                    aria-label={`${td.evidence_remove ?? 'Fjern'} – ${entry.title}`}
                                     onClick={() => {
                                         if (window.confirm(td.evidence_remove_confirm ?? 'Fjern evidensen fra kontrollen?')) {
-                                            router.delete(`/app/quality/document-links/${entry.id}`, { preserveScroll: true });
+                                            removeRow(`/app/quality/document-links/${entry.id}`, evidence.map(removeId), index, headingRef);
                                         }
                                     }}
                                 >
@@ -522,12 +547,13 @@ function ControlEvidencePanel({ td, item, canEdit, evidence, documentOptions }) 
             )}
 
             {canEdit && (
-                <form onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-6">
+                <form ref={formRef} onSubmit={submit} className="mt-6 space-y-4 border-t border-slate-100 pt-6">
                     <h3 className="text-base font-semibold text-slate-900">
                         {td.evidence_add_heading ?? 'Legg til evidens'}
                     </h3>
+                    <RequiredFieldsNote text={ta.required_fields} className="text-base text-slate-600" />
                     <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={td.evidence_title ?? 'Navn'} error={form.errors.title}>
+                        <Field label={td.evidence_title ?? 'Navn'} error={form.errors.title} required>
                             <input
                                 className={INPUT}
                                 value={form.data.title}
@@ -581,18 +607,23 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
     const tt = tq.tools ?? {};
     const categoryLabels = tq.tool_categories ?? {};
     const form = useForm({ quality_tool_id: '' });
+    const formRef = useRef(null);
+    const headingRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const removeId = (tool) => `control-tool-remove-${tool.link_id}`;
 
     function submit(event) {
         event.preventDefault();
         form.post(`/app/quality/items/${item.id}/tools`, {
             preserveScroll: true,
             onSuccess: () => form.reset(),
+            onError: () => focusFirstError(),
         });
     }
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{td.tools_heading ?? 'Verktøy'}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{td.tools_heading ?? 'Verktøy'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.tools_help ?? ''}</p>
 
             {tools.length === 0 ? (
@@ -601,34 +632,36 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {tools.map((tool) => (
+                    {tools.map((tool, index) => (
                         <li key={tool.link_id} className="flex flex-wrap items-start gap-3 py-3">
                             <div className="min-w-0 flex-1 space-y-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                     <p className="font-semibold text-slate-950">{tool.title}</p>
                                     {tool.category && (
-                                        <span className="text-base text-slate-500">· {categoryLabels[tool.category] ?? tool.category}</span>
+                                        <span className="text-base text-slate-600">· {categoryLabels[tool.category] ?? tool.category}</span>
                                     )}
                                 </div>
                                 {tool.description && (
                                     <p className="whitespace-pre-line text-base text-slate-700">{tool.description}</p>
                                 )}
-                                {tool.filename && <p className="break-all text-base text-slate-500">{tool.filename}</p>}
+                                {tool.filename && <p className="break-all text-base text-slate-600">{tool.filename}</p>}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                                <a href={tool.open_url} target="_blank" rel="noreferrer" className={SECONDARY_ACTION}>
+                                <a href={tool.open_url} target="_blank" rel="noreferrer" className={SECONDARY_ACTION} aria-label={`${tt.open ?? 'Åpne'} – ${tool.title}`}>
                                     {tt.open ?? 'Åpne'}
                                 </a>
-                                <a href={tool.download_url} className={SECONDARY_ACTION}>
+                                <a href={tool.download_url} className={SECONDARY_ACTION} aria-label={`${tt.download ?? 'Last ned'} – ${tool.title}`}>
                                     {tt.download ?? 'Last ned'}
                                 </a>
                                 {canEdit && (
                                     <button
                                         type="button"
+                                        id={removeId(tool)}
                                         className={ROW_DESTRUCTIVE}
+                                        aria-label={`${td.tools_remove ?? 'Fjern'} – ${tool.title}`}
                                         onClick={() => {
                                             if (window.confirm(td.tools_remove_confirm ?? 'Fjern verktøyet fra kontrollen? Dokumentet beholdes.')) {
-                                                router.delete(`/app/quality/document-links/${tool.link_id}`, { preserveScroll: true });
+                                                removeRow(`/app/quality/document-links/${tool.link_id}`, tools.map(removeId), index, headingRef);
                                             }
                                         }}
                                     >
@@ -644,7 +677,7 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
             {canEdit && (
                 <div className="mt-6 border-t border-slate-100 pt-6">
                     {options.length === 0 ? (
-                        <p className="text-base text-slate-500">
+                        <p className="text-base text-slate-600">
                             {tools.length === 0
                                 ? (td.tools_library_empty ?? 'Verktøybiblioteket er tomt. Verktøy registreres under Kvalitet → Verktøy.')
                                 : (td.tools_none_available ?? 'Alle verktøy i biblioteket er allerede koblet til.')}{' '}
@@ -653,10 +686,11 @@ function ControlToolsPanel({ tq, td, item, canEdit, tools, options }) {
                             </Link>
                         </p>
                     ) : (
-                        <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+                        <form ref={formRef} onSubmit={submit} className="flex flex-wrap items-end gap-3">
                             <div className="min-w-[16rem] flex-1">
                                 <Field label={td.tools_pick ?? 'Verktøy fra biblioteket'} error={form.errors.quality_tool_id}>
                                     <select
+                                        aria-required="true"
                                         className={INPUT}
                                         value={form.data.quality_tool_id}
                                         onChange={(event) => form.setData('quality_tool_id', event.target.value)}
@@ -704,7 +738,7 @@ function ActivityName({ td, placement }) {
     );
 }
 
-function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOptions }) {
+function MetadataPanel({ tq, td, ta = {}, item, canEdit, statuses, statusLabels, ownerOptions }) {
     const { data, setData, patch, processing, errors } = useForm({
         title: item.title ?? '',
         code: item.code ?? '',
@@ -715,9 +749,12 @@ function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOpt
         last_reviewed_at: item.last_reviewed_at ?? '',
     });
 
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+
     function submit(event) {
         event.preventDefault();
-        patch(`/app/quality/items/${item.id}`);
+        patch(`/app/quality/items/${item.id}`, { onError: () => focusFirstError() });
     }
 
     if (! canEdit) {
@@ -738,11 +775,13 @@ function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOpt
     }
 
     return (
-        <section className={CARD}>
+        <section id="quality-item-metadata" className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{td.metadata_heading ?? 'Styringsinformasjon'}</h2>
 
-            <form onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
-                <Field label={tq.field_title ?? 'Tittel'} error={errors.title}>
+            <form ref={formRef} onSubmit={submit} className="mt-4 grid gap-4 md:grid-cols-2">
+                <RequiredFieldsNote text={ta.required_fields} className="text-base text-slate-600 md:col-span-2" />
+
+                <Field label={tq.field_title ?? 'Tittel'} error={errors.title} required>
                     <input className={INPUT} value={data.title} onChange={(e) => setData('title', e.target.value)} />
                 </Field>
 
@@ -809,7 +848,7 @@ function MetadataPanel({ tq, td, item, canEdit, statuses, statusLabels, ownerOpt
                     <button type="submit" className={PRIMARY_ACTION} disabled={processing}>
                         {tq.save ?? 'Lagre'}
                     </button>
-                    <span className="text-base text-slate-500">
+                    <span className="text-base text-slate-600">
                         {(tq.field_next_review ?? 'Neste revisjon')}: {item.next_review_at ?? '—'}
                     </span>
                 </div>
@@ -949,8 +988,17 @@ function StructurePanel({ tq, td, item, canEdit, frequencies, frequencyLabels })
 function RowEditor({
     heading, emptyText, addText, removeText, canEdit, rows, setRows, blank, fields, numbered = false,
 }) {
+    // Rows have no key of their own, so the remove buttons are found by position (A11Y-014).
+    const removePrefix = 'quality-structure-row-remove-';
+    const addId = 'quality-structure-row-add';
+
     function update(index, key, value) {
         setRows(rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+    }
+
+    function remove(index) {
+        setRows(rows.filter((_, i) => i !== index));
+        refocusIfLost(positionalRemovalFocusCandidates(removePrefix, rows.length, index, addId));
     }
 
     return (
@@ -964,18 +1012,19 @@ function RowEditor({
                     {rows.map((row, index) => (
                         <li key={index} className="rounded-2xl border border-slate-200 p-4">
                             {numbered && (
-                                <p className="mb-2 text-base font-semibold text-slate-500">{index + 1}</p>
+                                <p className="mb-2 text-base font-semibold text-slate-600">{index + 1}</p>
                             )}
                             <div className="grid gap-3 md:grid-cols-2">
                                 {fields.map((field) => (
-                                    <Field key={field.key} label={field.label}>
+                                    // «Punkt 2»: every row has the same labels, so each says its row.
+                                    <Field key={field.key} label={<>{field.label}<span className="sr-only"> {index + 1}</span></>}>
                                         {field.checkbox ? (
                                             <input
                                                 type="checkbox"
                                                 disabled={! canEdit}
                                                 checked={Boolean(row[field.key])}
                                                 onChange={(e) => update(index, field.key, e.target.checked)}
-                                                className="h-5 w-5 rounded border-slate-300"
+                                                className="h-5 w-5 rounded border-slate-500"
                                             />
                                         ) : field.textarea ? (
                                             <textarea
@@ -999,8 +1048,10 @@ function RowEditor({
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={`${removePrefix}${index}`}
                                     className={`mt-2 ${ROW_DESTRUCTIVE}`}
-                                    onClick={() => setRows(rows.filter((_, i) => i !== index))}
+                                    onClick={() => remove(index)}
+                                    aria-label={`${removeText} – ${fields[0]?.label ?? heading} ${index + 1}`}
                                 >
                                     {removeText}
                                 </button>
@@ -1013,6 +1064,7 @@ function RowEditor({
             {canEdit && (
                 <button
                     type="button"
+                    id={addId}
                     className={`${SECONDARY_ACTION} mt-3`}
                     onClick={() => setRows([...rows, { ...blank }])}
                 >
@@ -1067,6 +1119,10 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
     const [chosen, setChosen] = useState([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const headingRef = useRef(null);
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const removeId = (relation) => `governing-document-remove-${relation.id}`;
 
     const pickerOptions = options.map((option) => ({
         value: option.id,
@@ -1083,14 +1139,17 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
         router.post(`/app/quality/items/${item.id}/governing-documents`, { document_ids: chosen }, {
             preserveScroll: true,
             onSuccess: () => setChosen([]),
-            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onError: (errors) => {
+                setError(Object.values(errors)[0] ?? null);
+                focusFirstError();
+            },
             onFinish: () => setBusy(false),
         });
     }
 
     return (
         <section className={CARD} data-testid="governing-documents">
-            <h2 className="text-xl font-semibold text-slate-950">{td.governing_heading ?? 'Styrende dokumenter'}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{td.governing_heading ?? 'Styrende dokumenter'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{td.governing_help ?? ''}</p>
 
             {governingDocuments.length === 0 ? (
@@ -1099,7 +1158,7 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {governingDocuments.map((relation) => (
+                    {governingDocuments.map((relation, index) => (
                         <li key={relation.id} className="flex flex-wrap items-center gap-3 py-3">
                             <StatusBadge tone={TYPE_TONES[relation.other_quality_type] ?? 'slate'}>
                                 {typeLabels?.[relation.other_quality_type] ?? relation.other_quality_type}
@@ -1115,11 +1174,12 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={removeId(relation)}
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
                                     aria-label={(td.governing_remove_label ?? 'Fjern koblingen til :title').replace(':title', relation.other_title ?? '')}
                                     onClick={() => {
                                         if (window.confirm(td.governing_remove_confirm ?? 'Fjerne koblingen?')) {
-                                            router.delete(`/app/quality/relations/${relation.id}`, { preserveScroll: true });
+                                            removeRow(`/app/quality/relations/${relation.id}`, governingDocuments.map(removeId), index, headingRef);
                                         }
                                     }}
                                 >
@@ -1133,11 +1193,11 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
 
             {canEdit && (
                 pickerOptions.length === 0 ? (
-                    <p className="mt-4 text-base text-slate-500">
+                    <p className="mt-4 text-base text-slate-600">
                         {td.governing_no_options ?? 'Alle styrende dokumenter som gjelder, er allerede koblet til.'}
                     </p>
                 ) : (
-                    <form onSubmit={submit} className="mt-6 flex flex-wrap items-start gap-3">
+                    <form ref={formRef} onSubmit={submit} className="mt-6 flex flex-wrap items-start gap-3">
                         <div className="min-w-0 flex-1 basis-64">
                             <label htmlFor="governing-document-picker" className={LABEL}>
                                 {td.governing_select ?? 'Legg til styrende dokumenter'}
@@ -1152,9 +1212,11 @@ function GoverningDocumentsPanel({ td, item, canEdit, governingDocuments, option
                                 noResultsLabel={td.governing_no_results ?? 'Ingen dokumenter passer søket.'}
                                 removeLabel={td.governing_deselect ?? 'Fjern :name fra utvalget'}
                                 selectedLabel={td.governing_selected ?? 'Valgt'}
+                                describedBy={error ? 'governing-document-error' : undefined}
+                                invalid={Boolean(error)}
                                 testId="governing-document-picker"
                             />
-                            {error && <p className="mt-1 text-base text-rose-600" role="alert">{error}</p>}
+                            {error && <p id="governing-document-error" className="mt-1 text-base text-rose-700" role="alert">{error}</p>}
                         </div>
                         <button type="submit" className={`mt-8 ${PRIMARY_ACTION}`} disabled={busy || chosen.length === 0}>
                             {td.governing_submit ?? 'Koble til'}
@@ -1196,6 +1258,13 @@ function DocumentsPanel({
     // otherwise it keeps the previous file while the label reads "Ingen fil valgt".
     const [fileInputKey, setFileInputKey] = useState(0);
 
+    const headingRef = useRef(null);
+    const linkFormRef = useRef(null);
+    const uploadFormRef = useRef(null);
+    const focusLinkError = useFocusFirstError(linkFormRef);
+    const focusUploadError = useFocusFirstError(uploadFormRef);
+    const removeId = (link) => `quality-document-remove-${link.id}`;
+
     const linkForm = useForm({
         enterprise_wiki_document_id: '',
         relation_type: relationTypes[0] ?? 'source',
@@ -1213,6 +1282,7 @@ function DocumentsPanel({
         linkForm.post(`/app/quality/items/${item.id}/document-links`, {
             preserveScroll: true,
             onSuccess: () => linkForm.reset(),
+            onError: () => focusLinkError(),
         });
     }
 
@@ -1225,12 +1295,13 @@ function DocumentsPanel({
                 uploadForm.reset();
                 setFileInputKey((key) => key + 1);
             },
+            onError: () => focusUploadError(),
         });
     }
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tdoc.heading ?? 'Dokumenter'}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{tdoc.heading ?? 'Dokumenter'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{(isControl ? tdoc.help_control : tdoc.help) ?? ''}</p>
 
             {documents.length === 0 ? (
@@ -1241,7 +1312,7 @@ function DocumentsPanel({
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {documents.map((link) => (
+                    {documents.map((link, index) => (
                         <li key={link.id} className="flex flex-wrap items-center gap-3 py-3">
                             <a
                                 href={link.download_url}
@@ -1259,7 +1330,7 @@ function DocumentsPanel({
                                     {statusLabels?.failed ?? 'Tekstuttrekk feilet'}
                                 </StatusBadge>
                             )}
-                            <span className="text-base text-slate-500">
+                            <span className="text-base text-slate-600">
                                 {link.owner_name ?? (tdoc.no_owner ?? 'Ingen eier')}
                                 {link.uploaded_at ? ` · ${link.uploaded_at}` : ''}
                             </span>
@@ -1267,10 +1338,12 @@ function DocumentsPanel({
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={removeId(link)}
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
+                                    aria-label={`${tdoc.unlink ?? 'Fjern kobling'} – ${link.filename}`}
                                     onClick={() => {
                                         if (window.confirm(tdoc.unlink_confirm ?? 'Fjern koblingen?')) {
-                                            router.delete(`/app/quality/document-links/${link.id}`, { preserveScroll: true });
+                                            removeRow(`/app/quality/document-links/${link.id}`, documents.map(removeId), index, headingRef);
                                         }
                                     }}
                                 >
@@ -1295,8 +1368,10 @@ function DocumentsPanel({
 
                         <div className="flex flex-wrap gap-2">
                             <input
+                                type="search"
                                 className={`${INPUT} max-w-sm`}
                                 placeholder={tdoc.search_placeholder ?? 'Søk etter filnavn …'}
+                                aria-label={tdoc.search_placeholder ?? 'Søk etter filnavn …'}
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
                             />
@@ -1314,17 +1389,18 @@ function DocumentsPanel({
                         </div>
 
                         {documentOptions.length === 0 ? (
-                            <p className="text-base text-slate-500">
+                            <p className="text-base text-slate-600">
                                 {tdoc.no_candidates ?? 'Ingen dokumenter er lastet opp ennå, eller søket ga ingen treff.'}
                             </p>
                         ) : (
-                            <form onSubmit={submitLink} className="grid gap-4 md:grid-cols-4">
+                            <form ref={linkFormRef} onSubmit={submitLink} className="grid gap-4 md:grid-cols-4">
                                 <div className="md:col-span-2">
                                     <Field
                                         label={tdoc.document_label ?? 'Dokument'}
                                         error={linkForm.errors.enterprise_wiki_document_id}
                                     >
                                         <select
+                                            aria-required="true"
                                             className={INPUT}
                                             value={linkForm.data.enterprise_wiki_document_id}
                                             onChange={(e) => linkForm.setData('enterprise_wiki_document_id', e.target.value)}
@@ -1368,7 +1444,7 @@ function DocumentsPanel({
                         </h3>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">{tdoc.upload_help ?? ''}</p>
 
-                        <form onSubmit={submitUpload} className="grid gap-4 md:grid-cols-4">
+                        <form ref={uploadFormRef} onSubmit={submitUpload} className="grid gap-4 md:grid-cols-4">
                             <div className="md:col-span-2">
                                 <FilePickerField
                                     id={`quality-document-upload-${item.id}`}
@@ -1429,18 +1505,23 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
         link_type: 'documents',
         note: '',
     });
+    const headingRef = useRef(null);
+    const formRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    const removeId = (link) => `quality-wiki-link-remove-${link.id}`;
 
     function submit(event) {
         event.preventDefault();
         post(`/app/quality/items/${item.id}/wiki-links`, {
             preserveScroll: true,
             onSuccess: () => reset(),
+            onError: () => focusFirstError(),
         });
     }
 
     return (
         <section className={CARD}>
-            <h2 className="text-xl font-semibold text-slate-950">{tw.heading ?? 'Kunnskap i Wiki'}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{tw.heading ?? 'Kunnskap i Wiki'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">{(isControl ? tw.help_control : tw.help) ?? ''}</p>
 
             {wikiLinks.length === 0 ? (
@@ -1451,7 +1532,7 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
                 </p>
             ) : (
                 <ul className="mt-4 divide-y divide-slate-100">
-                    {wikiLinks.map((link) => (
+                    {wikiLinks.map((link, index) => (
                         <li key={link.id} className="flex flex-wrap items-center gap-3 py-3">
                             <a
                                 href={link.page_url}
@@ -1466,10 +1547,12 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={removeId(link)}
                                     className={`ml-auto ${ROW_DESTRUCTIVE}`}
+                                    aria-label={`${tw.unlink ?? 'Fjern kobling'} – ${link.page_title}`}
                                     onClick={() => {
                                         if (window.confirm(tw.unlink_confirm ?? 'Fjern koblingen?')) {
-                                            router.delete(`/app/quality/wiki-links/${link.id}`, { preserveScroll: true });
+                                            removeRow(`/app/quality/wiki-links/${link.id}`, wikiLinks.map(removeId), index, headingRef);
                                         }
                                     }}
                                 >
@@ -1485,8 +1568,10 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
                 <div className="mt-6 space-y-4">
                     <div className="flex flex-wrap gap-2">
                         <input
+                            type="search"
                             className={`${INPUT} max-w-sm`}
                             placeholder={tw.search_placeholder ?? 'Søk etter Wiki-side …'}
+                            aria-label={tw.search_placeholder ?? 'Søk etter Wiki-side …'}
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
                         />
@@ -1504,14 +1589,15 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
                     </div>
 
                     {wikiPageOptions.length === 0 ? (
-                        <p className="text-base text-slate-500">
+                        <p className="text-base text-slate-600">
                             {tw.no_candidates ?? 'Ingen synlige Wiki-sider, eller søket ga ingen treff.'}
                         </p>
                     ) : (
-                        <form onSubmit={submit} className="grid gap-4 md:grid-cols-4">
+                        <form ref={formRef} onSubmit={submit} className="grid gap-4 md:grid-cols-4">
                             <div className="md:col-span-2">
                                 <Field label={tw.page_label ?? 'Wiki-side'} error={errors.enterprise_wiki_page_id}>
                                     <select
+                                        aria-required="true"
                                         className={INPUT}
                                         value={data.enterprise_wiki_page_id}
                                         onChange={(e) => setData('enterprise_wiki_page_id', e.target.value)}
@@ -1549,14 +1635,36 @@ function WikiPanel({ tq, item, canEdit, wikiLinks, wikiPageOptions, wikiSearch, 
     );
 }
 
-function Field({ label, error, children }) {
+/**
+ * One field: the page's old `Field` look, now wired through FormField (A11Y-013, -121) — the label
+ * names the control by for/id, the error describes it and marks it invalid, `required` gives the «*»
+ * and aria-required. The single control child receives those props.
+ */
+function Field({ label, error, required = false, children }) {
     return (
-        <label className="block space-y-1">
-            <span className={LABEL}>{label}</span>
-            {children}
-            {error && <span className="block text-base text-rose-600">{error}</span>}
-        </label>
+        <FormField
+            label={label}
+            error={error}
+            required={required}
+            className="space-y-1"
+            controlClassName=""
+            errorClassName="block text-base text-rose-700"
+        >
+            {(field) => cloneElement(children, field)}
+        </FormField>
     );
+}
+
+/**
+ * Removes one row (after its window.confirm), then — once the list has re-rendered without it — puts
+ * focus on the next row's remove button, the previous one's, or the section heading, so it never
+ * falls to <body> (2.4.3, A11Y-014). Nothing about the request changes.
+ */
+function removeRow(url, ids, index, headingRef) {
+    router.delete(url, {
+        preserveScroll: true,
+        onSuccess: () => refocusIfLost([...removalFocusCandidates(ids, index), headingRef?.current].filter(Boolean)),
+    });
 }
 
 function ReadOnly({ label, value }) {

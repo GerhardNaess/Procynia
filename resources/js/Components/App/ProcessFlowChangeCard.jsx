@@ -1,9 +1,10 @@
 import ProcessSwimlaneDiagram from './ProcessSwimlaneDiagram';
+import FormField from './FormField';
 import { describeChange } from '../../Support/processFlowChanges';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../Support/actionStyles';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const TEXTAREA = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base leading-6 text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const TEXTAREA = 'w-full rounded-xl border border-field-border bg-white px-3 py-2 text-base leading-6 text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 const BADGE_STYLES = {
     add: 'border-emerald-200 bg-emerald-50 text-emerald-800',
@@ -28,6 +29,8 @@ const BADGE_STYLES = {
  */
 export default function ProcessFlowChangeCard({
     tb,
+    // The card, so the panel can put the reader on the field after a refused instruction.
+    sectionRef = null,
     itemTitle,
     value,
     setValue,
@@ -45,7 +48,7 @@ export default function ProcessFlowChangeCard({
     const questions = proposal?.questions ?? [];
 
     return (
-        <section className={CARD} aria-labelledby="process-flow-change-heading">
+        <section ref={sectionRef} className={CARD} aria-labelledby="process-flow-change-heading">
             <h2 id="process-flow-change-heading" className="text-xl font-semibold text-slate-950">
                 {tb.change_heading ?? 'Endre prosessen med AI'}
             </h2>
@@ -53,27 +56,42 @@ export default function ProcessFlowChangeCard({
                 {tb.change_help ?? 'Skriv med vanlige ord hva som skal endres i flyten.'}
             </p>
 
-            <label className="mt-4 block space-y-1">
-                <span className="block text-base font-semibold text-slate-700">
-                    {tb.change_label ?? 'Hva skal endres?'}
-                </span>
-                <textarea
-                    className={TEXTAREA}
-                    rows={3}
-                    value={value}
-                    placeholder={tb.change_placeholder ?? ''}
-                    aria-invalid={error ? 'true' : undefined}
-                    onChange={(event) => setValue(event.target.value)}
-                    disabled={busy}
-                />
-            </label>
-
-            {error && <p className="mt-2 text-base font-medium text-rose-700">{error}</p>}
+            {/* The error is tied to the field, and the field is focused when the instruction is
+                refused (A11Y-013). */}
+            <FormField
+                id="process-flow-change-instruction"
+                className="mt-4"
+                label={tb.change_label ?? 'Hva skal endres?'}
+                error={error}
+                errorClassName="mt-2 text-base font-medium text-rose-700"
+            >
+                {(field) => (
+                    <textarea
+                        {...field}
+                        className={TEXTAREA}
+                        rows={3}
+                        value={value}
+                        placeholder={tb.change_placeholder ?? ''}
+                        onChange={(event) => setValue(event.target.value)}
+                        disabled={busy}
+                    />
+                )}
+            </FormField>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
                 {/* No arguments on purpose — see InterpretCard for what the click event does to an
-                    Inertia payload. */}
-                <button type="button" className={PRIMARY_ACTION} onClick={() => onSubmit()} disabled={busy}>
+                    Inertia payload. aria-disabled while it works, so the pressed button keeps focus
+                    (A11Y-143); the guard is in the handler. */}
+                <button
+                    type="button"
+                    className={PRIMARY_ACTION}
+                    onClick={() => {
+                        if (! busy) {
+                            onSubmit();
+                        }
+                    }}
+                    aria-disabled={busy || undefined}
+                >
                     {busy ? (tb.change_working ?? 'Lager endringsforslag …') : (tb.change_submit ?? 'Foreslå endringer')}
                 </button>
             </div>
@@ -101,7 +119,7 @@ export default function ProcessFlowChangeCard({
                     </div>
 
                     <dl className="rounded-2xl bg-slate-50 p-4 text-base leading-6">
-                        <dt className="text-base font-semibold text-slate-500">{tb.change_instruction_label ?? 'Instruks'}</dt>
+                        <dt className="text-base font-semibold text-slate-600">{tb.change_instruction_label ?? 'Instruks'}</dt>
                         <dd className="mt-1 text-slate-900">{proposal.instruction}</dd>
                         {proposal.summary && <dd className="mt-2 text-slate-700">{proposal.summary}</dd>}
                     </dl>

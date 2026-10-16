@@ -5,6 +5,9 @@ import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import WikiKnowledgeHandoffPanel from '../../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../../Support/actionStyles';
+import { focusElement } from '../../../../Support/focusManagement';
+import { inPageTargetId } from '../complianceA11y';
+import { usePanelSwitchFocus } from '../useComplianceFocus';
 import { formatDay } from '../../Improvements/improvementStatus';
 import { AttentionReasons } from '../Requirements/ComplianceAttention';
 import { complianceHelp } from '../Requirements/complianceHelp';
@@ -20,6 +23,15 @@ import { AUDIT_PHASES, AUDIT_STATUS_TONES, auditPhase, auditPhaseLabel, auditSta
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
+
+/**
+ * Where focus goes when a panel closes (A11Y-014): the button that opened it — or, when the step
+ * changed the status and that button is gone (Start → Under arbeid), the status itself, so the
+ * new status is what is heard next. Rediger's button is always back after the edit.
+ */
+function panelReturnTargets(key) {
+    return [`compliance-audit-action-${key}`, 'compliance-audit-status'];
+}
 
 /**
  * The three phases as tabs. The phase the audit is in is read off its status and marked; any tab can
@@ -55,7 +67,7 @@ function PhaseTabs({ tab, setTab, current, ta }) {
                         tabIndex={selected ? 0 : -1}
                         onClick={() => setTab(phase)}
                         onKeyDown={(event) => move(event, index)}
-                        className={`flex min-h-12 flex-col items-start rounded-2xl border px-4 py-2 text-left text-base ${selected ? 'border-violet-600 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'}`}
+                        className={`flex min-h-12 flex-col items-start rounded-2xl border px-4 py-2 text-left text-base ${selected ? 'border-violet-600 bg-violet-50 text-violet-900 ring-1 ring-inset ring-violet-600' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'}`}
                     >
                         <span className="font-semibold">{index + 1}. {auditPhaseLabel(phase, ta)}</span>
                         {current === phase && <span className="text-base text-slate-700" data-testid="compliance-audit-current-phase">{ta.phase_current ?? 'Nåværende fase'}</span>}
@@ -68,9 +80,7 @@ function PhaseTabs({ tab, setTab, current, ta }) {
 
 /** The finding or check the address points at (#finding-12, #check-3), if any. */
 function linkedItem() {
-    const hash = typeof window === 'undefined' ? '' : window.location.hash;
-
-    return /^#(finding|check)-\d+$/.test(hash) ? hash : null;
+    return inPageTargetId(typeof window === 'undefined' ? '' : window.location.hash);
 }
 
 /**
@@ -116,19 +126,39 @@ export default function ComplianceAuditShow() {
     // Which panel is open: 'edit', 'start', 'complete', 'cancel', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
     const closePanel = () => setPanel(null);
+    const pageRef = useRef(null);
+    usePanelSwitchFocus(panel, { containerRef: pageRef, returnTargets: panelReturnTargets });
     // «Registrer funn» on a kontrollhandling: opens Nytt funn with that check chosen.
     const [findingDraft, setFindingDraft] = useState(null);
 
     // A link to one finding or check (#finding-12, as the case page's provenance sends) opens
-    // Gjennomføring, where it is, whatever phase the audit is in.
+    // Gjennomføring, where it is, whatever phase the audit is in — and puts focus on it, so the next
+    // Tab continues from there rather than from the top of the page (2.4.3, A11Y-015).
+    const linkedTarget = useRef(null);
     useEffect(() => {
-        const hash = linkedItem();
+        const targetId = linkedItem();
 
-        if (hash) {
+        if (targetId) {
+            linkedTarget.current = targetId;
             setTab('execution');
-            window.requestAnimationFrame(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' }));
         }
     }, []);
+
+    // Once Gjennomføring is drawn, the finding or check is there to scroll to and focus.
+    useEffect(() => {
+        const targetId = linkedTarget.current;
+
+        if (! targetId || tab !== 'execution') {
+            return;
+        }
+
+        linkedTarget.current = null;
+        window.requestAnimationFrame(() => {
+            const target = document.getElementById(targetId);
+            target?.scrollIntoView({ block: 'start' });
+            focusElement(target, { preventScroll: true });
+        });
+    }, [tab]);
 
     // A lifecycle step moves the page along to the phase the audit is now in — only when the status
     // actually changes, never on the first render.
@@ -185,12 +215,12 @@ export default function ComplianceAuditShow() {
 
     return (
         <CustomerAppLayout title={audit.title} showPageTitle={false} workView={panel === 'edit' ? (ta.edit ?? 'Rediger') : null}>
-            <div className="space-y-6">
+            <div ref={pageRef} className="space-y-6">
                 <header className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                         <div className="min-w-0 space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
-                                <span data-testid="compliance-audit-status">
+                                <span id="compliance-audit-status" data-testid="compliance-audit-status">
                                     <StatusBadge tone={AUDIT_STATUS_TONES[audit.status] ?? 'slate'}>{auditStatusLabel(audit.status, ta)}</StatusBadge>
                                 </span>
                                 <span className="text-base font-semibold text-slate-700">{auditTypeLabel(audit.audit_type, ta)}</span>
@@ -201,7 +231,7 @@ export default function ComplianceAuditShow() {
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...complianceHelp(tr, 'audit')} />
                             {permissions.can_edit && panel === null && (
-                                <button type="button" onClick={() => openPanel('edit', 'planning')} className={SECONDARY_ACTION}>{ta.edit ?? 'Rediger'}</button>
+                                <button type="button" onClick={() => openPanel('edit', 'planning')} id="compliance-audit-action-edit" className={SECONDARY_ACTION}>{ta.edit ?? 'Rediger'}</button>
                             )}
                             {permissions.can_delete && (
                                 <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{ta.delete ?? 'Slett revisjon'}</button>
@@ -222,24 +252,24 @@ export default function ComplianceAuditShow() {
                     {panel === null && hasLifecycleAction && (
                         <div className="flex flex-wrap gap-2" data-testid="compliance-audit-actions">
                             {permissions.can_start && (
-                                <button type="button" onClick={() => openPanel('start')} className={PRIMARY_ACTION}>{ta.start ?? 'Start revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('start')} id="compliance-audit-action-start" className={PRIMARY_ACTION}>{ta.start ?? 'Start revisjon'}</button>
                             )}
                             {permissions.can_complete && (
-                                <button type="button" onClick={() => openPanel('complete', 'report')} className={PRIMARY_ACTION}>{ta.complete ?? 'Fullfør revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('complete', 'report')} id="compliance-audit-action-complete" className={PRIMARY_ACTION}>{ta.complete ?? 'Fullfør revisjon'}</button>
                             )}
                             {permissions.can_reopen && (
-                                <button type="button" onClick={() => openPanel('reopen')} className={SECONDARY_ACTION}>{ta.reopen ?? 'Gjenåpne revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('reopen')} id="compliance-audit-action-reopen" className={SECONDARY_ACTION}>{ta.reopen ?? 'Gjenåpne revisjon'}</button>
                             )}
                             {permissions.can_cancel && (
-                                <button type="button" onClick={() => openPanel('cancel')} className={WARNING_ACTION}>{ta.cancel_audit ?? 'Avbryt revisjon'}</button>
+                                <button type="button" onClick={() => openPanel('cancel')} id="compliance-audit-action-cancel" className={WARNING_ACTION}>{ta.cancel_audit ?? 'Avbryt revisjon'}</button>
                             )}
                         </div>
                     )}
                 </header>
 
-                {panel === 'start' && <AuditStartForm auditId={audit.id} onDone={closePanel} ta={ta} />}
-                {panel === 'cancel' && <AuditCancelForm auditId={audit.id} onDone={closePanel} ta={ta} />}
-                {panel === 'reopen' && <AuditReopenForm auditId={audit.id} onDone={closePanel} ta={ta} />}
+                {panel === 'start' && <div data-inline-panel="start"><AuditStartForm auditId={audit.id} onDone={closePanel} ta={ta} /></div>}
+                {panel === 'cancel' && <div data-inline-panel="cancel"><AuditCancelForm auditId={audit.id} onDone={closePanel} ta={ta} /></div>}
+                {panel === 'reopen' && <div data-inline-panel="reopen"><AuditReopenForm auditId={audit.id} onDone={closePanel} ta={ta} /></div>}
 
                 <PhaseTabs tab={tab} setTab={setTab} current={current} ta={ta} />
                 {audit.status === 'cancelled' && (
@@ -258,7 +288,7 @@ export default function ComplianceAuditShow() {
                     {tab === 'planning' && (
                         <>
                             {panel === 'edit' ? (
-                                <section className={CARD} aria-label={ta.edit ?? 'Rediger'}>
+                                <section className={CARD} aria-label={ta.edit ?? 'Rediger'} data-inline-panel="edit">
                                     <AuditForm
                                         form={form}
                                         onSubmit={submit}
@@ -361,7 +391,7 @@ export default function ComplianceAuditShow() {
 
                     {tab === 'report' && (
                         <AuditReport audit={audit} checks={checks} requirements={requirements} findings={findings} ta={ta}>
-                            {panel === 'complete' && <AuditCompleteForm audit={audit} onDone={closePanel} ta={ta} />}
+                            {panel === 'complete' && <div data-inline-panel="complete"><AuditCompleteForm audit={audit} onDone={closePanel} ta={ta} /></div>}
                         </AuditReport>
                     )}
                 </div>

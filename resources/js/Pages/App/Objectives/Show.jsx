@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { focusElement, focusableWithin, refocusIfLost } from '../../../Support/focusManagement';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
 import { ObjectiveAttentionNote } from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
 import { objectiveHelp } from './objectiveHelp';
@@ -12,6 +14,7 @@ import ObjectiveHistory from './ObjectiveHistory';
 import ObjectiveKpis from './ObjectiveKpis';
 import { ObjectiveCloseForm, ObjectiveReopenForm } from './ObjectiveStatusForms';
 import { OBJECTIVE_STATUS_TONES, formatLongDate, formatTargetDate } from './objectiveStatus';
+import { panelCloseFocusCandidates } from './objectivesA11y';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 
@@ -36,6 +39,7 @@ export default function ObjectiveShow() {
         affected_processes: affectedProcesses = null,
         attention = null,
         knowledge_handoff: knowledgeHandoff = null,
+        flash = {},
     } = usePage().props;
 
     const tr = translations?.objectives ?? {};
@@ -45,6 +49,35 @@ export default function ObjectiveShow() {
     // Which panel is open: 'edit', 'close', 'reopen' or none. One at a time.
     const [panel, setPanel] = useState(null);
     const editing = panel === 'edit';
+    const rowError = useRowActionError(flash?.error);
+
+    // An opened panel takes focus (its first field); closing gives it back to the button that opened
+    // it, or — when a saved Lukk mål took that button away — to the next action or the heading
+    // (2.4.3, A11Y-014).
+    const panelRef = useRef(null);
+    const triggerRef = useRef(null);
+    const [panelFocusRequest, setPanelFocusRequest] = useState(0);
+
+    useEffect(() => {
+        if (panelFocusRequest > 0) {
+            focusElement(focusableWithin(panelRef.current).find((element) => element.matches('input, select, textarea')) ?? panelRef.current);
+        }
+    }, [panelFocusRequest]);
+
+    const openPanel = (name) => {
+        triggerRef.current = `objective-action-${name}`;
+        setPanel(name);
+        setPanelFocusRequest((count) => count + 1);
+    };
+
+    const closePanel = () => {
+        setPanel(null);
+        refocusIfLost(panelCloseFocusCandidates(
+            triggerRef.current,
+            ['objective-action-edit', 'objective-action-close', 'objective-action-reopen'],
+            'objective-heading',
+        ));
+    };
 
     const form = useForm({
         title: objective.title ?? '',
@@ -54,11 +87,12 @@ export default function ObjectiveShow() {
         target_date: objective.target_date ?? '',
     });
 
-    const submit = (event) => {
+    const submit = (event, focusFirstError) => {
         event.preventDefault();
         form.patch(`/app/objectives/${objective.id}`, {
             preserveScroll: true,
-            onSuccess: () => setPanel(null),
+            onSuccess: closePanel,
+            onError: focusFirstError,
         });
     };
 
@@ -71,15 +105,17 @@ export default function ObjectiveShow() {
             return;
         }
 
-        router.delete(`/app/objectives/${objective.id}`);
+        // A refused delete (the objective is not deletable) is said beside the button too.
+        router.delete(`/app/objectives/${objective.id}`, trackRowAction(`objective-delete-${objective.id}`, { preserveScroll: true }));
     };
+    const deleteError = rowError(`objective-delete-${objective.id}`);
 
     return (
         <CustomerAppLayout title={objective.title} showPageTitle={false} workView={editing ? (tr.edit ?? 'Rediger') : null}>
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{objective.title}</h1>
+                        <h1 id="objective-heading" className="text-3xl font-semibold tracking-tight text-slate-950">{objective.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={OBJECTIVE_STATUS_TONES[objective.status] ?? 'slate'}>
@@ -97,17 +133,17 @@ export default function ObjectiveShow() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...objectiveHelp(tr, 'objective')} />
                         {permissions.can_edit && panel === null && (
-                            <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>
+                            <button type="button" id="objective-action-edit" onClick={() => openPanel('edit')} className={SECONDARY_ACTION}>
                                 {tr.edit ?? 'Rediger'}
                             </button>
                         )}
                         {permissions.can_close && panel === null && (
-                            <button type="button" onClick={() => setPanel('close')} className={SECONDARY_ACTION}>
+                            <button type="button" id="objective-action-close" onClick={() => openPanel('close')} className={SECONDARY_ACTION}>
                                 {tr.close ?? 'Lukk mål'}
                             </button>
                         )}
                         {permissions.can_reopen && panel === null && (
-                            <button type="button" onClick={() => setPanel('reopen')} className={SECONDARY_ACTION}>
+                            <button type="button" id="objective-action-reopen" onClick={() => openPanel('reopen')} className={SECONDARY_ACTION}>
                                 {tr.reopen ?? 'Gjenåpne'}
                             </button>
                         )}
@@ -116,26 +152,29 @@ export default function ObjectiveShow() {
 
                 <ObjectiveAttentionNote attention={attention} tr={tr} />
 
-                {panel === 'close' && (
-                    <ObjectiveCloseForm
-                        objectiveId={objective.id}
-                        outcomes={closingOutcomes}
-                        statusLabels={statusLabels}
-                        onDone={() => setPanel(null)}
-                        tr={tr}
-                    />
-                )}
-
-                {panel === 'reopen' && (
-                    <ObjectiveReopenForm objectiveId={objective.id} onDone={() => setPanel(null)} tr={tr} />
+                {(panel === 'close' || panel === 'reopen') && (
+                    <div ref={panelRef}>
+                        {panel === 'close' && (
+                            <ObjectiveCloseForm
+                                objectiveId={objective.id}
+                                outcomes={closingOutcomes}
+                                statusLabels={statusLabels}
+                                onDone={closePanel}
+                                tr={tr}
+                            />
+                        )}
+                        {panel === 'reopen' && (
+                            <ObjectiveReopenForm objectiveId={objective.id} onDone={closePanel} tr={tr} />
+                        )}
+                    </div>
                 )}
 
                 {editing ? (
-                    <section className={CARD}>
+                    <section ref={panelRef} className={CARD} aria-label={tr.edit ?? 'Rediger'}>
                         <ObjectiveForm
                             form={form}
                             onSubmit={submit}
-                            onCancel={() => { setPanel(null); form.reset(); form.clearErrors(); }}
+                            onCancel={() => { closePanel(); form.reset(); form.clearErrors(); }}
                             areaOptions={areaOptions}
                             ownerOptions={ownerOptions}
                             tr={tr}
@@ -146,7 +185,7 @@ export default function ObjectiveShow() {
                         {objective.description ? (
                             <p className="whitespace-pre-line text-base leading-7 text-slate-800">{objective.description}</p>
                         ) : (
-                            <p className="text-base text-slate-500">{tr.no_description ?? 'Ingen beskrivelse.'}</p>
+                            <p className="text-base text-slate-600">{tr.no_description ?? 'Ingen beskrivelse.'}</p>
                         )}
 
                         <h2 className="mt-6 text-lg font-semibold text-slate-950">{tr.details ?? 'Detaljer'}</h2>
@@ -192,10 +231,16 @@ export default function ObjectiveShow() {
                         {/* Deleting is for an objective registered by mistake: kept small and out of the way. */}
                         {permissions.can_delete && (
                             <div className="mt-6 border-t border-slate-100 pt-4">
-                                <button type="button" onClick={destroy} className="text-base font-semibold text-rose-700 underline-offset-2 hover:underline">
+                                <button
+                                    type="button"
+                                    onClick={destroy}
+                                    aria-describedby={['objective-delete-hint', deleteError ? rowErrorId(`objective-delete-${objective.id}`) : null].filter(Boolean).join(' ')}
+                                    className="text-base font-semibold text-rose-700 underline-offset-2 hover:underline"
+                                >
                                     {tr.delete ?? 'Slett mål'}
                                 </button>
-                                <p className="text-base text-slate-500">{tr.delete_hint ?? 'Bare for mål som er registrert ved en feil. Et ferdig mål lukkes i stedet.'}</p>
+                                <p id="objective-delete-hint" className="text-base text-slate-600">{tr.delete_hint ?? 'Bare for mål som er registrert ved en feil. Et ferdig mål lukkes i stedet.'}</p>
+                                {deleteError && <p id={rowErrorId(`objective-delete-${objective.id}`)} className="mt-1 text-base text-rose-700">{deleteError}</p>}
                             </div>
                         )}
                     </section>

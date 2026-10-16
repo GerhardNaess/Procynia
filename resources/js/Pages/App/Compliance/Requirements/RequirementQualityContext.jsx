@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { refocusIfLost } from '../../../../Support/focusManagement';
+import { INPUT, LABEL } from '../../../../Support/formStyles';
+import FieldError from '../FieldError';
+import { fieldStateProps, removalFocusCandidates } from '../complianceA11y';
+import { useFocusOnRejectedSubmit, usePanelSwitchFocus } from '../useComplianceFocus';
 import {
     LINK_FILTER_THRESHOLD,
     QUALITY_STATUS_TONES,
@@ -13,8 +18,9 @@ import {
 } from './complianceQuality';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
+// Ids of a linked item's name and its «Fjern kobling», per kind ('process' | 'control').
+const nameId = (kind, id) => `compliance-${kind}-name-${id}`;
+const unlinkId = (kind, id) => `compliance-${kind}-unlink-${id}`;
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 whitespace-pre-line break-words text-base text-slate-900';
 
@@ -29,6 +35,8 @@ function LinkPicker({ kind, requirementId, options, onDone, tq }) {
     const searchable = options.length > LINK_FILTER_THRESHOLD;
     const shown = searchable ? filterQualityOptions(options, query, form.data[field]) : options;
     const id = `compliance-${kind}-link`;
+    const formRef = useRef(null);
+    useFocusOnRejectedSubmit(form, formRef);
 
     const submit = (event) => {
         event.preventDefault();
@@ -36,7 +44,7 @@ function LinkPicker({ kind, requirementId, options, onDone, tq }) {
     };
 
     return (
-        <form onSubmit={submit} className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid={`${id}-form`}>
+        <form ref={formRef} onSubmit={submit} className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid={`${id}-form`} data-inline-panel={kind}>
             {options.length === 0 ? (
                 <p className="text-base text-slate-700">{kind === 'process' ? (tq.no_process_options ?? 'Det finnes ingen flere prosesser i Kvalitet å koble til.') : (tq.no_control_options ?? 'Det finnes ingen flere kontroller i Kvalitet å koble til.')}</p>
             ) : (
@@ -57,15 +65,15 @@ function LinkPicker({ kind, requirementId, options, onDone, tq }) {
                     )}
                     <div>
                         <label htmlFor={id} className={LABEL}>{kind === 'process' ? (tq.choose_process ?? 'Velg prosess') : (tq.choose_control ?? 'Velg kontroll')}</label>
-                        <select id={id} value={form.data[field]} onChange={(event) => form.setData(field, event.target.value)} className={`mt-1 ${INPUT}`}>
+                        <select id={id} {...fieldStateProps(id, form.errors[field])} value={form.data[field]} onChange={(event) => form.setData(field, event.target.value)} className={`mt-1 ${INPUT}`}>
                             <option value="">{tq.choose_placeholder ?? 'Velg …'}</option>
                             {shown.map((option) => <option key={option.id} value={option.id}>{qualityOptionLabel(option)}</option>)}
                         </select>
                     </div>
                 </>
             )}
-            {form.errors[field] && <p className="text-base text-rose-700">{form.errors[field]}</p>}
-            {form.errors.requirement && <p className="text-base text-rose-700">{form.errors.requirement}</p>}
+            <FieldError field={id} message={form.errors[field]} className="text-base text-rose-700" />
+            {form.errors.requirement && <p className="text-base text-rose-700" data-form-error-summary="">{form.errors.requirement}</p>}
             <div className="flex flex-wrap gap-2">
                 {options.length > 0 && (
                     <button type="submit" disabled={form.processing || form.data[field] === ''} className={PRIMARY_ACTION}>{tq.save ?? 'Koble'}</button>
@@ -107,13 +115,13 @@ function ControlCard({ control, canManage, onUnlink, tq, qualityStatuses, freque
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                        <a href={control.url} className="break-words text-base font-semibold text-violet-700 hover:text-violet-900">{qualityItemLabel(control)}</a>
+                        <a id={nameId('control', control.id)} href={control.url} className="break-words text-base font-semibold text-violet-700 hover:text-violet-900">{qualityItemLabel(control)}</a>
                         <StatusBadge tone={QUALITY_STATUS_TONES[control.status] ?? 'slate'}>{qualityStatuses[control.status] ?? control.status}</StatusBadge>
                     </div>
                     {retired && <p className="text-base font-semibold text-amber-800">{tq.retired_control ?? 'Kontrollen er utgått i Kvalitet.'}</p>}
                 </div>
                 {canManage && (
-                    <button type="button" onClick={() => onUnlink(control)} className={DESTRUCTIVE_ACTION}>{tq.unlink ?? 'Fjern kobling'}</button>
+                    <button id={unlinkId('control', control.id)} type="button" onClick={() => onUnlink(control)} className={DESTRUCTIVE_ACTION} aria-describedby={nameId('control', control.id)}>{tq.unlink ?? 'Fjern kobling'}</button>
                 )}
             </div>
 
@@ -166,6 +174,13 @@ export default function RequirementQualityContext({ item, context, options, canM
     const processes = context.processes ?? [];
     const controls = context.controls ?? [];
     const active = item.status === 'active';
+    const sectionRef = useRef(null);
+
+    // The picker opens in place of its button: focus goes into it and back (A11Y-014).
+    usePanelSwitchFocus(picker, {
+        containerRef: sectionRef,
+        returnTargets: (kind) => [`compliance-${kind}-link-open`, 'compliance-quality-heading'],
+    });
 
     const unlink = (kind, linked) => {
         const message = kind === 'process'
@@ -176,11 +191,14 @@ export default function RequirementQualityContext({ item, context, options, canM
             return;
         }
 
-        router.delete(`/app/compliance/requirements/${item.id}/${kind === 'process' ? 'processes' : 'controls'}/${linked.id}`, { preserveScroll: true });
+        // Focus goes to the next link's «Fjern kobling», the previous one's, or the add button (A11Y-014).
+        const list = kind === 'process' ? processes : controls;
+        const candidates = removalFocusCandidates(list.map((entry) => entry.id), linked.id, [(id) => unlinkId(kind, id)], [`compliance-${kind}-link-open`, 'compliance-quality-heading']);
+        router.delete(`/app/compliance/requirements/${item.id}/${kind === 'process' ? 'processes' : 'controls'}/${linked.id}`, { preserveScroll: true, onSuccess: () => refocusIfLost(candidates) });
     };
 
     return (
-        <section className={CARD} aria-labelledby="compliance-quality-heading" data-testid="compliance-quality">
+        <section ref={sectionRef} className={CARD} aria-labelledby="compliance-quality-heading" data-testid="compliance-quality">
             <h2 id="compliance-quality-heading" className="text-xl font-semibold text-slate-950">{tq.heading ?? 'Koblinger til Kvalitet (valgfritt)'}</h2>
             <p className="mt-1 text-base text-slate-600">{tq.intro ?? 'Valgfrie henvisninger til prosesser og kontroller i Kvalitet. En prosessbeskrivelse er ikke i seg selv dokumentasjon på at kravet er oppfylt – begrunn og dokumenter vurderingen under Etterlevelse.'}</p>
             {! active && (
@@ -191,7 +209,7 @@ export default function RequirementQualityContext({ item, context, options, canM
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="text-lg font-semibold text-slate-950">{tq.processes_heading ?? 'Relevante prosesser'}</h3>
                     {canManage && picker === null && (
-                        <button type="button" onClick={() => setPicker('process')} className={SECONDARY_ACTION}>{tq.link_process ?? 'Legg til prosess'}</button>
+                        <button id="compliance-process-link-open" type="button" onClick={() => setPicker('process')} className={SECONDARY_ACTION}>{tq.link_process ?? 'Legg til prosess'}</button>
                     )}
                 </div>
                 {picker === 'process' && <LinkPicker kind="process" requirementId={item.id} options={options?.processes ?? []} onDone={() => setPicker(null)} tq={tq} />}
@@ -202,11 +220,11 @@ export default function RequirementQualityContext({ item, context, options, canM
                         {processes.map((process) => (
                             <li key={process.id} className="flex flex-wrap items-center justify-between gap-3 py-3" data-testid="compliance-process">
                                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                    <a href={process.url} className="break-words text-base font-semibold text-violet-700 hover:text-violet-900">{qualityItemLabel(process)}</a>
+                                    <a id={nameId('process', process.id)} href={process.url} className="break-words text-base font-semibold text-violet-700 hover:text-violet-900">{qualityItemLabel(process)}</a>
                                     <StatusBadge tone={QUALITY_STATUS_TONES[process.status] ?? 'slate'}>{qualityStatuses[process.status] ?? process.status}</StatusBadge>
                                 </div>
                                 {canManage && (
-                                    <button type="button" onClick={() => unlink('process', process)} className={DESTRUCTIVE_ACTION}>{tq.unlink ?? 'Fjern kobling'}</button>
+                                    <button id={unlinkId('process', process.id)} type="button" onClick={() => unlink('process', process)} className={DESTRUCTIVE_ACTION} aria-describedby={nameId('process', process.id)}>{tq.unlink ?? 'Fjern kobling'}</button>
                                 )}
                             </li>
                         ))}
@@ -218,7 +236,7 @@ export default function RequirementQualityContext({ item, context, options, canM
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="text-lg font-semibold text-slate-950">{tq.controls_heading ?? 'Kontroller'}</h3>
                     {canManage && picker === null && (
-                        <button type="button" onClick={() => setPicker('control')} className={SECONDARY_ACTION}>{tq.link_control ?? 'Legg til kontroll'}</button>
+                        <button id="compliance-control-link-open" type="button" onClick={() => setPicker('control')} className={SECONDARY_ACTION}>{tq.link_control ?? 'Legg til kontroll'}</button>
                     )}
                 </div>
                 {picker === 'control' && <LinkPicker kind="control" requirementId={item.id} options={options?.controls ?? []} onDone={() => setPicker(null)} tq={tq} />}

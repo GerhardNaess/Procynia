@@ -1,18 +1,17 @@
+import { useRef } from 'react';
 import { useForm } from '@inertiajs/react';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import RequiredMark from '../Risk/RequiredMark';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT as FIELD_INPUT, TEXTAREA } from '../../../Support/formStyles';
+import SupplierField, { BUSY, FieldError, RequiredNote, RequiredStar, groupA11y } from './SupplierField';
 import { anchorLabel, controlPointLabel, intervalLabel, levelLabel, requirementFormData, requirementKeepsRule, themeLabel, toggleCode } from './controlRequirements';
 
 const LABEL = 'block text-base font-semibold text-slate-900';
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
-const INPUT = 'mt-1 min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const INPUT = `mt-1 ${FIELD_INPUT}`;
 const FIELDSET = 'rounded-xl border border-slate-200 px-4 py-3';
 const CHOICE = 'flex min-h-10 items-start gap-2 py-1 text-base text-slate-900';
-
-function FieldError({ message }) {
-    return message ? <p className={ERROR}>{message}</p> : null;
-}
 
 /**
  * Nytt kontrollkrav / Rediger kontrollkrav — and, with `supplierId`, a requirement for that one
@@ -22,6 +21,9 @@ function FieldError({ message }) {
  *
  * The anchor in Etterlevelse og revisjon is offered only when the server sent options — that is,
  * only to someone who can read Etterlevelse og revisjon.
+ *
+ * Fields and groups are tied to their hints and errors, and a refused save puts focus on the first
+ * wrong field (A11Y-013, A11Y-120); an error about the requirement as a whole is the form's summary.
  */
 export default function ControlRequirementForm({ requirement = null, supplierId = null, options = {}, onDone, tr }) {
     const c = tr.control ?? {};
@@ -38,10 +40,21 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
     const anchorOptions = options.anchor_options ?? null;
     const maxConditions = options.max_conditions ?? 6;
     const prefix = requirement ? `control-requirement-${requirement.id}` : (supplierId ? 'control-requirement-own' : 'control-requirement-new');
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
+    const levelGroup = groupA11y(`${prefix}-level`, { error: form.errors.level });
+    const ruleError = form.errors.conditions ?? form.errors['conditions.0'] ?? form.errors.rule_mode;
+    const ruleGroup = groupA11y(`${prefix}-rule`, { error: ruleError });
+    const documentTypesGroup = groupA11y(`${prefix}-document-types`, { hint: true });
 
     const send = (event) => {
         event.preventDefault();
-        const done = { preserveScroll: true, onSuccess: onDone };
+
+        if (form.processing) {
+            return;
+        }
+
+        const done = { preserveScroll: true, onSuccess: onDone, onError: focusError };
 
         if (requirement) {
             form.patch(`/app/supplier-management/control-requirements/${requirement.id}`, done);
@@ -61,32 +74,29 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
     };
 
     const text = (field, label, { hint = null, required = false, multiline = false } = {}) => (
-        <div>
-            <label htmlFor={`${prefix}-${field}`} className={LABEL}>{label}{required && <RequiredMark />}</label>
-            {hint && <p className={HINT}>{hint}</p>}
-            {multiline ? (
-                <textarea id={`${prefix}-${field}`} rows={3} value={form.data[field]} onChange={(event) => form.setData(field, event.target.value)} className={INPUT} />
+        <SupplierField id={`${prefix}-${field}`} label={label} hint={hint} hintClassName={HINT} error={form.errors[field]} errorClassName={ERROR} required={required}>
+            {(control) => (multiline ? (
+                <textarea {...control} rows={3} value={form.data[field]} onChange={(event) => form.setData(field, event.target.value)} className={`mt-1 ${TEXTAREA}`} />
             ) : (
-                <input id={`${prefix}-${field}`} type="text" value={form.data[field]} required={required} aria-required={required} onChange={(event) => form.setData(field, event.target.value)} className={INPUT} />
-            )}
-            <FieldError message={form.errors[field]} />
-        </div>
+                <input {...control} type="text" value={form.data[field]} required={required} onChange={(event) => form.setData(field, event.target.value)} className={INPUT} />
+            ))}
+        </SupplierField>
     );
 
     const select = (field, label, values, name, { required = true, empty = null } = {}) => (
-        <div>
-            <label htmlFor={`${prefix}-${field}`} className={LABEL}>{label}{required && <RequiredMark />}</label>
-            <select id={`${prefix}-${field}`} value={form.data[field]} required={required} aria-required={required} onChange={(event) => form.setData(field, event.target.value)} className={INPUT}>
-                <option value="">{empty ?? '–'}</option>
-                {values.map((value) => <option key={value} value={value}>{name(value)}</option>)}
-            </select>
-            <FieldError message={form.errors[field]} />
-        </div>
+        <SupplierField id={`${prefix}-${field}`} label={label} error={form.errors[field]} errorClassName={ERROR} required={required}>
+            {(control) => (
+                <select {...control} value={form.data[field]} required={required} onChange={(event) => form.setData(field, event.target.value)} className={INPUT}>
+                    <option value="">{empty ?? '–'}</option>
+                    {values.map((value) => <option key={value} value={value}>{name(value)}</option>)}
+                </select>
+            )}
+        </SupplierField>
     );
 
     return (
-        <form onSubmit={send} className="mt-4 space-y-5 border-t border-slate-100 pt-5" data-testid="control-requirement-form">
-            {form.errors.requirement && <p className={ERROR}>{form.errors.requirement}</p>}
+        <form ref={formRef} onSubmit={send} className="mt-4 space-y-5 border-t border-slate-100 pt-5" data-testid="control-requirement-form">
+            <FieldError message={form.errors.requirement} className={ERROR} summary />
             {text('title', f.title ?? 'Tittel', { hint: f.title_hint, required: true })}
             {text('description', f.description ?? 'Hva kravet innebærer', { multiline: true })}
 
@@ -96,23 +106,23 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
                 {select('control_interval_months', f.control_interval_months ?? 'Hvor ofte skal kravet kontrolleres?', (options.control_intervals ?? []).map(String), (value) => intervalLabel(Number(value), tr), { required: false, empty: intervalLabel(null, tr) })}
             </div>
 
-            <fieldset className={FIELDSET} data-testid="control-requirement-level">
-                <legend className={LABEL}>{f.level ?? 'Kravnivå'}<RequiredMark /></legend>
+            <fieldset className={FIELDSET} data-testid="control-requirement-level" {...levelGroup.groupProps}>
+                <legend className={LABEL}>{f.level ?? 'Kravnivå'}<RequiredStar /></legend>
                 {(options.levels ?? []).map((level) => (
                     <label key={level} className={CHOICE}>
-                        <input type="radio" name={`${prefix}-level`} value={level} checked={form.data.level === level} onChange={() => form.setData('level', level)} className="mt-1 h-5 w-5 shrink-0" />
+                        <input type="radio" name={`${prefix}-level`} value={level} checked={form.data.level === level} onChange={() => form.setData('level', level)} className="mt-1 h-5 w-5 shrink-0" {...levelGroup.optionProps} />
                         <span className="min-w-0 break-words"><span className="font-semibold">{levelLabel(level, tr)}</span> – {c.level_hints?.[level] ?? ''}</span>
                     </label>
                 ))}
-                <FieldError message={form.errors.level} />
+                <FieldError id={levelGroup.errorId} message={form.errors.level} className={ERROR} />
             </fieldset>
 
             {! forSupplier && (
-                <fieldset className={FIELDSET} data-testid="control-requirement-rule">
-                    <legend className={LABEL}>{f.rule ?? 'Hvilke leverandører gjelder kravet?'}<RequiredMark /></legend>
+                <fieldset className={FIELDSET} data-testid="control-requirement-rule" {...ruleGroup.groupProps}>
+                    <legend className={LABEL}>{f.rule ?? 'Hvilke leverandører gjelder kravet?'}<RequiredStar /></legend>
                     {ruleModes.map((mode) => (
                         <label key={mode} className={CHOICE}>
-                            <input type="radio" name={`${prefix}-rule-mode`} value={mode} checked={form.data.rule_mode === mode} onChange={() => form.setData('rule_mode', mode)} className="mt-1 h-5 w-5 shrink-0" />
+                            <input type="radio" name={`${prefix}-rule-mode`} value={mode} checked={form.data.rule_mode === mode} onChange={() => form.setData('rule_mode', mode)} className="mt-1 h-5 w-5 shrink-0" {...ruleGroup.optionProps} />
                             <span className="min-w-0 break-words">
                                 {ruleModeLabel(mode)}
                                 {mode === 'keep' && requirement?.rule_text && <span className="block text-slate-700" data-testid="control-requirement-kept-rule">{requirement.rule_text}</span>}
@@ -138,9 +148,9 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
                             </div>
                         </div>
                     )}
-                    <FieldError message={form.errors.conditions ?? form.errors['conditions.0'] ?? form.errors.rule_mode} />
-                    {form.data.rule_mode !== 'keep' && <div className="mt-3 border-t border-slate-100 pt-2">
-                        <p className={LABEL}>{f.criticality_scope ?? 'Kritikalitet'}</p>
+                    <FieldError id={ruleGroup.errorId} message={ruleError} className={ERROR} />
+                    {form.data.rule_mode !== 'keep' && <div className="mt-3 border-t border-slate-100 pt-2" role="group" aria-labelledby={`${prefix}-scope-label`}>
+                        <p id={`${prefix}-scope-label`} className={LABEL}>{f.criticality_scope ?? 'Kritikalitet'}</p>
                         {[['', f.scope_all ?? 'Alle kritikalitetsnivåer'], ['important', f.scope_important ?? 'Bare for Viktig og Kritisk'], ['critical', f.scope_critical ?? 'Bare for Kritisk']].map(([scope, label]) => (
                             <label key={scope || 'all'} className={CHOICE}>
                                 <input type="radio" name={`${prefix}-scope`} value={scope} checked={form.data.criticality_scope === scope} onChange={() => form.setData('criticality_scope', scope)} className="mt-1 h-5 w-5 shrink-0" />
@@ -153,9 +163,9 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
 
             {text('guidance', f.guidance ?? 'Slik kontrollerer vi det', { hint: f.guidance_hint, multiline: true })}
 
-            <fieldset className={FIELDSET}>
+            <fieldset className={FIELDSET} {...documentTypesGroup.groupProps}>
                 <legend className={LABEL}>{f.accepted_document_types ?? 'Dokumentasjon som normalt godtas'}</legend>
-                <p className={HINT}>{f.accepted_document_types_hint ?? 'Veiledende. Valgfritt.'}</p>
+                <p id={documentTypesGroup.hintId} className={HINT}>{f.accepted_document_types_hint ?? 'Veiledende. Valgfritt.'}</p>
                 <div className="mt-1 grid gap-x-6 sm:grid-cols-2">
                     {(options.document_types ?? []).map((type) => (
                         <label key={type} className={CHOICE}>
@@ -167,11 +177,10 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
             </fieldset>
 
             {anchorOptions !== null && (
-                <div>
-                    <label htmlFor={`${prefix}-anchor`} className={LABEL}>{f.compliance_requirement_id ?? 'Forankret i Etterlevelse og revisjon'}</label>
-                    <p className={HINT}>{f.anchor_hint}</p>
+                <SupplierField id={`${prefix}-anchor`} label={f.compliance_requirement_id ?? 'Forankret i Etterlevelse og revisjon'} hint={f.anchor_hint} hintClassName={HINT} error={form.errors.compliance_requirement_id} errorClassName={ERROR}>
+                    {(control) => (
                     <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <select id={`${prefix}-anchor`} value={form.data.compliance_requirement_id} onChange={(event) => form.setData('compliance_requirement_id', event.target.value)} className={`${INPUT} mt-0 sm:flex-1`}>
+                        <select {...control} value={form.data.compliance_requirement_id} onChange={(event) => form.setData('compliance_requirement_id', event.target.value)} className={`${INPUT} mt-0 sm:flex-1`}>
                             <option value="">{f.anchor_none ?? 'Ingen forankring'}</option>
                             {requirement?.anchor && ! anchorOptions.some((option) => option.id === requirement.anchor.id) && (
                                 <option value={String(requirement.anchor.id)}>{anchorLabel(requirement.anchor)}</option>
@@ -182,14 +191,16 @@ export default function ControlRequirementForm({ requirement = null, supplierId 
                             <button type="button" onClick={fillBasis} className={SECONDARY_ACTION}>{f.anchor_fill_basis ?? 'Bruk som grunnlag'}</button>
                         )}
                     </div>
-                    <FieldError message={form.errors.compliance_requirement_id} />
-                </div>
+                    )}
+                </SupplierField>
             )}
 
             {text('basis_text', f.basis_text ?? 'Grunnlag', { hint: f.basis_text_hint, multiline: true })}
 
+            <RequiredNote tr={tr} />
+
             <div className="flex flex-wrap gap-2">
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{c.catalogue?.submit ?? 'Lagre kontrollkrav'}</button>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>{c.catalogue?.submit ?? 'Lagre kontrollkrav'}</button>
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
             </div>
         </form>

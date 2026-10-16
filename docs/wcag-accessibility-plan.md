@@ -1,6 +1,6 @@
 # Plan: Universell utforming (WCAG 2.2 AA)
 
-**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert, teknisk sluttkontrollert (§18.14) og committet (`8240951e`). Fase 5 er implementert, automatisk verifisert, sluttkontrollert (§19.17) og committet; manuell verifisering gjenstår. OPPF-001 er lukket; OPPF-002 og OPPF-003 er åpne og må løses før merge. Fase 6–7 er ikke startet.**
+**Status: Fase 0 er ferdig. Fase 1 er committet (`4c594ebf`) og Fase 2 er committet (`683246a7`); manuell verifisering med skjermleser, Firefox og Safari gjenstår for begge (§15.8, §16.8). Fase 3 er implementert, automatisk verifisert, teknisk sluttkontrollert (§17.12) og committet (`5559fcb9`); manuell verifisering gjenstår, og OPPF-001 (én eksisterende E2E-feil) må lukkes før merge. Fase 4 er implementert, automatisk verifisert, teknisk sluttkontrollert (§18.14) og committet (`8240951e`). Fase 5 er implementert, automatisk verifisert, sluttkontrollert (§19.17) og committet; manuell verifisering gjenstår. OPPF-001 ble lukket i Fase 5; OPPF-002 og OPPF-003 er åpne og må løses før merge. Fase 6 er implementert, automatisk verifisert, sluttkontrollert (§20.16) og committet; manuell verifisering gjenstår. OPPF-001 er gjenåpnet, og OPPF-001–004 må løses før merge. Fase 7 er ikke startet.**
 Branch: `feature/wcag-accessibility`
 Utgangspunkt: `bc9070c2` (2026-10-14)
 Sist oppdatert: **2026-10-16**
@@ -57,7 +57,7 @@ Dette er også rammer for arbeidet:
 | 3 | Skjema, tabeller, dialoger og varsler | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§17.12). Manuell verifisering gjenstår (§17.8). Åpen før merge: OPPF-001. | `5559fcb9` |
 | 4 | Anbud, dokumenter og AI-arbeidsflyter | Implementert, automatisk verifisert og teknisk sluttkontrollert 2026-10-15 (§18.14). Manuell verifisering gjenstår (§18.9). | `8240951e` |
 | 5 | Enterprise Wiki og editor | Implementert, automatisk verifisert og sluttkontrollert 2026-10-16 (§19.17). Manuell verifisering gjenstår (§19.12). Åpne før merge: OPPF-002, OPPF-003. | `feat(a11y): improve enterprise wiki accessibility` |
-| 6 | Kvalitet/GRC, administrasjon og resterende flater | Ikke startet | — |
+| 6 | Kvalitet/GRC, administrasjon og resterende flater | Implementert, automatisk verifisert og sluttkontrollert 2026-10-16 (§20.16). Manuell verifisering gjenstår (§20.11). Åpne før merge: OPPF-001 (gjenåpnet), OPPF-002, OPPF-003, OPPF-004. | `feat(a11y): improve GRC and admin accessibility` |
 | 7 | Samlet testing, regresjon og dokumentasjon | Ikke startet | — |
 
 ---
@@ -724,12 +724,12 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
   (Fase 4: AI-uttrekkets polling flytter ikke fokus i E2E; skriving under polling er ikke testet.)
 - Om skjermlesere faktisk leser kunngjøringene fra AI-arbeidsflaten én gang (§18.9).
 
-**Åpne oppfølgingsoppgaver:** OPPF-002 (ustabil `wiki-graph-labels.spec.js:82`, også på baseline) og OPPF-003 (eksisterende PHP-feil i `WikiQualityTabRemovalTest`), begge må løses før merge (§19.17.3). OPPF-001 er lukket (§19.17.3). Fra Fase 4: A11Y-145 (utsatt produktbeslutning om ansvarlig-velgeren, §18.14). Fra Fase 5: A11Y-153, -154, -156 (§19.9).
+**Åpne oppfølgingsoppgaver:** OPPF-001 (gjenåpnet i sluttkontrollen av Fase 6, §20.16.3), OPPF-002 (ustabil `wiki-graph-labels.spec.js:82`, også på baseline) og OPPF-003 (eksisterende PHP-feil i `WikiQualityTabRemovalTest`), begge må løses før merge (§19.17.3). OPPF-001 ble lukket i §19.17.3, men er gjenåpnet (§20.16.3). Fra Fase 4: A11Y-145 (utsatt produktbeslutning om ansvarlig-velgeren, §18.14). Fra Fase 5: A11Y-153, -154, -156 (§19.9). Fra Fase 6: OPPF-004 (eksisterende PHP-feil i `CustomerCreatePageTest`, må løses før merge) og A11Y-160, -161, -172, -184, -186, -193, -195, -196, -214 (§20.8).
 
 **Beslutninger som trengs før eller i fasene:**
 
 1. Godkjenning av dev-avhengighetene i §9.1 (før Fase 1).
-2. Filament mørk modus: legge til støtte eller deaktivere den (Fase 6).
+2. Filament mørk modus: legge til støtte eller deaktivere den (Fase 6). **Besluttet i Fase 6: støttes** (§20.4).
 3. Om `window.confirm` skal erstattes overalt (A11Y-107, ikke et AA-krav).
 4. Om offentlige sider som er utkast (Security, Privacy, Terms) tas med nå eller når innholdet er
    endelig.
@@ -740,6 +740,8 @@ Følgende kunne ikke avgjøres statisk og verifiseres i den fasen som berører d
 
 | Dato | Endring |
 |---|---|
+| 2026-10-16 | Sluttkontroll av Fase 6 (§20.16): ingen Fase 6-regresjoner; samlet E2E 255/1/0, feilen er OPPF-001, som er gjenåpnet; OPPF-002–004 åpne før merge. Committet. |
+| 2026-10-16 | Fase 6 implementert og automatisk verifisert (§20): Kvalitet (diagram som navngitt gruppe, stegliste med redigering og innsetting, struktureditor med navn), Risiko, Avvik, Mål og KPI (graf som bilde med sammendrag), Ledelsens gjennomgåelse (statustekst, HTML-alternativ til PDF), Etterlevelse og revisjon, Leverandøroppfølging (import), offentlige sider og resterende felleskomponenter; Filament med mørk modus støttet, mørkere primærfarge, vedleggsknapp, driftssider. `lint:a11y` 189 filer. Nye funn A11Y-160 til A11Y-215, OPPF-004. Ikke committet. |
 | 2026-10-16 | Sluttkontroll av Fase 5 (§19.17): ingen regresjoner; OPPF-001 lukket (kriteriet oppfylt, årsak ikke endelig funnet); OPPF-002 og ny OPPF-003 åpne før merge. Committet. |
 | 2026-10-16 | Fase 5 implementert og automatisk verifisert (§19): grafens listevisning på samme data (graf ↔ liste, detaljer, relasjoner, fokusliste), artikkelens Markdown-overskrifter ett nivå ned (én h1), navngitte redigeringsfelt med feil på riktig avsnitt, påstandsbeslutninger uten fokustap, gjennomgangspanel med navn og fokusretur, fire Wiki-dialoger til `ActionDialog`, filtre og søk navngitt, kjøringsstatus som overganger, Spør Wiki og kunnskapsoverføringen. Nye funn A11Y-148 til A11Y-156, OPPF-002. OPPF-001-kriteriet oppfylt. Ikke committet. |
 | 2026-10-15 | Teknisk sluttkontroll av Fase 4 (§18.14): A11Y-146 og ny A11Y-147 (tom «Legg til BR») rettet, dobbel opplesing av opplastingsfeil rettet, A11Y-145 utsatt som produktbeslutning, samlet regresjon 196/196. |
@@ -2015,3 +2017,288 @@ Kontroll på Fase 5-koden før commit. Branch `feature/wcag-accessibility`, HEAD
 #### 19.17.6 Vurdering
 
 Sluttkontrollen fant ingen uavklarte regresjoner. Fase 5 er klar for commit. OPPF-001 er lukket; OPPF-002 og OPPF-003 er åpne og må løses før merge til `main`. Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.
+
+---
+
+## 20. Fase 6 – gjennomføringsrapport (2026-10-16)
+
+Branch `feature/wcag-accessibility`, utgangspunkt `641d4a1c` (Fase 5), rent arbeidstre ved start. Begrepene er de samme som i §17–§19: **Kode** = implementert, **Auto** = automatisk test i repoet, **Agent** = kontrollert av agenten i ekte nettleser (Playwright, Chromium), **Manuell** = kontrollert av en person. Ingen manuell verifisering er gjort. Fase 6 ble committet etter sluttkontrollen (§20.16).
+
+### 20.1 Omfang og arbeidsmåte
+
+Kartlagt før endringene. Hver modul ble gjennomgått fil for fil; ingenting er byttet ut mekanisk på tvers av modulene.
+
+| Område | Filer | Hva som finnes |
+|---|---|---|
+| Kvalitet og prosessflyt | `Quality/{Index,Item}.jsx`, `Components/App/ProcessFlowPanel.jsx` (2 843 linjer), `ProcessSwimlaneDiagram.jsx`, `ProcessFlowStepList.jsx`, `ProcessFlowChangeCard.jsx`, `QualityItemActions.jsx` | Typeoversikt, oppmerksomhet, tre registre og Verktøy; dokumentvisning med styringsinformasjon, struktur, koblinger, evidens og verktøy; SVG-prosessdiagram, steglisten, struktureditor (roller, noder, forbindelser), AI-forslag og endringsforslag, avklaringer, dialogene Rediger steg / Flytt steg / Slett flyt / aktivitet (kontroller, artikler) |
+| Risikostyring | `Risk/**` (13 filer) | Register med søk og status, Ny risiko, risikoside med detaljer og redigering, vurdering (sannsynlighet × konsekvens → nivå), behandling og tiltak, kontroller, kontekst, aksept av restrisiko, vurderingsintervall, oppmerksomhet |
+| Avvik og forbedringer | `Improvements/**` (9 filer) | Register med søk og tre filtre (kort på mobil, tabell fra `md`), registrering, saksside med behandling (start, lukk, avbryt, gjenåpne), årsak, tiltak med livsløp og effektverifisering, historikk, oppmerksomhet |
+| Mål og KPI | `Objectives/**` (14 filer) | Målregister, målside, KPI-side med resultat, måling, korrigering og tilbaketrekking, trendgraf (SVG) og målehistorikk, KPI-skjema med måltyper og `UnitInput`, kontekst mot Kvalitet, oppmerksomhet |
+| Ledelsens gjennomgåelse | `ManagementReview/**` (6 filer), `resources/views/management-review/report.blade.php` | Register, gjennomgang med seksjonsnavigasjon, klarhetsliste og statusmarkører, deltakere, vurderinger, beslutninger/tiltak, rapport (HTML-utskrift og PDF via dompdf) |
+| Etterlevelse og revisjon | `Compliance/**` (25 filer) | Kravregister (gruppert/liste), kravkilder, kravside (relevans/Kontrollvalg, vurdering, Kvalitet-koblinger, status), Etterlevelsesvurdering (tall, fremdrift, arbeidsliste), Kravbibliotek (tre med søk, aktiveringsdialog), Revisjoner (planlegging, omfang, kontrollhandlinger, funn → Avvik, livsløp, rapport, ARIA-faner) |
+| Leverandøroppfølging | `SupplierManagement/**` (29 filer) | Register, leverandørside med seks faner (lenker), kritikalitet, profil, vurdering, aktsomhet, kontrollkrav og overstyringer, kravmaler (dialog), dokumentasjon med private filer, risiko- og avvikskoblinger, Wiki-veiledning, oppfølgingsplan, Excel-import i steg |
+| Filament `/admin` | `AdminPanelProvider.php`, `app/Filament/**`, 23 egne Blade-visninger, `theme.css` | Filament v5.7.6 (Livewire), primærfarge amber, mørk modus aktiv (systemvalg). 16 egne sider (Varsler, AI-erfaring, AI-forbruk, AI-lønnsomhet, AI-bruksmønster, Backup, Fakturering, CSV, Doffin ×4, Overvåkning, Kø/Scheduler, Systemstatus, Hendelser) og 14 ressurser. Ingen plugins, ingen egne modaler (bare Filaments egne). |
+| Øvrige flater | `Components/App/{StatusBadge,AlertBox,EmptyStateBox,FormButtonRow,SearchableMultiSelect,AiCapacityCard,AiQuotaCompact,BidPipelineOverview}.jsx`, `Pages/Public/*` (9) | Felleskomponenter som ikke var dekket av lint; offentlige sider (registrering, FAQ, personvern, betingelser, sikkerhet m.fl.) |
+
+Oppgaver og tiltak (Oppfølging / Mine oppgaver), Styringsdashboardet (`Governance`), Brukere, Avdelinger, Kundemiljø/Tilganger og Abonnement ble rettet i Fase 2–3. De er kontrollert på nytt i Fase 6 (ingen endringer etter `5559fcb9`, mønstrene fra Fase 3 er intakte, lint uten funn) og ikke migrert på nytt. Etter Fase 6 finnes det ingen `.jsx`-fil i `resources/js` som verken er dekket av `lint:a11y` eller av en fase.
+
+**Rammer som er holdt:** ingen endring i risikoberegning, KPI- og målberegninger, måltyper/toleranse, avviksprosess, revisjonsløp, etterlevelses- og relevansregler, godkjenninger, leverandørvurdering, signaler, kravoppløsning, importparsing, tilgangsregler, roller, datamodell, migrasjoner, ruter, kontrollere, validering, API-kontrakter, forespørselsdata eller historikk. Ingen PHP-kode i `app/` utenom Filament-presentasjon (§20.4). Ingen nye avhengigheter. `window.confirm` er beholdt (beslutning 3 i §13; native dialoger er tilgjengelige).
+
+### 20.2 Implementert – React/GRC
+
+| Del | Hva | Filer | Funn | Status |
+|---|---|---|---|---|
+| A. Prosessdiagram og stegliste | SVG-en er `role="group"` med navn og `<desc>` når den har knapper, `role="img"` bare når den ikke har det; dekor (baner, piler, ikke-klikkbare noder) er `aria-hidden`. Steglisten er et likeverdig alternativ på samme data: «Rediger steget X» (samme navn som noden) og «+ Legg til aktivitet etter» for nøyaktig de pilene diagrammet har «+» på; knappene kaller de samme handlerne og åpner de samme dialogene. Fokusringen tegnes i SVG (rect/sirkel som vises ved `:focus-visible`). Streker ≥ 3:1. | `ProcessSwimlaneDiagram.jsx`, `ProcessFlowStepList.jsx`, `ProcessFlowPanel.jsx`, `processFlowA11y.js` (ny) | A11Y-004, -018, -128 | Kode + auto (enhet + E2E) |
+| B. Struktureditor og dialoger | Noder/Forbindelser i `ScrollRegion` med caption og `scope`; alle felt navngitt («Tekst, node 2», «Fra, forbindelse 1»), handlingskolonnen har tekst; «Fjern» med radkontekst og fokus til neste/forrige rad/«Legg til». Fjerning av en rolle: knappen sier hvor mange steg som forsvinner, og fjerningen kunngjøres som ulagret (ingen ny bekreftelse). Rediger/Flytt steg via `FormField`, utfall navngitt, dialogene har beskrivelse og reservefokus. | `ProcessFlowPanel.jsx` | A11Y-108, -014, -121, -127 | Kode + auto |
+| C. AI i Kvalitet | Prosessbeskrivelse og endringsinstruks via `FormField`; knappene `aria-disabled` + vakt; «Leser beskrivelsen …» ved start og resultatet én gang (`useTransitionAnnouncement`); fokus beholdes eller settes bevisst etter avklaring, godta og forkast. AI-flyt, prompter og lagring er uendret. | `ProcessFlowPanel.jsx`, `ProcessFlowChangeCard.jsx` | A11Y-013, -014, -143 | Kode + auto |
+| D. Kvalitet: sider | «Dokument \| Flyt» som `nav` med `aria-current`; radhandlingene er en disclosure (ikke `role="menu"`); lokale `Field` bygger på `FormField`; tabeller med caption, `scope` og radoverskrift; fjerning (med `window.confirm`) gir fokus til neste rad, forrige eller seksjonsoverskriften. | `Quality/{Index,Item}.jsx`, `QualityItemActions.jsx` | A11Y-027, -103, -013, -014, -108, -016, -019, -121 | Kode + auto |
+| E. Risiko | Alle felt koblet (`fieldA11y`): hint, feil, `aria-invalid`, `aria-required`; `RequiredFieldsNote`; stjernen `rose-700`. Paneler (Ny risiko, Rediger fra tre utløsere, vurdering, tiltak, kontroller, kontekst, aksept) får fokus inn og tilbake til riktig utløser. Beregnet nivå var en live-region som monteres med skjemaet; nå kunngjøres en nivåendring én gang. Registeret: `ScrollRegion`, caption, radoverskrift, antall treff kunngjøres etter søk. | `Risk/**`, `riskA11y.js`, `useInlinePanelFocus.js` (nye) | A11Y-013, -014, -019, -108–-112, -121, -143, -191 | Kode + auto (enhet + E2E) |
+| F. Avvik og forbedringer | Samme mønster for register, sak, årsak, status og tiltak; sletting av sak og tiltak med fokus til neste/forrige/«Nytt tiltak»; avvist sletting og avvist start vises ved knappen (`trackRowAction`, A11Y-170). | `Improvements/**`, `improvementA11y.js` (ny) | A11Y-013, -014, -108–-111, -121, -137, -143 | Kode + auto (enhet + E2E) |
+| G. Mål og KPI | Trendgrafen er et rent `role="img"` med tekstlig sammendrag (antall perioder, siste verdi, mål, status, retning) og lenke til Målehistorikk; ingen tabstopp per punkt; tooltip lukkes med Escape. Målehistorikk med caption, radoverskrift (periode) og `ScrollRegion`; Korriger/Trekk tilbake beskrevet av perioden. Skjema via `FormField`/`fieldA11y`, fokus til første feil også ved klientsidig tallkontroll; `UnitInput`s fokusbytte er urørt. | `Objectives/**`, `objectivesA11y.js` (ny) | A11Y-052, -018, -013, -014, -108–-111, -120, -121 | Kode + auto (enhet + E2E) |
+| H. Ledelsens gjennomgåelse | Klarhetslisten sier «fullført/gjenstår» i tekst, markørene har kanter ≥ 3:1; «Neste/Forrige seksjon» flytter fokus til seksjonens overskrift; skjema, grupper (Avgrensning, fagområder, overføring) og deltakere via `FormField`/`FieldsetField`; fjerning av deltaker og beslutning uten fokustap; flaggede tall har tekst. Rapporten: caption og `th scope="row"`; PDF-lenken er beskrevet av «PDF-filen er ikke tilrettelagt for skjermleser» og peker til HTML-rapporten. | `ManagementReview/**`, `reviewA11y.js` (ny), `report.blade.php` | A11Y-024, -113, -120, -013, -014, -126 | Kode + auto (enhet + E2E) |
+| I. Etterlevelse og revisjon | Alle skjema koblet, radiogrupper som `fieldset role="radiogroup"`, avkrysningsgrupper beskrevet av feilen; alle paneler med fokus inn/ut; fjerning (kilder, omfang, kontrollhandlinger, funn, koblinger) gir fokus videre; avvist sletting av kilde ved knappen. Dyplenker og interne lenker til funn/kontroll flytter fokus (A11Y-015). Overskriftsnivåene følger strukturen (A11Y-119). Antall treff kunngjøres én gang (register, vurdering, revisjoner, bibliotekets tre). Tabeller i `ScrollRegion`. Revisjonsfanene (ARIA-faner) er beholdt. | `Compliance/**`, `complianceA11y.js`, `useComplianceFocus.js`, `FieldError.jsx`, `RequiredMark.jsx` (nye) | A11Y-010, -013, -014, -015, -019, -110, -111, -119, -120, -121, -137, -190, -192 | Kode + auto (enhet + E2E) |
+| J. Leverandøroppfølging | Alle skjema koblet (felles `SupplierField`, beholder hint over feltet), grupper beskrevet av feilen, `aria-disabled` + vakt; paneler med fokus inn/ut; fjerning/frakobling uten fokustap; interne lenker flytter fokus (A11Y-015). Import: `FilePickerField`, stegene sier «fullført/nåværende/gjenstår» og har `aria-current="step"`, filterendring kunngjøres. Live-regioner som ble montert med innholdet (aktiveringsadvarsel, utfasingsfeil, Wiki-søk) er erstattet med beskrivelse + én kunngjøring. Dokumentopplastingen beholder den native filvelgeren (låst av test), men er koblet. | `SupplierManagement/**`, `supplierA11y.js`, `supplierFocus.js`, `SupplierField.jsx` (nye) | A11Y-011, -013, -014, -015, -019, -024, -109, -120, -121, -143 | Kode + auto (enhet + E2E) |
+| K. Felleskomponenter og offentlige sider | `SearchableMultiSelect`: antall treff kunngjøres etter skriving, synlig aktiv rad, fokus etter fjernet brikke, `invalid`/`required`. `AlertBox` kan få `role`/`id` (ingen standardrolle: alle dagens bruk er statiske). Registrering via `FormField` med fokus til første feil og `RequiredFieldsNote`; FAQ som overskrift + disclosure; personvern-tabellene i `ScrollRegion` med radoverskrifter; innholdsfortegnelser som `nav`; overskriftsnivå på Sikkerhet; kontrast. | `Components/App/{SearchableMultiSelect,AlertBox,AiQuotaCompact,BidPipelineOverview}.jsx`, `searchableMultiSelectA11y.js` (ny), `Pages/Public/{Register,Faq,Security,Privacy,Terms,Home}.jsx` | A11Y-013, -016, -019, -111, -119, -121 | Kode + auto (enhet + E2E) |
+| i18n | 48 nye nøkler i `procynia.a11y.*` (`quality_*` 24, `objectives_*` 9, `suppliers_*` 10, `management_review_*` 3, `compliance_*` 2) og 12 i den nye gruppen `procynia.admin_a11y.*` (Filament, lest server-side via `App\Filament\Support\AdminText`). no + en. Ellers gjenbrukt eksisterende modulnøkler. | `lang/{no,en}/procynia.php` | A11Y-105 (delvis) | Auto (`A11yTranslationsTest`) |
+| Lint | `lint:a11y` dekker 123 nye filer (189 totalt): alle GRC-sider, prosesskomponentene, de resterende felleskomponentene og de offentlige sidene. Ingen regel er slått av. De reelle funnene (radioetiketter i `QualityItemActions`, klikk uten tastatur på `UnitInput`-rammen, et ukjent `eslint-disable`-direktiv m.fl.) er rettet. | `eslint.config.js` | — | Auto |
+
+### 20.3 Status og visualiseringer
+
+- **Status, alvorlighet, prioritet og frister:** risikonivå, KPI-status, måloppnåelse, avviksstatus, revisjonsfunn, tiltaksstatus, kritikalitet, vurderingsresultat og forsinkelser var allerede tekst i merkene (`StatusBadge` og modulenes egne merker). Det som bare var farge eller ikon, har fått tekst: klarhetslisten og markørene i Ledelsens gjennomgåelse, importstegene, flaggede tall i grunnlaget, valgt fase i revisjonen (2 px kant i tillegg til farge), alvorlighet i Filament (Kritisk/Advarsel/Info).
+- **KPI-graf:** `role="img"` med et sammendrag som sier det vesentlige; tallene står i Målehistorikk-tabellen. Grafen tegnes som før.
+- **Prosessdiagram:** innholdet og alle redigeringshandlingene finnes i steglisten (samme mønster som Wiki-grafens liste i Fase 5). Diagrammet beholdes som det er.
+- **Filament AI-forbruk:** SVG-grafene var allerede `aria-hidden` med dataene i «Trendtabell».
+- Ingen beregning, statusverdi eller datagrunnlag er endret.
+
+### 20.4 Filament Admin
+
+| Del | Hva | Filer | Funn | Status |
+|---|---|---|---|---|
+| Primærfarge | `array_replace(Color::Amber, [600 => Color::Amber[700]])`: bare trinn 600 byttes. Lenke- og merketekst går fra ca. 3,2:1 til 5,0:1 mot hvitt (4,85:1 mot amber-50); gjelder også Filaments egne merker. | `AdminPanelProvider.php` | A11Y-055 | Kode + agent (målt rendret) |
+| Mørk modus | **Beslutning: mørk modus beholdes og støttes.** Alle 23 egne visninger og klassestrengene i `AiForbruk.php`/`DoffinSupplierHarvestRun.php` har fått `dark:`-varianter; AI-erfaringens egne stiler har `.dark`-regler. | `resources/views/filament/**`, `app/Filament/Pages/*` | A11Y-056 | Kode + agent (axe lys og mørk) |
+| Vedleggstabellen | Ekte `<button aria-expanded aria-controls>` («Beskrivelse av <fil>») i stedet for bare klikk på raden (radklikket er beholdt for mus); caption, `scope`, radoverskrift, «Last ned <fil>», navngitt rulleregion. | `attachment-table.blade.php` | A11Y-053 | Kode + agent |
+| Skjema | Datofelt Fra/Til har `for`/`id`; egne felt har `field-border` og synlig fokus; etter en avvist innsending flytter et lite skript (hendelsen `form-validation-error`) fokus til første ugyldige felt (A11Y-212). Filaments tømme-/fjernknapper minst 24 px (A11Y-210), tomverdier og plassholdere med nok kontrast (A11Y-211). | `ai-forbruk`, `ai-profitability`, `components/focus-first-error.blade.php` (ny), `theme.css` | A11Y-054, -210, -211, -212 | Kode + agent |
+| Driftssider | Varsler: alvorlighet i ord, lister, «Merk lest» beskrevet av tittelen og fokus til neste. Systemstatus og Backup: overskrifter, alvorlighet i ord, `role="progressbar"` med verdi, disclosure for feilede jobber, og en knapp «Pause/Fortsett automatisk oppdatering» (samme `refreshRuntimeState`, ingen ny datahenting). Høsting: fremdriftsfelt med rolle og verdi, fasemerke `role="status"`, `motion-reduce`. Høstingens 3 s-polling beholdes (fremdrift i en kjøring brukeren selv har startet, stopper av seg selv; låst av test). | `admin-notifications`, `system-status`, `backup-recovery`, `doffin-harvest`, `doffin-supplier-harvest-run` | A11Y-125, -213 | Kode + agent |
+| Struktur og tabeller | Doble h1 → h2, hopp i overskriftsnivå rettet (Kø/Scheduler, Overvåkning, AI-bruksmønster); tabeller med caption/`scope`/radoverskrift; rulleregioner som Blade-utgaven av `ScrollRegion` (`components/scroll-region-attrs.blade.php`). | Sidene over | A11Y-108–-110 (admin) | Kode + agent |
+| Hjelp | Hjelpeknappen, «Rediger hjelpetekst» og «Lukk» er oversatt (`admin_a11y.*`); pilen `aria-hidden`. | `HasAdminPageHelp.php`, `page-help.blade.php`, `AdminText.php` (ny) | A11Y-105 (Filament-hjelpen) | Kode + auto |
+
+Filaments egne komponenter (sidemeny, brødsmuler, tabeller, modaler, varsler) ble kontrollert med axe og tastatur og trengte ingen endring utover A11Y-210–212. Ingen leverandørkode er endret.
+
+### 20.5 Tester og resultater
+
+Resultatene er fra kjøringer på endelig kode.
+
+| Test | Resultat |
+|---|---|
+| `npm run test:unit` (Node 22, Docker) | **2050 bestått, 0 feilet, 0 hoppet over.** Nye: `a11yPhase6{Quality,Risk,Improvements,Objectives,ManagementReview,Compliance,Suppliers,Remaining,Filament}.test.js` (rene hjelpere for fokusmål, kunngjøringstekster og stegstatus; kilderegler for feltkobling, tabellsemantikk, paneler, grafens rolle, diagrammets gruppe og stegliste, disclosure, Filament-visningene; alle nye nøkler i begge språk). |
+| `npm run lint:a11y` (Node 22) | **0 feil, 0 advarsler** (189 filer). |
+| `npm run build` | Bestått. |
+| PHP, målrettet – GRC, offentlige sider, språk (76 testklasser: Quality*, Risk*, Kpi*, Objective*, Improvement*, Compliance*, ManagementReview*, Supplier*, Public*, A11y*, SharedTranslations*, InfoCenter*, Governance*, MyTasks*, DompdfPreview*, CustomerEnvironment*, CrossTenant*) | **987 bestått, 0 feilet** (13 589 påstander). |
+| PHP, Filament (`tests/Feature/Filament`) | **282 bestått, 1 feilet** (1 404 påstander). Feilen er eksisterende, se 20.6 (OPPF-004). |
+| Pint (berørte PHP-filer) | Bestått. |
+| E2E, nye spesifikasjoner (9) | `a11y-grc-quality` (8), `a11y-grc-risk` (1), `a11y-grc-improvements` (1), `a11y-grc-objectives` (1), `a11y-grc-management-review` (1), `a11y-grc-compliance` (3), `a11y-grc-suppliers` (5), `a11y-remaining` (4), `a11y-admin` (13): **37 bestått, 0 feilet** i siste kjøring per spesifikasjon. Første samlede kjøring fant fire feil, se 20.6. |
+| E2E-regresjon, 88 spesifikasjoner (256 tester): alle `a11y-*` fra Fase 1–6, alle GRC-modulspesifikasjoner (`quality-*`, `risk-*`, `improvement*`, `objective*`, `management-review`, `compliance-*`, `supplier-*`), `knowledge-handoff`, `my-tasks-*`, `admin`, `billing`, `package-change`, `permission-sections`, `roles-on-user-edit`, `info-hint`, `app-navigation`, `breadcrumbs`, `dashboard-structure` | Kjøring 1: **250 bestått, 5 feilet, 1 hoppet over** (39,9 min) – feilene er undersøkt og rettet, se 20.6. Kjøring 2 på endelig kode, uten kildeendringer underveis: **255 bestått, 0 feilet, 1 hoppet over** (40,0 min). Den ene som ble hoppet over (`a11y-forms.spec.js:199`), hoppet over seg selv fordi Fase 6 gjorde første celle til `<th>` (20.6); etter rettelsen: `a11y-forms` **13 bestått, 0 feilet, 0 hoppet over**. |
+| Full PHP- og E2E-suite | Ikke kjørt (merge gate, jf. prosjektregel). |
+
+Dekning i de nye E2E-spesifikasjonene: avvist innsending → fokus, `aria-invalid` og beskrivelse (alle moduler, Filament og registrering); paneler og dialoger med fokus inn og ut (inkl. Filament-modal med Escape); tabellsemantikk; radhandling/sletting uten fokustap; statustekst; kunngjort antall treff; grafens sammendrag; diagrammet som gruppe og steglisten; disclosure i Kvalitet og i vedleggstabellen; axe uten brudd på hovedflatene (Filament: hele sider, lys og mørk); 320 px uten sidelengs rulling.
+
+### 20.6 Regresjon, feil funnet under testing og eksisterende feil
+
+- **Antall treff etter søk (Fase 6-feil, rettet før levering):** Risiko, Avvik og Leverandøroppfølging kunngjorde `visible_count` (alt brukeren har tilgang til, uavhengig av søket) i stedet for antall rader søket ga – «1 risikoer» for et søk uten treff. Funnet av `a11y-grc-risk`/`-improvements`. Rettet til listens lengde; låst av en ny enhetstest.
+- **Personvern ved 320 px (Fase 6-feil, rettet):** den nye `break-words`-løse tittelen «Personvernerklæring» (36 px, ett ord) og en tabellboks uten `min-w-0` gjorde siden 338 px bred. Tittelen kan nå brytes; tabellene ligger i `ScrollRegion`.
+- **To testfeil i de nye spesifikasjonene:** feil import (`sidewaysOverflow` fra `helpers/a11y.js`) i to spesifikasjoner, og en musetest i `a11y-grc-objectives` der klikket på «Lagre» bommet fordi feilteksten fra tallkontrollen ved blur skjøv knappen ned (se A11Y-186). Testen bruker nå tastatur; påstandene er uendret.
+- **Funnet i den første samlede regresjonen (kjøring 1, 20.5) og rettet:**
+  - *Dupliserte id-er (Fase 6-feil):* en ny id på kravradens tittel i Leverandøroppfølging (`control-requirement-<id>-title`) var den samme som id-en `ControlRequirementForm` gir «Tittel»-feltet ved redigering, så etiketten pekte på teksten og feltet mistet navnet sitt (`supplier-assurance.spec.js:112`). Radens id-er har nå et eget prefiks. axe sjekker ikke `duplicate-id` med WCAG 2.2-taggene (4.1.1 er utgått), så slike feil fanges bare av tester som bruker feltets navn.
+  - *To kontroller med samme navn (Fase 6-feil):* deltakerens «Fjern» i Ledelsens gjennomgåelse fikk navnet «Fjern <navn>», det samme som brikken i deltakervelgeren (`management-review.spec.js:85`). Knappen heter nå «Fjern» og beskrives av deltakeren.
+  - *Opplastingsfeilen i leverandørimporten var ikke lenger `role="alert"`* (Fase 1-testen `a11y-foundation.spec.js:48`). Importen bruker nå `FilePickerField`s standard (alert + fokus tilbake til feltet), som Wiki-kildeopplastingen.
+  - *Testfeil:* `objective-kpi-target-types.spec.js:138` (tilpasset i Fase 6) brukte vanlige mellomrom der `Intl` setter hardt mellomrom; mønsteret bruker nå `\s` og er litt strengere.
+  - *Eksisterende feil fra Fase 3:* `risk-access.spec.js:56` søkte etter en knapp med navnet «Alle», men Fase 3 (`5559fcb9`, A11Y-109) ga knappen radkontekst («Alle – Endre fagområder: <rolle>»). Specen var ikke med i regresjonsutvalget i Fase 3. Påstanden bruker nå det fullstendige navnet (`exact`), like streng som før.
+- **Eksisterende tester tilpasset (låste den utilgjengelige oppførselen):**
+  - `objective-kpi-target-types.spec.js`: fokuserte `circle[tabindex="0"]` og forventet en `role=status`-tooltip – nettopp det A11Y-052 fjerner. Kontrollerer nå at punktene ikke har tabstopp, at grafens navn sier siste verdi, og hover-tooltipen.
+  - `quality-flow-activity-articles`, `quality-activity-controls`, `quality-flow-subprocess`, `quality-flow-zoom`: `getByRole('img', { name: /Prosessflyt/ })` → `svg[aria-label^="Prosessflyt"]` (diagrammet med knapper er nå en gruppe, A11Y-004).
+  - `quality-process-row-actions`, `quality-overview-sections`: `menuitem` → `button` (disclosure, A11Y-103).
+  - `a11y-forms.spec.js:199` (Fase 3): fant lenken i første `td`; i Kvalitet-tabellene er første celle nå `<th scope="row">`, så testen hoppet over seg selv med meldingen «No seeded quality process». Leter nå i `th, td`; påstandene er uendret.
+  - `risk-access.spec.js:56`: se over.
+  - Ingen påstand er svekket. Kildetester som låser markup, er ellers oppfylt ved å tilpasse koden.
+- **OPPF-004 (ny, eksisterende feil):** `CustomerCreatePageTest::test_internal_admin_can_create_customer_with_first_system_owner` forventer modulene `['wiki', 'quality', 'improvements']`, men `ModuleEntitlementService` gir i tillegg `management_review`. Bekreftet feilende i en ren HEAD-worktree (`641d4a1c`, egen `vendor`-kopi, klassen lastet fra worktreen). Ingen Fase 6-fil berører pakker eller moduler. Må rettes mot dagens modulkatalog før merge; ingen tilgangslogikk endres for å gjøre den grønn.
+
+### 20.7 Funnstatus etter Fase 6
+
+Lukket betyr: utbedret og verifisert automatisk innenfor testomfanget i 20.5, på Fase 6-flatene. Ingen er manuelt verifisert.
+
+| ID | Status |
+|---|---|
+| A11Y-004 | Lukket (auto): diagrammet er en navngitt gruppe, strukturfeltene har navn, og steglisten kan redigere og sette inn steg med de samme dialogene. Akseptansekriteriet i §8 («prosesser kan redigeres fullt ut med tastatur og skjermleser via steglisten») er oppfylt med tastatur i E2E; skjermleser gjenstår manuelt. |
+| A11Y-010 | Lukket for `RegisterGroups` og de øvrige svake ringene i Etterlevelse. |
+| A11Y-011 | Lukket for leverandørimporten. Delvis for leverandørdokumentene (native filvelger, koblet; låst av `documentFiles.test.js`). Wiki: se A11Y-156. |
+| A11Y-013 | Lukket for alle skjemaer i GRC, de offentlige sidene og egne Filament-skjema (auto). Med Fase 3–5 er alle kjente skjema i `/app` koblet. |
+| A11Y-014 | Lukket for GRC-panelene og fjerninger (auto). Se A11Y-184, -195, -196 for gjenstående enkelttilfeller. |
+| A11Y-015 | Lukket (Revisjon, Leverandør; Wiki i Fase 5). |
+| A11Y-016, -019 | Lukket i Fase 6-filene (beregnet + axe). |
+| A11Y-018 | Lukket for prosessdiagrammet og KPI-grafen. |
+| A11Y-024 | Lukket for Ledelsens gjennomgåelse og leverandørimporten. Med Fase 4–5 er alle kjente tilfeller rettet. |
+| A11Y-027 | Lukket for `Quality/Item.jsx`. |
+| A11Y-052 | Lukket (auto). |
+| A11Y-053, -054, -055, -056 | Lukket (agent: axe lys og mørk, målt kontrast). Beslutning 2 i §13: mørk modus støttes. |
+| A11Y-103 | Lukket for `QualityItemActions`. Det finnes ikke lenger `role="menu"` i `resources/js`. |
+| A11Y-107 | Uendret: `window.confirm` beholdes (beslutning 3). Fokus etter bekreftet fjerning er rettet der det gjaldt (A11Y-014). |
+| A11Y-108 – -111 | Lukket i GRC, de offentlige sidene og Filament-visningene. |
+| A11Y-113 | Lukket for rapporten i Ledelsens gjennomgåelse. |
+| A11Y-119 | Lukket (Etterlevelse, Sikkerhet, Filament-sidene). |
+| A11Y-120 | Lukket for GRC-gruppene. |
+| A11Y-121 | Lukket for GRC, registreringen og de egne Filament-skjemaene: stjerne + «Felt merket med * må fylles ut.» + `aria-required`. Med Fase 3–5 er påkrevde felt forklart i alle kjente skjema. |
+| A11Y-125 | Lukket (agent). Høstingens 3 s-polling er beholdt med begrunnelse (20.4). |
+| A11Y-126 | Delvis: HTML-rapporten er lenket og beskrevet fra PDF-nedlastingen. PDF-en er fortsatt ikke tagget (dompdf). Krever annen PDF-motor (ikke gjort). |
+| A11Y-127 | Delvis, med vilje: konsekvensen sies i knappens navn og kunngjøres etter fjerning; ingen ny bekreftelse (ville vært et nytt prosesstrinn). Endringen er ulagret og kan forkastes. |
+| A11Y-128 | Lukket i kode (fokusring tegnet i SVG, auto i Chromium). Firefox/Safari gjenstår manuelt. |
+| A11Y-137, -143 | Mønstrene er tatt i bruk i GRC (auto). |
+| A11Y-105, -155 | Delvis: Filament-hjelpen er oversatt. Gjenstår til Fase 7: se 20.8. |
+| A11Y-145, -153, -154, -156 | Uendret (Fase 4–5). Ingen av dem berører Fase 6-flatene. |
+
+### 20.8 Nye funn
+
+| ID | Funn | WCAG | Status |
+|---|---|---|---|
+| A11Y-160 | Tekst inne i prosessdiagrammet under 12 px (artikkel- og underprosessmerker 10,5 px, kantetiketter 11 px). Bredden beregnes fra antall tegn, så en rettelse berører tegningen. Samme informasjon står i steglisten. | 1.4.4 (beste praksis) | Åpen, P2 |
+| A11Y-161 | «Legg artikkelen inn i Wiki» fra en prosessaktivitet: en valideringsfeil fra serveren vises ikke (ingen `onError`). | 3.3.1 | Åpen |
+| A11Y-162 | `DESTRUCTIVE_CONFIRM` i `actionStyles.js` er `bg-rose-600` med hvit tekst (4,51:1) – oppfyller AA, men ikke §10-regelen om `-700`. Låst av `actionStyles.test.js`. | 1.4.3 | Informasjon |
+| A11Y-163 | Hver node og «+» i diagrammet er et tabstopp. Steglisten er det effektive alternativet. | 2.4.3 (beste praksis) | Informasjon |
+| A11Y-170 | Avvist «Start behandling» (`errors.status`) ble aldri vist. | 3.3.1 | Rettet |
+| A11Y-171 | Forklaringen av risikovurderingen fantes bare som `title` ved hover. | 1.4.13, 1.3.1 | Rettet |
+| A11Y-172 | Datoer i Risiko formateres med fast `nb-NO` også i engelsk UI (`RiskAcceptancePanel.jsx:14,16`, `RiskTreatmentPanel.jsx:15,17`, `RiskAssessmentPanel.jsx:17`, `RiskReviewSchedule.jsx:12`, `Show.jsx:210`). | 3.1.2 | Åpen (Fase 7, som A11Y-105) |
+| A11Y-180 | `UnitInput`-rammens klikk-til-fokus hadde ingen rolle (lint). Rammen er `role="presentation"`; fokusbyttet er uendret. | 4.1.2 | Rettet |
+| A11Y-181 | Søkefeltet i Mål kunne ikke krympe under 16rem og rullet siden sidelengs ved 320 px. | 1.4.10 | Rettet |
+| A11Y-182 | Flaggede tall i grunnlaget i Ledelsens gjennomgåelse ble bare vist med farge. | 1.4.1 | Rettet |
+| A11Y-183 | Korrigeringsmerknaden i KPI var en live-region som monteres med teksten. | 4.1.3 | Rettet |
+| A11Y-184 | «Ferdigstill» i Ledelsens gjennomgåelse er `disabled`, og grunnen står bare i `title`. Klarhetslisten forklarer hva som mangler. | 2.4.3, 1.4.13 | Åpen (samme mønster som A11Y-156) |
+| A11Y-185 | Statusmarkørene i Ledelsens gjennomgåelse hadde kanter under 3:1. | 1.4.11 | Rettet |
+| A11Y-186 | KPI-skjemaene: tallkontrollen ved blur viser en feiltekst som skyver «Lagre»/«Registrer måling» ned mellom museklikk og slipp, så første klikk kan bomme. Eksisterende oppførsel. Rettelsen (fast plass til feilteksten) er en synlig layoutendring og er ikke gjort. | 3.2.2-nær, brukbarhet | Åpen, P2 |
+| A11Y-190 | Tallflisene i Etterlevelsesvurdering hadde `dt`/`dd` inne i `<a>` (axe `dlitem`). | 1.3.1 | Rettet |
+| A11Y-191 | `Risk/RequiredMark` tegnet stjernen i `rose-500` (under 4,5:1). | 1.4.3 | Rettet (`rose-700`) |
+| A11Y-192 | Veiledningens h4 sto rett under en h2 på kravsiden. | 1.3.1 | Rettet |
+| A11Y-193 | En handling i revisjonen som revisjonens status avviser (`errors.audit`), vises bare i varselet øverst, ikke ved knappen. | 3.3.1 (seende) | Åpen |
+| A11Y-194 | Kapittelknappene i Kravbiblioteket har fortsatt `violet-300`-ringen i tillegg til app-rammen (låst av `complianceLibrary.test.js`). Kosmetisk. | — | Informasjon |
+| A11Y-195 | «Registrer funn» når Nytt funn allerede er åpent, nullstiller skjemaet uten å flytte fokus. | 2.4.3 | Åpen, P2 |
+| A11Y-196 | Aktiveringsknappen i Kravbiblioteket og lagreknappene i Etterlevelse er `disabled` under lagring (låst av test, som A11Y-156). | 2.4.3 | Åpen |
+| A11Y-210 | Filaments tømme- og fjernknapper var 16/20 px. | 2.5.8 | Rettet |
+| A11Y-211 | Filaments tomverdier/plassholdere hadde 2,6:1 (lys) og 3,7:1 (mørk). | 1.4.3 | Rettet |
+| A11Y-212 | Filament ruller til feilen etter avvist innsending, men lar fokus stå på knappen. | 3.3.1, 2.4.3 | Rettet |
+| A11Y-213 | Etikettene i Systemstatus overlappet («QUEUE/SCHEDULER» inn i «FAILED JOBS»). | 1.4.10 | Rettet |
+| A11Y-214 | Y-aksen i AI-forbruk-grafene er snudd (0 øverst). Eksisterende visningsfeil; grafene er `aria-hidden` og dataene står i tabellen. | — | Åpen (informasjon) |
+| A11Y-215 | Dekorative ikoner i Filaments kjerne er `gray-400`. Ikke tekst og ikke informasjonsbærende. | — | Informasjon |
+
+ID-ene 164–169, 173–179, 187–189, 197–209 og 216–229 er ikke brukt.
+
+**Gjenstående hardkodet tekst (A11Y-105/-155, til Fase 7):** Filament – `admin-notifications.blade.php:50,53,97,105,111` (antall uleste med stavefeilen «varseler», «Merk alle som lest», «Merk lest», «Ingen uleste varsler.», «Leste varsler (siste 30)»), `billing-overview.blade.php:9-13,37-53`, hele `monitoring.blade.php`, mesteparten av `ai-forbruk` og `ai-profitability`, hardkodet engelsk i `doffin-harvest`, `doffin-supplier-harvest(-run)`, `csv-import`, `queue-scheduler`, `view-doffin-supplier` og `system-status.blade.php:188,352,682`. Offentlige sider – samtykketekstene i `Register.jsx:269-296`, «Tilbake til registrering» (`Privacy.jsx:21`, `Terms.jsx:21`) og alt markedsførings- og juridisk innhold (bare norsk i dag). Risiko – datoformatet (A11Y-172). `BidPipelineOverview.jsx` er død kode (importeres ingen steder).
+
+### 20.9 Synlige endringer
+
+- **Felles i GRC:** tydeligere feltkanter (`field-border`), stjerne og feiltekst i `rose-700`, «Felt merket med * må fylles ut.» i skjema med påkrevde felt (også noen der det manglet stjerne på felt som allerede var påkrevd), enkelte grå tekster én nyanse mørkere, knapper som lagrer er dempet i stedet for grå mens de arbeider. En avvist sletting/start vises med en rød linje ved knappen.
+- **Kvalitet:** mørkere omriss og piler i diagrammet og en fiolett fokusring i SVG; knappene «Rediger steget» og «+ Legg til aktivitet etter» i steglisten.
+- **Mål og KPI:** mørkere akse, grunnlinje og målbånd i grafen; lenken «Se alle verdiene i Målehistorikk»; tooltipen lukkes med Escape.
+- **Ledelsens gjennomgåelse:** mørkere kanter på statusmarkørene; merknaden om PDF-en i rapportens verktøylinje; hinten til Avgrensning står under valgene.
+- **Etterlevelse:** valgt fase i revisjonen har 2 px kant; de svake fiolette ringene er borte (app-rammen gjelder).
+- **Risiko:** forklaringen under «Iboende risiko» og «Restrisiko» er synlig tekst.
+- **Offentlige sider:** stjerner og forklaring på registreringen, litt mørkere grå tekst, «⚠ verifiseres» 12 px, personverntittelen kan brytes ved 320 px.
+- **Filament:** mørkere amber (trinn 700) på primærknapper, lenker og merker i hele panelet; egne sider vises som mørke kort i mørk modus; alvorlighetsmerke på Varsler; «Kritisk:/Advarsel:» i advarsler; pauseknapp på Systemstatus; pilknapp på vedlegg.
+- **Uendret:** ruter, handlinger, rekkefølge, statusverdier, beregninger, polling (bortsett fra pauseknappen), data.
+
+### 20.10 Nettleserkontroll (agent)
+
+Kontrollert i Chromium (Playwright) på `localhost:8080` med Vite dev-server:
+
+- **Bredder:** 320 px (E2E) for alle GRC-modulene, de offentlige sidene og de egne Filament-sidene; 640 px for Ledelsens gjennomgåelse; 1440 px i alle testene. Ingen sidelengs rulling av siden; brede tabeller ruller i egne, navngitte regioner. 320 px dekker 400 % av 1280 px, 640 px dekker 200 %.
+- **Tastatur:** paneler, dialoger (inkl. Filament-modal), steglisten, revisjonsfanene, fjerning, avviste innsendinger – fokus synlig og aldri tapt i de testede flytene.
+- **axe:** ingen brudd på de testede GRC-flatene; i Filament på hele sider, i lys og mørk modus.
+- **Ikke kontrollert:** nettleserens egen zoom, Firefox, Safari, forced-colors, skjermleser.
+
+### 20.11 Manuell testing som gjenstår
+
+I tillegg til §15.8.7, §16.8, §17.8, §18.9 og §19.12:
+
+1. **NVDA + Firefox/Chrome og VoiceOver + Safari:**
+   1. Prosessflyt: diagrammet leses som gruppe med beskrivelse; steglisten leses og kan redigere og sette inn steg; kunngjøringen etter at en rolle fjernes.
+   2. KPI-grafens navn leses i sin helhet (det er langt); korrigeringsmerknaden kunngjøres.
+   3. Radiogrupper som `fieldset role="radiogroup"` (Etterlevelse, Leverandør) og fokus til gruppen etter avvist innsending.
+   4. Antall treff etter søk leses én gang (Risiko, Avvik, Mål, Krav, Leverandør, `SearchableMultiSelect`).
+   5. Klarhetslisten og «Neste seksjon» i Ledelsens gjennomgåelse.
+   6. Filament: fasemerket og fremdriftsfeltene under en høsting; fokus etter «Merk lest»; AI-erfaringens kortvisning under 768 px.
+2. **Ekte Firefox og Safari:** SVG-fokusringen i diagrammet (A11Y-128), at interne lenker flytter fokus (A11Y-015), `[contain:inline-size]` og rulleregionene i Filament, fokus etter klikk på en brikkes fjernknapp.
+3. **Forced-colors / Windows høykontrast:** diagrammets fokusring (gjennomsiktig outline beholdt), tallflisene i Etterlevelsesvurdering.
+4. **Zoom 200/400 %** med nettleserens zoom på prosessflyten, KPI-siden, revisjonen, leverandørsiden og Systemstatus.
+5. **Akseptansekriteriet i §8 Fase 6:** opprette og redigere en prosess med bare tastatur og skjermleser via steglisten; registrere risiko, avvik og KPI-måling; gjennomføre en revisjon.
+6. **Visuelt:** den mørkere amber i Filament og mørk modus på de egne sidene.
+
+### 20.12 Kjente risikoer og begrensninger
+
+- Fokusmålene bygger på element-id-er (`risk-edit-button`, `improvement-action-…`, `kpi-withdraw-…`, `#compliance-audit-status` m.fl.); enhetstestene låser de viktigste. Flere moduler har en egen, liten panelfokus-hook (`useInlinePanelFocus` i Risiko og Leverandør, `usePanelSwitchFocus` i Etterlevelse) ved siden av den felles `usePanelFocus`, fordi utløserne der byttes ut eller remonteres. De er like i oppførsel; en samling i `focusManagement.js` kan vurderes i Fase 7, men er ikke gjort for å unngå å endre felles kode sent.
+- Fokusretur ved lukking flytter bare fokus når det faktisk er tapt (`refocusIfLost`), og bygger på at Inertia v3 bevarer tilstand ved ikke-GET-besøk (kontrollert i `node_modules`).
+- Systemstatus oppdateres nå av et Alpine-intervall i stedet for `wire:poll` (samme metode); ikke testet over lange økter.
+- Filaments fokus-til-feil-skript bygger på hendelsen `form-validation-error` og en forsinkelse på 150 ms; en Filament-oppgradering kan endre hendelsen.
+- Den mørkere amber gjelder hele adminpanelet.
+- E2E kjører bare i Chromium. Flere testkjøringer ble avbrutt av sideomlastinger mens andre filer ble endret under Vite dev-serveren (§18.14.6.1); regresjonen er kjørt uten kildeendringer underveis.
+
+### 20.13 Oppfølgingsoppgaver
+
+- **OPPF-001 – gjenåpnet i sluttkontrollen** (§20.16.3), må løses før merge til `main`.
+- **OPPF-002 – åpen, må løses før merge til `main`** (uendret, Wiki-grafen er ikke rørt).
+- **OPPF-003 – åpen, må løses før merge til `main`** (uendret, ingen Wiki-logikk endret).
+- **OPPF-004 – åpen (ny), må løses før merge til `main`:** `CustomerCreatePageTest` (20.6).
+- **A11Y-161, -184, -186, -193, -195, -196:** små, avgrensede rettelser som kan tas i Fase 7.
+- **A11Y-105/-155, -172:** gjenstående hardkodet tekst (20.8).
+- **A11Y-126:** tagget PDF krever annen PDF-motor (produktbeslutning).
+- **A11Y-145, -153, -154, -156:** uendret fra Fase 4–5.
+
+### 20.14 Risiko før Fase 7
+
+- Fase 6 er den bredeste fasen (ca. 170 filer). Endringene er på presentasjonsnivå og dekket av enhetstester, lint, målrettet PHP og E2E per modul, men full PHP- og E2E-suite er ikke kjørt.
+- Tre åpne oppfølgingsoppgaver (OPPF-002, -003, -004) er eksisterende feil som må løses før merge.
+- Skjermleser, Firefox, Safari, forced-colors og nettleserzoom er ikke testet for noen fase. Fase 7 bør prioritere en manuell runde på prosessflyten (A11Y-004), KPI-grafen og Filament i mørk modus.
+- Gjenstående hardkodet tekst og de små åpne funnene i 20.8 må enten rettes eller begrunnes i tilgjengelighetserklæringen.
+
+### 20.15 Vurdering
+
+Fase 6 er implementert og automatisk verifisert. Alle Fase 6-funnene fra planen er rettet eller dokumentert med begrunnelse: A11Y-004, -018, -052, -053, -054, -055, -056, -125, -128 og GRC-/admin-delene av -010, -011, -013, -014, -015, -016, -019, -024, -027, -103, -108–-111, -113, -119, -120, -121, -137, -143; A11Y-126 og -127 er delvis rettet med begrunnelse, og beslutningen om mørk modus i Filament er tatt (støttes). 27 nye funn er registrert (innenfor A11Y-160 til -215, se 20.8): 14 rettet, 9 åpne (små og avgrensede, eller eksisterende oppførsel) og 4 informasjon. Ingen beregninger, prosesser, godkjenninger, tilganger, ruter, kontrollere, validering, data eller migrasjoner er endret. Enhetstester (2050/0), lint (189 filer, 0 funn), bygg, målrettet PHP (987/0 for GRC; 282/1 for Filament, der feilen er eksisterende OPPF-004), de nye E2E-spesifikasjonene og den andre samlede regresjonen (255/0, og den ene oversprungne testen grønn etter rettelse) er grønne. Fase 6 er etter agentens vurdering **teknisk klar for sluttkontroll**, men er **ikke** sluttkontrollert, ikke manuelt verifisert med skjermleser, ekte Safari/Firefox, nettleserzoom eller Windows-høykontrast, ikke committet, og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA. OPPF-002, OPPF-003 og OPPF-004 må løses før merge til `main`. Full E2E- og PHP-suite er merge gate og er ikke kjørt.
+
+### 20.16 Sluttkontroll av Fase 6 (2026-10-16)
+
+Kontroll på Fase 6-koden før commit. Branch `feature/wcag-accessibility`, HEAD `641d4a1c`. Ingen kodeendringer er gjort i sluttkontrollen.
+
+#### 20.16.1 Git og omfang
+
+- Arbeidstreet inneholder bare Fase 6-endringer: GRC-sidene, prosesskomponentene og de resterende felleskomponentene, de offentlige sidene, Filament-presentasjon (`app/Filament/**`, `AdminPanelProvider.php`, `resources/views/filament/**`, `theme.css`), rapportvisningen for Ledelsens gjennomgåelse, språkfilene, `eslint.config.js`, denne planen, nye enhetstester, E2E-spesifikasjoner og -fixturer. Ingen filer i `database/`, `routes/`, `config/` eller `app/` utenom Filament. Ingen midlertidige eller genererte filer (ignorerte lokale artefakter som `public/hot`, `public/build` og `test-results/` er ikke med). `git diff --check` uten funn.
+- **Forretningslogikk:** ingen logikkfil (`.js` utenom nye hjelpemoduler) er endret. Antall `useForm` per fil er uendret, og alle `setData`-felt går i null netto (flyttet inn i `FormField`, ikke endret). Ingen endepunkter er lagt til, fjernet eller endret; de seks `router.delete`-kallene i Kvalitet går nå via en hjelper med samme URL og metode, pluss fokus etterpå. Ingen risiko- eller KPI-beregning, tilgangsregel, migrasjon eller API-kontrakt er endret.
+- **Tidligere faser:** fjernede `htmlFor`/`aria-required`/`aria-describedby` er erstattet av `FormField` (180 nye bruk); de fire `ActionDialog`-linjene som er endret, har bare fått flere egenskaper (`descriptionId`, `fallbackFocusRef`). Enhetstestene for Fase 1–5 er grønne.
+- **Tester:** ingen `test.skip`, `.only`, `fixme` eller økt global timeout er lagt til; `playwright.config` er uendret. Tilpassede eksisterende spesifikasjoner er listet i 20.6.
+
+#### 20.16.2 Endelige testresultater
+
+| Test | Resultat |
+|---|---|
+| Enhetstester | 2050 bestått, 0 feilet, 0 hoppet over |
+| `lint:a11y` | 0 feil, 0 advarsler (189 filer) |
+| `npm run build` | Bestått |
+| PHP, GRC m.fl. (76 klasser) | 987 bestått, 0 feilet |
+| PHP, Filament | 282 bestått, 1 feilet (OPPF-004, feiler også på ren HEAD) |
+| E2E samlet, kjøring 3 (endelig kode, 88 spesifikasjoner, 256 tester, uten bygg rett før og uten kildeendringer underveis) | **255 bestått, 1 feilet, 0 hoppet over** (44,2 min) |
+
+- **Ingen hoppede tester:** `a11y-forms.spec.js:199` kjører og består etter rettelsen i 20.6.
+- **Den ene feilen er OPPF-001:** `a11y-navigation.spec.js:155`, linje 188 (h1 etter Kunngjøringer → Saksliste har ikke fokus innen 5 s) – samme test, linje og symptom som i Fase 3 (§17.12.9), der den ble reprodusert 3/3 på `683246a7` uten Fase 3-kode. Fase 6 har ikke endret `Notices/*`, `Layouts/*`, `routeFocus.js`, `app.js` eller spesifikasjonen. Isolert på samme kode: **5 bestått av 5** (`--repeat-each=5`). Vurdert som eksisterende, sekvensavhengig ustabilitet, ikke en Fase 6-regresjon. Ingen kode eller ventetid er endret for testen.
+- Beslutning 2026-10-16: Fase 6 committes med denne kjente feilen, og **OPPF-001 gjenåpnes** som forutsetning før merge (som ved commit av Fase 3). Det er ikke en generell aksept av feilede tester.
+
+#### 20.16.3 Oppfølgingsoppgaver før merge til `main`
+
+- **OPPF-001 – gjenåpnet.** Feilet i den samlede kjøringen på endelig Fase 6-kode (20.16.2), etter å ha bestått i alle samlede kjøringer i Fase 4–5 og i kjøring 1–2 i Fase 6. Årsaken er fortsatt ikke funnet. Akseptansekriteriet i §17.12.9 gjelder: tre påfølgende samlede kjøringer uten feil i testen, ingen økt timeout, ingen svekkede påstander, og en eventuell rettelse i appen dokumentert med årsak. Første spor: om `routeFocus.js` mister fokusflyttingen ved Kunngjøringer → Saksliste (samme komponent, ny spørrestreng og tittel) når siden tidligere i sekvensen har fått fokus via hopp-lenken.
+- **OPPF-002 – åpen** (uendret; Wiki-grafen er ikke rørt).
+- **OPPF-003 – åpen** (uendret; ingen Wiki-logikk er endret).
+- **OPPF-004 – åpen** (`CustomerCreatePageTest`, eksisterende; ingen Filament- eller tilgangskode er endret for å gjøre den grønn).
+
+#### 20.16.4 Åpne funn, manuell verifisering og risiko før Fase 7
+
+- **Åpne WCAG-funn:** fra Fase 6 A11Y-160, -161, -172, -184, -186, -193, -195, -196, -214 (20.8); delvis A11Y-011 (leverandørdokumentene), -126 (PDF), -127; uendret A11Y-145, -153, -154, -156; gjenstående hardkodet tekst A11Y-105/-155 (20.8).
+- **Manuell verifisering:** hele 20.11 gjenstår, i tillegg til §15.8.7, §16.8, §17.8, §18.9 og §19.12. Ingen fase er verifisert med skjermleser, Firefox, Safari, forced-colors eller nettleserzoom.
+- **Risiko før Fase 7:** fire åpne oppfølgingsoppgaver (OPPF-001–004) før merge; fokusregler som bygger på element-id-er og flere modulvise panelfokus-hooker (20.12); dupliserte id-er og like navn fanges ikke av axe (20.6); E2E bare i Chromium.
+
+#### 20.16.5 Vurdering
+
+Sluttkontrollen fant ingen Fase 6-regresjoner og ingen endring i forretningslogikk, tilganger, data eller API. Den ene feilen i den samlede kjøringen er den kjente OPPF-001, som er gjenåpnet. Fase 6 committes. **Fase 7 er ikke startet.** Fasen er ikke manuelt verifisert og gir ikke grunnlag for å hevde at Procynia oppfyller WCAG 2.2 AA.

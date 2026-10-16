@@ -4,7 +4,10 @@ import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { INPUT, LABEL } from '../../../../Support/formStyles';
+import { countRequirementNodes, libraryHitAnnouncement, nextHeadingLevel } from '../complianceA11y';
 import { complianceHelp } from '../Requirements/complianceHelp';
+import { useSettledAnnouncement } from '../useComplianceFocus';
 import RequirementGuidance from './RequirementGuidance';
 import {
     APPLICABILITY_TONES,
@@ -18,14 +21,12 @@ import {
 } from './complianceLibrary';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
  * One requirement in the tree: clause, title and — once activated — its relevance or Kontrollvalg in
  * the customer's register. Whether it is met is not shown here; that is Etterlevelsesvurdering's.
  */
-function RequirementRow({ node, activated, tr, open, onToggle }) {
+function RequirementRow({ node, activated, tr, open, onToggle, level }) {
     const tl = tr.library ?? {};
     const row = node.requirement;
     const detailsId = `compliance-library-details-${node.id}`;
@@ -63,7 +64,7 @@ function RequirementRow({ node, activated, tr, open, onToggle }) {
             </div>
             {open && (
                 <div id={detailsId} className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <RequirementGuidance details={node} tr={tr} showDescription idPrefix={`compliance-library-${node.clause}`} />
+                    <RequirementGuidance details={node} tr={tr} showDescription idPrefix={`compliance-library-${node.clause}`} headingLevel={nextHeadingLevel(level)} />
                 </div>
             )}
         </li>
@@ -94,16 +95,18 @@ function SectionChevron({ open, chapter }) {
 
 /**
  * A chapter or sub-clause: the whole heading is one button that opens it. aria-expanded says
- * whether it is open; the chevron only shows it.
+ * whether it is open; the chevron only shows it. A chapter's heading is an h3 under «Kravene», and
+ * each sub-clause one level below the clause it sits in.
  */
-function Section({ node, activated, tr, expanded, toggleSection, openDetails, toggleDetails }) {
+function Section({ node, activated, tr, expanded, toggleSection, openDetails, toggleDetails, level = 3 }) {
     const isOpen = expanded(node.id);
     const panelId = `compliance-library-section-${node.id}`;
     const chapter = node.depth === 1;
+    const Heading = `h${level}`;
 
     return (
         <li className={chapter ? 'rounded-2xl border border-slate-200' : ''} data-testid={`compliance-library-section-${node.clause}`}>
-            <h3 className="m-0">
+            <Heading className="m-0">
                 <button
                     type="button"
                     onClick={() => toggleSection(node.id)}
@@ -116,7 +119,7 @@ function Section({ node, activated, tr, expanded, toggleSection, openDetails, to
                         <span className="min-w-0 break-words">{chapter ? chapterHeading(node) : `${node.clause} ${node.title}`}</span>
                     </span>
                 </button>
-            </h3>
+            </Heading>
             {isOpen && (
                 <div id={panelId} className={chapter ? 'px-4 pb-2' : 'pl-5'}>
                     <ul className="divide-y divide-slate-100">
@@ -129,6 +132,7 @@ function Section({ node, activated, tr, expanded, toggleSection, openDetails, to
                                     tr={tr}
                                     open={openDetails.has(child.id)}
                                     onToggle={() => toggleDetails(child.id)}
+                                    level={level}
                                 />
                             ) : (
                                 <Section
@@ -140,6 +144,7 @@ function Section({ node, activated, tr, expanded, toggleSection, openDetails, to
                                     toggleSection={toggleSection}
                                     openDetails={openDetails}
                                     toggleDetails={toggleDetails}
+                                    level={nextHeadingLevel(level)}
                                 />
                             )
                         ))}
@@ -172,6 +177,7 @@ export default function ComplianceLibraryShow() {
     const withControls = hasControls(nodes);
     const filterLabels = withControls ? { ...(tl.filters ?? {}), ...(tl.filters_controls ?? {}) } : (tl.filters ?? {});
 
+    const ta11y = translations?.a11y ?? {};
     const tree = useMemo(() => buildTree(nodes), [nodes]);
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState('all');
@@ -181,6 +187,14 @@ export default function ComplianceLibraryShow() {
     const narrowing = search.trim() !== '' || filter !== 'all';
     const visible = useMemo(() => filterTree(tree, filter, search), [tree, filter, search]);
     const expanded = (id) => narrowing || openSections.has(id);
+
+    // The number of hits is spoken once the user stops typing or changes Vis — not on every key
+    // (4.1.3, A11Y-111).
+    useSettledAnnouncement(`${search.trim()}|${filter}`, libraryHitAnnouncement(narrowing, countRequirementNodes(visible), {
+        none: tl.no_matches,
+        one: ta11y.compliance_library_hits_one,
+        many: ta11y.compliance_library_hits,
+    }));
 
     const toggle = (setter) => (id) => setter((current) => {
         const next = new Set(current);
@@ -307,6 +321,7 @@ export default function ComplianceLibraryShow() {
                                         tr={tr}
                                         open={openDetails.has(node.id)}
                                         onToggle={() => toggle(setOpenDetails)(node.id)}
+                                        level={2}
                                     />
                                 )
                             ))}

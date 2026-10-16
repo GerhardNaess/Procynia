@@ -60,7 +60,7 @@ test('Oversikt lists documents, processes and controls in separate sections', as
     const actions = row.getByRole('button', { name: `Handlinger – ${titles.control}` });
     await actions.scrollIntoViewIfNeeded();
     await actions.click();
-    await expect(page.getByRole('menuitem', { name: 'Slett kontroll' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Slett kontroll', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
 
     // No generic relation editor: a governing document is linked on the process itself.

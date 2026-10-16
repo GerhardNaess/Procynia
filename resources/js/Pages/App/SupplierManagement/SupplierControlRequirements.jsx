@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { TEXTAREA } from '../../../Support/formStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
-import RequiredMark from '../Risk/RequiredMark';
+import SupplierField, { BUSY, FieldError, RequiredNote, RequiredStar, groupA11y } from './SupplierField';
+import { useInlinePanelFocus } from './supplierFocus';
 import ControlRequirementForm from './ControlRequirementForm';
 import RequirementStatusHistory from './RequirementStatusHistory';
 import { LEVEL_TONES, anchorLabel, groupByTheme, levelLabel, rowActions } from './controlRequirements';
@@ -15,7 +19,6 @@ import WikiGuidance from './WikiGuidance';
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
-const INPUT = 'mt-1 min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const CHOICE_CARD = 'min-w-0 rounded-xl border border-slate-200 bg-white p-4 text-left hover:border-violet-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:hover:border-slate-200';
 
 /**
@@ -23,12 +26,12 @@ const CHOICE_CARD = 'min-w-0 rounded-xl border border-slate-200 bg-white p-4 tex
  * automatically (an include override), or a requirement for this supplier only. Neither is a new
  * register: the first is the catalogue, the second a supplier-specific control requirement.
  */
-function AddChoice({ includable, onChoose, onCancel, tr }) {
+function AddChoice({ includable, onChoose, onCancel, panelId, tr }) {
     const c = tr.control ?? {};
     const noneToInclude = includable.length === 0;
 
     return (
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="add-requirement-choice">
+        <div id={panelId} className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="add-requirement-choice">
             <h3 className="text-lg font-semibold text-slate-950">{c.add_heading ?? 'Legg til krav'}</h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <button type="button" onClick={() => onChoose('include')} disabled={noneToInclude} className={CHOICE_CARD} data-testid="add-requirement-existing">
@@ -58,9 +61,14 @@ function AddChoice({ includable, onChoose, onCancel, tr }) {
  * one new row in the history. For include, the person also picks the requirement among those that do
  * not apply, each with when it would.
  */
-function OverrideForm({ supplierId, action, requirement = null, includable = [], onDone, tr }) {
+function OverrideForm({ supplierId, action, requirement = null, includable = [], onDone, panelId, tr }) {
     const c = tr.control ?? {};
     const form = useForm({ requirement_id: requirement ? String(requirement.id) : '', action, reason: '' });
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
+    const idBase = `override-${action}-${requirement?.id ?? 'new'}`;
+    const chooseGroup = groupA11y(`${idBase}-requirement`, { error: form.errors.requirement_id });
+    const unchosen = ! form.data.requirement_id;
     const texts = {
         include: [c.include_heading, c.include_intro, c.include_submit],
         exclude: [c.exclude_heading, c.exclude_intro, c.exclude_submit],
@@ -69,18 +77,23 @@ function OverrideForm({ supplierId, action, requirement = null, includable = [],
 
     const send = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplierId}/requirement-overrides`, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing || unchosen) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplierId}/requirement-overrides`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={send} className="mt-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`override-form-${action}`}>
+        <form ref={formRef} id={panelId} onSubmit={send} className="mt-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`override-form-${action}`}>
             <h4 className="text-lg font-semibold text-slate-950">{texts[0]}</h4>
             {requirement && <p className="break-words text-base font-semibold text-slate-900">{requirement.title}</p>}
             <p className={HINT}>{texts[1]}</p>
 
             {action === 'include' && (
-                <fieldset>
-                    <legend className="text-base font-semibold text-slate-900">{c.include_choose ?? 'Velg krav'}<RequiredMark /></legend>
+                <fieldset {...chooseGroup.groupProps}>
+                    <legend className="text-base font-semibold text-slate-900">{c.include_choose ?? 'Velg krav'}<RequiredStar /></legend>
                     <div className="mt-1 space-y-1">
                         {includable.map((option) => (
                             <label key={option.id} className="flex min-h-10 items-start gap-2 py-1 text-base text-slate-900">
@@ -91,6 +104,7 @@ function OverrideForm({ supplierId, action, requirement = null, includable = [],
                                     checked={form.data.requirement_id === String(option.id)}
                                     onChange={() => form.setData('requirement_id', String(option.id))}
                                     className="mt-1 h-5 w-5 shrink-0"
+                                    {...chooseGroup.optionProps}
                                 />
                                 <span className="min-w-0 break-words">
                                     <span className="font-semibold">{option.title}</span> · {levelLabel(option.level, tr)}
@@ -101,17 +115,17 @@ function OverrideForm({ supplierId, action, requirement = null, includable = [],
                     </div>
                 </fieldset>
             )}
-            {form.errors.requirement_id && <p className={ERROR}>{form.errors.requirement_id}</p>}
+            {/* On «Legg til krav» the error belongs to the choice; on a row it is about the row as a whole. */}
+            <FieldError id={action === 'include' ? chooseGroup.errorId : undefined} message={form.errors.requirement_id} className={ERROR} summary={action !== 'include'} />
 
-            <div>
-                <label htmlFor={`override-reason-${action}`} className="block text-base font-semibold text-slate-900">{c.reason_label ?? 'Begrunnelse'}<RequiredMark /></label>
-                <p className={HINT}>{c.reason_hint ?? 'Begrunnelsen lagres i historikken og kan ikke endres.'}</p>
-                <textarea id={`override-reason-${action}`} rows={3} required aria-required value={form.data.reason} onChange={(event) => form.setData('reason', event.target.value)} className={INPUT} />
-                {form.errors.reason && <p className={ERROR}>{form.errors.reason}</p>}
-            </div>
+            <SupplierField id={`override-reason-${action}`} label={c.reason_label ?? 'Begrunnelse'} hint={c.reason_hint ?? 'Begrunnelsen lagres i historikken og kan ikke endres.'} hintClassName={HINT} error={form.errors.reason} errorClassName={ERROR} required>
+                {(field) => <textarea {...field} rows={3} required value={form.data.reason} onChange={(event) => form.setData('reason', event.target.value)} className={`mt-1 ${TEXTAREA}`} />}
+            </SupplierField>
+
+            <RequiredNote tr={tr} />
 
             <div className="flex flex-wrap gap-2">
-                <button type="submit" disabled={form.processing || ! form.data.requirement_id} className={PRIMARY_ACTION}>{texts[2]}</button>
+                <button type="submit" aria-disabled={form.processing || unchosen || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>{texts[2]}</button>
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
             </div>
         </form>
@@ -180,6 +194,21 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
     // Why Sett som utgått or Ta i bruk igjen was refused, e.g. the supplier was ended meanwhile.
     const [retireError, setRetireError] = useState(null);
     const close = () => setPanel(null);
+    // One panel at a time opens in place of the row's buttons: focus in, and back to the button that
+    // opened it — or to its row, or the section heading, when that button is gone (A11Y-014).
+    const lastRow = useRef(null);
+
+    if (panel) {
+        lastRow.current = panel.requirement?.id ?? null;
+    }
+
+    const rememberTrigger = useInlinePanelFocus(panel ? `${panel.kind}-${panel.requirement?.id ?? ''}` : null, {
+        panelId: 'supplier-control-panel',
+        fallbackIds: lastRow.current ? [`control-requirement-${lastRow.current}`, 'supplier-control-heading'] : ['supplier-add-requirement', 'supplier-control-heading'],
+    });
+    // Not `control-requirement-<id>-…`: that is the prefix of the requirement form's own field ids.
+    const titleId = (row) => `supplier-requirement-${row.id}-name`;
+    const actionId = (row, kind) => `supplier-requirement-${row.id}-action-${kind}`;
     const changeStatus = (row, action, confirmText) => {
         if (! window.confirm(confirmText)) {
             return;
@@ -188,7 +217,16 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
         setRetireError(null);
         router.post(`/app/supplier-management/control-requirements/${row.id}/${action}`, {}, {
             preserveScroll: true,
-            onError: (errors) => setRetireError({ id: row.id, message: errors.requirement ?? Object.values(errors)[0] }),
+            // The row moves to the other list and takes the pressed button with it: focus goes to the
+            // row where it now stands (Ta i bruk igjen) or to the section heading (A11Y-014).
+            onSuccess: () => refocusIfLost([action === 'reactivate' ? `control-requirement-${row.id}` : null, 'supplier-control-heading'].filter(Boolean)),
+            onError: (errors) => {
+                const message = errors.requirement ?? Object.values(errors)[0];
+
+                // Shown at the row and said once; focus stays on the button that was pressed.
+                setRetireError({ id: row.id, message });
+                announce(message, { politeness: 'assertive' });
+            },
         });
     };
     const retire = (row) => changeStatus(row, 'retire', c.retire_own_confirm ?? 'Sette kravet som utgått? Det gjelder da ikke leverandøren lenger. Kontrollene av kravet blir stående i historikken.');
@@ -203,23 +241,23 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
         }
 
         if (panel.kind === 'evaluate') {
-            return <EvaluationForm key={`evaluate-${row.id}`} supplierId={supplierId} row={row} options={data.evaluation_form ?? {}} onDone={close} locale={locale} tr={tr} />;
+            return <div id="supplier-control-panel"><EvaluationForm key={`evaluate-${row.id}`} supplierId={supplierId} row={row} options={data.evaluation_form ?? {}} onDone={close} locale={locale} tr={tr} /></div>;
         }
 
         if (panel.kind === 'edit') {
             return (
-                <div key={`edit-${row.id}`} className="mt-4" data-testid="own-requirement-edit">
+                <div id="supplier-control-panel" key={`edit-${row.id}`} className="mt-4" data-testid="own-requirement-edit">
                     <h4 className="text-lg font-semibold text-slate-950">{c.edit_own_heading ?? 'Rediger krav'}</h4>
                     <ControlRequirementForm requirement={row} options={data.form ?? {}} onDone={close} tr={tr} />
                 </div>
             );
         }
 
-        return <OverrideForm key={`${panel.kind}-${row.id}`} supplierId={supplierId} action={panel.kind} requirement={row} onDone={close} tr={tr} />;
+        return <div id="supplier-control-panel"><OverrideForm key={`${panel.kind}-${row.id}`} supplierId={supplierId} action={panel.kind} requirement={row} onDone={close} tr={tr} /></div>;
     };
 
     return (
-        <section className={CARD} aria-labelledby="supplier-control-heading" data-testid="supplier-control-requirements">
+        <section className={CARD} aria-labelledby="supplier-control-heading" data-testid="supplier-control-requirements" onClickCapture={rememberTrigger}>
             {/* Every requirement that applies to the supplier is listed here; the catalogue is under Kontrollkrav. */}
             <h2 id="supplier-control-heading" className="text-xl font-semibold text-slate-950">{c.heading ?? 'Kontrollkrav for leverandøren'}</h2>
             <p className={`mt-2 ${HINT}`}>{c.intro}</p>
@@ -246,7 +284,7 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                             return (
                                 <li key={row.id} id={`control-requirement-${row.id}`} className="min-w-0 scroll-mt-4 rounded-xl border border-slate-200 p-4" data-testid="control-requirement-row">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
+                                        <span id={titleId(row)} className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
                                         <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
                                         <span data-testid="requirement-display-status">
                                             <StatusBadge tone={DISPLAY_STATUS_TONES[row.display_status] ?? 'slate'}>{displayStatusLabel(row.display_status, tr)}</StatusBadge>
@@ -268,20 +306,20 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
 
                                     {panel === null && (row.can_evaluate || actions.exclude || actions.clear || row.can_manage) && (
                                         <div className="mt-3 flex flex-wrap gap-2">
-                                            {row.can_evaluate && <button type="button" onClick={() => setPanel({ kind: 'evaluate', requirement: row })} className={PRIMARY_ACTION}>{c.evaluate ?? 'Kontroller krav'}</button>}
+                                            {row.can_evaluate && <button type="button" id={actionId(row, 'evaluate')} data-panel-trigger="" aria-describedby={titleId(row)} onClick={() => setPanel({ kind: 'evaluate', requirement: row })} className={PRIMARY_ACTION}>{c.evaluate ?? 'Kontroller krav'}</button>}
                                             {row.can_follow_up && onFollowUp && (
-                                                <button type="button" onClick={() => onFollowUp({ ...row.current, requirement_title: row.title })} className={SECONDARY_ACTION} data-testid="requirement-follow-up">
+                                                <button type="button" aria-describedby={titleId(row)} onClick={() => onFollowUp({ ...row.current, requirement_title: row.title })} className={SECONDARY_ACTION} data-testid="requirement-follow-up">
                                                     {c.follow_up ?? 'Følg opp i Avvik og forbedringer'}
                                                 </button>
                                             )}
-                                            {actions.exclude && <button type="button" onClick={() => setPanel({ kind: 'exclude', requirement: row })} className={SECONDARY_ACTION}>{c.exclude ?? 'Gjelder ikke denne leverandøren'}</button>}
-                                            {actions.clear && <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={SECONDARY_ACTION}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>}
+                                            {actions.exclude && <button type="button" id={actionId(row, 'exclude')} data-panel-trigger="" aria-describedby={titleId(row)} onClick={() => setPanel({ kind: 'exclude', requirement: row })} className={SECONDARY_ACTION}>{c.exclude ?? 'Gjelder ikke denne leverandøren'}</button>}
+                                            {actions.clear && <button type="button" id={actionId(row, 'clear')} data-panel-trigger="" aria-describedby={titleId(row)} onClick={() => setPanel({ kind: 'clear', requirement: row })} className={SECONDARY_ACTION}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>}
                                             {/* This supplier's own requirement: maintained here, never deleted. */}
-                                            {row.can_manage && <button type="button" onClick={() => setPanel({ kind: 'edit', requirement: row })} className={SECONDARY_ACTION}>{c.edit_own ?? 'Rediger krav'}</button>}
-                                            {row.can_manage && <button type="button" onClick={() => retire(row)} className={WARNING_ACTION}>{c.retire_own ?? 'Sett som utgått'}</button>}
+                                            {row.can_manage && <button type="button" onClick={() => setPanel({ kind: 'edit', requirement: row })} id={actionId(row, 'edit')} data-panel-trigger="" aria-describedby={titleId(row)} className={SECONDARY_ACTION}>{c.edit_own ?? 'Rediger krav'}</button>}
+                                            {row.can_manage && <button type="button" onClick={() => retire(row)} id={actionId(row, 'retire')} aria-describedby={retireError?.id === row.id ? `${titleId(row)} ${actionId(row, 'error')}` : titleId(row)} className={WARNING_ACTION}>{c.retire_own ?? 'Sett som utgått'}</button>}
                                         </div>
                                     )}
-                                    {retireError?.id === row.id && <p className={`mt-2 ${ERROR}`} role="alert">{retireError.message}</p>}
+                                    {retireError?.id === row.id && <p id={actionId(row, 'error')} className={`mt-2 ${ERROR}`}>{retireError.message}</p>}
                                     {panelFor(row)}
                                     <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} />
                                     <RequirementStatusHistory entries={row.status_history ?? []} locale={locale} tr={tr} />
@@ -295,13 +333,13 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
             {/* One action for the exceptions; the requirements themselves come from the profile. */}
             {canOverride && panel === null && (
                 <div className="mt-5 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => setPanel({ kind: 'add' })} className={PRIMARY_ACTION} data-testid="add-requirement">{c.include ?? 'Legg til krav'}</button>
+                    <button type="button" onClick={() => setPanel({ kind: 'add' })} id="supplier-add-requirement" data-panel-trigger="" className={PRIMARY_ACTION} data-testid="add-requirement">{c.include ?? 'Legg til krav'}</button>
                 </div>
             )}
-            {panel?.kind === 'add' && <AddChoice includable={data.includable} onChoose={(kind) => setPanel({ kind })} onCancel={close} tr={tr} />}
-            {panel?.kind === 'include' && <OverrideForm supplierId={supplierId} action="include" includable={data.includable} onDone={close} tr={tr} />}
+            {panel?.kind === 'add' && <AddChoice includable={data.includable} onChoose={(kind) => setPanel({ kind })} onCancel={close} panelId="supplier-control-panel" tr={tr} />}
+            {panel?.kind === 'include' && <OverrideForm supplierId={supplierId} action="include" includable={data.includable} onDone={close} panelId="supplier-control-panel" tr={tr} />}
             {panel?.kind === 'own' && (
-                <div className="mt-4" data-testid="own-requirement-create">
+                <div id="supplier-control-panel" className="mt-4" data-testid="own-requirement-create">
                     <h3 className="text-lg font-semibold text-slate-950">{c.add_for_supplier_heading ?? 'Opprett krav for denne leverandøren'}</h3>
                     <p className={HINT}>{c.add_for_supplier_intro ?? 'Et krav som bare gjelder denne leverandøren, for eksempel et særskilt kontraktsvilkår. Det gjelder alltid leverandøren.'}</p>
                     <ControlRequirementForm supplierId={supplierId} options={data.form ?? {}} onDone={close} tr={tr} />
@@ -317,12 +355,12 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                         {data.excluded.map((row) => (
                             <li key={row.id} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-excluded-row">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
+                                    <span id={titleId(row)} className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
                                     <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
                                 </div>
                                 <Reason reason={row.reason} tr={tr} />
                                 {panel === null && row.can_clear && (
-                                    <button type="button" onClick={() => setPanel({ kind: 'clear', requirement: row })} className={`mt-3 ${SECONDARY_ACTION}`}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>
+                                    <button type="button" id={actionId(row, 'clear')} data-panel-trigger="" aria-describedby={titleId(row)} onClick={() => setPanel({ kind: 'clear', requirement: row })} className={`mt-3 ${SECONDARY_ACTION}`}>{c.clear ?? 'Tilbake til automatisk vurdering'}</button>
                                 )}
                                 {panelFor(row)}
                             </li>
@@ -342,16 +380,16 @@ export default function SupplierControlRequirements({ supplierId, data, onFollow
                         {retiredOwn.map((row) => (
                             <li key={row.id} id={`control-requirement-${row.id}`} className="min-w-0 scroll-mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="control-retired-own-row">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
+                                    <span id={titleId(row)} className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
                                     <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
                                     <StatusBadge tone="slate">{c.retired_own_badge ?? 'Utgått'}</StatusBadge>
                                 </div>
                                 {row.description && <p className="mt-2 whitespace-pre-line break-words text-base text-slate-700">{row.description}</p>}
                                 <Basis row={row} tr={tr} />
                                 {panel === null && row.can_reactivate && (
-                                    <button type="button" onClick={() => reactivate(row)} className={`mt-3 ${SECONDARY_ACTION}`}>{c.reactivate_own ?? 'Ta i bruk igjen'}</button>
+                                    <button type="button" onClick={() => reactivate(row)} id={actionId(row, 'reactivate')} aria-describedby={retireError?.id === row.id ? `${titleId(row)} ${actionId(row, 'error')}` : titleId(row)} className={`mt-3 ${SECONDARY_ACTION}`}>{c.reactivate_own ?? 'Ta i bruk igjen'}</button>
                                 )}
-                                {retireError?.id === row.id && <p className={`mt-2 ${ERROR}`} role="alert">{retireError.message}</p>}
+                                {retireError?.id === row.id && <p id={actionId(row, 'error')} className={`mt-2 ${ERROR}`}>{retireError.message}</p>}
                                 <EvaluationHistory evaluations={row.evaluations ?? []} locale={locale} tr={tr} testId="retired-own-evaluation-history" />
                                 <RequirementStatusHistory entries={row.status_history ?? []} locale={locale} tr={tr} />
                             </li>

@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { usePanelFocus } from '../../../Support/focusManagement';
+import { INPUT } from '../../../Support/formStyles';
 import ObjectiveAttention from './ObjectiveAttention';
 import ObjectiveForm from './ObjectiveForm';
 import { objectiveHelp } from './objectiveHelp';
@@ -12,7 +16,6 @@ import { indicatorLabel } from './kpiStatus';
 import { OBJECTIVE_STATUS_TONES, formatTargetDate } from './objectiveStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 /**
  * The overview when none of the person's roles reaches an area. A regular user is told who can fix
@@ -75,6 +78,22 @@ export default function ObjectivesIndex() {
     const [status, setStatus] = useState(filters.status ?? '');
     const [area, setArea] = useState(filters.area ? String(filters.area) : '');
 
+    // Nytt mål opens in place: focus to its first field, and back to the button on Avbryt (A11Y-014).
+    const createPanelRef = useRef(null);
+    const createButtonRef = useRef(null);
+    usePanelFocus(creating, { panelRef: createPanelRef, returnFocusRef: createButtonRef });
+
+    // The count after Søk or Nullstill is said once, when the answer has arrived — never on first load.
+    const announceCountRef = useRef(false);
+    const countText = (tr.count ?? ':count mål').replace(':count', String(visibleCount));
+
+    useEffect(() => {
+        if (announceCountRef.current) {
+            announceCountRef.current = false;
+            announce(countText);
+        }
+    }, [objectives, countText]);
+
     const form = useForm({
         title: '',
         description: '',
@@ -85,6 +104,7 @@ export default function ObjectivesIndex() {
 
     const submitSearch = (event) => {
         event.preventDefault();
+        announceCountRef.current = true;
         router.get('/app/objectives', {
             search: search || undefined,
             status: status || undefined,
@@ -96,12 +116,13 @@ export default function ObjectivesIndex() {
         setSearch('');
         setStatus('');
         setArea('');
+        announceCountRef.current = true;
         router.get('/app/objectives', {}, { replace: true });
     };
 
-    const submitCreate = (event) => {
+    const submitCreate = (event, focusFirstError) => {
         event.preventDefault();
-        form.post('/app/objectives', { preserveScroll: true });
+        form.post('/app/objectives', { preserveScroll: true, onError: focusFirstError });
     };
 
     const filtered = Boolean(filters.search || filters.status || filters.area);
@@ -116,13 +137,13 @@ export default function ObjectivesIndex() {
                             {tr.index_subtitle ?? 'Det virksomheten skal oppnå, samlet med ansvarlig, fagområde og måldato.'}
                         </p>
                         {hasAreas && (
-                            <p className="text-base text-slate-500">{tr.scope_note ?? 'Du ser målene i fagområdene rollene dine gir deg.'}</p>
+                            <p className="text-base text-slate-600">{tr.scope_note ?? 'Du ser målene i fagområdene rollene dine gir deg.'}</p>
                         )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...objectiveHelp(tr, 'index')} />
                         {canCreate && ! creating && (
-                            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
+                            <button type="button" ref={createButtonRef} onClick={() => setCreating(true)} className={PRIMARY_ACTION}>
                                 {tr.create ?? 'Nytt mål'}
                             </button>
                         )}
@@ -130,8 +151,8 @@ export default function ObjectivesIndex() {
                 </header>
 
                 {creating && (
-                    <section className={CARD}>
-                        <h2 className="mb-4 text-lg font-semibold text-slate-950">{tr.create_heading ?? 'Nytt mål'}</h2>
+                    <section ref={createPanelRef} className={CARD} aria-labelledby="objective-create-heading">
+                        <h2 id="objective-create-heading" className="mb-4 text-lg font-semibold text-slate-950">{tr.create_heading ?? 'Nytt mål'}</h2>
                         <ObjectiveForm
                             form={form}
                             onSubmit={submitCreate}
@@ -150,7 +171,7 @@ export default function ObjectivesIndex() {
                     {attention && <ObjectiveAttention attention={attention} tr={tr} />}
                     <section className={CARD}>
                         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-3">
-                            <div className="min-w-[16rem] flex-1">
+                            <div className="min-w-0 flex-1 basis-full sm:basis-0 sm:min-w-[16rem]">
                                 <label htmlFor="objective-search" className="block text-base font-semibold text-slate-700">
                                     {tr.search_label ?? 'Søk'}
                                 </label>
@@ -205,9 +226,7 @@ export default function ObjectivesIndex() {
                             )}
                         </form>
 
-                        <p className="mt-4 text-base text-slate-500">
-                            {(tr.count ?? ':count mål').replace(':count', String(visibleCount))}
-                        </p>
+                        <p className="mt-4 text-base text-slate-600">{countText}</p>
 
                         {objectives.length === 0 ? (
                             <EmptyStateBox
@@ -216,26 +235,27 @@ export default function ObjectivesIndex() {
                                 description={filtered ? null : (canCreate ? (tr.empty_hint ?? '') : null)}
                             />
                         ) : (
-                            <div className="mt-4 overflow-x-auto">
+                            <ScrollRegion label={tr.index_title ?? 'Mål og KPI'} className="mt-4">
                                 <table className="w-full text-base">
+                                    <caption className="sr-only">{tr.index_title ?? 'Mål og KPI'}</caption>
                                     <thead>
                                         <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                            <th className="pb-3 pr-4">{tr.col_title ?? 'Mål'}</th>
-                                            <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
-                                            <th className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>
-                                            <th className="px-4 pb-3">{tr.col_status ?? 'Status'}</th>
-                                            <th className="px-4 pb-3">{tr.col_kpis ?? 'KPI-er'}</th>
-                                            <th className="pb-3 pl-4">{tr.col_target_date ?? 'Måldato'}</th>
+                                            <th scope="col" className="pb-3 pr-4">{tr.col_title ?? 'Mål'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_status ?? 'Status'}</th>
+                                            <th scope="col" className="px-4 pb-3">{tr.col_kpis ?? 'KPI-er'}</th>
+                                            <th scope="col" className="pb-3 pl-4">{tr.col_target_date ?? 'Måldato'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {objectives.map((objective) => (
                                             <tr key={objective.id}>
-                                                <td className="py-3 pr-4">
+                                                <th scope="row" className="py-3 pr-4 text-left font-normal">
                                                     <Link href={objective.url} className="font-semibold text-violet-700 hover:text-violet-900">
                                                         {objective.title}
                                                     </Link>
-                                                </td>
+                                                </th>
                                                 <td className="px-4 py-3 text-slate-700">{objective.area_name}</td>
                                                 <td className="px-4 py-3 text-slate-700">
                                                     {objective.owner_name ?? <span className="text-amber-700">{tr.no_owner ?? 'Mangler ansvarlig'}</span>}
@@ -255,7 +275,7 @@ export default function ObjectivesIndex() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         )}
                     </section>
                     </>

@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { usePage } from '@inertiajs/react';
 import { METRICS, edgePath, layoutBlueprint, nodeShape } from '../../Support/processBlueprintLayout';
-import { canInsertStepOn, insertAnchor, isEditableStep } from '../../Support/processStepEdit';
+import { canInsertStepOn, insertAnchor } from '../../Support/processStepEdit';
+import { diagramIsInteractive, nodeAction } from './processFlowA11y';
 import {
     ZOOM_LIMITS,
     anchoredScroll,
@@ -28,6 +30,14 @@ import {
  *
  * Colour is the lane's, shape is the node's. Shape is the part that has to survive being printed in
  * black and white, which is how a kvalitetshåndbok is still read in a lot of places.
+ *
+ * ACCESSIBILITY (WCAG Fase 6, A11Y-004, -018, -128). A drawing with nothing to press is a named
+ * picture (`role="img"`). A drawing with buttons in it is a named group instead — inside an img every
+ * child is presentational, so the buttons would not exist for a screen reader. In the group the
+ * drawing itself (lanes, arrows, boxes that do nothing) is hidden from assistive technology; the step
+ * list under the diagram is the same flow as text, with the same actions, and the group's
+ * description says so. Strokes are at least 3:1 against the lanes, and the focus ring is drawn in
+ * the SVG, because an outline on an SVG <g> is not painted in Firefox and Safari.
  */
 
 /** Rotated through the lanes so neighbouring bands are told apart without carrying any meaning. */
@@ -39,12 +49,23 @@ const LANE_TINTS = [
 /** The height the control strip keeps clear at the top of the surface. */
 const CONTROL_STRIP = 48;
 
+// Strokes at least 3:1 against both lane bands (#ffffff and #f8fafc), 1.4.11 (A11Y-018):
+// emerald-600, indigo-500, amber-700 and slate-500.
 const NODE_TONES = {
-    start: { fill: '#ecfdf5', stroke: '#6ee7b7', text: '#065f46' },
-    end: { fill: '#eef2ff', stroke: '#a5b4fc', text: '#3730a3' },
-    decision: { fill: '#fffbeb', stroke: '#fcd34d', text: '#92400e' },
-    step: { fill: '#ffffff', stroke: '#cbd5e1', text: '#0f172a' },
+    start: { fill: '#ecfdf5', stroke: '#059669', text: '#065f46' },
+    end: { fill: '#eef2ff', stroke: '#6366f1', text: '#3730a3' },
+    decision: { fill: '#fffbeb', stroke: '#b45309', text: '#92400e' },
+    step: { fill: '#ffffff', stroke: '#64748b', text: '#0f172a' },
 };
+
+/** Arrows and the «+» on them: slate-500, 4.5:1 on the lanes (A11Y-018). */
+const EDGE_STROKE = '#64748b';
+
+/**
+ * The keyboard focus ring, drawn in the SVG (A11Y-128). Hidden until the node's <g> has keyboard
+ * focus; violet-600 like every other focus indicator in the app (§10).
+ */
+const FOCUS_RING = 'pointer-events-none fill-none stroke-violet-600 opacity-0 group-focus-visible:opacity-100';
 
 export default function ProcessSwimlaneDiagram({
     blueprint,
@@ -89,6 +110,9 @@ export default function ProcessSwimlaneDiagram({
  * blueprint — an empty flow renders a sentence, not a zoomable surface.
  */
 function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, onEditStep, onInsertStep }) {
+    const ta = usePage().props.translations?.a11y ?? {};
+    const descriptionId = `process-diagram-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-description`;
+    const interactive = diagramIsInteractive(layout, { onOpenSubprocess, onOpenActivity, onEditStep, onInsertStep });
     const surfaceRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [scale, setScale] = useState(null);
@@ -219,14 +243,24 @@ function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, 
                     style={{ minHeight: drawable, paddingTop: CONTROL_STRIP }}
                 >
                     <svg
-                        role="img"
+                        // A picture when nothing in it can be pressed, a named group when it holds
+                        // buttons — inside an img they would be presentational (A11Y-004).
+                        role={interactive ? 'group' : 'img'}
                         aria-label={title}
+                        aria-describedby={descriptionId}
                         width={layout.width * effective}
                         height={layout.height * effective}
                         viewBox={`0 0 ${layout.width} ${layout.height}`}
                         className="block shrink-0"
                     >
                         <title>{title}</title>
+                        <desc id={descriptionId}>
+                            {interactive
+                                ? (ta.quality_diagram_interactive_description
+                                    ?? 'Stegene i diagrammet kan åpnes med tastaturet. Listen «Steg» under diagrammet viser den samme flyten som tekst, med de samme handlingene.')
+                                : (ta.quality_diagram_description
+                                    ?? 'Listen «Steg» viser den samme flyten som tekst.')}
+                        </desc>
 
                         <defs>
                             <marker
@@ -246,7 +280,7 @@ function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, 
                             const tint = LANE_TINTS[lane.index % LANE_TINTS.length];
 
                             return (
-                                <g key={lane.key}>
+                                <g key={lane.key} aria-hidden="true">
                                     <rect x="0" y={lane.y} width={layout.width} height={lane.height} fill={tint.band} />
                                     <line
                                         x1="0"
@@ -263,6 +297,7 @@ function ZoomableDiagram({ layout, title, tb, onOpenSubprocess, onOpenActivity, 
 
                         {/* The line that separates the role column from the flow, drawn once over every band. */}
                         <line
+                            aria-hidden="true"
                             x1={METRICS.laneLabelWidth}
                             y1={layout.lanes[0].y}
                             x2={METRICS.laneLabelWidth}
@@ -433,11 +468,11 @@ function Edge({ edge }) {
     }
 
     return (
-        <g>
+        <g aria-hidden="true">
             <path
                 d={edgePath(edge.points)}
                 fill="none"
-                stroke="#94a3b8"
+                stroke={EDGE_STROKE}
                 strokeWidth="1.5"
                 // A loop back to an earlier step is a different kind of statement from moving on,
                 // so it is dashed as well as routed below the flow.
@@ -502,7 +537,7 @@ function InsertHandle({ edge, nodes, tb, onInsert }) {
             role="button"
             tabIndex={0}
             aria-label={name}
-            className="group cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
+            className="group cursor-pointer outline-hidden"
             onClick={activate}
             onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -511,12 +546,13 @@ function InsertHandle({ edge, nodes, tb, onInsert }) {
             }}
         >
             <title>{name}</title>
+            <circle cx={anchor.x} cy={anchor.y} r="13" strokeWidth="2.5" className={FOCUS_RING} />
             <circle
                 cx={anchor.x}
                 cy={anchor.y}
                 r="9"
                 fill="#ffffff"
-                stroke="#94a3b8"
+                stroke={EDGE_STROKE}
                 strokeWidth="1.5"
                 className="transition group-hover:fill-slate-100 group-hover:stroke-slate-600"
             />
@@ -566,10 +602,11 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null, o
     const subprocess = node.subprocess ?? null;
     const articles = node.articles ?? [];
 
-    const opensSubprocess = subprocess !== null && typeof onOpenSubprocess === 'function';
-    const editsStep = ! opensSubprocess && typeof onEditStep === 'function' && isEditableStep(node);
-    const opensActivity = ! opensSubprocess && ! editsStep && articles.length > 0 && typeof onOpenActivity === 'function';
-    const openable = opensSubprocess || editsStep || opensActivity;
+    // The rule is shared with diagramIsInteractive(), so the svg's role and the buttons in it agree.
+    const action = nodeAction(node, { onOpenSubprocess, onOpenActivity, onEditStep });
+    const opensSubprocess = action === 'subprocess';
+    const editsStep = action === 'edit';
+    const openable = action !== null;
 
     const open = openable
         ? (event) => {
@@ -628,7 +665,8 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null, o
     );
 
     if (! openable) {
-        return <g>{body}</g>;
+        // Only a picture of a step; the step list carries it as text (A11Y-004).
+        return <g aria-hidden="true">{body}</g>;
     }
 
     const name = opensSubprocess
@@ -642,7 +680,9 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null, o
             role="button"
             tabIndex={0}
             aria-label={name}
-            className={`cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${opensSubprocess ? 'focus-visible:outline-violet-600' : editsStep ? 'focus-visible:outline-slate-600' : 'focus-visible:outline-sky-600'}`}
+            // The outline is transparent (still shown in forced-colours mode); the visible ring is
+            // the rect below, because Firefox and Safari do not paint an outline on SVG (A11Y-128).
+            className="group cursor-pointer outline-hidden"
             onClick={open}
             onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -652,6 +692,15 @@ function Node({ node, tb = {}, onOpenSubprocess = null, onOpenActivity = null, o
             }}
         >
             <title>{name}</title>
+            <rect
+                x={node.x - 5}
+                y={node.y - 5}
+                width={node.width + 10}
+                height={node.height + 10}
+                rx="14"
+                strokeWidth="3"
+                className={FOCUS_RING}
+            />
             {body}
         </g>
     );

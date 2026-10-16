@@ -50,7 +50,7 @@ export default function ComplianceAttention({ attention, tr, testIdPrefix = 'com
                 {attentionTotalLabel(panel.total, tr)}
             </p>
 
-            <ul className="mt-4 space-y-2" data-testid={`${testIdPrefix}-list`}>
+            <ul id={`${testIdPrefix}-list`} className="mt-4 space-y-2" data-testid={`${testIdPrefix}-list`}>
                 {panel.items.map((item) => (
                     <li key={item.id} className="rounded-2xl bg-white px-4 py-3" data-testid={`${testIdPrefix}-item`}>
                         <Link href={item.url} className="block break-words text-base font-semibold text-violet-700 hover:text-violet-900">
@@ -69,6 +69,7 @@ export default function ComplianceAttention({ attention, tr, testIdPrefix = 'com
                     type="button"
                     className="mt-3 text-base font-semibold text-violet-700 hover:text-violet-900"
                     aria-expanded={expanded}
+                    aria-controls={`${testIdPrefix}-list`}
                     onClick={() => setExpanded((value) => ! value)}
                 >
                     {expanded

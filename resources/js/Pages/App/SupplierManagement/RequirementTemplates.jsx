@@ -3,6 +3,8 @@ import { router } from '@inertiajs/react';
 import ActionDialog from '../../../Components/App/ActionDialog';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { focusElement } from '../../../Support/focusManagement';
+import { BUSY } from './SupplierField';
 import { LEVEL_TONES, levelLabel, templateItemUse, templatePreview, themeLabel } from './controlRequirements';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
@@ -80,11 +82,18 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
     const toggleShown = (key) => setShown((current) => (current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]));
     const [processing, setProcessing] = useState(false);
     const confirmRef = useRef(null);
+    // Where focus goes if the button that opened the dialog is gone when it closes.
+    const toggleRef = useRef(null);
     const template = templates.find((candidate) => candidate.key === open) ?? null;
     const preview = templatePreview(template);
     const close = () => setOpen(null);
 
     const apply = () => {
+        // While it runs the button says so (aria-disabled) but keeps focus; a second press does nothing.
+        if (processing) {
+            return;
+        }
+
         router.post(`/app/supplier-management/control-requirements/templates/${template.key}`, {}, {
             preserveScroll: true,
             // The section stays open on the template just applied.
@@ -99,6 +108,8 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
         if (window.location.hash === '#requirement-templates-heading') {
             setExpanded(true);
             document.getElementById('requirement-templates-heading')?.scrollIntoView?.({ block: 'start' });
+            // «Bruk kravmal» lands on the section's own button, not just its position (A11Y-015).
+            focusElement(document.getElementById('requirement-templates-toggle'), { preventScroll: true });
         }
     }, []);
 
@@ -114,6 +125,8 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
                     aria-expanded={expanded}
                     aria-controls="requirement-templates-panel"
                     onClick={() => setExpanded((value) => ! value)}
+                    id="requirement-templates-toggle"
+                    ref={toggleRef}
                     className="flex min-h-12 w-full min-w-0 items-start gap-3 rounded-xl py-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
                     data-testid="requirement-templates-toggle"
                 >
@@ -136,7 +149,7 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
                     {templates.map((row) => (
                         // An open template takes the whole row, so its list has room and the others keep their size.
                         <li key={row.key} className={`flex min-w-0 flex-col rounded-xl border border-slate-200 p-4 ${shown.includes(row.key) ? 'lg:col-span-3' : ''}`} data-testid="requirement-template">
-                            <h3 className="break-words text-lg font-semibold text-slate-950">{row.name}</h3>
+                            <h3 id={`requirement-template-${row.key}-name`} className="break-words text-lg font-semibold text-slate-950">{row.name}</h3>
                             <p className="mt-1 break-words text-base text-slate-700">{row.purpose}</p>
                             <p className="mt-2 break-words text-base text-slate-700"><span className="font-semibold text-slate-900">{t.suited_for ?? 'Passer for'}:</span> {row.suited_for}</p>
                             <p className="mt-2 text-base text-slate-700">
@@ -149,13 +162,14 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
                                     onClick={() => toggleShown(row.key)}
                                     aria-expanded={shown.includes(row.key)}
                                     aria-controls={`requirement-template-items-${row.key}`}
+                                    aria-describedby={`requirement-template-${row.key}-name`}
                                     className={SECONDARY_ACTION}
                                     data-testid="requirement-template-toggle"
                                 >
                                     {shown.includes(row.key) ? (t.hide_items ?? 'Skjul kravene') : fill(t.show_items ?? 'Vis kravene (:count)', { count: row.items.length })}
                                 </button>
                                 {canManage && (
-                                    <button type="button" onClick={() => setOpen(row.key)} className={SECONDARY_ACTION}>{t.apply ?? 'Ta i bruk kravmal'}</button>
+                                    <button type="button" onClick={() => setOpen(row.key)} aria-describedby={`requirement-template-${row.key}-name`} className={SECONDARY_ACTION}>{t.apply ?? 'Ta i bruk kravmal'}</button>
                                 )}
                             </div>
                             {shown.includes(row.key) && (
@@ -168,11 +182,11 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
                 </ul>
             </div>
 
-            <ActionDialog isOpen={canManage && template !== null} onClose={close} closeDisabled={processing} titleId="requirement-template-dialog-heading" initialFocusRef={confirmRef}>
+            <ActionDialog isOpen={canManage && template !== null} onClose={close} closeDisabled={processing} titleId="requirement-template-dialog-heading" descriptionId="requirement-template-dialog-description" initialFocusRef={confirmRef} fallbackFocusRef={toggleRef}>
                 {template && (
                     <div data-testid="requirement-template-dialog">
                         <h2 id="requirement-template-dialog-heading" className="break-words text-xl font-semibold text-slate-950">{fill(t.dialog_heading ?? 'Ta i bruk kravmal: :name', { name: template.name })}</h2>
-                        <p className={`mt-2 ${HINT}`}>{t.dialog_keeps}</p>
+                        <p id="requirement-template-dialog-description" className={`mt-2 ${HINT}`}>{t.dialog_keeps}</p>
                         {!reviewed && <Unreviewed t={t} />}
 
                         {preview.toCreate.length > 0 ? (
@@ -192,7 +206,7 @@ export default function RequirementTemplates({ templates = [], reviewed = false,
 
                         <div className="mt-5 flex flex-wrap gap-2">
                             {preview.toCreate.length > 0 && (
-                                <button ref={confirmRef} type="button" onClick={apply} disabled={processing} className={PRIMARY_ACTION}>
+                                <button ref={confirmRef} type="button" onClick={apply} aria-disabled={processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>
                                     {fill(t.confirm ?? 'Legg til :count kontrollkrav', { count: preview.toCreate.length })}
                                 </button>
                             )}

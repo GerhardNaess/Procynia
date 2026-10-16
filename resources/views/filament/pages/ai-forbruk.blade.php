@@ -15,28 +15,28 @@
     <div class="ai-forbruk-layout">
 
         {{-- ── SIDEBAR ── --}}
-        <aside class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-6">
+        <aside class="overflow-hidden rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm lg:sticky lg:top-6">
 
-            <div class="border-b border-gray-100 px-5 py-4">
-                <p class="text-base font-bold uppercase tracking-widest text-gray-600">Procynia intern</p>
-                <h2 class="mt-1 text-xl font-extrabold tracking-tight text-gray-950">AI-forbruk</h2>
-                <p class="mt-1 text-base leading-6 text-gray-600">Viser faktisk AI-forbruk, tokenforbruk og estimert intern AI-kost. Dette er intern styring, ikke fakturagrunnlag.</p>
+            <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                <p class="text-base font-bold uppercase tracking-widest text-gray-600 dark:text-gray-400">Procynia intern</p>
+                <h2 class="mt-1 text-xl font-extrabold tracking-tight text-gray-950 dark:text-white">AI-forbruk</h2>
+                <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">Viser faktisk AI-forbruk, tokenforbruk og estimert intern AI-kost. Dette er intern styring, ikke fakturagrunnlag.</p>
             </div>
 
             {{-- Kunde --}}
-            <div class="border-b border-gray-100 px-5 py-4 space-y-3">
-                <label class="block text-base font-bold text-gray-800" for="customer-select">Kunde</label>
+            <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4 space-y-3">
+                <label class="block text-base font-bold text-gray-800 dark:text-gray-100" for="customer-select">Kunde</label>
                 <select id="customer-select" wire:model.live="selectedCustomerId"
-                    class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    class="w-full rounded-xl border border-field-border bg-white dark:bg-gray-900 px-3 py-2 text-base text-gray-900 dark:text-white shadow-sm focus:border-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-600 dark:focus:border-violet-400 dark:focus:ring-violet-400">
                     <option value="">Alle kunder samlet</option>
                     @foreach ($customerList as $c)
                         <option value="{{ $c['id'] }}">{{ $c['name'] }}</option>
                     @endforeach
                 </select>
 
-                <label class="block text-base font-bold text-gray-800" for="period-select">Periode</label>
+                <label class="block text-base font-bold text-gray-800 dark:text-gray-100" for="period-select">Periode</label>
                 <select id="period-select" wire:model.live="periodPreset"
-                    class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    class="w-full rounded-xl border border-field-border bg-white dark:bg-gray-900 px-3 py-2 text-base text-gray-900 dark:text-white shadow-sm focus:border-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-600 dark:focus:border-violet-400 dark:focus:ring-violet-400">
                     <option value="last30">Siste 30 dager</option>
                     <option value="month">Denne måneden</option>
                     <option value="quarter">Dette kvartalet</option>
@@ -46,24 +46,24 @@
 
                 <div class="grid grid-cols-2 gap-2">
                     <div>
-                        <label class="block text-base font-semibold text-gray-600 mb-1">Fra</label>
-                        <input type="date" wire:model="dateFrom"
-                            class="w-full rounded-xl border border-gray-300 bg-white px-2 py-1.5 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                        <label class="block text-base font-semibold text-gray-600 dark:text-gray-400 mb-1" for="ai-forbruk-date-from">Fra</label>
+                        <input type="date" id="ai-forbruk-date-from" wire:model="dateFrom"
+                            class="w-full rounded-xl border border-field-border bg-white dark:bg-gray-900 px-2 py-1.5 text-base text-gray-900 dark:text-white shadow-sm focus:border-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-600 dark:focus:border-violet-400 dark:focus:ring-violet-400">
                     </div>
                     <div>
-                        <label class="block text-base font-semibold text-gray-600 mb-1">Til</label>
-                        <input type="date" wire:model="dateTo"
-                            class="w-full rounded-xl border border-gray-300 bg-white px-2 py-1.5 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                        <label class="block text-base font-semibold text-gray-600 dark:text-gray-400 mb-1" for="ai-forbruk-date-to">Til</label>
+                        <input type="date" id="ai-forbruk-date-to" wire:model="dateTo"
+                            class="w-full rounded-xl border border-field-border bg-white dark:bg-gray-900 px-2 py-1.5 text-base text-gray-900 dark:text-white shadow-sm focus:border-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-600 dark:focus:border-violet-400 dark:focus:ring-violet-400">
                     </div>
                 </div>
 
                 <div class="grid gap-2 pt-1">
                     <button wire:click="applyFilters" type="button"
-                        class="w-full rounded-xl bg-gray-900 px-4 py-2.5 text-base font-bold leading-6 text-white transition hover:bg-gray-700">
+                        class="w-full rounded-xl bg-gray-900 dark:bg-gray-700 px-4 py-2.5 text-base font-bold leading-6 text-white transition hover:bg-gray-700 dark:hover:bg-gray-600">
                         Oppdater visning
                     </button>
                     <button wire:click="resetFilters" type="button"
-                        class="w-full rounded-xl bg-gray-50 border border-gray-200 px-4 py-2.5 text-base font-semibold leading-6 text-gray-700 transition hover:bg-gray-100">
+                        class="w-full rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 px-4 py-2.5 text-base font-semibold leading-6 text-gray-700 dark:text-gray-200 transition hover:bg-gray-100 dark:hover:bg-white/10">
                         Nullstill filtre
                     </button>
                 </div>
@@ -71,18 +71,18 @@
 
             {{-- AI-funksjon og trendgruppe --}}
             <div class="px-5 py-4 space-y-3">
-                <label class="block text-base font-bold text-gray-800" for="function-select">AI-funksjon</label>
+                <label class="block text-base font-bold text-gray-800 dark:text-gray-100" for="function-select">AI-funksjon</label>
                 <select id="function-select" wire:model.live="functionFilter"
-                    class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    class="w-full rounded-xl border border-field-border bg-white dark:bg-gray-900 px-3 py-2 text-base text-gray-900 dark:text-white shadow-sm focus:border-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-600 dark:focus:border-violet-400 dark:focus:ring-violet-400">
                     <option value="">Alle funksjoner</option>
                     @foreach (\App\Filament\Pages\AiForbruk::FEATURE_LABELS as $featureKey => $featureLabel)
                         <option value="{{ $featureKey }}">{{ $featureLabel }}</option>
                     @endforeach
                 </select>
 
-                <label class="block text-base font-bold text-gray-800" for="trend-select">Trendvisning</label>
+                <label class="block text-base font-bold text-gray-800 dark:text-gray-100" for="trend-select">Trendvisning</label>
                 <select id="trend-select" wire:model.live="trendGrouping"
-                    class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    class="w-full rounded-xl border border-field-border bg-white dark:bg-gray-900 px-3 py-2 text-base text-gray-900 dark:text-white shadow-sm focus:border-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-600 dark:focus:border-violet-400 dark:focus:ring-violet-400">
                     <option value="day">Daglig</option>
                     <option value="week">Ukentlig</option>
                     <option value="month">Månedlig</option>
@@ -90,8 +90,8 @@
             </div>
 
             {{-- Datakildemark --}}
-            <div class="border-t border-amber-100 bg-amber-50 px-5 py-3">
-                <p class="text-base leading-relaxed text-amber-800">
+            <div class="border-t border-amber-100 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-5 py-3">
+                <p class="text-base leading-relaxed text-amber-800 dark:text-amber-300">
                     <strong>Datagrunnlag:</strong>
                     kall, tokens og kostnad hentes fra hvert leverandørkall i <code class="font-mono">ai_usage_attempts</code>, kun pålitelige rader etter bruksintegritetsgrensen.
                     Kostnad er faktisk kostnad fra leverandørens forbruk; kall med ukjent kostnad telles, men summeres aldri som null.
@@ -100,18 +100,18 @@
             </div>
 
             {{-- Kontrollsignaler --}}
-            <div class="border-t border-gray-100">
+            <div class="border-t border-gray-100 dark:border-white/10">
                 <div class="px-5 pt-4 pb-2">
-                    <div class="text-base font-bold uppercase tracking-wider text-gray-600">Kontrollsignaler</div>
-                    <p class="mt-0.5 text-base text-gray-600">Kunder eller mønstre som bør følges opp.</p>
+                    <div class="text-base font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">Kontrollsignaler</div>
+                    <p class="mt-0.5 text-base text-gray-600 dark:text-gray-400">Kunder eller mønstre som bør følges opp.</p>
                 </div>
-                <div class="divide-y divide-gray-50 px-4 pb-3">
+                <div class="divide-y divide-gray-50 dark:divide-white/10 px-4 pb-3">
                     @forelse ($alerts as $alert)
                         @php
                             $alertColors = [
-                                'red'   => 'bg-red-50 border-red-200 text-red-800',
-                                'amber' => 'bg-amber-50 border-amber-200 text-amber-800',
-                                'blue'  => 'bg-blue-50 border-blue-200 text-blue-800',
+                                'red'   => 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-300',
+                                'amber' => 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300',
+                                'blue'  => 'bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30 text-blue-800 dark:text-blue-300',
                             ];
                             $cls = $alertColors[$alert['type']] ?? $alertColors['blue'];
                         @endphp
@@ -120,7 +120,7 @@
                             <span class="mt-0.5 text-base leading-6">{{ $alert['message'] }}</span>
                         </div>
                     @empty
-                        <p class="py-4 text-center text-base text-gray-600">Ingen signaler i valgt periode.</p>
+                        <p class="py-4 text-center text-base text-gray-600 dark:text-gray-400">Ingen signaler i valgt periode.</p>
                     @endforelse
                 </div>
             </div>
@@ -132,13 +132,13 @@
             {{-- Header --}}
             <div class="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <p class="text-base font-bold uppercase tracking-widest text-gray-600">Faktisk AI-forbruk og intern kost</p>
-                    <h1 class="mt-1 text-3xl font-extrabold tracking-tight text-gray-950">{{ $pageContextTitle }}</h1>
-                    <p class="mt-1 text-base leading-6 text-gray-600">
+                    <p class="text-base font-bold uppercase tracking-widest text-gray-600 dark:text-gray-400">Faktisk AI-forbruk og intern kost</p>
+                    <h2 class="mt-1 text-3xl font-extrabold tracking-tight text-gray-950 dark:text-white">{{ $pageContextTitle }}</h2>
+                    <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">
                         Viser {{ $functionFilter !== '' ? $this->operationLabel($functionFilter) : 'alle AI-funksjoner' }} i valgt periode for intern styring, ikke fakturagrunnlag.
                     </p>
                 </div>
-                <div class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2.5 text-base font-bold leading-6 text-gray-600 shadow-sm whitespace-nowrap">
+                <div class="inline-flex items-center gap-2 rounded-full border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 px-4 py-2.5 text-base font-bold leading-6 text-gray-600 dark:text-gray-400 shadow-sm whitespace-nowrap">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                     {{ $periodLabel }}
                 </div>
@@ -177,7 +177,7 @@
                             'label'  => 'AI-kapasitet',
                             'value'  => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0),
                             'footer' => ($kpi['capacity_pct'] ?? 0).' % brukt',
-                            'fClass' => 'text-gray-600',
+                            'fClass' => 'text-gray-600 dark:text-gray-400',
                         ],
                         [
                             'label'  => 'Blokkerte',
@@ -189,26 +189,26 @@
                 @endphp
 
                 @foreach ($kpiCards as $card)
-                    <article class="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                        <div class="min-h-[2.5rem] text-base font-bold uppercase leading-6 tracking-wider text-gray-600">{{ $card['label'] }}</div>
-                        <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-950">{{ $card['value'] }}</div>
+                    <article class="flex min-h-36 flex-col rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                        <div class="min-h-[2.5rem] text-base font-bold uppercase leading-6 tracking-wider text-gray-600 dark:text-gray-400">{{ $card['label'] }}</div>
+                        <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-950 dark:text-white">{{ $card['value'] }}</div>
                         <div class="mt-auto text-base font-medium {{ $card['fClass'] }}">{{ $card['footer'] }}</div>
                     </article>
                 @endforeach
 
                 {{-- Kort 6: Estimert kostnad --}}
-                <article class="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                    <div class="min-h-[2.5rem] text-base font-bold uppercase leading-6 tracking-wider text-gray-600">Kostnad</div>
+                <article class="flex min-h-36 flex-col rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                    <div class="min-h-[2.5rem] text-base font-bold uppercase leading-6 tracking-wider text-gray-600 dark:text-gray-400">Kostnad</div>
                     @if ($totalCostStatus === 'ok' || $totalCostStatus === 'partial')
-                        <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-950">
+                        <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-950 dark:text-white">
                             ≈ {{ number_format($totalCostNok ?? 0, 0, ',', ' ') }} kr
                         </div>
-                        <div class="mt-auto text-base font-medium text-gray-600">
+                        <div class="mt-auto text-base font-medium text-gray-600 dark:text-gray-400">
                             {{ $totalCostStatus === 'partial' ? $unpricedCalls.' kall uten kjent kostnad' : 'Faktisk kostnad, oppgjort' }}
                         </div>
                     @else
-                        <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-600">–</div>
-                        <div class="mt-auto text-base font-medium text-gray-600">
+                        <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-600 dark:text-gray-400">–</div>
+                        <div class="mt-auto text-base font-medium text-gray-600 dark:text-gray-400">
                             @if ($totalCostStatus === 'price_missing') Kostnad ukjent
                             @elseif ($totalCostStatus === 'exchange_rate_missing') Valutakurs mangler
                             @else Ingen tokens
@@ -221,35 +221,35 @@
 
             {{-- Kostnadsoppgjør: oppgjort, åpent og legacy holdes adskilt --}}
             <section aria-label="Kostnadsoppgjør" class="grid gap-3 sm:grid-cols-3">
-                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                    <div class="text-base font-bold text-gray-900">Oppgjort</div>
-                    <div class="text-base text-gray-700">{{ number_format($totalCostNok ?? 0, 2, ',', ' ') }} kr faktisk kostnad</div>
+                <div class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                    <div class="text-base font-bold text-gray-900 dark:text-white">Oppgjort</div>
+                    <div class="text-base text-gray-700 dark:text-gray-200">{{ number_format($totalCostNok ?? 0, 2, ',', ' ') }} kr faktisk kostnad</div>
                 </div>
-                <div class="rounded-2xl border p-4 shadow-sm {{ ($pendingCalls + $unresolvedCalls) > 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white' }}">
-                    <div class="text-base font-bold text-gray-900">Venter / uavklart</div>
-                    <div class="text-base text-gray-700">
+                <div class="rounded-2xl border p-4 shadow-sm {{ ($pendingCalls + $unresolvedCalls) > 0 ? 'border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10' : 'border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900' }}">
+                    <div class="text-base font-bold text-gray-900 dark:text-white">Venter / uavklart</div>
+                    <div class="text-base text-gray-700 dark:text-gray-200">
                         {{ $pendingCalls }} venter ({{ number_format($pendingReservedNok, 2, ',', ' ') }} kr reservert),
                         {{ $unresolvedCalls }} uavklart ({{ number_format($unresolvedReservedNok, 2, ',', ' ') }} kr reservert)
                     </div>
-                    <div class="text-base text-gray-600">Reservert, ikke belastet. Inngår ikke i oppgjort kostnad.</div>
+                    <div class="text-base text-gray-600 dark:text-gray-400">Reservert, ikke belastet. Inngår ikke i oppgjort kostnad.</div>
                 </div>
-                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                    <div class="text-base font-bold text-gray-900">Legacy</div>
-                    <div class="text-base text-gray-700">{{ $legacyCalls }} kall før usage-grensen</div>
-                    <div class="text-base text-gray-600">Gamle estimater vises ikke som kostnad.</div>
+                <div class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                    <div class="text-base font-bold text-gray-900 dark:text-white">Legacy</div>
+                    <div class="text-base text-gray-700 dark:text-gray-200">{{ $legacyCalls }} kall før usage-grensen</div>
+                    <div class="text-base text-gray-600 dark:text-gray-400">Gamle estimater vises ikke som kostnad.</div>
                 </div>
             </section>
 
             {{-- Merknad under KPI-raden --}}
-            <p class="text-base leading-6 text-gray-600">
+            <p class="text-base leading-6 text-gray-600 dark:text-gray-400">
                 AI-kapasitet og estimert kostnad er foreløpige interne beregninger og er ikke faktureringsgrunnlag.
             </p>
 
             {{-- Trend: AI-operasjoner --}}
-            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-100 px-5 py-4">
-                        <h3 class="font-bold text-gray-900">Trend: AI-operasjoner og blokkerte forsøk</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Leverandørkall fra ai_usage_attempts; blokkerte forsøk fra Anbud-bruksgrensen.</p>
+            <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                        <h3 class="font-bold text-gray-900 dark:text-white">Trend: AI-operasjoner og blokkerte forsøk</h3>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Leverandørkall fra ai_usage_attempts; blokkerte forsøk fra Anbud-bruksgrensen.</p>
                     </div>
                     @if ($operationsChartPoints !== '')
                         @php
@@ -269,7 +269,7 @@
                             <svg viewBox="-44 -4 610 168" class="w-full" aria-hidden="true">
                                 {{-- Y-axis label (rotated) --}}
                                 <text x="-36" y="65" transform="rotate(-90,-36,65)" text-anchor="middle"
-                                      font-size="11" fill="#94a3b8" font-family="inherit" font-weight="600" letter-spacing="0.06em">
+                                      font-size="11" fill="#475569" class="fill-slate-600 dark:fill-gray-400" font-family="inherit" font-weight="600" letter-spacing="0.06em">
                                     ANTALL OPERASJONER
                                 </text>
 
@@ -280,21 +280,21 @@
                                         $val   = $pct === 0 ? 0 : (int) round($yMax * (1 - $pct));
                                         $label = $val >= 1000 ? round($val / 1000, 1).'k' : $val;
                                     @endphp
-                                    <line x1="0" y1="{{ $gy }}" x2="560" y2="{{ $gy }}" stroke="#f1f5f9" stroke-width="1"/>
+                                    <line x1="0" y1="{{ $gy }}" x2="560" y2="{{ $gy }}" stroke="#f1f5f9" class="stroke-slate-100 dark:stroke-white/10" stroke-width="1"/>
                                     <text x="-5" y="{{ $gy + 4 }}" text-anchor="end"
-                                          font-size="12" fill="#94a3b8" font-family="inherit">{{ $label }}</text>
+                                          font-size="12" fill="#475569" class="fill-slate-600 dark:fill-gray-400" font-family="inherit">{{ $label }}</text>
                                 @endforeach
 
                                 {{-- Allowed line --}}
-                                <polyline points="{{ $operationsChartPoints }}" fill="none" stroke="#111827" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+                                <polyline points="{{ $operationsChartPoints }}" fill="none" stroke="#111827" class="stroke-gray-900 dark:stroke-gray-100" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
 
                                 {{-- Blocked line --}}
                                 @if ($blockedChartPoints !== '')
-                                    <polyline points="{{ $blockedChartPoints }}" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>
+                                    <polyline points="{{ $blockedChartPoints }}" fill="none" stroke="#2563eb" class="stroke-blue-600 dark:stroke-blue-400" stroke-width="2" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>
                                 @endif
 
                                 {{-- X-axis baseline --}}
-                                <line x1="0" y1="120" x2="560" y2="120" stroke="#e2e8f0" stroke-width="1"/>
+                                <line x1="0" y1="120" x2="560" y2="120" stroke="#e2e8f0" class="stroke-slate-200 dark:stroke-white/20" stroke-width="1"/>
 
                                 {{-- X-axis period labels (first, ~middle, last) --}}
                                 @if ($labelCount > 0)
@@ -306,26 +306,26 @@
                                             @endphp
                                             <text x="{{ $lx }}" y="136"
                                                   text-anchor="{{ $anchor }}"
-                                                  font-size="12" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
+                                                  font-size="12" fill="#475569" class="fill-slate-600 dark:fill-gray-400" font-family="inherit">{{ $lbl }}</text>
                                         @endif
                                     @endforeach
                                 @endif
                             </svg>
                         </div>
-                        <div class="flex gap-5 px-5 pb-4 text-base font-semibold text-gray-600">
-                            <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-gray-900"></span>AI-operasjoner</span>
-                            <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Blokkerte forsøk</span>
+                        <div class="flex gap-5 px-5 pb-4 text-base font-semibold text-gray-600 dark:text-gray-400">
+                            <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-gray-900 dark:bg-gray-100"></span>AI-operasjoner</span>
+                            <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600 dark:bg-blue-400"></span>Blokkerte forsøk</span>
                         </div>
                     @else
-                        <p class="px-5 py-10 text-center text-base leading-6 text-gray-600">Ingen data i valgt periode.</p>
+                        <p class="px-5 py-10 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen data i valgt periode.</p>
                     @endif
             </article>
 
             {{-- Token chart --}}
-            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-100 px-5 py-4">
-                    <h3 class="font-bold text-gray-900">Trend: tokenforbruk</h3>
-                    <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_usage_attempts</code>.</p>
+            <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                    <h3 class="font-bold text-gray-900 dark:text-white">Trend: tokenforbruk</h3>
+                    <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Basert på <code class="font-mono text-xs">ai_usage_attempts</code>.</p>
                 </div>
                 @if ($tokensChartPoints !== '')
                     @php
@@ -339,7 +339,7 @@
                         <svg viewBox="-44 -4 610 168" class="w-full" aria-hidden="true">
                             {{-- Y-axis label (rotated) --}}
                             <text x="-36" y="65" transform="rotate(-90,-36,65)" text-anchor="middle"
-                                  font-size="11" fill="#94a3b8" font-family="inherit" font-weight="600" letter-spacing="0.06em">
+                                  font-size="11" fill="#475569" class="fill-slate-600 dark:fill-gray-400" font-family="inherit" font-weight="600" letter-spacing="0.06em">
                                 TOKENS
                             </text>
 
@@ -352,16 +352,16 @@
                                         ? round($val / 1000000, 1).'M'
                                         : ($val >= 1000 ? round($val / 1000, 1).'k' : $val);
                                 @endphp
-                                <line x1="0" y1="{{ $gy }}" x2="560" y2="{{ $gy }}" stroke="#f1f5f9" stroke-width="1"/>
+                                <line x1="0" y1="{{ $gy }}" x2="560" y2="{{ $gy }}" stroke="#f1f5f9" class="stroke-slate-100 dark:stroke-white/10" stroke-width="1"/>
                                 <text x="-5" y="{{ $gy + 4 }}" text-anchor="end"
-                                      font-size="12" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
+                                      font-size="12" fill="#475569" class="fill-slate-600 dark:fill-gray-400" font-family="inherit">{{ $lbl }}</text>
                             @endforeach
 
                             {{-- Token line --}}
-                            <polyline points="{{ $tokensChartPoints }}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+                            <polyline points="{{ $tokensChartPoints }}" fill="none" stroke="#2563eb" class="stroke-blue-600 dark:stroke-blue-400" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
 
                             {{-- X-axis baseline --}}
-                            <line x1="0" y1="120" x2="560" y2="120" stroke="#e2e8f0" stroke-width="1"/>
+                            <line x1="0" y1="120" x2="560" y2="120" stroke="#e2e8f0" class="stroke-slate-200 dark:stroke-white/20" stroke-width="1"/>
 
                             {{-- X-axis period labels --}}
                             @if ($tLabelCount > 0)
@@ -372,17 +372,17 @@
                                             $anchor = $i === 0 ? 'start' : ($i === $tLabelCount - 1 ? 'end' : 'middle');
                                         @endphp
                                         <text x="{{ $lx }}" y="136" text-anchor="{{ $anchor }}"
-                                              font-size="12" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
+                                              font-size="12" fill="#475569" class="fill-slate-600 dark:fill-gray-400" font-family="inherit">{{ $lbl }}</text>
                                     @endif
                                 @endforeach
                             @endif
                         </svg>
                     </div>
-                    <div class="px-5 pb-4 text-base font-semibold text-gray-600">
-                        <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Total tokens</span>
+                    <div class="px-5 pb-4 text-base font-semibold text-gray-600 dark:text-gray-400">
+                        <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600 dark:bg-blue-400"></span>Total tokens</span>
                     </div>
                 @else
-                    <div class="px-5 py-6 text-center text-base leading-6 text-gray-600 space-y-1">
+                    <div class="px-5 py-6 text-center text-base leading-6 text-gray-600 dark:text-gray-400 space-y-1">
                         <p>Det finnes ingen registrerte tokenhendelser i valgt periode.</p>
                         <p class="text-base leading-6">Ingen tokens registrert i valgt periode.</p>
                     </div>
@@ -392,57 +392,57 @@
             {{-- Function + Customer capacity --}}
             <div class="grid gap-5 lg:grid-cols-2">
 
-                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-100 px-5 py-4">
-                        <h3 class="font-bold text-gray-900">Bruk per AI-funksjon</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Per funksjon og operasjon, fra <code class="font-mono text-xs">ai_usage_attempts</code>.</p>
+                <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                        <h3 class="font-bold text-gray-900 dark:text-white">Bruk per AI-funksjon</h3>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Per funksjon og operasjon, fra <code class="font-mono text-xs">ai_usage_attempts</code>.</p>
                     </div>
                     @forelse ($functionRows as $row)
-                        <div class="border-b border-gray-50 px-5 py-3">
+                        <div class="border-b border-gray-50 dark:border-white/10 px-5 py-3">
                             <div class="flex items-center justify-between gap-4">
                                 <div class="min-w-0">
-                                    <div class="font-semibold text-base text-gray-900 truncate">{{ $row['label'] }}</div>
+                                    <div class="font-semibold text-base text-gray-900 dark:text-white truncate">{{ $row['label'] }}</div>
                                 </div>
                                 <div class="text-right shrink-0">
-                                    <div class="font-extrabold text-base text-gray-950">{{ number_format($row['operations'], 0, ',', ' ') }}</div>
-                                    <div class="text-base text-gray-600">{{ $row['pct'] }}%</div>
+                                    <div class="font-extrabold text-base text-gray-950 dark:text-white">{{ number_format($row['operations'], 0, ',', ' ') }}</div>
+                                    <div class="text-base text-gray-600 dark:text-gray-400">{{ $row['pct'] }}%</div>
                                 </div>
                             </div>
-                            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-base leading-6 text-gray-600">
+                            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-base leading-6 text-gray-600 dark:text-gray-400">
                                 @if ($row['has_token_data'] && $row['tokens'] > 0)
                                     <span>{{ number_format($row['tokens'], 0, ',', ' ') }} tokens</span>
                                 @elseif (! $row['has_token_data'])
-                                    <span class="italic text-gray-600">Tokenforbruk ikke registrert for denne funksjonen</span>
+                                    <span class="italic text-gray-600 dark:text-gray-400">Tokenforbruk ikke registrert for denne funksjonen</span>
                                 @endif
                                 @if ($row['blocked'] > 0)
-                                    <span class="text-base text-red-700">{{ $row['blocked'] }} blokkert</span>
+                                    <span class="text-base text-red-700 dark:text-red-400">{{ $row['blocked'] }} blokkert</span>
                                 @endif
                                 @if (in_array($row['cost_status'] ?? '', ['ok', 'partial']) && $row['cost_nok'] !== null)
-                                    <span class="text-violet-600 font-semibold">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</span>
+                                    <span class="text-violet-600 dark:text-violet-400 font-semibold">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</span>
                                 @elseif (($row['cost_status'] ?? '') === 'price_missing')
-                                    <span class="text-base italic text-amber-800">Kostnad ukjent</span>
+                                    <span class="text-base italic text-amber-800 dark:text-amber-300">Kostnad ukjent</span>
                                 @endif
                             </div>
-                            <div class="mt-2 h-1.5 w-full rounded-full bg-gray-100">
-                                <div class="h-full rounded-full bg-gray-900 transition-all" style="width: {{ $row['pct'] }}%"></div>
+                            <div class="mt-2 h-1.5 w-full rounded-full bg-gray-100 dark:bg-white/10">
+                                <div class="h-full rounded-full bg-gray-900 dark:bg-gray-200 transition-all" style="width: {{ $row['pct'] }}%"></div>
                             </div>
                         </div>
                     @empty
-                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen data i valgt periode.</p>
+                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen data i valgt periode.</p>
                     @endforelse
                 </article>
 
-                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-100 px-5 py-4">
-                        <h3 class="font-bold text-gray-900">Kapasitet per kunde</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Foreløpig intern visning av AI-aktiverte saker mot registrert kapasitetsverdi. Datagrunnlaget er delvis og må kvalitetssikres før dette brukes som kommersiell fasit.</p>
+                <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                        <h3 class="font-bold text-gray-900 dark:text-white">Kapasitet per kunde</h3>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Foreløpig intern visning av AI-aktiverte saker mot registrert kapasitetsverdi. Datagrunnlaget er delvis og må kvalitetssikres før dette brukes som kommersiell fasit.</p>
                     </div>
                     @forelse ($customerCapacityRows as $row)
-                        <div class="border-b border-gray-50 px-5 py-3">
+                        <div class="border-b border-gray-50 dark:border-white/10 px-5 py-3">
                             <div class="flex items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <div class="font-semibold text-base text-gray-900">{{ $row['customer_name'] }}</div>
-                                    <div class="text-base text-gray-600">{{ $row['plan'] }}</div>
+                                    <div class="font-semibold text-base text-gray-900 dark:text-white">{{ $row['customer_name'] }}</div>
+                                    <div class="text-base text-gray-600 dark:text-gray-400">{{ $row['plan'] }}</div>
                                 </div>
                                 <span class="inline-flex shrink-0 items-center rounded-full border px-2 py-1 text-base font-bold leading-6 {{ $this->capacityStatusClass($row['status']) }}">
                                     {{ $this->capacityStatusLabel($row['status']) }}
@@ -450,14 +450,14 @@
                             </div>
                             @if ($row['limit_defined'])
                                 <div class="mt-2 flex items-center gap-3 text-base">
-                                    <span class="font-bold text-gray-950">{{ $row['activated'] }}</span>
-                                    <span class="text-gray-600">av</span>
-                                    <span class="font-semibold text-gray-700">{{ $row['limit'] }}</span>
-                                    <span class="text-gray-600 text-base">AI-saker</span>
-                                    <span class="ml-auto text-base text-gray-600">{{ $row['pct'] }}%</span>
+                                    <span class="font-bold text-gray-950 dark:text-white">{{ $row['activated'] }}</span>
+                                    <span class="text-gray-600 dark:text-gray-400">av</span>
+                                    <span class="font-semibold text-gray-700 dark:text-gray-200">{{ $row['limit'] }}</span>
+                                    <span class="text-gray-600 dark:text-gray-400 text-base">AI-saker</span>
+                                    <span class="ml-auto text-base text-gray-600 dark:text-gray-400">{{ $row['pct'] }}%</span>
                                 </div>
-                                <p class="mt-1 text-base text-gray-600">Foreløpig beregning — ikke endelig kommersiell fasit.</p>
-                                <div class="mt-1.5 h-1.5 w-full rounded-full bg-gray-100">
+                                <p class="mt-1 text-base text-gray-600 dark:text-gray-400">Foreløpig beregning — ikke endelig kommersiell fasit.</p>
+                                <div class="mt-1.5 h-1.5 w-full rounded-full bg-gray-100 dark:bg-white/10">
                                     @php
                                         $fillCls = match($row['status']) {
                                             'over' => 'bg-red-500',
@@ -468,14 +468,14 @@
                                     <div class="h-full rounded-full transition-all {{ $fillCls }}" style="width: {{ min(100, $row['pct']) }}%"></div>
                                 </div>
                             @else
-                                <div class="mt-2 text-base leading-6 text-gray-600">
-                                    <span class="font-semibold text-gray-900">{{ $row['activated'] }}</span> AI-saker registrert ·
-                                    <span class="text-base text-gray-600">Ingen grense registrert</span>
+                                <div class="mt-2 text-base leading-6 text-gray-600 dark:text-gray-400">
+                                    <span class="font-semibold text-gray-900 dark:text-white">{{ $row['activated'] }}</span> AI-saker registrert ·
+                                    <span class="text-base text-gray-600 dark:text-gray-400">Ingen grense registrert</span>
                                 </div>
                             @endif
                         </div>
                     @empty
-                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen kunder å vise.</p>
+                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen kunder å vise.</p>
                     @endforelse
                 </article>
             </div>
@@ -483,26 +483,26 @@
             {{-- Token summary tables --}}
             <div class="grid gap-5 lg:grid-cols-2">
 
-                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-100 px-5 py-4">
-                        <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Tokenforbruk</div>
-                        <h3 class="mt-0.5 font-bold text-gray-900">Tokenforbruk per kunde</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_usage_attempts</code> for valgt periode.</p>
+                <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                        <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">Tokenforbruk</div>
+                        <h3 id="ai-forbruk-table-heading-1" class="mt-0.5 font-bold text-gray-900 dark:text-white">Tokenforbruk per kunde</h3>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Basert på <code class="font-mono text-xs">ai_usage_attempts</code> for valgt periode.</p>
                     </div>
                     @if (count($customerTokenRows) > 0)
-                        <div class="overflow-x-auto">
+                        <div class="relative overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'ai-forbruk-table-heading-1'])>
                             <table class="w-full text-left text-base">
-                                <thead class="border-b border-gray-200 text-gray-600">
+                                <thead class="border-b border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400">
                                     <tr>
-                                        <th class="pb-2 px-5 font-medium">Kunde</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Kall</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Input</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Output</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Total</th>
-                                        <th class="pb-2 px-5 text-right font-medium">Kostnad</th>
+                                        <th scope="col" class="pb-2 px-5 font-medium">Kunde</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Kall</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Input</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Output</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Total</th>
+                                        <th scope="col" class="pb-2 px-5 text-right font-medium">Kostnad</th>
                                     </tr>
                                 </thead>
-                                <tbody class="divide-y divide-gray-100 text-gray-900">
+                                <tbody class="divide-y divide-gray-100 dark:divide-white/10 text-gray-900 dark:text-white">
                                     @foreach ($customerTokenRows as $row)
                                         <tr>
                                             <td class="py-2 px-5 font-medium">{{ $row['customer_name'] }}</td>
@@ -510,118 +510,118 @@
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_input_tokens'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_output_tokens'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
-                                            <td class="py-2 px-5 text-right tabular-nums text-violet-700">{{ $row['cost_status'] === 'price_missing' ? 'Ukjent' : number_format($row['cost_nok'], 2, ',', ' ').' kr' }}</td>
+                                            <td class="py-2 px-5 text-right tabular-nums text-violet-700 dark:text-violet-400">{{ $row['cost_status'] === 'price_missing' ? 'Ukjent' : number_format($row['cost_nok'], 2, ',', ' ').' kr' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
-                                <tfoot class="border-t border-gray-200 text-gray-700">
+                                <tfoot class="border-t border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200">
                                     <tr>
                                         <td class="pt-2 px-5 font-semibold">Totalt</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'event_count')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_input_tokens')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_output_tokens')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
-                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold text-violet-700">{{ number_format(array_sum(array_column($customerTokenRows, 'cost_nok')), 2, ',', ' ') }} kr</td>
+                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold text-violet-700 dark:text-violet-400">{{ number_format(array_sum(array_column($customerTokenRows, 'cost_nok')), 2, ',', ' ') }} kr</td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
                     @else
-                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
+                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
                     @endif
                 </article>
 
-                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-100 px-5 py-4">
-                        <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Tokenforbruk</div>
-                        <h3 class="mt-0.5 font-bold text-gray-900">Tokenforbruk per modell</h3>
-                        <p class="mt-0.5 text-base leading-6 text-gray-600">Basert på <code class="font-mono text-xs">ai_usage_attempts</code> for valgt periode.</p>
+                <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                        <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">Tokenforbruk</div>
+                        <h3 id="ai-forbruk-table-heading-2" class="mt-0.5 font-bold text-gray-900 dark:text-white">Tokenforbruk per modell</h3>
+                        <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Basert på <code class="font-mono text-xs">ai_usage_attempts</code> for valgt periode.</p>
                     </div>
                     @if (count($modelTokenRows) > 0)
-                        <div class="overflow-x-auto">
+                        <div class="relative overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'ai-forbruk-table-heading-2'])>
                             <table class="w-full text-left text-base">
-                                <thead class="border-b border-gray-200 text-gray-600">
+                                <thead class="border-b border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400">
                                     <tr>
-                                        <th class="pb-2 px-5 font-medium">Modell</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Kall</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Input</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Output</th>
-                                        <th class="pb-2 px-4 text-right font-medium">Total</th>
-                                        <th class="pb-2 px-5 text-right font-medium">Kostnad</th>
+                                        <th scope="col" class="pb-2 px-5 font-medium">Modell</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Kall</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Input</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Output</th>
+                                        <th scope="col" class="pb-2 px-4 text-right font-medium">Total</th>
+                                        <th scope="col" class="pb-2 px-5 text-right font-medium">Kostnad</th>
                                     </tr>
                                 </thead>
-                                <tbody class="divide-y divide-gray-100 text-gray-900">
+                                <tbody class="divide-y divide-gray-100 dark:divide-white/10 text-gray-900 dark:text-white">
                                     @foreach ($modelTokenRows as $row)
                                         <tr>
-                                            <td class="py-2 px-5 font-mono text-base text-gray-700">{{ $row['model'] }}</td>
+                                            <td class="py-2 px-5 font-mono text-base text-gray-700 dark:text-gray-200">{{ $row['model'] }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['event_count'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_input_tokens'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_output_tokens'], 0, ',', ' ') }}</td>
                                             <td class="py-2 px-4 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
-                                            <td class="py-2 px-5 text-right tabular-nums text-violet-700">{{ $row['cost_status'] === 'price_missing' ? 'Ukjent' : number_format($row['cost_nok'], 2, ',', ' ').' kr' }}</td>
+                                            <td class="py-2 px-5 text-right tabular-nums text-violet-700 dark:text-violet-400">{{ $row['cost_status'] === 'price_missing' ? 'Ukjent' : number_format($row['cost_nok'], 2, ',', ' ').' kr' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
-                                <tfoot class="border-t border-gray-200 text-gray-700">
+                                <tfoot class="border-t border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200">
                                     <tr>
                                         <td class="pt-2 px-5 font-semibold">Totalt</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'event_count')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_input_tokens')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_output_tokens')), 0, ',', ' ') }}</td>
                                         <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
-                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold text-violet-700">{{ number_format(array_sum(array_column($modelTokenRows, 'cost_nok')), 2, ',', ' ') }} kr</td>
+                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold text-violet-700 dark:text-violet-400">{{ number_format(array_sum(array_column($modelTokenRows, 'cost_nok')), 2, ',', ' ') }} kr</td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
                     @else
-                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
+                        <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
                     @endif
                 </article>
             </div>
 
             {{-- User table --}}
-            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-100 px-5 py-4">
-                    <h3 class="font-bold text-gray-900">Brukere i valgt periode</h3>
-                    <p class="mt-0.5 text-base leading-6 text-gray-600">Analysegrunnlag for hvem som bruker AI og hvor tung bruken er. Maks 50 brukere.</p>
+            <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                    <h3 id="ai-forbruk-table-heading-3" class="font-bold text-gray-900 dark:text-white">Brukere i valgt periode</h3>
+                    <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Analysegrunnlag for hvem som bruker AI og hvor tung bruken er. Maks 50 brukere.</p>
                 </div>
                 @if (count($userRows) > 0)
-                    <div class="overflow-x-auto">
+                    <div class="relative overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'ai-forbruk-table-heading-3'])>
                         <table class="w-full text-base">
-                            <thead class="bg-gray-50 text-base font-bold uppercase tracking-wider text-gray-600">
+                            <thead class="bg-gray-50 dark:bg-white/5 text-base font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
                                 <tr>
-                                    <th class="px-4 py-3 text-left">Bruker</th>
-                                    <th class="px-4 py-3 text-left">Kunde</th>
-                                    <th class="px-4 py-3 text-left">Rolle</th>
-                                    <th class="px-4 py-3 text-right">Operasjoner</th>
-                                    <th class="px-4 py-3 text-right">Tokens</th>
-                                    <th class="px-4 py-3 text-right">Tok / op</th>
-                                    <th class="px-4 py-3 text-right">Blokkert</th>
-                                    <th class="px-4 py-3 text-right text-violet-600">Kostnad</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Bruker</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Kunde</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Rolle</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Operasjoner</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Tokens</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Tok / op</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Blokkert</th>
+                                    <th scope="col" class="px-4 py-3 text-right text-violet-600 dark:text-violet-400">Kostnad</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-gray-50">
+                            <tbody class="divide-y divide-gray-50 dark:divide-white/10">
                                 @foreach ($userRows as $row)
-                                    <tr class="hover:bg-gray-50/50">
-                                        <td class="px-4 py-3 font-medium text-gray-900">{{ $row['user_name'] }}</td>
-                                        <td class="px-4 py-3 text-gray-600">{{ $row['customer_name'] }}</td>
-                                        <td class="px-4 py-3 text-gray-600 text-base">{{ $row['role'] }}</td>
+                                    <tr class="hover:bg-gray-50/50 dark:hover:bg-white/5">
+                                        <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ $row['user_name'] }}</td>
+                                        <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ $row['customer_name'] }}</td>
+                                        <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-base">{{ $row['role'] }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums font-semibold">{{ number_format($row['operations'], 0, ',', ' ') }}</td>
                                         @if ($row['has_token_data'])
-                                            <td class="px-4 py-3 text-right tabular-nums text-gray-700">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
-                                            <td class="px-4 py-3 text-right tabular-nums text-gray-600">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-gray-600 dark:text-gray-400">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
                                         @else
-                                            <td class="px-4 py-3 text-right text-base text-gray-600 italic">Ikke registrert</td>
-                                            <td class="px-4 py-3 text-right text-base text-gray-600 italic">Ikke registrert</td>
+                                            <td class="px-4 py-3 text-right text-base text-gray-600 dark:text-gray-400 italic">Ikke registrert</td>
+                                            <td class="px-4 py-3 text-right text-base text-gray-600 dark:text-gray-400 italic">Ikke registrert</td>
                                         @endif
-                                        <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-700' : 'text-gray-600' }}">{{ $row['blocked'] }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-700 dark:text-red-400' : 'text-gray-600 dark:text-gray-400' }}">{{ $row['blocked'] }}</td>
                                         @if (in_array($row['cost_status'] ?? '', ['ok', 'partial']) && $row['cost_nok'] !== null)
-                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700 dark:text-violet-400">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</td>
                                         @elseif (($row['cost_status'] ?? '') === 'price_missing')
-                                            <td class="px-4 py-3 text-right text-base italic text-amber-800">Kostnad ukjent</td>
+                                            <td class="px-4 py-3 text-right text-base italic text-amber-800 dark:text-amber-300">Kostnad ukjent</td>
                                         @else
-                                            <td class="px-4 py-3 text-right text-base text-gray-600">—</td>
+                                            <td class="px-4 py-3 text-right text-base text-gray-600 dark:text-gray-400">—</td>
                                         @endif
                                     </tr>
                                 @endforeach
@@ -629,43 +629,43 @@
                         </table>
                     </div>
                 @else
-                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen brukere med AI-aktivitet i valgt periode.</p>
+                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen brukere med AI-aktivitet i valgt periode.</p>
                 @endif
             </article>
 
             {{-- Trend table --}}
-            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-100 px-5 py-4">
-                    <h3 class="font-bold text-gray-900">Trendtabell</h3>
-                    <p class="mt-0.5 text-base leading-6 text-gray-600">Gruppert etter valgt trendvisning (dag / uke / måned).</p>
+            <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                    <h3 id="ai-forbruk-table-heading-4" class="font-bold text-gray-900 dark:text-white">Trendtabell</h3>
+                    <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Gruppert etter valgt trendvisning (dag / uke / måned).</p>
                 </div>
                 @if (count($trendRows) > 0)
-                    <div class="overflow-x-auto">
+                    <div class="relative overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'ai-forbruk-table-heading-4'])>
                         <table class="w-full text-base">
-                            <thead class="bg-gray-50 text-base font-bold uppercase tracking-wider text-gray-600">
+                            <thead class="bg-gray-50 dark:bg-white/5 text-base font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
                                 <tr>
-                                    <th class="px-4 py-3 text-left">Periode</th>
-                                    <th class="px-4 py-3 text-right">AI-operasjoner</th>
-                                    <th class="px-4 py-3 text-right">Tokens</th>
-                                    <th class="px-4 py-3 text-right">Tok / op</th>
-                                    <th class="px-4 py-3 text-right">Blokkert</th>
-                                    <th class="px-4 py-3 text-right text-violet-600">Kostnad</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Periode</th>
+                                    <th scope="col" class="px-4 py-3 text-right">AI-operasjoner</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Tokens</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Tok / op</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Blokkert</th>
+                                    <th scope="col" class="px-4 py-3 text-right text-violet-600 dark:text-violet-400">Kostnad</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-gray-50">
+                            <tbody class="divide-y divide-gray-50 dark:divide-white/10">
                                 @foreach ($trendRows as $row)
-                                    <tr class="hover:bg-gray-50/50">
-                                        <td class="px-4 py-3 font-mono text-base text-gray-700">{{ $row['period'] }}</td>
+                                    <tr class="hover:bg-gray-50/50 dark:hover:bg-white/5">
+                                        <td class="px-4 py-3 font-mono text-base text-gray-700 dark:text-gray-200">{{ $row['period'] }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums font-semibold">{{ number_format($row['operations'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-gray-700">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-gray-600">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-700' : 'text-gray-600' }}">{{ $row['blocked'] }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-gray-600 dark:text-gray-400">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-700 dark:text-red-400' : 'text-gray-600 dark:text-gray-400' }}">{{ $row['blocked'] }}</td>
                                         @if (in_array($row['cost_status'] ?? '', ['ok', 'partial']) && $row['cost_nok'] !== null)
-                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-base font-semibold text-violet-700 dark:text-violet-400">{{ number_format($row['cost_nok'], 2, ',', ' ') }} kr{{ ($row['cost_status'] ?? '') === 'partial' ? ' (delvis)' : '' }}</td>
                                         @elseif (($row['cost_status'] ?? '') === 'price_missing')
-                                            <td class="px-4 py-3 text-right text-base italic text-amber-800">Kostnad ukjent</td>
+                                            <td class="px-4 py-3 text-right text-base italic text-amber-800 dark:text-amber-300">Kostnad ukjent</td>
                                         @else
-                                            <td class="px-4 py-3 text-right text-base text-gray-600">—</td>
+                                            <td class="px-4 py-3 text-right text-base text-gray-600 dark:text-gray-400">—</td>
                                         @endif
                                     </tr>
                                 @endforeach
@@ -673,46 +673,46 @@
                         </table>
                     </div>
                 @else
-                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen data i valgt periode.</p>
+                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen data i valgt periode.</p>
                 @endif
             </article>
 
             {{-- Recent events --}}
-            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-100 px-5 py-4">
-                    <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Hendelseslogg</div>
-                    <h3 class="mt-0.5 font-bold text-gray-900">Siste AI-kall (maks 30)</h3>
-                    <p class="mt-0.5 text-base leading-6 text-gray-600">Nyeste registrerte AI-kall i valgt periode, med kunde, bruker, operasjon og tokenfordeling.</p>
+            <article class="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+                <div class="border-b border-gray-100 dark:border-white/10 px-5 py-4">
+                    <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600 dark:text-gray-400">Hendelseslogg</div>
+                    <h3 id="ai-forbruk-table-heading-5" class="mt-0.5 font-bold text-gray-900 dark:text-white">Siste AI-kall (maks 30)</h3>
+                    <p class="mt-0.5 text-base leading-6 text-gray-600 dark:text-gray-400">Nyeste registrerte AI-kall i valgt periode, med kunde, bruker, operasjon og tokenfordeling.</p>
                 </div>
                 @if (count($recentEvents) > 0)
-                    <div class="overflow-x-auto">
+                    <div class="relative overflow-x-auto" @include('filament.components.scroll-region-attrs', ['labelledby' => 'ai-forbruk-table-heading-5'])>
                         <table class="w-full text-base">
-                            <thead class="bg-gray-50 text-base font-bold uppercase tracking-wider text-gray-600">
+                            <thead class="bg-gray-50 dark:bg-white/5 text-base font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
                                 <tr>
-                                    <th class="px-4 py-3 text-left">Tidspunkt</th>
-                                    <th class="px-4 py-3 text-left">Kunde</th>
-                                    <th class="px-4 py-3 text-left">Bruker</th>
-                                    <th class="px-4 py-3 text-left">Operasjon</th>
-                                    <th class="px-4 py-3 text-left">Modell</th>
-                                    <th class="px-4 py-3 text-right">Input</th>
-                                    <th class="px-4 py-3 text-right">Output</th>
-                                    <th class="px-4 py-3 text-right">Total</th>
-                                    <th class="px-4 py-3 text-left">Status</th>
-                                    <th class="px-4 py-3 text-right">Kostnad</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Tidspunkt</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Kunde</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Bruker</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Operasjon</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Modell</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Input</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Output</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Total</th>
+                                    <th scope="col" class="px-4 py-3 text-left">Status</th>
+                                    <th scope="col" class="px-4 py-3 text-right">Kostnad</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-gray-50">
+                            <tbody class="divide-y divide-gray-50 dark:divide-white/10">
                                 @foreach ($recentEvents as $event)
-                                    <tr class="hover:bg-gray-50/50">
-                                        <td class="px-4 py-3 text-xs tabular-nums text-gray-600">{{ $event['created_at'] }}</td>
-                                        <td class="px-4 py-3 text-xs text-gray-700">{{ $event['customer_name'] }}</td>
-                                        <td class="px-4 py-3 text-xs text-gray-600">{{ $event['user_name'] }}</td>
-                                        <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ $event['operation_key'] }}</td>
-                                        <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ $event['model'] }}</td>
+                                    <tr class="hover:bg-gray-50/50 dark:hover:bg-white/5">
+                                        <td class="px-4 py-3 text-xs tabular-nums text-gray-600 dark:text-gray-400">{{ $event['created_at'] }}</td>
+                                        <td class="px-4 py-3 text-xs text-gray-700 dark:text-gray-200">{{ $event['customer_name'] }}</td>
+                                        <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">{{ $event['user_name'] }}</td>
+                                        <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ $event['operation_key'] }}</td>
+                                        <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ $event['model'] }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['input_tokens'] ?? 0, 0, ',', ' ') }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['output_tokens'] ?? 0, 0, ',', ' ') }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold">{{ number_format($event['total_tokens'] ?? 0, 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-xs text-gray-600">{{ $event['status'] }}</td>
+                                        <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">{{ $event['status'] }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums text-xs">{{ $event['cost_nok'] === null ? '–' : number_format($event['cost_nok'], 4, ',', ' ').' kr' }}</td>
                                     </tr>
                                 @endforeach
@@ -720,7 +720,7 @@
                         </table>
                     </div>
                 @else
-                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
+                    <p class="px-5 py-8 text-center text-base leading-6 text-gray-600 dark:text-gray-400">Ingen AI-kall registrert for {{ $periodLabel }}.</p>
                 @endif
             </article>
 

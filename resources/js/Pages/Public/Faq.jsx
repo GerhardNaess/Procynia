@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Link } from '@inertiajs/react';
 import PublicLayout from '../../Layouts/PublicLayout';
 
@@ -7,7 +7,7 @@ function ChevronIcon({ open }) {
         <svg
             viewBox="0 0 20 20"
             fill="none"
-            className={`h-5 w-5 shrink-0 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+            className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
             aria-hidden="true"
         >
             <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -15,23 +15,30 @@ function ChevronIcon({ open }) {
     );
 }
 
+/**
+ * One question as a disclosure (WCAG 4.1.2, 1.3.1; Fase 6): the button sits in an h3 under the group's
+ * h2, so the questions are reachable by heading; aria-expanded says whether the answer is shown and
+ * aria-controls points at it. The answer is slate-600 (A11Y-016).
+ */
 function FaqItem({ question, children }) {
     const [open, setOpen] = useState(false);
+    const answerId = `faq-answer-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
 
     return (
         <div className="border-b border-slate-100 last:border-0">
-            <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="flex w-full items-center justify-between gap-4 py-5 text-left"
-                aria-expanded={open}
-            >
-                <span className="text-sm font-semibold text-slate-900">{question}</span>
-                <ChevronIcon open={open} />
-            </button>
-            {open && (
-                <div className="pb-5 text-sm leading-7 text-slate-500">{children}</div>
-            )}
+            <h3>
+                <button
+                    type="button"
+                    onClick={() => setOpen((v) => !v)}
+                    className="flex w-full items-center justify-between gap-4 py-5 text-left"
+                    aria-expanded={open}
+                    aria-controls={answerId}
+                >
+                    <span className="text-sm font-semibold text-slate-900">{question}</span>
+                    <ChevronIcon open={open} />
+                </button>
+            </h3>
+            <div id={answerId} hidden={! open} className="pb-5 text-sm leading-7 text-slate-600">{children}</div>
         </div>
     );
 }
@@ -54,7 +61,7 @@ export default function Faq() {
             <div className="mb-12 text-center">
                 <div className="mb-3 text-sm font-semibold uppercase tracking-widest text-blue-600">FAQ</div>
                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Ofte stilte spørsmål</h1>
-                <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-slate-500">
+                <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-slate-600">
                     Finner du ikke svaret? Send oss en e-post på{' '}
                     <a href="mailto:hei@procynia.no" className="text-blue-700 underline underline-offset-2 hover:text-blue-800">hei@procynia.no</a>.
                 </p>

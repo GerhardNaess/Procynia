@@ -1,11 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, router } from '@inertiajs/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, router, usePage } from '@inertiajs/react';
 import ProcessSwimlaneDiagram from './ProcessSwimlaneDiagram';
 import ProcessFlowStepList from './ProcessFlowStepList';
 import ProcessFlowChangeCard from './ProcessFlowChangeCard';
 import ActionDialog from './ActionDialog';
+import FormField, { RequiredFieldsNote } from './FormField';
+import ScrollRegion from './ScrollRegion';
 import SearchableMultiSelect from './SearchableMultiSelect';
 import StatusBadge from './StatusBadge';
+import { announce } from '../../Support/announcer';
+import { focusElement, refocusIfLost, useFocusFirstError, usePanelFocus } from '../../Support/focusManagement';
+import { useTransitionAnnouncement } from '../../Support/statusAnnouncement';
+import {
+    flowAiAnnouncement,
+    flowAiStateKey,
+    laneRemoveLabel,
+    laneRemovedAnnouncement,
+    nodesInLane,
+    positionalRemovalFocusCandidates,
+    removalFocusCandidates,
+    structureFieldLabel,
+} from './processFlowA11y';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
 import {
     branchProblems,
@@ -73,17 +88,23 @@ import {
  */
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const SMALL_INPUT = 'min-h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const INPUT = 'min-h-10 w-full rounded-xl border border-field-border bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const SMALL_INPUT = 'min-h-9 w-full rounded-lg border border-field-border bg-white px-2.5 py-1.5 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const ROW_ADD = `inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300`;
 const ROW_DESTRUCTIVE = `inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-base font-semibold transition ${DESTRUCTIVE_COLOURS}`;
 const SUBHEADING = 'text-base font-semibold text-slate-900';
 
-const TEXTAREA = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base leading-6 text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const TEXTAREA = 'w-full rounded-xl border border-field-border bg-white px-3 py-2 text-base leading-6 text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 const NODE_TYPES = ['start', 'step', 'decision', 'end'];
 
 const STRUCTURE_EDITOR_ID = 'process-flow-structure-editor';
+
+/** ProcessFlowChangeCard's instruction field. */
+const CHANGE_INSTRUCTION_ID = 'process-flow-change-instruction';
+
+/** The form label look inside a tinted (slate-50) box: slate-600, since slate-500 is under 4.5:1 there. */
+const TINTED_LABEL = 'block text-base font-semibold uppercase tracking-wide text-slate-600';
 
 export default function ProcessFlowPanel({
     tq,
@@ -125,6 +146,18 @@ export default function ProcessFlowPanel({
 }) {
     const tb = tq.blueprint ?? {};
     const nodeTypeLabels = tb.node_types ?? {};
+    const ta = usePage().props.translations?.a11y ?? {};
+
+    // Where focus lands when the thing it was on is gone (A11Y-014): the flow's heading after the
+    // flow is deleted, the step list's heading after a dialog opened from a button that left.
+    const flowHeadingRef = useRef(null);
+    const stepsHeadingRef = useRef(null);
+    // A refused description or change instruction puts the reader on the field that says why
+    // (A11Y-013) — once the request has finished and the field is enabled again.
+    const interpretRef = useRef(null);
+    const changeRef = useRef(null);
+    const focusInterpretError = useFocusFirstError(interpretRef);
+    const focusChangeError = useFocusFirstError(changeRef);
 
     const [lanes, setLanes] = useState(() => (proposal ?? blueprint)?.lanes ?? []);
     const [nodes, setNodes] = useState(() => (proposal ?? blueprint)?.nodes ?? []);
@@ -189,6 +222,13 @@ export default function ProcessFlowPanel({
     useEffect(() => {
         setChangeDiscarded(false);
     }, [changeProposal]);
+
+    // The AI's answer is said once when it arrives — that there is a proposal, a change list or a
+    // reason it could not be made — never its text, and focus stays where it is (4.1.3).
+    useTransitionAnnouncement(
+        flowAiStateKey({ proposal, flowError, changeProposal, changeError }),
+        (previous, next) => flowAiAnnouncement(next, ta, { changeCount: (changeProposal?.changes ?? []).length }),
+    );
 
     // What the server stored, as a value. generated_at is to the second, so two saves from the
     // diagram inside one second would otherwise leave the editor holding the flow before the
@@ -372,23 +412,47 @@ export default function ProcessFlowPanel({
     // `text` is the description to read, and it is never an event: see InterpretCard's button for
     // what happens when a handler with a meaningful first argument is wired to onClick directly.
     function interpret(text = description) {
+        let refused = false;
+
         setSaving(true);
         setDescriptionError(null);
+        announce(tb.ai_working ?? 'Leser beskrivelsen …');
         router.post(`/app/quality/items/${item.id}/blueprint/interpret`, { description: text }, {
             preserveScroll: true,
-            onError: (errors) => setDescriptionError(errors.description ?? null),
-            onFinish: () => setSaving(false),
+            onError: (errors) => {
+                refused = true;
+                setDescriptionError(errors.description ?? null);
+            },
+            onFinish: () => {
+                setSaving(false);
+
+                if (refused) {
+                    focusInterpretError();
+                }
+            },
         });
     }
 
     // Same terms as interpret(): `text` is never an event, and nothing is written.
     function proposeChange(text = changeInstruction) {
+        let refused = false;
+
         setSaving(true);
         setChangeInputError(null);
+        announce(tb.change_working ?? 'Lager endringsforslag …');
         router.post(`/app/quality/items/${item.id}/blueprint/changes/propose`, { instruction: text }, {
             preserveScroll: true,
-            onError: (errors) => setChangeInputError(errors.instruction ?? null),
-            onFinish: () => setSaving(false),
+            onError: (errors) => {
+                refused = true;
+                setChangeInputError(errors.instruction ?? null);
+            },
+            onFinish: () => {
+                setSaving(false);
+
+                if (refused) {
+                    focusChangeError();
+                }
+            },
         });
     }
 
@@ -408,6 +472,9 @@ export default function ProcessFlowPanel({
             operations: changeProposal.operations ?? [],
         }, {
             preserveScroll: true,
+            // The proposal and its buttons leave with the answer; the reader is put back on the
+            // instruction field rather than on <body> (A11Y-014).
+            onSuccess: () => refocusIfLost([CHANGE_INSTRUCTION_ID, flowHeadingRef.current]),
             onFinish: () => {
                 setSaving(false);
                 setAcceptingChange(false);
@@ -492,6 +559,8 @@ export default function ProcessFlowPanel({
         setSaving(true);
         router.post(`/app/quality/items/${item.id}/blueprint/adopt`, { ...draft, description }, {
             preserveScroll: true,
+            // «Bruk denne prosessflyten» leaves with the proposal (A11Y-014).
+            onSuccess: () => refocusIfLost([flowHeadingRef.current]),
             onFinish: () => setSaving(false),
         });
     }
@@ -519,6 +588,7 @@ export default function ProcessFlowPanel({
 
                 <ActivityArticlePanel
                     tb={tb}
+                    ta={ta}
                     itemId={shownItemId}
                     activity={activityByKey(shown, activityKey)}
                     controls={controlsByKey(shown)[activityKey]}
@@ -542,6 +612,7 @@ export default function ProcessFlowPanel({
             {canEdit && (
                 <InterpretCard
                     tb={tb}
+                    sectionRef={interpretRef}
                     value={description}
                     setValue={setDescription}
                     onSubmit={interpret}
@@ -559,11 +630,15 @@ export default function ProcessFlowPanel({
             {canEdit && flowAiAvailable && blueprint !== null && ! reviewing && (
                 <ProcessFlowChangeCard
                     tb={tb}
+                    sectionRef={changeRef}
                     itemTitle={item.title}
                     value={changeInstruction}
                     setValue={setChangeInstruction}
                     onSubmit={proposeChange}
-                    onDiscard={() => setChangeDiscarded(true)}
+                    onDiscard={() => {
+                        setChangeDiscarded(true);
+                        refocusIfLost([CHANGE_INSTRUCTION_ID]);
+                    }}
                     onAccept={acceptChange}
                     busy={saving}
                     accepting={acceptingChange}
@@ -583,7 +658,7 @@ export default function ProcessFlowPanel({
                   * proposal or by saving the editor below.
                   */}
                 <div>
-                    <h2 className="text-xl font-semibold text-slate-950">{tb.heading ?? 'Prosessflyt'}</h2>
+                    <h2 ref={flowHeadingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{tb.heading ?? 'Prosessflyt'}</h2>
                     <p className="mt-1 max-w-2xl text-base leading-6 text-slate-600">
                         {tb.help ?? 'Flyten viser hvem som gjør hva, i hvilken rekkefølge.'}
                     </p>
@@ -601,6 +676,7 @@ export default function ProcessFlowPanel({
                             onDecline={declineClarification}
                             busy={saving}
                             canEdit={canEdit}
+                            fallbackRef={flowHeadingRef}
                         />
                     )
                     : (
@@ -651,15 +727,19 @@ export default function ProcessFlowPanel({
                         </div>
                     </section>
 
-                    <section className={CARD}>
-                        <h2 className="text-xl font-semibold text-slate-950">{tb.steps_heading ?? 'Steg'}</h2>
+                    <section id="process-flow-steps" className={CARD}>
+                        <h2 ref={stepsHeadingRef} tabIndex={-1} className="text-xl font-semibold text-slate-950">{tb.steps_heading ?? 'Steg'}</h2>
                         <div className="mt-4">
+                            {/* The diagram's accessible equivalent: the same flow and the same edit
+                                and insert actions, through the same handlers (A11Y-004). */}
                             <ProcessFlowStepList
                                 tb={tb}
                                 blueprint={draft}
                                 controlsByKey={savedControls}
                                 onOpenSubprocess={isDirty ? null : openSubprocess}
                                 onOpenActivity={openActivity}
+                                onEditStep={canEdit && ! reviewing ? (node) => setEditingStepKey(node.key) : null}
+                                onInsertStep={canEdit && ! reviewing ? setInsertingOn : null}
                             />
                         </div>
                     </section>
@@ -691,6 +771,7 @@ export default function ProcessFlowPanel({
                             <div id={STRUCTURE_EDITOR_ID} className="mt-6 space-y-8">
                                 <LaneEditor
                                     tb={tb}
+                                    ta={ta}
                                     lanes={lanes}
                                     setLanes={edit(setLanes)}
                                     nodes={nodes}
@@ -699,6 +780,8 @@ export default function ProcessFlowPanel({
                                 />
                                 <NodeEditor
                                     tb={tb}
+                                    ta={ta}
+                                    actionsLabel={tq.actions_menu ?? 'Handlinger'}
                                     nodeTypeLabels={nodeTypeLabels}
                                     lanes={lanes}
                                     nodes={nodes}
@@ -710,6 +793,8 @@ export default function ProcessFlowPanel({
                                 />
                                 <EdgeEditor
                                     tb={tb}
+                                    ta={ta}
+                                    actionsLabel={tq.actions_menu ?? 'Handlinger'}
                                     nodes={nodes}
                                     edges={edges}
                                     setEdges={edit(setEdges)}
@@ -726,7 +811,12 @@ export default function ProcessFlowPanel({
                                 <button
                                     type="button"
                                     className={SECONDARY_ACTION}
-                                    onClick={() => setDismissed(true)}
+                                    onClick={() => {
+                                        setDismissed(true);
+                                        // The reader is going to rewrite the description, and the
+                                        // button they pressed is gone (A11Y-014).
+                                        refocusIfLost(['process-flow-description', flowHeadingRef.current]);
+                                    }}
                                     disabled={saving}
                                 >
                                     {tb.proposal_discard ?? 'Endre beskrivelsen'}
@@ -796,6 +886,8 @@ export default function ProcessFlowPanel({
 
             <ActivityArticlePanel
                 tb={tb}
+                ta={ta}
+                fallbackFocusRef={stepsHeadingRef}
                 itemId={item.id}
                 activity={activityByKey(draft, activityKey)}
                 controls={savedControls[activityKey]}
@@ -815,6 +907,8 @@ export default function ProcessFlowPanel({
 
             <StepEditDialog
                 tb={tb}
+                ta={ta}
+                fallbackFocusRef={stepsHeadingRef}
                 step={editingStepKey === null ? null : nodes.find((node) => node.key === editingStepKey && isEditableStep(node)) ?? null}
                 lanes={lanes}
                 nodes={nodes}
@@ -846,6 +940,7 @@ export default function ProcessFlowPanel({
 
             <MoveStepDialog
                 tb={tb}
+                fallbackFocusRef={stepsHeadingRef}
                 // Only while it can still be moved: the editor may have changed the flow since.
                 step={movingStepKey !== null && canMoveStep({ nodes, edges }, movingStepKey)
                     ? nodes.find((node) => node.key === movingStepKey)
@@ -860,6 +955,8 @@ export default function ProcessFlowPanel({
 
             <StepEditDialog
                 tb={tb}
+                ta={ta}
+                fallbackFocusRef={stepsHeadingRef}
                 inserting
                 // Only while the arrow is still in the flow: the editor may have moved it since.
                 step={insertingOn !== null && edges.some((edge) => edge.from === insertingOn.from && edge.to === insertingOn.to && canInsertStepOn(edge, nodes))
@@ -887,6 +984,9 @@ export default function ProcessFlowPanel({
                 onClose={() => setConfirmingDelete(false)}
                 closeDisabled={saving}
                 titleId="process-flow-delete-title"
+                descriptionId="process-flow-delete-description"
+                // The «Slett flyt» that opened it is gone once the flow is (A11Y-014).
+                fallbackFocusRef={flowHeadingRef}
             >
                 <h2 id="process-flow-delete-title" className="text-xl font-semibold tracking-tight text-slate-950">
                     {discards
@@ -895,7 +995,7 @@ export default function ProcessFlowPanel({
                 </h2>
                 <p className="mt-2 text-base leading-6 text-slate-600">{item.title}</p>
 
-                <dl className="mt-5 space-y-4">
+                <dl id="process-flow-delete-description" className="mt-5 space-y-4">
                     <div>
                         <dt className="text-base font-semibold uppercase tracking-wide text-rose-700">
                             {tq.delete_dialog_removed_heading ?? 'Dette slettes'}
@@ -996,6 +1096,8 @@ function controlsByKey(blueprint) {
  */
 function StepEditDialog({
     tb,
+    ta = {},
+    fallbackFocusRef = null,
     step,
     inserting = false,
     lanes,
@@ -1014,6 +1116,7 @@ function StepEditDialog({
     onClose,
 }) {
     const titleId = inserting ? 'process-step-insert-title' : 'process-step-edit-title';
+    const branchProblemsId = `${titleId}-branch-problems`;
     const [label, setLabel] = useState('');
     const [lane, setLane] = useState('');
     // Null for anything that is not a decision being edited, so its save leaves the arrows alone.
@@ -1066,7 +1169,13 @@ function StepEditDialog({
     }
 
     return (
-        <ActionDialog isOpen={step !== null} onClose={onClose} closeDisabled={busy} titleId={titleId}>
+        <ActionDialog
+            isOpen={step !== null}
+            onClose={onClose}
+            closeDisabled={busy}
+            titleId={titleId}
+            fallbackFocusRef={fallbackFocusRef}
+        >
             {step !== null && (
                 <form onSubmit={submit}>
                     <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
@@ -1085,38 +1194,45 @@ function StepEditDialog({
                         </p>
                     )}
 
-                    <label className="mt-5 block space-y-1">
-                        <span className="block text-base font-semibold text-slate-700">{tb.step_edit_label ?? 'Aktivitet'}</span>
-                        <input
-                            type="text"
-                            className={INPUT}
-                            value={label}
-                            maxLength={200}
-                            onChange={(event) => setLabel(event.target.value)}
-                            disabled={busy}
-                        />
-                    </label>
+                    <RequiredFieldsNote text={ta.required_fields} className="mt-4 text-base text-slate-600" />
 
-                    <label className="mt-4 block space-y-1">
-                        <span className="block text-base font-semibold text-slate-700">{tb.step_edit_lane ?? 'Ansvarlig rolle'}</span>
-                        <select
-                            className={INPUT}
-                            value={lane}
-                            onChange={(event) => setLane(event.target.value)}
-                            disabled={busy}
-                        >
-                            {lanes.map((candidate) => (
-                                <option key={candidate.key} value={candidate.key}>
-                                    {candidate.label || (tb.default_lane ?? 'Uten angitt rolle')}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                    {/* Both are required — the save stays off until they are filled (A11Y-121). */}
+                    <FormField className="mt-4" label={tb.step_edit_label ?? 'Aktivitet'} required>
+                        {(field) => (
+                            <input
+                                {...field}
+                                type="text"
+                                className={INPUT}
+                                value={label}
+                                maxLength={200}
+                                onChange={(event) => setLabel(event.target.value)}
+                                disabled={busy}
+                            />
+                        )}
+                    </FormField>
+
+                    <FormField className="mt-4" label={tb.step_edit_lane ?? 'Ansvarlig rolle'} required>
+                        {(field) => (
+                            <select
+                                {...field}
+                                className={INPUT}
+                                value={lane}
+                                onChange={(event) => setLane(event.target.value)}
+                                disabled={busy}
+                            >
+                                {lanes.map((candidate) => (
+                                    <option key={candidate.key} value={candidate.key}>
+                                        {candidate.label || (tb.default_lane ?? 'Uten angitt rolle')}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                    </FormField>
 
                     {shownBranches !== null && (
-                        <fieldset className="mt-5">
+                        <fieldset className="mt-5" aria-describedby={problems.length > 0 ? branchProblemsId : undefined}>
                             <legend className="block text-base font-semibold text-slate-700">{tb.branches_heading ?? 'Grener'}</legend>
-                            <p className="mt-1 text-base leading-6 text-slate-500">
+                            <p className="mt-1 text-base leading-6 text-slate-600">
                                 {tb.branches_help ?? 'Hvert utfall av beslutningen går til et steg som allerede finnes i flyten.'}
                             </p>
 
@@ -1125,7 +1241,11 @@ function StepEditDialog({
                                     // By position: a branch has no identity of its own until it is saved as an arrow.
                                     <li key={index} className="flex flex-wrap items-end gap-2">
                                         <label className="min-w-[8rem] flex-1 space-y-1">
-                                            <span className="block text-base font-semibold text-slate-600">{tb.branch_label ?? 'Utfall'}</span>
+                                            <span className="block text-base font-semibold text-slate-600">
+                                                {tb.branch_label ?? 'Utfall'}
+                                                {/* «Utfall 2»: the same label on every row needs its row to tell them apart. */}
+                                                <span className="sr-only"> {index + 1}</span>
+                                            </span>
                                             <input
                                                 type="text"
                                                 className={INPUT}
@@ -1137,7 +1257,10 @@ function StepEditDialog({
                                             />
                                         </label>
                                         <label className="min-w-[10rem] flex-[2] space-y-1">
-                                            <span className="block text-base font-semibold text-slate-600">{tb.branch_target ?? 'Går til'}</span>
+                                            <span className="block text-base font-semibold text-slate-600">
+                                                {tb.branch_target ?? 'Går til'}
+                                                <span className="sr-only"> ({tb.branch_label ?? 'Utfall'} {index + 1})</span>
+                                            </span>
                                             <select
                                                 className={INPUT}
                                                 value={branch.to}
@@ -1178,7 +1301,7 @@ function StepEditDialog({
                             </button>
 
                             {problems.length > 0 && (
-                                <ul className="mt-3 list-disc space-y-1 rounded-xl border border-amber-200 bg-amber-50 py-2 pl-8 pr-3 text-base text-amber-900">
+                                <ul id={branchProblemsId} className="mt-3 list-disc space-y-1 rounded-xl border border-amber-200 bg-amber-50 py-2 pl-8 pr-3 text-base text-amber-900">
                                     {problems.map((problem) => <li key={problem}>{problemText(problem)}</li>)}
                                 </ul>
                             )}
@@ -1304,7 +1427,7 @@ function StepEditDialog({
  * which — so there is nothing here to validate beyond having picked one. The diagram moves the step
  * once the server has stored the flow, not before.
  */
-function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onSave, onClose }) {
+function MoveStepDialog({ tb, fallbackFocusRef = null, step, after, targets, hasUnsavedChanges, busy, onSave, onClose }) {
     const titleId = 'process-step-move-title';
     const [afterKey, setAfterKey] = useState('');
     const [error, setError] = useState(null);
@@ -1330,7 +1453,13 @@ function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onS
     }
 
     return (
-        <ActionDialog isOpen={step !== null} onClose={onClose} closeDisabled={busy} titleId={titleId}>
+        <ActionDialog
+            isOpen={step !== null}
+            onClose={onClose}
+            closeDisabled={busy}
+            titleId={titleId}
+            fallbackFocusRef={fallbackFocusRef}
+        >
             {step !== null && (
                 <form onSubmit={submit}>
                     <h2 id={titleId} className="text-xl font-semibold tracking-tight text-slate-950">
@@ -1342,29 +1471,32 @@ function MoveStepDialog({ tb, step, after, targets, hasUnsavedChanges, busy, onS
                             .replace(':after', after?.label || after?.key || '')}
                     </p>
 
-                    <label className="mt-5 block space-y-1">
-                        <span className="block text-base font-semibold text-slate-700">{tb.step_move_after ?? 'Plasser etter'}</span>
-                        <select
-                            className={INPUT}
-                            value={afterKey}
-                            onChange={(event) => setAfterKey(event.target.value)}
-                            disabled={busy || targets.length === 0}
-                        >
-                            <option value="" disabled>{tb.branch_target_choose ?? 'Velg steg …'}</option>
-                            {targets.map((node) => (
-                                <option key={node.key} value={node.key}>
-                                    {(node.label || node.key)
-                                        + ((node.type ?? 'step') === 'step' ? '' : ` (${(tb.node_types ?? {})[node.type] ?? node.type})`)}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-
-                    {targets.length === 0 && (
-                        <p className="mt-2 text-base leading-6 text-slate-500">
-                            {tb.step_move_no_targets ?? 'Det finnes ikke noe annet sted på hovedlinjen steget kan flyttes til.'}
-                        </p>
-                    )}
+                    <FormField
+                        className="mt-5"
+                        label={tb.step_move_after ?? 'Plasser etter'}
+                        hint={targets.length === 0
+                            ? (tb.step_move_no_targets ?? 'Det finnes ikke noe annet sted på hovedlinjen steget kan flyttes til.')
+                            : null}
+                        hintClassName="mt-2 text-base leading-6 text-slate-600"
+                    >
+                        {(field) => (
+                            <select
+                                {...field}
+                                className={INPUT}
+                                value={afterKey}
+                                onChange={(event) => setAfterKey(event.target.value)}
+                                disabled={busy || targets.length === 0}
+                            >
+                                <option value="" disabled>{tb.branch_target_choose ?? 'Velg steg …'}</option>
+                                {targets.map((node) => (
+                                    <option key={node.key} value={node.key}>
+                                        {(node.label || node.key)
+                                            + ((node.type ?? 'step') === 'step' ? '' : ` (${(tb.node_types ?? {})[node.type] ?? node.type})`)}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                    </FormField>
 
                     <p className="mt-4 text-base leading-6 text-slate-500">
                         {tb.step_edit_help ?? 'Endringen lagres i arbeidsversjonen. Den gjelder ikke før flyten er godkjent og publisert.'}
@@ -1423,7 +1555,7 @@ function SubprocessTrail({ tb, rootTitle, trail, onNavigate }) {
 
                 return (
                     <span key={crumb.id ?? 'root'} className="flex items-center gap-1.5">
-                        {index > 0 && <span aria-hidden="true" className="text-slate-400">/</span>}
+                        {index > 0 && <span aria-hidden="true" className="text-slate-500">/</span>}
 
                         <button
                             type="button"
@@ -1438,7 +1570,7 @@ function SubprocessTrail({ tb, rootTitle, trail, onNavigate }) {
                 );
             })}
 
-            <span aria-hidden="true" className="text-slate-400">/</span>
+            <span aria-hidden="true" className="text-slate-500">/</span>
             <span className="px-1 font-semibold text-slate-950" aria-current="page">{current.title}</span>
         </nav>
     );
@@ -1578,9 +1710,9 @@ function DescriptionCard({ tq, tb, item }) {
  * Nothing here is a technical representation. The user never sees a node, an edge, a schema or a
  * key; they see their sentence and, afterwards, a picture of it.
  */
-function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy, error }) {
+function InterpretCard({ tb, sectionRef = null, value, setValue, onSubmit, available, hasFlow, busy, error }) {
     return (
-        <section className={CARD}>
+        <section ref={sectionRef} className={CARD}>
             <h2 className="text-xl font-semibold text-slate-950">{tb.ai_heading ?? 'Beskriv prosessen'}</h2>
             <p className="mt-1 max-w-3xl text-base leading-6 text-slate-600">
                 {tb.ai_help ?? 'Skriv med egne ord hvordan prosessen gjennomføres.'}
@@ -1599,23 +1731,27 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                       * that read-only card — so the one box you can actually write the description
                       * in looked like it belonged to something else.
                       */}
-                    <label className="mt-4 block space-y-1">
-                        <span className="block text-base font-semibold text-slate-700">
-                            {tb.ai_label ?? 'Prosessbeskrivelse'}
-                        </span>
-                        <textarea
-                            className={TEXTAREA}
-                            rows={6}
-                            value={value}
-                            placeholder={tb.ai_placeholder ?? ''}
-                            aria-label={tb.ai_label ?? 'Prosessbeskrivelse'}
-                            aria-invalid={error ? 'true' : undefined}
-                            onChange={(event) => setValue(event.target.value)}
-                            disabled={busy}
-                        />
-                    </label>
-
-                    {error && <p className="mt-2 text-base font-medium text-rose-700">{error}</p>}
+                    {/* The error is tied to the field and the field is focused when a reading is
+                        refused (A11Y-013). */}
+                    <FormField
+                        id="process-flow-description"
+                        className="mt-4"
+                        label={tb.ai_label ?? 'Prosessbeskrivelse'}
+                        error={error}
+                        errorClassName="mt-2 text-base font-medium text-rose-700"
+                    >
+                        {(field) => (
+                            <textarea
+                                {...field}
+                                className={TEXTAREA}
+                                rows={6}
+                                value={value}
+                                placeholder={tb.ai_placeholder ?? ''}
+                                onChange={(event) => setValue(event.target.value)}
+                                disabled={busy}
+                            />
+                        )}
+                    </FormField>
 
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                         <button
@@ -1626,7 +1762,11 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                             // straight through, the event becomes the request payload, and Inertia
                             // walks it looking for files until the stack runs out. Nothing here
                             // wants the event, so nothing here is given it.
-                            onClick={() => onSubmit()}
+                            onClick={() => {
+                                if (! busy) {
+                                    onSubmit();
+                                }
+                            }}
                             // Off only while a reading is actually running. It used to be off
                             // until this component's own copy of the text was non-empty, which
                             // made the one control on the tab depend on client state the user
@@ -1635,7 +1775,9 @@ function InterpretCard({ tb, value, setValue, onSubmit, available, hasFlow, busy
                             // floor on the description is enforced where it is authoritative —
                             // the request is refused before any model is called, and the reason
                             // comes back into the field's error line below.
-                            disabled={busy}
+                            // aria-disabled rather than disabled, so the pressed button keeps focus
+                            // while it says «Leser beskrivelsen …» (A11Y-143); the guard is above.
+                            aria-disabled={busy || undefined}
                         >
                             {busy ? (tb.ai_working ?? 'Leser beskrivelsen …') : (tb.ai_submit ?? 'Generer prosessflyt')}
                         </button>
@@ -1705,7 +1847,7 @@ function FlowErrorCard({ tb, flowError }) {
  * and the copy in both panels says so, because a user who believes they have to answer first will
  * answer first.
  */
-function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline, busy, canEdit }) {
+function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline, busy, canEdit, fallbackRef = null }) {
     return (
         <div className="mt-4 space-y-4">
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5">
@@ -1744,6 +1886,7 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
                     onDecline={onDecline}
                     busy={busy}
                     canEdit={canEdit}
+                    fallbackRef={fallbackRef}
                 />
             )}
         </div>
@@ -1765,9 +1908,20 @@ function ProposalNotice({ tb, replaces, blocking, optional, onClarify, onDecline
  * sequence to work through, no state between the suggestions, and no step that has to be completed.
  * Answer one, answer none, dismiss the rest — the flow is adoptable either way.
  */
-function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, canEdit }) {
+function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, canEdit, fallbackRef = null }) {
     const [answering, setAnswering] = useState(null);
     const [answer, setAnswer] = useState('');
+    const answerRef = useRef(null);
+    const headingRef = useRef(null);
+    const clarifyId = (index) => `process-flow-clarify-${index}`;
+
+    // «Avklar» opens the answer field in place of the two buttons, so focus goes into it; «Avbryt»
+    // gives it back to «Avklar» (A11Y-014).
+    useEffect(() => {
+        if (answering !== null) {
+            focusElement(answerRef.current);
+        }
+    }, [answering]);
 
     function open(question) {
         setAnswering(question);
@@ -1775,13 +1929,30 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
     }
 
     function close() {
+        const index = questions.indexOf(answering);
+
         setAnswering(null);
         setAnswer('');
+        refocusIfLost([clarifyId(index)]);
+    }
+
+    /**
+     * An answered or dismissed suggestion leaves the list at once, with the button that was pressed —
+     * focus goes to the next suggestion's «Avklar», the previous one's, this panel's heading, and
+     * when the panel itself is gone with the last suggestion, the flow's heading (2.4.3). An answer
+     * starts a rewrite, during which every button here is off, so it goes straight to the heading.
+     */
+    function settle(question, { rewriting = false } = {}) {
+        const index = questions.indexOf(question);
+        // The list closes up: the next suggestion takes this one's place, and so its id.
+        const candidates = rewriting ? [] : positionalRemovalFocusCandidates('process-flow-clarify-', questions.length, index);
+
+        refocusIfLost([...candidates, headingRef.current, fallbackRef?.current].filter(Boolean));
     }
 
     return (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-base font-semibold text-slate-900">
+            <p ref={headingRef} tabIndex={-1} className="text-base font-semibold text-slate-900">
                 {tb.optional_clarifications_heading ?? 'Verdt å presisere'}
             </p>
             <p className="mt-1 text-base leading-6 text-slate-600">
@@ -1791,7 +1962,7 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
             <ul className="mt-3 space-y-3">
                 {questions.map((question) => (
                     <li key={question} className="rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-base leading-6 text-slate-800">{question}</p>
+                        <p id={`${clarifyId(questions.indexOf(question))}-question`} className="text-base leading-6 text-slate-800">{question}</p>
 
                         {answering === question ? (
                             <div className="mt-3 space-y-2">
@@ -1799,14 +1970,16 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
                                     {tb.clarification_answer_label ?? 'Svar'}
                                 </label>
                                 <textarea
+                                    ref={answerRef}
                                     id="clarification-answer"
                                     className={TEXTAREA}
                                     rows={2}
                                     value={answer}
                                     onChange={(event) => setAnswer(event.target.value)}
                                     placeholder={tb.clarification_answer_placeholder ?? ''}
+                                    aria-describedby="clarification-answer-help"
                                 />
-                                <p className="text-base text-slate-500">
+                                <p id="clarification-answer-help" className="text-base text-slate-600">
                                     {tb.clarification_answer_help ?? 'Procynia skriver om beskrivelsen slik at svaret inngår i den, og tolker flyten på nytt. Spørsmålet blir ikke stående i beskrivelsen.'}
                                 </p>
                                 <div className="flex flex-wrap gap-2">
@@ -1816,7 +1989,9 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
                                         disabled={busy || answer.trim() === ''}
                                         onClick={() => {
                                             onClarify(question, answer);
-                                            close();
+                                            setAnswering(null);
+                                            setAnswer('');
+                                            settle(question, { rewriting: true });
                                         }}
                                     >
                                         {tb.clarification_submit ?? 'Bruk svaret'}
@@ -1828,14 +2003,25 @@ function ClarificationSuggestions({ tb, questions, onClarify, onDecline, busy, c
                             </div>
                         ) : canEdit && (
                             <div className="mt-3 flex flex-wrap gap-2">
-                                <button type="button" className={ROW_ADD} onClick={() => open(question)} disabled={busy}>
+                                <button
+                                    type="button"
+                                    id={clarifyId(questions.indexOf(question))}
+                                    className={ROW_ADD}
+                                    onClick={() => open(question)}
+                                    disabled={busy}
+                                    aria-describedby={`${clarifyId(questions.indexOf(question))}-question`}
+                                >
                                     {tb.clarification_clarify ?? 'Avklar'}
                                 </button>
                                 <button
                                     type="button"
                                     className={ROW_ADD}
-                                    onClick={() => onDecline(question)}
+                                    onClick={() => {
+                                        onDecline(question);
+                                        settle(question);
+                                    }}
                                     disabled={busy}
+                                    aria-describedby={`${clarifyId(questions.indexOf(question))}-question`}
                                 >
                                     {tb.clarification_dismiss ?? 'Avvis'}
                                 </button>
@@ -1894,7 +2080,7 @@ function StatusLine({ tq, blueprint, publication, isDirty, current }) {
             </span>
 
             {blueprint?.generated_at && (
-                <span className="text-base text-slate-400">
+                <span className="text-base text-slate-600">
                     {(tb.generated_notice ?? 'Sist generert :date.').replace(':date', blueprint.generated_at)}
                 </span>
             )}
@@ -1934,16 +2120,25 @@ function RevisionHistory({ tb, revisions }) {
  * alternative — leaving the nodes behind in a lane that no longer exists — is exactly the dangling
  * state the backend would silently repair by moving them somewhere the user did not choose.
  */
-function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canEdit }) {
+function LaneEditor({ tb, ta = {}, lanes, setLanes, nodes, setNodes, canEdit }) {
+    const removeId = (lane) => `process-lane-remove-${lane.key}`;
+    const addId = 'process-lane-add';
+
     function update(index, value) {
         setLanes(lanes.map((lane, i) => (i === index ? { ...lane, label: value } : lane)));
     }
 
     function remove(index) {
         const removed = lanes[index];
+        const stepCount = nodesInLane(nodes, removed.key);
 
         setLanes(lanes.filter((_, i) => i !== index));
         setNodes(nodes.filter((node) => node.lane !== removed.key));
+
+        // The steps go with the role. Unsaved, so it can be undone by not saving — but it is said,
+        // not only seen as boxes vanishing from the diagram (A11Y-127). Focus stays in the list.
+        announce(laneRemovedAnnouncement(ta, removed.label, stepCount));
+        refocusIfLost(removalFocusCandidates(lanes.map(removeId), index, addId));
     }
 
     function add() {
@@ -1963,12 +2158,18 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canEdit }) {
                             <input
                                 className={INPUT}
                                 value={lane.label ?? ''}
-                                aria-label={tb.lane_label ?? 'Rolle'}
+                                aria-label={`${tb.lane_label ?? 'Rolle'} ${index + 1}`}
                                 onChange={(event) => update(index, event.target.value)}
                                 disabled={! canEdit}
                             />
                             {canEdit && (
-                                <button type="button" className={ROW_DESTRUCTIVE} onClick={() => remove(index)}>
+                                <button
+                                    type="button"
+                                    id={removeId(lane)}
+                                    className={ROW_DESTRUCTIVE}
+                                    onClick={() => remove(index)}
+                                    aria-label={laneRemoveLabel(ta, lane.label, nodesInLane(nodes, lane.key))}
+                                >
                                     {tb.remove_row ?? 'Fjern'}
                                 </button>
                             )}
@@ -1978,7 +2179,7 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canEdit }) {
             )}
 
             {canEdit && (
-                <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={add}>
+                <button type="button" id={addId} className={`mt-3 ${ROW_ADD}`} onClick={add}>
                     {tb.add_lane ?? 'Legg til rolle'}
                 </button>
             )}
@@ -1992,7 +2193,12 @@ function LaneEditor({ tb, lanes, setLanes, nodes, setNodes, canEdit }) {
  * Removing a node removes the arrows that reached it, here rather than on the server, so the
  * diagram beside the editor is correct immediately instead of after a save.
  */
-function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdges, canEdit, subprocessOptions = [] }) {
+function NodeEditor({ tb, ta = {}, actionsLabel, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdges, canEdit, subprocessOptions = [] }) {
+    const removeId = (node) => `process-node-remove-${node.key}`;
+    const addId = 'process-node-add';
+    const rowKind = ta.quality_structure_node ?? 'node';
+    const name = (column, index) => structureFieldLabel(ta, column, rowKind, index + 1);
+
     function update(index, field, value) {
         setNodes(nodes.map((node, i) => (i === index ? { ...node, [field]: value } : node)));
     }
@@ -2027,6 +2233,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
 
         setNodes(nodes.filter((_, i) => i !== index));
         setEdges(edges.filter((edge) => edge.from !== removed.key && edge.to !== removed.key));
+        refocusIfLost(removalFocusCandidates(nodes.map(removeId), index, addId));
     }
 
     function add() {
@@ -2047,20 +2254,25 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
             {nodes.length === 0 ? (
                 <p className="mt-2 text-base text-slate-500">{tb.nodes_empty ?? 'Ingen noder er definert.'}</p>
             ) : (
-                <div className="mt-3 overflow-x-auto">
+                <ScrollRegion label={tb.nodes_heading ?? 'Noder'} className="mt-3">
                     <table className={`w-full text-left text-base ${subprocessOptions.length > 0 ? 'min-w-[820px]' : 'min-w-[640px]'}`}>
+                        <caption className="sr-only">{tb.nodes_heading ?? 'Noder'}</caption>
                         <thead className="text-base uppercase tracking-wide text-slate-500">
                             <tr>
-                                <th className="pb-2 pr-3">{tb.node_label ?? 'Tekst'}</th>
-                                <th className="pb-2 pr-3">{tb.node_lane ?? 'Rolle'}</th>
-                                <th className="pb-2 pr-3">{tb.node_type ?? 'Type'}</th>
+                                <th scope="col" className="pb-2 pr-3">{tb.node_label ?? 'Tekst'}</th>
+                                <th scope="col" className="pb-2 pr-3">{tb.node_lane ?? 'Rolle'}</th>
+                                <th scope="col" className="pb-2 pr-3">{tb.node_type ?? 'Type'}</th>
                                 {/* Only offered where there is something to offer: a customer with
                                     one process has no other process to point at, and an empty
                                     dropdown is a question with no answers. */}
                                 {subprocessOptions.length > 0 && (
-                                    <th className="pb-2 pr-3">{tb.node_subprocess ?? 'Underprosess'}</th>
+                                    <th scope="col" className="pb-2 pr-3">{tb.node_subprocess ?? 'Underprosess'}</th>
                                 )}
-                                {canEdit && <th className="pb-2" />}
+                                {canEdit && (
+                                    <th scope="col" className="pb-2">
+                                        <span className="sr-only">{actionsLabel}</span>
+                                    </th>
+                                )}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -2070,6 +2282,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                         <input
                                             className={SMALL_INPUT}
                                             value={node.label ?? ''}
+                                            aria-label={name(tb.node_label ?? 'Tekst', index)}
                                             onChange={(event) => update(index, 'label', event.target.value)}
                                             disabled={! canEdit}
                                         />
@@ -2078,6 +2291,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                         <select
                                             className={SMALL_INPUT}
                                             value={node.lane ?? ''}
+                                            aria-label={name(tb.node_lane ?? 'Rolle', index)}
                                             onChange={(event) => update(index, 'lane', event.target.value)}
                                             disabled={! canEdit}
                                         >
@@ -2090,6 +2304,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                         <select
                                             className={SMALL_INPUT}
                                             value={node.type ?? 'step'}
+                                            aria-label={name(tb.node_type ?? 'Type', index)}
                                             onChange={(event) => update(index, 'type', event.target.value)}
                                             disabled={! canEdit}
                                         >
@@ -2105,7 +2320,7 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                             <select
                                                 className={SMALL_INPUT}
                                                 value={node.subprocess_quality_item_id ?? ''}
-                                                aria-label={tb.node_subprocess ?? 'Underprosess'}
+                                                aria-label={name(tb.node_subprocess ?? 'Underprosess', index)}
                                                 onChange={(event) => setSubprocess(index, event.target.value)}
                                                 disabled={! canEdit}
                                             >
@@ -2120,8 +2335,10 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                                         <td className="py-2">
                                             <button
                                                 type="button"
+                                                id={removeId(node)}
                                                 className={ROW_DESTRUCTIVE}
                                                 onClick={() => remove(index)}
+                                                aria-label={`${tb.remove_row ?? 'Fjern'} – ${node.label ? `«${node.label}»` : `${rowKind} ${index + 1}`}`}
                                             >
                                                 {tb.remove_row ?? 'Fjern'}
                                             </button>
@@ -2131,11 +2348,11 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
                             ))}
                         </tbody>
                     </table>
-                </div>
+                </ScrollRegion>
             )}
 
             {canEdit && lanes.length > 0 && (
-                <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={add}>
+                <button type="button" id={addId} className={`mt-3 ${ROW_ADD}`} onClick={add}>
                     {tb.add_node ?? 'Legg til node'}
                 </button>
             )}
@@ -2147,13 +2364,21 @@ function NodeEditor({ tb, nodeTypeLabels, lanes, nodes, setNodes, edges, setEdge
  * The arrows. `label` is the outcome a decision branches on — "Ja" / "Nei" — and is what makes a
  * branch readable; it is blank for an ordinary next step, where naming it would be noise.
  */
-function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
+function EdgeEditor({ tb, ta = {}, actionsLabel, nodes, edges, setEdges, canEdit }) {
+    // By position: an arrow has no key of its own, and the rows are keyed partly by index.
+    const removePrefix = 'process-edge-remove-';
+    const addId = 'process-edge-add';
+    const rowKind = ta.quality_structure_edge ?? 'forbindelse';
+    const name = (column, index) => structureFieldLabel(ta, column, rowKind, index + 1);
+    const labelOf = (key) => nodes.find((node) => node.key === key)?.label || key;
+
     function update(index, field, value) {
         setEdges(edges.map((edge, i) => (i === index ? { ...edge, [field]: value } : edge)));
     }
 
     function remove(index) {
         setEdges(edges.filter((_, i) => i !== index));
+        refocusIfLost(positionalRemovalFocusCandidates(removePrefix, edges.length, index, addId));
     }
 
     function add() {
@@ -2171,14 +2396,19 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
             {edges.length === 0 ? (
                 <p className="mt-2 text-base text-slate-500">{tb.edges_empty ?? 'Ingen forbindelser er definert.'}</p>
             ) : (
-                <div className="mt-3 overflow-x-auto">
+                <ScrollRegion label={tb.edges_heading ?? 'Forbindelser'} className="mt-3">
                     <table className="w-full min-w-[640px] text-left text-base">
+                        <caption className="sr-only">{tb.edges_heading ?? 'Forbindelser'}</caption>
                         <thead className="text-base uppercase tracking-wide text-slate-500">
                             <tr>
-                                <th className="pb-2 pr-3">{tb.edge_from ?? 'Fra'}</th>
-                                <th className="pb-2 pr-3">{tb.edge_to ?? 'Til'}</th>
-                                <th className="pb-2 pr-3">{tb.edge_label ?? 'Utfall'}</th>
-                                {canEdit && <th className="pb-2" />}
+                                <th scope="col" className="pb-2 pr-3">{tb.edge_from ?? 'Fra'}</th>
+                                <th scope="col" className="pb-2 pr-3">{tb.edge_to ?? 'Til'}</th>
+                                <th scope="col" className="pb-2 pr-3">{tb.edge_label ?? 'Utfall'}</th>
+                                {canEdit && (
+                                    <th scope="col" className="pb-2">
+                                        <span className="sr-only">{actionsLabel}</span>
+                                    </th>
+                                )}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -2188,6 +2418,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
                                         <NodeSelect
                                             nodes={nodes}
                                             value={edge.from}
+                                            label={name(tb.edge_from ?? 'Fra', index)}
                                             onChange={(value) => update(index, 'from', value)}
                                             disabled={! canEdit}
                                         />
@@ -2196,6 +2427,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
                                         <NodeSelect
                                             nodes={nodes}
                                             value={edge.to}
+                                            label={name(tb.edge_to ?? 'Til', index)}
                                             onChange={(value) => update(index, 'to', value)}
                                             disabled={! canEdit}
                                         />
@@ -2204,6 +2436,7 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
                                         <input
                                             className={SMALL_INPUT}
                                             value={edge.label ?? ''}
+                                            aria-label={name(tb.edge_label ?? 'Utfall', index)}
                                             placeholder={tb.edge_label_placeholder ?? ''}
                                             onChange={(event) => update(index, 'label', event.target.value)}
                                             disabled={! canEdit}
@@ -2213,8 +2446,10 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
                                         <td className="py-2">
                                             <button
                                                 type="button"
+                                                id={`${removePrefix}${index}`}
                                                 className={ROW_DESTRUCTIVE}
                                                 onClick={() => remove(index)}
+                                                aria-label={`${tb.remove_row ?? 'Fjern'} – ${labelOf(edge.from)} → ${labelOf(edge.to)}`}
                                             >
                                                 {tb.remove_row ?? 'Fjern'}
                                             </button>
@@ -2224,11 +2459,11 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
                             ))}
                         </tbody>
                     </table>
-                </div>
+                </ScrollRegion>
             )}
 
             {canEdit && nodes.length > 1 && (
-                <button type="button" className={`mt-3 ${ROW_ADD}`} onClick={add}>
+                <button type="button" id={addId} className={`mt-3 ${ROW_ADD}`} onClick={add}>
                     {tb.add_edge ?? 'Legg til forbindelse'}
                 </button>
             )}
@@ -2236,10 +2471,11 @@ function EdgeEditor({ tb, nodes, edges, setEdges, canEdit }) {
     );
 }
 
-function NodeSelect({ nodes, value, onChange, disabled }) {
+function NodeSelect({ nodes, value, label, onChange, disabled }) {
     return (
         <select
             className={SMALL_INPUT}
+            aria-label={label}
             value={value ?? ''}
             onChange={(event) => onChange(event.target.value)}
             disabled={disabled}
@@ -2321,6 +2557,8 @@ function articleSkeleton(tb) {
  */
 function ActivityArticlePanel({
     tb,
+    ta = {},
+    fallbackFocusRef = null,
     itemId,
     activity,
     // Writing an article off an activity creates a new Wiki source, so it is quality.create —
@@ -2349,6 +2587,14 @@ function ActivityArticlePanel({
     const [markdown, setMarkdown] = useState('');
     const [writing, setWriting] = useState(false);
     const [busy, setBusy] = useState(false);
+    // The writing form replaces the two buttons that open it, so focus goes into it and back to
+    // «Skriv artikkelen selv» on «Avbryt» — or to the panel's heading when that button is not there
+    // (the draft came from «Opprett kunnskapsartikkel») (A11Y-014).
+    const writingRef = useRef(null);
+    const writeButtonRef = useRef(null);
+    const panelHeadingRef = useRef(null);
+
+    usePanelFocus(writing, { panelRef: writingRef, returnFocusRef: writeButtonRef, fallbackRef: panelHeadingRef });
 
     // A draft belongs to the activity it was asked for. One arriving for a different step must not
     // appear in this one's editor, which is what the key comparison is for.
@@ -2371,6 +2617,12 @@ function ActivityArticlePanel({
             setBusy(false);
         }
     }, [failed]);
+
+    // The draft's arrival moves focus into the form (above); a draft that could not be made is said,
+    // since the message appears where the reader is not (4.1.3).
+    useTransitionAnnouncement(failed ? `failed:${error?.message ?? ''}` : 'ok', (previous, next) => (
+        next.startsWith('failed:') ? { message: error?.message ?? '', politeness: 'assertive' } : null
+    ));
 
     // Closing settles the draft: it was never stored, and leaving it in the editor would offer it
     // again beside a different step.
@@ -2424,13 +2676,13 @@ function ActivityArticlePanel({
     const canSubmit = title.trim() !== '' && markdown.trim() !== '' && ! busy;
 
     return (
-        <ActionDialog isOpen={activity !== null} onClose={close} titleId={titleId}>
+        <ActionDialog isOpen={activity !== null} onClose={close} titleId={titleId} fallbackFocusRef={fallbackFocusRef}>
             {activity !== null && (
                 <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[24px] bg-white p-6 shadow-xl">
                     <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
                         {activity.role || (tb.default_lane ?? 'Uten angitt rolle')}
                     </p>
-                    <h2 id={titleId} className="mt-1 text-xl font-semibold text-slate-950">{activity.label}</h2>
+                    <h2 id={titleId} ref={panelHeadingRef} tabIndex={-1} className="mt-1 text-xl font-semibold text-slate-950">{activity.label}</h2>
 
                     {activity.description && (
                         <p className="mt-2 text-base leading-6 text-slate-600">{activity.description}</p>
@@ -2439,6 +2691,7 @@ function ActivityArticlePanel({
                     <ActivityControls
                         key={activity.key}
                         tb={tb}
+                        ta={ta}
                         itemId={itemId}
                         activityKey={activity.key}
                         controls={controls}
@@ -2531,7 +2784,7 @@ function ActivityArticlePanel({
                                     </button>
                                 )}
 
-                                <button type="button" className={SECONDARY_ACTION} onClick={writeByHand}>
+                                <button ref={writeButtonRef} type="button" className={SECONDARY_ACTION} onClick={writeByHand}>
                                     {tb.articles_write ?? 'Skriv artikkelen selv'}
                                 </button>
                             </div>
@@ -2539,39 +2792,57 @@ function ActivityArticlePanel({
                     )}
 
                     {canCreate && writing && (
-                        <div className="mt-6 border-t border-slate-100 pt-5">
+                        <div ref={writingRef} className="mt-6 border-t border-slate-100 pt-5">
                             <p className="text-base leading-6 text-slate-600">
                                 {tb.articles_review_help
                                     ?? 'Les gjennom og rett teksten før du legger den inn. Det som legges inn, er det som står her — Wiki bygger kunnskapssidene av teksten og sender dem til vanlig gjennomgang.'}
                             </p>
 
-                            <p className="mt-2 text-base leading-6 text-slate-500">
+                            <p className="mt-2 text-base leading-6 text-slate-600">
                                 {tb.articles_fill_in_help
                                     ?? 'Står det «Må fylles inn» et sted, er det kunnskap Procynia ikke fant i prosessen. Fyll det inn selv — ikke la det stå.'}
                             </p>
 
-                            <label className="mt-4 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-title">
-                                {tb.articles_title ?? 'Tittel'}
-                            </label>
-                            <input
-                                id="activity-article-title"
-                                type="text"
-                                className={`mt-1 ${INPUT}`}
-                                value={title}
-                                maxLength={255}
-                                onChange={(event) => setTitle(event.target.value)}
-                            />
+                            <RequiredFieldsNote text={ta.required_fields} className="mt-4 text-base text-slate-600" />
 
-                            <label className="mt-4 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-article-markdown">
-                                {tb.articles_body ?? 'Artikkel'}
-                            </label>
-                            <textarea
+                            {/* Both are required: «Legg artikkelen inn i Wiki» stays off until they
+                                have text (A11Y-121). */}
+                            <FormField
+                                id="activity-article-title"
+                                className="mt-4"
+                                label={tb.articles_title ?? 'Tittel'}
+                                labelClassName="block text-base font-semibold uppercase tracking-wide text-slate-500"
+                                required
+                            >
+                                {(field) => (
+                                    <input
+                                        {...field}
+                                        type="text"
+                                        className={INPUT}
+                                        value={title}
+                                        maxLength={255}
+                                        onChange={(event) => setTitle(event.target.value)}
+                                    />
+                                )}
+                            </FormField>
+
+                            <FormField
                                 id="activity-article-markdown"
-                                className={`mt-1 ${TEXTAREA}`}
-                                rows={16}
-                                value={markdown}
-                                onChange={(event) => setMarkdown(event.target.value)}
-                            />
+                                className="mt-4"
+                                label={tb.articles_body ?? 'Artikkel'}
+                                labelClassName="block text-base font-semibold uppercase tracking-wide text-slate-500"
+                                required
+                            >
+                                {(field) => (
+                                    <textarea
+                                        {...field}
+                                        className={TEXTAREA}
+                                        rows={16}
+                                        value={markdown}
+                                        onChange={(event) => setMarkdown(event.target.value)}
+                                    />
+                                )}
+                            </FormField>
 
                             <div className="mt-5 flex flex-wrap justify-end gap-3">
                                 <button type="button" className={SECONDARY_ACTION} onClick={() => setWriting(false)}>
@@ -2607,7 +2878,7 @@ function ActivityArticlePanel({
  * Both writes preserve state, so the dialog stays open on the activity it was used from and any
  * unsaved work in the flow editor behind it is kept.
  */
-function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options = [], statusLabels = {}, startAdding = false }) {
+function ActivityControls({ tb, ta = {}, itemId, activityKey, controls, canEdit, options = [], statusLabels = {}, startAdding = false }) {
     // Mounted afresh each time the panel opens, so the initial value is the one that applies.
     // false, or which form is open: 'new' registers a control, 'existing' places ones that exist.
     const [adding, setAdding] = useState(startAdding ? 'new' : false);
@@ -2616,6 +2887,26 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
     const [chosen, setChosen] = useState([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    // Which field of «Ny kontroll» the error is about, so it is tied to that field; null for an error
+    // about the request as a whole.
+    const [errorOn, setErrorOn] = useState(null);
+    // The two forms open in place of the buttons that open them: focus goes into the form, and back
+    // to the button that opened it on «Avbryt» or after saving (A11Y-014). A refused save puts the
+    // reader on the field that says why (A11Y-013).
+    const formRef = useRef(null);
+    const openedWithRef = useRef('new');
+    const newButtonRef = useRef(null);
+    const attachButtonRef = useRef(null);
+    // The button that opened the form, read when focus goes back — it re-mounts as the form closes.
+    const openedFromRef = useMemo(() => ({
+        get current() {
+            return openedWithRef.current === 'existing' ? attachButtonRef.current : newButtonRef.current;
+        },
+    }), []);
+    const headingRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+
+    usePanelFocus(adding !== false, { panelRef: formRef, returnFocusRef: openedFromRef, fallbackRef: headingRef });
 
     const list = controls ?? [];
     const saved = controls !== undefined;
@@ -2630,7 +2921,9 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
         }));
 
     function open(mode) {
+        openedWithRef.current = mode;
         setError(null);
+        setErrorOn(null);
         setAdding(mode);
     }
 
@@ -2652,7 +2945,10 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                 setAdding(false);
                 setChosen([]);
             },
-            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onError: (errors) => {
+                setError(Object.values(errors)[0] ?? null);
+                focusFirstError();
+            },
             onFinish: () => setBusy(false),
         });
     }
@@ -2674,7 +2970,11 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                 setTitle('');
                 setCriterion('');
             },
-            onError: (errors) => setError(errors.title ?? errors.criterion ?? errors.activity_key ?? Object.values(errors)[0] ?? null),
+            onError: (errors) => {
+                setError(errors.title ?? errors.criterion ?? errors.activity_key ?? Object.values(errors)[0] ?? null);
+                setErrorOn(errors.title ? 'title' : (errors.criterion ? 'criterion' : null));
+                focusFirstError();
+            },
             onFinish: () => setBusy(false),
         });
     }
@@ -2684,17 +2984,26 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
             return;
         }
 
+        const index = list.findIndex((candidate) => candidate.id === control.id);
+
         setBusy(true);
         router.delete(`/app/quality/activity-controls/${control.id}`, {
             preserveState: true,
             preserveScroll: true,
+            // The row goes with its button: the next control's «Fjern», the previous one's, then
+            // «Ny kontroll» or the heading — never <body> (2.4.3).
+            onSuccess: () => refocusIfLost([
+                ...removalFocusCandidates(list.map((candidate) => `activity-control-remove-${candidate.id}`), index),
+                newButtonRef.current,
+                headingRef.current,
+            ].filter(Boolean)),
             onFinish: () => setBusy(false),
         });
     }
 
     return (
         <section className="mt-6" aria-labelledby="process-activity-controls-title">
-            <h3 id="process-activity-controls-title" className="text-base font-semibold text-slate-900">
+            <h3 id="process-activity-controls-title" ref={headingRef} tabIndex={-1} className="text-base font-semibold text-slate-900">
                 {tb.controls_heading ?? 'Kontroller'}
             </h3>
 
@@ -2724,6 +3033,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                             {canEdit && (
                                 <button
                                     type="button"
+                                    id={`activity-control-remove-${control.id}`}
                                     className={ROW_DESTRUCTIVE}
                                     onClick={() => remove(control)}
                                     disabled={busy}
@@ -2740,18 +3050,18 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
 
             {canEdit && saved && ! adding && (
                 <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" className={ROW_ADD} onClick={() => open('new')}>
+                    <button ref={newButtonRef} type="button" className={ROW_ADD} onClick={() => open('new')}>
                         {tb.controls_new ?? 'Ny kontroll'}
                     </button>
-                    <button type="button" className={ROW_ADD} onClick={() => open('existing')}>
+                    <button ref={attachButtonRef} type="button" className={ROW_ADD} onClick={() => open('existing')}>
                         {tb.controls_attach ?? 'Velg eksisterende kontroll'}
                     </button>
                 </div>
             )}
 
             {canEdit && saved && adding === 'existing' && (
-                <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={attach}>
-                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-picker">
+                <form ref={formRef} className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={attach}>
+                    <label className={TINTED_LABEL} htmlFor="activity-control-picker">
                         {tb.controls_attach_label ?? 'Eksisterende kontroller'}
                     </label>
                     <p className="mt-1 text-base leading-6 text-slate-600" id="activity-control-picker-help">
@@ -2759,7 +3069,7 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                     </p>
 
                     {pickerOptions.length === 0 ? (
-                        <p className="mt-3 text-base text-slate-500">
+                        <p className="mt-3 text-base text-slate-600">
                             {tb.controls_attach_none ?? 'Alle kontroller som ikke er utgått, står allerede på denne aktiviteten.'}
                         </p>
                     ) : (
@@ -2773,13 +3083,14 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
                             noResultsLabel={tb.controls_attach_no_results ?? 'Ingen kontroller passer søket.'}
                             removeLabel={tb.controls_attach_deselect ?? 'Fjern :name fra utvalget'}
                             selectedLabel={tb.controls_attach_selected ?? 'Valgt'}
-                            describedBy="activity-control-picker-help"
+                            describedBy={error ? 'activity-control-picker-help activity-control-attach-error' : 'activity-control-picker-help'}
+                            invalid={Boolean(error)}
                             testId="activity-control-picker"
                         />
                     )}
 
                     {error && (
-                        <p className="mt-2 text-base text-red-700" role="alert">{error}</p>
+                        <p id="activity-control-attach-error" className="mt-2 text-base text-rose-700" role="alert">{error}</p>
                     )}
 
                     <div className="mt-3 flex flex-wrap justify-end gap-3">
@@ -2794,38 +3105,57 @@ function ActivityControls({ tb, itemId, activityKey, controls, canEdit, options 
             )}
 
             {canEdit && saved && adding === 'new' && (
-                <form className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={add}>
+                <form ref={formRef} className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={add}>
                     <p className="text-base leading-6 text-slate-600">
                         {tb.controls_help
                             ?? 'Hva skal kontrolleres i dette steget? En kontroll registreres også i kvalitetssystemet, der den kan få eier og frekvens.'}
                     </p>
 
-                    <label className="mt-3 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-title">
-                        {tb.controls_title ?? 'Navn på kontrollen'}
-                    </label>
-                    <input
+                    <RequiredFieldsNote text={ta.required_fields} className="mt-2 text-base text-slate-600" />
+
+                    {/* The error the server gives back is the name's when it is about the name, and
+                        is tied to that field; anything else stays a message under the form. */}
+                    <FormField
                         id="activity-control-title"
-                        type="text"
-                        className={`mt-1 ${INPUT}`}
-                        value={title}
-                        maxLength={255}
-                        onChange={(event) => setTitle(event.target.value)}
-                    />
+                        className="mt-3"
+                        label={tb.controls_title ?? 'Navn på kontrollen'}
+                        labelClassName={TINTED_LABEL}
+                        required
+                        error={errorOn === 'title' ? error : null}
+                    >
+                        {(field) => (
+                            <input
+                                {...field}
+                                type="text"
+                                className={INPUT}
+                                value={title}
+                                maxLength={255}
+                                onChange={(event) => setTitle(event.target.value)}
+                            />
+                        )}
+                    </FormField>
 
-                    <label className="mt-3 block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="activity-control-criterion">
-                        {tb.controls_criterion ?? 'Hva skal kontrolleres'}
-                    </label>
-                    <textarea
+                    <FormField
                         id="activity-control-criterion"
-                        className={`mt-1 ${TEXTAREA}`}
-                        rows={3}
-                        maxLength={2000}
-                        value={criterion}
-                        onChange={(event) => setCriterion(event.target.value)}
-                    />
+                        className="mt-3"
+                        label={tb.controls_criterion ?? 'Hva skal kontrolleres'}
+                        labelClassName={TINTED_LABEL}
+                        error={errorOn === 'criterion' ? error : null}
+                    >
+                        {(field) => (
+                            <textarea
+                                {...field}
+                                className={TEXTAREA}
+                                rows={3}
+                                maxLength={2000}
+                                value={criterion}
+                                onChange={(event) => setCriterion(event.target.value)}
+                            />
+                        )}
+                    </FormField>
 
-                    {error && (
-                        <p className="mt-2 text-base text-red-700" role="alert">{error}</p>
+                    {error && errorOn === null && (
+                        <p className="mt-2 text-base text-rose-700" role="alert" data-form-error-summary>{error}</p>
                     )}
 
                     <div className="mt-3 flex flex-wrap justify-end gap-3">

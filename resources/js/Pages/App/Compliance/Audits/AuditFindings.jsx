@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm } from '@inertiajs/react';
+import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
+import { refocusIfLost } from '../../../../Support/focusManagement';
+import { ERROR, HINT, INPUT, LABEL } from '../../../../Support/formStyles';
 import { formatDay } from '../../Improvements/improvementStatus';
-import RequiredMark from '../../Risk/RequiredMark';
+import RequiredMark from '../RequiredMark';
+import FieldError from '../FieldError';
+import { fieldStateProps, radioGroupProps, removalFocusCandidates } from '../complianceA11y';
+import { focusInPageTarget, useFocusOnRejectedSubmit, usePanelSwitchFocus } from '../useComplianceFocus';
 import { ownersForArea } from '../../Risk/riskOwners';
 import { qualityItemLabel } from '../Requirements/complianceQuality';
 import {
@@ -17,11 +23,12 @@ import {
 } from './complianceAudit';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
-const HINT = 'mt-1 text-base text-slate-600';
-const ERROR = 'mt-1 text-base text-rose-700';
 const TERM = 'text-base font-semibold text-slate-600';
+// Ids of a finding card's heading and its buttons, for focus return and the buttons' description.
+const headingId = (id) => `compliance-finding-heading-${id}`;
+const editId = (id) => `compliance-finding-edit-${id}`;
+const deleteId = (id) => `compliance-finding-delete-${id}`;
+const handOffId = (id) => `compliance-finding-handoff-${id}`;
 
 /** The finding's current choice stays selectable even when it is no longer offered (retired since). */
 function withCurrent(options, current) {
@@ -42,7 +49,7 @@ function ContextSelect({ id, label, value, onChange, options, current, error, la
     return (
         <div>
             <label htmlFor={id} className={LABEL}>{label} <span className="font-normal text-slate-600">({tf.optional ?? 'valgfritt'})</span></label>
-            <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`mt-1 ${INPUT}`}>
+            <select id={id} {...fieldStateProps(id, error)} value={value} onChange={(event) => onChange(event.target.value)} className={`mt-1 ${INPUT}`}>
                 <option value="">{tf.none ?? 'Ingen'}</option>
                 {inScope.length > 0 ? (
                     <>
@@ -51,7 +58,7 @@ function ContextSelect({ id, label, value, onChange, options, current, error, la
                     </>
                 ) : render(other)}
             </select>
-            {error && <p className={ERROR}>{error}</p>}
+            <FieldError field={id} message={error} />
         </div>
     );
 }
@@ -66,6 +73,8 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
     const form = useForm(findingFormData(finding, draft));
     const idPrefix = finding ? `compliance-finding-${finding.id}` : 'compliance-finding-new';
     const hasQuality = Array.isArray(options?.processes) && 'quality_process_id' in form.data;
+    const formRef = useRef(null);
+    useFocusOnRejectedSubmit(form, formRef);
 
     const submit = (event) => {
         event.preventDefault();
@@ -79,10 +88,10 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
     };
 
     return (
-        <form onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-finding-form">
+        <form ref={formRef} onSubmit={submit} className="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4" data-testid="compliance-finding-form" data-inline-panel={finding ? `edit-${finding.id}` : 'create'}>
             <h3 className="text-lg font-semibold text-slate-950">{finding ? (tf.edit_heading ?? 'Rediger funn') : (tf.create_heading ?? 'Nytt funn')}</h3>
 
-            <fieldset>
+            <fieldset {...radioGroupProps(`${idPrefix}-type`, form.errors.finding_type, { required: true })}>
                 <legend className={LABEL}>{tf.field_type ?? 'Type'}<RequiredMark /></legend>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
                     {types.map((type) => (
@@ -95,14 +104,14 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
                                 onChange={() => form.setData('finding_type', type)}
                                 className="mt-1 h-5 w-5 shrink-0"
                             />
-                            <span className="min-w-0 break-words">
-                                <span className="block font-semibold">{findingTypeLabel(type, ta)}</span>
-                                <span className="block text-slate-600">{tf.type_hints?.[type] ?? ''}</span>
+                            <span className="min-w-0 break-words font-semibold">
+                                {findingTypeLabel(type, ta)}
+                                <span className="block font-normal text-slate-600">{tf.type_hints?.[type] ?? ''}</span>
                             </span>
                         </label>
                     ))}
                 </div>
-                {form.errors.finding_type && <p className={ERROR}>{form.errors.finding_type}</p>}
+                <FieldError field={`${idPrefix}-type`} message={form.errors.finding_type} />
             </fieldset>
 
             <div>
@@ -113,11 +122,12 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
                     required
                     aria-required="true"
                     maxLength={255}
+                    {...fieldStateProps(`${idPrefix}-title`, form.errors.title)}
                     value={form.data.title}
                     onChange={(event) => form.setData('title', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
+                <FieldError field={`${idPrefix}-title`} message={form.errors.title} />
             </div>
 
             <div>
@@ -128,12 +138,12 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
                     rows={4}
                     required
                     aria-required="true"
-                    aria-describedby={`${idPrefix}-description-hint`}
+                    {...fieldStateProps(`${idPrefix}-description`, form.errors.description, [`${idPrefix}-description-hint`])}
                     value={form.data.description}
                     onChange={(event) => form.setData('description', event.target.value)}
                     className={`mt-1 ${INPUT}`}
                 />
-                {form.errors.description && <p className={ERROR}>{form.errors.description}</p>}
+                <FieldError field={`${idPrefix}-description`} message={form.errors.description} />
             </div>
 
             <div className="space-y-4">
@@ -190,7 +200,9 @@ function FindingForm({ auditId, finding = null, draft = null, options, types, on
                 )}
             </div>
 
-            {form.errors.finding && <p className={ERROR}>{form.errors.finding}</p>}
+            {form.errors.finding && <p className={ERROR} data-form-error-summary="">{form.errors.finding}</p>}
+
+            <RequiredFieldsNote text={ta.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={() => { form.reset(); form.clearErrors(); onDone(); }} className={SECONDARY_ACTION}>{tf.cancel ?? 'Avbryt'}</button>
@@ -223,6 +235,8 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
         link_process: process !== null,
     });
     const owners = ownersForArea(handoff?.owner_options ?? [], form.data.business_area_id);
+    const formRef = useRef(null);
+    useFocusOnRejectedSubmit(form, formRef);
 
     const chooseArea = (value) => {
         const stillAllowed = ownersForArea(handoff?.owner_options ?? [], value).some((owner) => String(owner.id) === String(form.data.owner_user_id));
@@ -235,7 +249,7 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
     };
 
     return (
-        <section className="mt-4 space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4" aria-labelledby={`${idPrefix}-heading`} data-testid="compliance-handoff-form">
+        <section className="mt-4 space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4" aria-labelledby={`${idPrefix}-heading`} data-testid="compliance-handoff-form" data-inline-panel={`handoff-${finding.id}`}>
             <div>
                 <h4 id={`${idPrefix}-heading`} className="text-lg font-semibold text-slate-950">{tf.handoff_heading ?? 'Følg opp i Avvik og forbedringer'}</h4>
                 <p className={HINT}>{tf.handoff_intro ?? 'Det opprettes en ny sak i Avvik og forbedringer. Funnet beholder sin egen tekst og låses når saken er opprettet.'}</p>
@@ -251,7 +265,7 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
                     </div>
                 </>
             ) : (
-                <form onSubmit={submit} className="space-y-4">
+                <form ref={formRef} onSubmit={submit} className="space-y-4">
                     <div>
                         <p className={LABEL}>{tf.handoff_type ?? 'Sakstype'}</p>
                         <p className="mt-1 text-base text-slate-900" data-testid="compliance-handoff-type">{improvementTypeLabel(finding.improvement_type, ta)}</p>
@@ -262,55 +276,57 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
 
                     <div>
                         <label htmlFor={`${idPrefix}-title`} className={LABEL}>{tf.handoff_title ?? 'Tittel på saken'}<RequiredMark /></label>
-                        <input id={`${idPrefix}-title`} type="text" required aria-required="true" maxLength={255} value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} className={`mt-1 ${INPUT}`} />
-                        {form.errors.title && <p className={ERROR}>{form.errors.title}</p>}
+                        <input id={`${idPrefix}-title`} type="text" required aria-required="true" maxLength={255} {...fieldStateProps(`${idPrefix}-title`, form.errors.title)} value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} className={`mt-1 ${INPUT}`} />
+                        <FieldError field={`${idPrefix}-title`} message={form.errors.title} />
                     </div>
 
                     <div>
                         <label htmlFor={`${idPrefix}-description`} className={LABEL}>{tf.handoff_description ?? 'Beskrivelse av saken'}<RequiredMark /></label>
-                        <textarea id={`${idPrefix}-description`} rows={4} required aria-required="true" value={form.data.description} onChange={(event) => form.setData('description', event.target.value)} className={`mt-1 ${INPUT}`} />
-                        {form.errors.description && <p className={ERROR}>{form.errors.description}</p>}
+                        <textarea id={`${idPrefix}-description`} rows={4} required aria-required="true" {...fieldStateProps(`${idPrefix}-description`, form.errors.description)} value={form.data.description} onChange={(event) => form.setData('description', event.target.value)} className={`mt-1 ${INPUT}`} />
+                        <FieldError field={`${idPrefix}-description`} message={form.errors.description} />
                     </div>
 
                     <div className="grid gap-4 sm:grid-cols-2">
                         <div>
                             <label htmlFor={`${idPrefix}-area`} className={LABEL}>{tf.handoff_area ?? 'Fagområde'}<RequiredMark /></label>
                             <p id={`${idPrefix}-area-hint`} className={HINT}>{tf.handoff_area_hint ?? 'Fagområdet bestemmer hvem som kan se saken.'}</p>
-                            <select id={`${idPrefix}-area`} required aria-required="true" aria-describedby={`${idPrefix}-area-hint`} value={form.data.business_area_id} onChange={(event) => chooseArea(event.target.value)} className={`mt-1 ${INPUT}`}>
+                            <select id={`${idPrefix}-area`} required aria-required="true" {...fieldStateProps(`${idPrefix}-area`, form.errors.business_area_id, [`${idPrefix}-area-hint`])} value={form.data.business_area_id} onChange={(event) => chooseArea(event.target.value)} className={`mt-1 ${INPUT}`}>
                                 <option value="">{tf.choose_area ?? 'Velg fagområde'}</option>
                                 {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
                             </select>
-                            {form.errors.business_area_id && <p className={ERROR}>{form.errors.business_area_id}</p>}
+                            <FieldError field={`${idPrefix}-area`} message={form.errors.business_area_id} />
                         </div>
                         <div>
                             <label htmlFor={`${idPrefix}-owner`} className={LABEL}>{tf.handoff_owner ?? 'Ansvarlig'}<RequiredMark /></label>
                             <p id={`${idPrefix}-owner-hint`} className={HINT}>{tf.handoff_owner_hint ?? 'Bare personer som kan se saker i valgt fagområde, kan velges.'}</p>
-                            <select id={`${idPrefix}-owner`} required aria-required="true" aria-describedby={`${idPrefix}-owner-hint`} disabled={form.data.business_area_id === ''} value={form.data.owner_user_id} onChange={(event) => form.setData('owner_user_id', event.target.value)} className={`mt-1 ${INPUT}`}>
+                            <select id={`${idPrefix}-owner`} required aria-required="true" {...fieldStateProps(`${idPrefix}-owner`, form.errors.owner_user_id, [`${idPrefix}-owner-hint`])} disabled={form.data.business_area_id === ''} value={form.data.owner_user_id} onChange={(event) => form.setData('owner_user_id', event.target.value)} className={`mt-1 ${INPUT}`}>
                                 <option value="">{form.data.business_area_id === '' ? (tf.choose_area_first ?? 'Velg fagområde først') : (tf.choose_owner ?? 'Velg ansvarlig')}</option>
                                 {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
                             </select>
-                            {form.errors.owner_user_id && <p className={ERROR}>{form.errors.owner_user_id}</p>}
+                            <FieldError field={`${idPrefix}-owner`} message={form.errors.owner_user_id} />
                         </div>
                     </div>
 
                     <div className="sm:max-w-xs">
                         <label htmlFor={`${idPrefix}-due`} className={LABEL}>{tf.handoff_due ?? 'Frist'}</label>
                         <p id={`${idPrefix}-due-hint`} className={HINT}>{tf.handoff_due_hint ?? 'Valgfritt. Når saken bør være behandlet.'}</p>
-                        <input id={`${idPrefix}-due`} type="date" aria-describedby={`${idPrefix}-due-hint`} value={form.data.due_date} onChange={(event) => form.setData('due_date', event.target.value)} className={`mt-1 ${INPUT}`} />
-                        {form.errors.due_date && <p className={ERROR}>{form.errors.due_date}</p>}
+                        <input id={`${idPrefix}-due`} type="date" {...fieldStateProps(`${idPrefix}-due`, form.errors.due_date, [`${idPrefix}-due-hint`])} value={form.data.due_date} onChange={(event) => form.setData('due_date', event.target.value)} className={`mt-1 ${INPUT}`} />
+                        <FieldError field={`${idPrefix}-due`} message={form.errors.due_date} />
                     </div>
 
                     {process !== null && (
                         <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-800" data-testid="compliance-handoff-process">
                             <input type="checkbox" checked={form.data.link_process} onChange={(event) => form.setData('link_process', event.target.checked)} className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300" />
-                            <span className="min-w-0 break-words">
-                                <span className="block font-semibold">{(tf.handoff_process ?? 'Koble saken til prosessen «:process»').replace(':process', qualityItemLabel(process))}</span>
-                                <span className="block text-slate-600">{tf.handoff_process_hint ?? 'Foreslått fordi funnet gjelder denne prosessen.'}</span>
+                            <span className="min-w-0 break-words font-semibold">
+                                {(tf.handoff_process ?? 'Koble saken til prosessen «:process»').replace(':process', qualityItemLabel(process))}
+                                <span className="block font-normal text-slate-600">{tf.handoff_process_hint ?? 'Foreslått fordi funnet gjelder denne prosessen.'}</span>
                             </span>
                         </label>
                     )}
 
-                    {form.errors.finding && <p className={ERROR}>{form.errors.finding}</p>}
+                    {form.errors.finding && <p className={ERROR} data-form-error-summary="">{form.errors.finding}</p>}
+
+                    <RequiredFieldsNote text={ta.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
 
                     <div className="flex flex-wrap justify-end gap-3">
                         <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tf.cancel ?? 'Avbryt'}</button>
@@ -330,7 +346,7 @@ function HandoffForm({ auditId, finding, handoff, onDone, ta }) {
  * read that case — and never shows the case's status. Rediger, Slett and the hand-off wait for the
  * server's permission on the finding.
  */
-function FindingCard({ auditId, finding, options, types, handoff, panel, setPanel, ta }) {
+function FindingCard({ auditId, finding, findingIds, options, types, handoff, panel, setPanel, ta }) {
     const tf = ta.findings ?? {};
     const perms = finding.permissions ?? {};
     const editing = panel === `edit-${finding.id}`;
@@ -341,7 +357,9 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
             return;
         }
 
-        router.delete(`/app/compliance/audits/${auditId}/findings/${finding.id}`, { preserveScroll: true });
+        // Focus goes to the next finding, the previous one, or Nytt funn (A11Y-014).
+        const candidates = removalFocusCandidates(findingIds, finding.id, [editId, deleteId, handOffId], ['compliance-findings-create', 'compliance-audit-findings-heading']);
+        router.delete(`/app/compliance/audits/${auditId}/findings/${finding.id}`, { preserveScroll: true, onSuccess: () => refocusIfLost(candidates) });
     };
 
     if (editing) {
@@ -358,7 +376,7 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
                 <StatusBadge tone={FINDING_TYPE_TONES[finding.finding_type] ?? 'slate'}>{findingTypeLabel(finding.finding_type, ta)}</StatusBadge>
                 {finding.handed_off && <span data-testid="compliance-finding-handed-off"><StatusBadge tone="emerald">{tf.handed_off ?? 'Overført'}</StatusBadge></span>}
             </div>
-            <h3 className="break-words text-lg font-semibold text-slate-950">{finding.title}</h3>
+            <h3 id={headingId(finding.id)} className="break-words text-lg font-semibold text-slate-950">{finding.title}</h3>
             <p className="whitespace-pre-line break-words text-base leading-7 text-slate-800">{finding.description}</p>
 
             {(finding.check || finding.requirement || finding.quality_process || finding.control) && (
@@ -367,7 +385,7 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
                         <div className="min-w-0">
                             <dt className={TERM}>{tf.check_label ?? 'Fra kontrollhandling'}</dt>
                             <dd className="mt-1 break-words text-base" data-testid="compliance-finding-check">
-                                <a href={`#check-${finding.check.id}`} className="font-semibold text-violet-700 hover:text-violet-900">{finding.check.title}</a>
+                                <a href={`#check-${finding.check.id}`} onClick={() => focusInPageTarget(`#check-${finding.check.id}`)} className="font-semibold text-violet-700 hover:text-violet-900">{finding.check.title}</a>
                             </dd>
                         </div>
                     )}
@@ -405,7 +423,7 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
                         <p>{(tf.handed_off_meta ?? 'Overført :date av :name').replace(':date', formatDay(finding.handed_off_at.slice(0, 10))).replace(':name', finding.handed_off_by_name ?? ta.unknown_user ?? 'en tidligere bruker')}</p>
                     )}
                     {finding.case_link && (
-                        <Link href={finding.case_link.url} className="mt-1 inline-block break-words font-semibold text-violet-700 hover:text-violet-900" data-testid="compliance-finding-case-link">
+                        <Link href={finding.case_link.url} id={`compliance-finding-case-link-${finding.id}`} className="mt-1 inline-block break-words font-semibold text-violet-700 hover:text-violet-900" data-testid="compliance-finding-case-link">
                             {tf.open_case ?? 'Åpne saken'}: {finding.case_link.title}
                         </Link>
                     )}
@@ -415,13 +433,13 @@ function FindingCard({ auditId, finding, options, types, handoff, panel, setPane
             {panel === null && (perms.can_edit || perms.can_delete || perms.can_hand_off) && (
                 <div className="flex flex-wrap gap-2" data-testid="compliance-finding-actions">
                     {perms.can_hand_off && (
-                        <button type="button" onClick={() => setPanel(`handoff-${finding.id}`)} className={PRIMARY_ACTION}>{tf.hand_off ?? 'Følg opp i Avvik og forbedringer'}</button>
+                        <button id={handOffId(finding.id)} type="button" onClick={() => setPanel(`handoff-${finding.id}`)} aria-describedby={headingId(finding.id)} className={PRIMARY_ACTION}>{tf.hand_off ?? 'Følg opp i Avvik og forbedringer'}</button>
                     )}
                     {perms.can_edit && (
-                        <button type="button" onClick={() => setPanel(`edit-${finding.id}`)} className={SECONDARY_ACTION}>{tf.edit ?? 'Rediger'}</button>
+                        <button id={editId(finding.id)} type="button" onClick={() => setPanel(`edit-${finding.id}`)} aria-describedby={headingId(finding.id)} className={SECONDARY_ACTION}>{tf.edit ?? 'Rediger'}</button>
                     )}
                     {perms.can_delete && (
-                        <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{tf.delete ?? 'Slett'}</button>
+                        <button id={deleteId(finding.id)} type="button" onClick={destroy} aria-describedby={headingId(finding.id)} className={DESTRUCTIVE_ACTION}>{tf.delete ?? 'Slett'}</button>
                     )}
                 </div>
             )}
@@ -444,23 +462,46 @@ export default function AuditFindings({ audit, findings = [], options = null, ty
     // 'create', 'edit-<id>', 'handoff-<id>' or none.
     const [panel, setPanel] = useState(null);
     const notice = findingsNotice(audit.status, ta);
+    const sectionRef = useRef(null);
+    const findingIds = findings.map((finding) => finding.id);
+    // Whether the open Nytt funn came from «Registrer funn» on a check (and so returns there).
+    const fromDraft = useRef(false);
+
+    // A form opens in place of its button: focus goes into it, and back when it closes (A11Y-014).
+    // Nytt funn from «Registrer funn» returns to that button; a hand-off that went through, whose
+    // button is gone, to the new case link or the finding's heading.
+    usePanelSwitchFocus(panel, {
+        containerRef: sectionRef,
+        returnTargets: (key) => {
+            if (key === 'create') {
+                return [fromDraft.current && draft ? `compliance-check-new-finding-${draft.check_id}` : null, 'compliance-findings-create', 'compliance-audit-findings-heading'].filter(Boolean);
+            }
+
+            const id = key.replace(/^(edit|handoff)-/, '');
+
+            return key.startsWith('handoff-')
+                ? [handOffId(id), `compliance-finding-case-link-${id}`, headingId(id)]
+                : [editId(id), headingId(id)];
+        },
+    });
 
     useEffect(() => {
         if (draft && canRecord) {
+            fromDraft.current = true;
             setPanel('create');
             document.getElementById('compliance-audit-findings-heading')?.scrollIntoView({ block: 'start' });
         }
     }, [draft?.key]);
 
     return (
-        <section className={CARD} aria-labelledby="compliance-audit-findings-heading" data-testid="compliance-audit-findings">
+        <section ref={sectionRef} className={CARD} aria-labelledby="compliance-audit-findings-heading" data-testid="compliance-audit-findings">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                     <h2 id="compliance-audit-findings-heading" className="text-xl font-semibold text-slate-950">{tf.heading ?? 'Funn'}</h2>
                     <p className="mt-1 text-base text-slate-600">{tf.intro ?? 'Det revisjonen fant. Et funn er ikke et tiltak – oppfølgingen skjer i Avvik og forbedringer.'}</p>
                 </div>
                 {canRecord && panel === null && (
-                    <button type="button" onClick={() => setPanel('create')} className={SECONDARY_ACTION}>{tf.create ?? 'Nytt funn'}</button>
+                    <button id="compliance-findings-create" type="button" onClick={() => { fromDraft.current = false; setPanel('create'); }} className={SECONDARY_ACTION}>{tf.create ?? 'Nytt funn'}</button>
                 )}
             </div>
 
@@ -481,6 +522,7 @@ export default function AuditFindings({ audit, findings = [], options = null, ty
                             key={finding.id}
                             auditId={audit.id}
                             finding={finding}
+                            findingIds={findingIds}
                             options={options}
                             types={types}
                             handoff={handoff}

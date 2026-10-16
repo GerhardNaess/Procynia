@@ -20,6 +20,7 @@ export default function SupplierDetailsSection({ headingId, testId, title, summa
                     type="button"
                     aria-expanded={open}
                     aria-controls={panelId}
+                    id={`${headingId}-toggle`}
                     onClick={onToggle}
                     className="flex min-h-12 w-full min-w-0 items-start gap-3 px-1 py-3 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500"
                     data-testid={`${testId}-toggle`}

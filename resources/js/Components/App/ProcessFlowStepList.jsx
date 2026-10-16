@@ -1,4 +1,7 @@
+import { usePage } from '@inertiajs/react';
 import { flowReadingOrder } from '../../Support/processBlueprintLayout';
+import { isEditableStep } from '../../Support/processStepEdit';
+import { insertButtonText, insertionsAfter } from './processFlowA11y';
 
 /**
  * The flow as text: who does what, in order.
@@ -11,9 +14,26 @@ import { flowReadingOrder } from '../../Support/processBlueprintLayout';
  * owner verifying that Procynia read their description correctly does that far faster down a list
  * of sentences than across a swimlane, and the list is also what survives being read aloud in a
  * review meeting.
+ *
+ * It is also the diagram's accessible equivalent (WCAG Fase 6, A11Y-004): everything that can be
+ * started from a box or an arrow can be started here, through the same handlers and the same dialogs
+ * — «Rediger» opens the step's dialog (and from there «Flytt steg» and the controls), «Legg til
+ * aktivitet etter» puts a new activity on the same arrow the diagram's «+» does. Given only where the
+ * diagram is editable; the list never offers more than the picture.
  */
-export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {}, onOpenSubprocess = null, onOpenActivity = null }) {
+export default function ProcessFlowStepList({
+    tb,
+    blueprint,
+    controlsByKey = {},
+    onOpenSubprocess = null,
+    onOpenActivity = null,
+    // The diagram's handlers, passed on unchanged: told which step or arrow, the panel does the rest.
+    onEditStep = null,
+    onInsertStep = null,
+}) {
+    const ta = usePage().props.translations?.a11y ?? {};
     const steps = flowReadingOrder(blueprint);
+    const nodeByKey = new Map((blueprint?.nodes ?? []).map((node) => [node.key, node]));
 
     if (steps.length === 0) {
         return <p className="text-base text-slate-500">{tb.steps_list_empty ?? 'Flyten har ingen steg.'}</p>;
@@ -23,7 +43,12 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
 
     return (
         <ol className="space-y-3">
-            {steps.map((step, index) => (
+            {steps.map((step, index) => {
+                const node = nodeByKey.get(step.key);
+                const editable = typeof onEditStep === 'function' && isEditableStep(node);
+                const insertions = typeof onInsertStep === 'function' ? insertionsAfter(blueprint, step.key) : [];
+
+                return (
                 <li key={step.key} className="flex gap-4">
                     <span
                         aria-hidden="true"
@@ -32,7 +57,7 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                         {index + 1}
                     </span>
 
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                         {/* The role, or what kind of thing this is when no role performs it. A
                             decision is attributed to whoever decides, so it keeps its role and
                             gains the word "Beslutning" rather than losing one for the other. */}
@@ -115,12 +140,48 @@ export default function ProcessFlowStepList({ tb, blueprint, controlsByKey = {},
                                 {(tb.step_outcomes ?? 'Utfall: :outcomes').replace(':outcomes', step.outcomes.join(' / '))}
                             </p>
                         )}
+
+                        {(editable || insertions.length > 0) && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                {editable && (
+                                    <button
+                                        type="button"
+                                        id={`process-step-edit-${step.key}`}
+                                        className={STEP_ACTION}
+                                        onClick={() => onEditStep(node)}
+                                        aria-label={(tb.step_edit_open ?? 'Rediger steget :label').replace(':label', step.label ?? '')}
+                                    >
+                                        {ta.quality_step_edit ?? 'Rediger steget'}
+                                    </button>
+                                )}
+                                {insertions.map((insertion) => {
+                                    const { text, label } = insertButtonText(ta, insertion, insertions.length > 1);
+
+                                    return (
+                                        <button
+                                            key={`${insertion.from}->${insertion.to}#${insertion.label ?? ''}`}
+                                            type="button"
+                                            className={STEP_ACTION}
+                                            onClick={() => onInsertStep({ from: insertion.from, to: insertion.to, label: insertion.label })}
+                                            aria-label={label}
+                                        >
+                                            <span aria-hidden="true">+ </span>
+                                            {text}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 </li>
-            ))}
+                );
+            })}
         </ol>
     );
 }
+
+/** Quiet like the diagram's own controls: it changes the working version, it does not publish. */
+const STEP_ACTION = 'inline-flex min-h-9 items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600';
 
 /** "2 kunnskapssider" — a count, never the titles: see the diagram's ArticleMarker. */
 function articleLabel(tb, articles) {

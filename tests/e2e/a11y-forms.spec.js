@@ -200,8 +200,9 @@ test('the focus ring of a first-column link and a last-column button is not cut 
     await page.goto('/app/quality?tab=processes');
 
     const region = page.locator('[data-scroll-region]').first();
-    const firstLink = region.locator('tbody tr').first().locator('td').first().locator('a');
-    const lastButton = region.locator('tbody tr').first().locator('td').last().locator('button');
+    // Fase 6 made the first cell the row header (<th scope="row">, A11Y-108), so cells are th or td.
+    const firstLink = region.locator('tbody tr').first().locator('th, td').first().locator('a');
+    const lastButton = region.locator('tbody tr').first().locator('th, td').last().locator('button');
 
     if (await firstLink.count() === 0) {
         test.skip(true, 'No seeded quality process in this environment.');

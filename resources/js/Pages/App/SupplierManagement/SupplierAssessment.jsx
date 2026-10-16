@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT, TEXTAREA } from '../../../Support/formStyles';
 import { formatLongDate } from '../Improvements/improvementStatus';
-import RequiredMark from '../Risk/RequiredMark';
 import SupplierCriticalityBadge from './SupplierCriticalityBadge';
+import SupplierField, { BUSY, FieldError, RequiredNote, RequiredStar, groupA11y } from './SupplierField';
+import { useInlinePanelFocus } from './supplierFocus';
 import {
     ASSESSMENT_CRITERIA,
     RESULT_TONES,
@@ -21,7 +24,6 @@ import {
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const TERM = 'text-base font-semibold text-slate-600';
 const VALUE = 'mt-1 break-words text-base text-slate-900';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LEGEND = 'text-base font-semibold text-slate-900';
 const ERROR = 'mt-1 text-base text-rose-700';
 
@@ -44,13 +46,13 @@ function Ratings({ ratings, tr }) {
  * offered only when the page can hand off (onFollowUp is null otherwise). The form opens under Avvik
  * og forbedringer hos leverandøren; the assessment itself never changes.
  */
-function FollowUpButton({ assessment, onFollowUp, tr }) {
+function FollowUpButton({ assessment, onFollowUp, describedBy, tr }) {
     if (! onFollowUp || ! assessmentNeedsFollowUp(assessment)) {
         return null;
     }
 
     return (
-        <button type="button" onClick={() => onFollowUp(assessment)} className={SECONDARY_ACTION} data-testid="assessment-follow-up">
+        <button type="button" onClick={() => onFollowUp(assessment)} aria-describedby={describedBy} className={SECONDARY_ACTION} data-testid="assessment-follow-up">
             {tr.cases?.follow_up_assessment ?? 'Følg opp vurderingen i Avvik og forbedringer'}
         </button>
     );
@@ -74,14 +76,22 @@ function CriticalityThen({ assessment, tr }) {
 function AssessmentForm({ supplierId, supplier, criteria, ratings, results, today, onDone, tr }) {
     const a = tr.assessment ?? {};
     const form = useForm(emptyAssessment(today));
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
+    const resultGroup = groupA11y('assessment-overall-result', { error: form.errors.overall_result });
 
     const send = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplierId}/assessments`, { preserveScroll: true, onSuccess: onDone });
+
+        if (form.processing) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplierId}/assessments`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={send} className="mt-4 space-y-5 border-t border-slate-100 pt-5" data-testid="assessment-form">
+        <form ref={formRef} id="supplier-assessment-panel" onSubmit={send} className="mt-4 space-y-5 border-t border-slate-100 pt-5" data-testid="assessment-form">
             <div>
                 <h3 className="text-lg font-semibold text-slate-950">{a.form_heading ?? 'Vurder leverandør'}</h3>
                 <p className="mt-1 text-base text-slate-600">
@@ -101,11 +111,14 @@ function AssessmentForm({ supplierId, supplier, criteria, ratings, results, toda
 
             <fieldset className="space-y-3">
                 <legend className={LEGEND}>{a.criteria_heading ?? 'Hvordan fungerer leverandøren?'}</legend>
-                {criteria.map((criterion) => (
-                    <fieldset key={criterion} className="relative rounded-xl border border-slate-200 px-4 py-3" data-testid={`assessment-criterion-${criterion}`}>
+                {criteria.map((criterion) => {
+                    const group = groupA11y(`assessment-${criterion}`, { hint: Boolean(a.criteria_hints?.[criterion]), error: form.errors[criterion] });
+
+                    return (
+                    <fieldset key={criterion} className="relative rounded-xl border border-slate-200 px-4 py-3" data-testid={`assessment-criterion-${criterion}`} {...group.groupProps}>
                         <legend className="sr-only">{criterionLabel(criterion, tr)}</legend>
-                        <p className="text-base font-semibold text-slate-900" aria-hidden="true">{criterionLabel(criterion, tr)}<RequiredMark /></p>
-                        <p className="text-base text-slate-600">{a.criteria_hints?.[criterion] ?? ''}</p>
+                        <p className="text-base font-semibold text-slate-900" aria-hidden="true">{criterionLabel(criterion, tr)}<RequiredStar /></p>
+                        <p id={group.hintId} className="text-base text-slate-600">{a.criteria_hints?.[criterion] ?? ''}</p>
                         <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
                             {ratings.map((rating) => (
                                 <label key={rating} className="flex min-h-10 items-center gap-2 text-base text-slate-900">
@@ -115,18 +128,20 @@ function AssessmentForm({ supplierId, supplier, criteria, ratings, results, toda
                                         checked={form.data[criterion] === rating}
                                         onChange={() => form.setData(criterion, rating)}
                                         className="h-5 w-5 shrink-0"
+                                        {...group.optionProps}
                                     />
                                     {ratingLabel(rating, tr)}
                                 </label>
                             ))}
                         </div>
-                        {form.errors[criterion] && <p className={ERROR}>{form.errors[criterion]}</p>}
+                        <FieldError id={group.errorId} message={form.errors[criterion]} className={ERROR} />
                     </fieldset>
-                ))}
+                    );
+                })}
             </fieldset>
 
-            <fieldset className="space-y-2" data-testid="assessment-result">
-                <legend className={LEGEND}>{a.result_label ?? 'Samlet vurdering'}<RequiredMark /></legend>
+            <fieldset className="space-y-2" data-testid="assessment-result" {...resultGroup.groupProps}>
+                <legend className={LEGEND}>{a.result_label ?? 'Samlet vurdering'}<RequiredStar /></legend>
                 {results.map((result) => (
                     <label key={result} className="flex min-h-10 items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-base font-semibold text-slate-900">
                         <input
@@ -135,49 +150,46 @@ function AssessmentForm({ supplierId, supplier, criteria, ratings, results, toda
                             checked={form.data.overall_result === result}
                             onChange={() => form.setData('overall_result', result)}
                             className="h-5 w-5 shrink-0"
+                            {...resultGroup.optionProps}
                         />
                         {resultLabel(result, tr)}
                     </label>
                 ))}
-                {form.errors.overall_result && <p className={ERROR}>{form.errors.overall_result}</p>}
+                <FieldError id={resultGroup.errorId} message={form.errors.overall_result} className={ERROR} />
             </fieldset>
 
-            <div>
-                <label htmlFor="supplier-assessment-rationale" className={`block ${LEGEND}`}>{a.rationale_label ?? 'Begrunnelse'}<RequiredMark /></label>
-                <p id="supplier-assessment-rationale-hint" className="mt-1 text-base text-slate-600">{a.rationale_hint ?? 'Hvorfor fikk leverandøren denne vurderingen?'}</p>
-                <textarea
-                    id="supplier-assessment-rationale"
-                    rows={4}
-                    required
-                    aria-required="true"
-                    aria-describedby="supplier-assessment-rationale-hint"
-                    value={form.data.rationale}
-                    onChange={(event) => form.setData('rationale', event.target.value)}
-                    className={`mt-1 ${INPUT}`}
-                />
-                {form.errors.rationale && <p className={ERROR}>{form.errors.rationale}</p>}
-            </div>
+            <SupplierField id="supplier-assessment-rationale" label={a.rationale_label ?? 'Begrunnelse'} hint={a.rationale_hint ?? 'Hvorfor fikk leverandøren denne vurderingen?'} error={form.errors.rationale} required>
+                {(field) => (
+                    <textarea
+                        {...field}
+                        rows={4}
+                        required
+                        value={form.data.rationale}
+                        onChange={(event) => form.setData('rationale', event.target.value)}
+                        className={`mt-1 ${TEXTAREA}`}
+                    />
+                )}
+            </SupplierField>
 
-            <div>
-                <label htmlFor="supplier-assessment-date" className={`block ${LEGEND}`}>{a.assessed_on_label ?? 'Vurderingsdato'}<RequiredMark /></label>
-                <p id="supplier-assessment-date-hint" className="mt-1 text-base text-slate-600">{a.assessed_on_hint ?? 'Dagen vurderingen gjelder. Kan ikke være fram i tid.'}</p>
-                <input
-                    id="supplier-assessment-date"
-                    type="date"
-                    required
-                    aria-required="true"
-                    aria-describedby="supplier-assessment-date-hint"
-                    max={today}
-                    value={form.data.assessed_on}
-                    onChange={(event) => form.setData('assessed_on', event.target.value)}
-                    className={`mt-1 ${INPUT} md:max-w-xs`}
-                />
-                {form.errors.assessed_on && <p className={ERROR}>{form.errors.assessed_on}</p>}
-            </div>
+            <SupplierField id="supplier-assessment-date" label={a.assessed_on_label ?? 'Vurderingsdato'} hint={a.assessed_on_hint ?? 'Dagen vurderingen gjelder. Kan ikke være fram i tid.'} error={form.errors.assessed_on} required>
+                {(field) => (
+                    <input
+                        {...field}
+                        type="date"
+                        required
+                        max={today}
+                        value={form.data.assessed_on}
+                        onChange={(event) => form.setData('assessed_on', event.target.value)}
+                        className={`mt-1 ${INPUT} md:max-w-xs`}
+                    />
+                )}
+            </SupplierField>
+
+            <RequiredNote tr={tr} />
 
             <div className="flex flex-wrap justify-end gap-3">
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (a.submit ?? 'Lagre vurdering')}
                 </button>
             </div>
@@ -198,9 +210,11 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
     const [open, setOpen] = useState(false);
     const [current, ...earlier] = assessments;
     const date = (iso) => formatLongDate(iso, locale);
+    // Vurder leverandør opens in place of its button: focus in, and back to it (A11Y-014).
+    const rememberTrigger = useInlinePanelFocus(open ? 'assess' : null, { panelId: 'supplier-assessment-panel', fallbackIds: ['supplier-assess-button', 'supplier-assessment-heading'] });
 
     return (
-        <section className={CARD} aria-labelledby="supplier-assessment-heading" data-testid="supplier-assessment">
+        <section className={CARD} aria-labelledby="supplier-assessment-heading" data-testid="supplier-assessment" onClickCapture={rememberTrigger}>
             <h2 id="supplier-assessment-heading" className="text-xl font-semibold text-slate-950">{a.heading ?? 'Leverandørvurdering'}</h2>
             <p className="mt-1 text-base text-slate-600">{a.intro ?? 'Hvordan leverandøren fungerer nå – ikke hvor viktig den er.'}</p>
 
@@ -213,7 +227,7 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
                         </div>
                         <div className="min-w-0">
                             <dt className={TERM}>{a.last_assessed ?? 'Sist vurdert'}</dt>
-                            <dd className={VALUE}>{date(current.assessed_on)}</dd>
+                            <dd className={VALUE} id={`assessment-${current.id}-date`}>{date(current.assessed_on)}</dd>
                         </div>
                         <div className="min-w-0">
                             <dt className={TERM}>{a.assessed_by ?? 'Vurdert av'}</dt>
@@ -230,14 +244,14 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
                         <p className={`${VALUE} whitespace-pre-line`} data-testid="assessment-rationale">{current.rationale}</p>
                     </div>
                     <CriticalityThen assessment={current} tr={tr} />
-                    <FollowUpButton assessment={current} onFollowUp={onFollowUp} tr={tr} />
+                    <FollowUpButton assessment={current} onFollowUp={onFollowUp} describedBy={`assessment-${current.id}-date`} tr={tr} />
                 </div>
             ) : (
                 <p className="mt-4 text-base text-slate-800" data-testid="assessment-none">{a.none ?? 'Leverandøren er ikke vurdert ennå.'}</p>
             )}
 
             {permissions.can_assess && ! open && (
-                <button type="button" onClick={() => setOpen(true)} className={`mt-4 ${PRIMARY_ACTION}`}>{a.assess ?? 'Vurder leverandør'}</button>
+                <button type="button" id="supplier-assess-button" data-panel-trigger="" onClick={() => setOpen(true)} className={`mt-4 ${PRIMARY_ACTION}`}>{a.assess ?? 'Vurder leverandør'}</button>
             )}
             {! permissions.can_assess && permissions.has_assess_right && (
                 <p className="mt-4 text-base text-slate-600">
@@ -266,7 +280,7 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
                     <ol className="mt-2 divide-y divide-slate-100" data-testid="assessment-history">
                         {earlier.map((entry) => (
                             <li key={entry.id} className="space-y-1 py-3" data-testid="assessment-history-entry">
-                                <p className="text-base text-slate-600">
+                                <p className="text-base text-slate-600" id={`assessment-${entry.id}-byline`}>
                                     {(a.history_entry ?? 'Vurdert :date av :name')
                                         .replace(':date', date(entry.assessed_on))
                                         .replace(':name', entry.assessed_by_name ?? (tr.unknown_user ?? 'en tidligere bruker'))}
@@ -276,7 +290,7 @@ export default function SupplierAssessment({ supplier, assessments = [], permiss
                                 </p>
                                 <CriticalityThen assessment={entry} tr={tr} />
                                 <p className="whitespace-pre-line break-words text-base text-slate-800">{entry.rationale}</p>
-                                <FollowUpButton assessment={entry} onFollowUp={onFollowUp} tr={tr} />
+                                <FollowUpButton assessment={entry} onFollowUp={onFollowUp} describedBy={`assessment-${entry.id}-byline`} tr={tr} />
                                 <details className="pt-1">
                                     <summary className="cursor-pointer text-base font-semibold text-violet-700">{a.criteria_heading ?? 'Hvordan fungerer leverandøren?'}</summary>
                                     <div className="mt-2"><Ratings ratings={entry.ratings} tr={tr} /></div>

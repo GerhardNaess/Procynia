@@ -35,7 +35,7 @@ async function openFlow(page, title) {
 
     await link.first().click();
     await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
-    await expect(page.getByRole('img', { name: /Prosessflyt/ })).toBeVisible();
+    await expect(page.locator('svg[aria-label^="Prosessflyt"]')).toBeVisible();
 }
 
 test.describe('an activity as a source of knowledge articles', () => {
@@ -43,7 +43,7 @@ test.describe('an activity as a source of knowledge articles', () => {
         await openFlow(page, PROCESS);
 
         // The indicator on the diagram: a count, discreetly, on the node itself.
-        await expect(page.locator('svg[role="img"]').getByText('2 kunnskapssider')).toBeVisible();
+        await expect(page.locator('svg[aria-label^="Prosessflyt"]').getByText('2 kunnskapssider')).toBeVisible();
 
         await page.getByRole('button', { name: `Åpne kunnskapen bak ${ACTIVITY}` }).first().click();
 
@@ -120,7 +120,7 @@ test.describe('an activity as a source of knowledge articles', () => {
     test('an activity that has produced nothing still offers the way in', async ({ page }) => {
         await openFlow(page, 'E2E liten prosess');
 
-        await expect(page.locator('svg[role="img"]').getByText(/kunnskapssid/)).toHaveCount(0);
+        await expect(page.locator('svg[aria-label^="Prosessflyt"]').getByText(/kunnskapssid/)).toHaveCount(0);
         await expect(page.getByRole('button', { name: /Åpne kunnskapen bak/ }).first()).toBeVisible();
     });
 });

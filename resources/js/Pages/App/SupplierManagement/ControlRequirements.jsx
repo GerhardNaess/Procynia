@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { router, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION, WARNING_ACTION } from '../../../Support/actionStyles';
+import { refocusIfLost } from '../../../Support/focusManagement';
 import ControlRequirementForm from './ControlRequirementForm';
 import RequirementStatusHistory from './RequirementStatusHistory';
 import RequirementTemplates from './RequirementTemplates';
 import WikiGuidance from './WikiGuidance';
 import { LEVEL_TONES, anchorLabel, appliesToText, controlPointLabel, groupByTheme, intervalLabel, levelLabel } from './controlRequirements';
 import { supplierHelp } from './supplierHelp';
+import { removalFocusCandidates } from './supplierA11y';
+import { useInlinePanelFocus } from './supplierFocus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
 const HINT = 'text-base text-slate-600';
@@ -38,24 +41,45 @@ export default function SupplierControlRequirementsIndex() {
     const close = () => setEditing(null);
     const groups = groupByTheme(requirements, tr);
     const base = '/app/supplier-management/control-requirements';
+    // A row's buttons, named by its title for a screen reader (A11Y-109), and found again by id.
+    const titleId = (row) => `control-catalogue-${row.id}-title`;
+    const actionId = (row, kind) => `control-catalogue-${row.id}-${kind}`;
+    // Nytt kontrollkrav and Rediger open in place of their buttons: focus in, and back (A11Y-014).
+    const lastEdited = useRef(null);
 
-    const post = (url, confirmText = null) => {
+    if (editing !== null) {
+        lastEdited.current = editing;
+    }
+
+    const rememberTrigger = useInlinePanelFocus(editing === null ? null : String(editing), {
+        panelId: 'control-requirement-panel',
+        fallbackIds: lastEdited.current === 'new' ? ['control-requirement-create', 'control-register-heading'] : [`control-catalogue-${lastEdited.current}`, 'control-register-heading'],
+    });
+
+    // Sett som utgått and Ta i bruk igjen swap places: focus goes to the one that replaced it.
+    const post = (row, url, confirmText = null) => {
         if (confirmText && ! window.confirm(confirmText)) {
             return;
         }
 
-        router.post(url, {}, { preserveScroll: true });
+        router.post(url, {}, { preserveScroll: true, onSuccess: () => refocusIfLost([actionId(row, 'status'), actionId(row, 'edit')]) });
     };
 
+    // A deleted row takes its buttons with it: focus goes to the next row, the previous one, or the heading.
     const destroy = (requirement) => {
         if (window.confirm(k.delete_confirm ?? 'Slette kravet for godt? Dette kan ikke angres.')) {
-            router.delete(`${base}/${requirement.id}`, { preserveScroll: true });
+            const order = groups.flatMap((group) => group.rows.map((row) => row.id));
+
+            router.delete(`${base}/${requirement.id}`, {
+                preserveScroll: true,
+                onSuccess: () => refocusIfLost(removalFocusCandidates(order, requirement.id, (id) => `control-catalogue-${id}-edit`, ['control-register-heading'])),
+            });
         }
     };
 
     return (
         <CustomerAppLayout title={k.heading ?? 'Kontrollkrav'} showPageTitle={false} workView={editing === 'new' ? (k.create ?? 'Nytt kontrollkrav') : null}>
-            <div className="space-y-6">
+            <div className="space-y-6" onClickCapture={rememberTrigger}>
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{k.heading ?? 'Kontrollkrav'}</h1>
@@ -64,7 +88,7 @@ export default function SupplierControlRequirementsIndex() {
                     <div className="flex flex-wrap items-center gap-2">
                         <PageHelpButton {...supplierHelp(tr, 'control_requirements')} />
                         {canManage && editing === null && (
-                            <button type="button" onClick={() => setEditing('new')} className={PRIMARY_ACTION}>{k.create ?? 'Nytt kontrollkrav'}</button>
+                            <button type="button" id="control-requirement-create" data-panel-trigger="" onClick={() => setEditing('new')} className={PRIMARY_ACTION}>{k.create ?? 'Nytt kontrollkrav'}</button>
                         )}
                     </div>
                 </header>
@@ -75,10 +99,10 @@ export default function SupplierControlRequirementsIndex() {
                     </p>
                 )}
 
-                {errors.requirement && <p className="text-base text-rose-700">{errors.requirement}</p>}
+                {errors.requirement && <p className="text-base text-rose-700" data-form-error-summary="">{errors.requirement}</p>}
 
                 {editing === 'new' && (
-                    <section className={CARD} aria-labelledby="control-requirement-new-heading">
+                    <section id="control-requirement-panel" className={CARD} aria-labelledby="control-requirement-new-heading">
                         <h2 id="control-requirement-new-heading" className="text-xl font-semibold text-slate-950">{k.create_heading ?? 'Nytt kontrollkrav'}</h2>
                         <ControlRequirementForm options={formOptions ?? {}} onDone={close} tr={tr} />
                     </section>
@@ -101,9 +125,9 @@ export default function SupplierControlRequirementsIndex() {
                             <h3 id={`control-theme-${group.theme}`} className="text-xl font-semibold text-slate-950">{group.label}</h3>
                             <ul className="mt-3 space-y-3">
                                 {group.rows.map((row) => (
-                                    <li key={row.id} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-catalogue-row">
+                                    <li key={row.id} id={`control-catalogue-${row.id}`} className="min-w-0 rounded-xl border border-slate-200 p-4" data-testid="control-catalogue-row">
                                         <div className="flex flex-wrap items-center gap-2">
-                                            <span className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
+                                            <span id={titleId(row)} className="min-w-0 break-words text-base font-semibold text-slate-950">{row.title}</span>
                                             <StatusBadge tone={LEVEL_TONES[row.level] ?? 'slate'}>{levelLabel(row.level, tr)}</StatusBadge>
                                             {row.status === 'retired' && <StatusBadge tone="slate">{k.retired ?? 'Utgått'}</StatusBadge>}
                                         </div>
@@ -131,20 +155,20 @@ export default function SupplierControlRequirementsIndex() {
 
                                         {canManage && editing === null && (
                                             <div className="mt-3 flex flex-wrap gap-2">
-                                                <button type="button" onClick={() => setEditing(row.id)} className={SECONDARY_ACTION}>{k.edit ?? 'Rediger'}</button>
+                                                <button type="button" id={actionId(row, 'edit')} data-panel-trigger="" aria-describedby={titleId(row)} onClick={() => setEditing(row.id)} className={SECONDARY_ACTION}>{k.edit ?? 'Rediger'}</button>
                                                 {row.status === 'active' ? (
-                                                    <button type="button" onClick={() => post(`${base}/${row.id}/retire`, k.retire_confirm)} className={WARNING_ACTION}>{k.retire ?? 'Sett som utgått'}</button>
+                                                    <button type="button" id={actionId(row, 'status')} aria-describedby={titleId(row)} onClick={() => post(row, `${base}/${row.id}/retire`, k.retire_confirm)} className={WARNING_ACTION}>{k.retire ?? 'Sett som utgått'}</button>
                                                 ) : (
-                                                    <button type="button" onClick={() => post(`${base}/${row.id}/reactivate`)} className={SECONDARY_ACTION}>{k.reactivate ?? 'Ta i bruk igjen'}</button>
+                                                    <button type="button" id={actionId(row, 'status')} aria-describedby={titleId(row)} onClick={() => post(row, `${base}/${row.id}/reactivate`)} className={SECONDARY_ACTION}>{k.reactivate ?? 'Ta i bruk igjen'}</button>
                                                 )}
-                                                {row.deletable && <button type="button" onClick={() => destroy(row)} className={DESTRUCTIVE_ACTION}>{k.delete ?? 'Slett'}</button>}
+                                                {row.deletable && <button type="button" aria-describedby={titleId(row)} onClick={() => destroy(row)} className={DESTRUCTIVE_ACTION}>{k.delete ?? 'Slett'}</button>}
                                             </div>
                                         )}
                                         {editing === row.id && (
-                                            <>
+                                            <div id="control-requirement-panel">
                                                 <h4 className="mt-4 text-lg font-semibold text-slate-950">{k.edit_heading ?? 'Rediger kontrollkrav'}</h4>
                                                 <ControlRequirementForm requirement={row} options={formOptions ?? {}} onDone={close} tr={tr} />
-                                            </>
+                                            </div>
                                         )}
                                     </li>
                                 ))}

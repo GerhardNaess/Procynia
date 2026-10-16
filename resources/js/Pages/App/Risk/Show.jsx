@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DESTRUCTIVE_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
 import RiskAcceptancePanel from './RiskAcceptancePanel';
 import RiskAssessmentPanel from './RiskAssessmentPanel';
 import RiskContextPanel from './RiskContextPanel';
@@ -75,9 +76,22 @@ export default function RiskShow() {
         setEditFocus(null);
     }, [editing, editFocus]);
 
-    const startEditing = (fieldId = null) => {
+    // Rediger, Behandling → Endre and Vurderingsintervall → Endre all open the same form and are all
+    // hidden while it is open. Focus goes into the form (its first field, or the one the section is
+    // about) and, when it closes, back to the button that opened it (2.4.3, A11Y-014).
+    const editReturnRef = useRef('risk-edit-button');
+    const editFormRef = useRef(null);
+    const focusFirstError = useFocusFirstError(editFormRef);
+
+    const startEditing = (fieldId = 'risk-title', triggerId = 'risk-edit-button') => {
+        editReturnRef.current = triggerId;
         setEditFocus(fieldId);
         setEditing(true);
+    };
+
+    const stopEditing = () => {
+        setEditing(false);
+        refocusIfLost([editReturnRef.current, 'risk-edit-button', 'risk-heading']);
     };
 
     const form = useForm({
@@ -97,7 +111,8 @@ export default function RiskShow() {
         event.preventDefault();
         form.patch(`/app/risk/risks/${risk.id}`, {
             preserveScroll: true,
-            onSuccess: () => setEditing(false),
+            onSuccess: stopEditing,
+            onError: () => focusFirstError(),
         });
     };
 
@@ -114,7 +129,7 @@ export default function RiskShow() {
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{risk.title}</h1>
+                        <h1 id="risk-heading" className="text-3xl font-semibold tracking-tight text-slate-950">{risk.title}</h1>
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-semibold text-slate-600">{tr.status_label ?? 'Status'}:</span>
                             <StatusBadge tone={RISK_STATUS_TONES[risk.status] ?? 'slate'}>
@@ -146,7 +161,7 @@ export default function RiskShow() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                         {permissions.can_edit && ! editing && (
-                            <button type="button" onClick={() => startEditing()} className={SECONDARY_ACTION}>
+                            <button id="risk-edit-button" type="button" onClick={() => startEditing()} className={SECONDARY_ACTION}>
                                 {tr.edit ?? 'Rediger'}
                             </button>
                         )}
@@ -163,7 +178,8 @@ export default function RiskShow() {
                         <RiskForm
                             form={form}
                             onSubmit={submit}
-                            onCancel={() => { setEditing(false); form.reset(); form.clearErrors(); }}
+                            onCancel={() => { stopEditing(); form.reset(); form.clearErrors(); }}
+                            formRef={editFormRef}
                             areaOptions={areaOptions}
                             ownerOptions={ownerOptions}
                             statuses={statuses}
@@ -199,7 +215,7 @@ export default function RiskShow() {
                                 <RiskReviewSchedule
                                     schedule={reviewSchedule}
                                     status={risk.status}
-                                    onEdit={permissions.can_edit ? () => startEditing('risk-review-interval') : null}
+                                    onEdit={permissions.can_edit ? () => startEditing('risk-review-interval', 'risk-review-interval-edit') : null}
                                     tr={tr}
                                 />
                             )}
@@ -221,7 +237,7 @@ export default function RiskShow() {
                     <RiskTreatmentStrategy
                         strategy={risk.treatment_strategy}
                         decision={riskAcceptance}
-                        onEdit={permissions.can_edit ? () => startEditing('risk-treatment-strategy') : null}
+                        onEdit={permissions.can_edit ? () => startEditing('risk-treatment-strategy', 'risk-treatment-strategy-edit') : null}
                         tr={tr}
                     />
                 )}

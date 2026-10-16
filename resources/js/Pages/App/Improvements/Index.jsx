@@ -1,17 +1,22 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ScrollRegion from '../../../Components/App/ScrollRegion';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { announce } from '../../../Support/announcer';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT } from '../../../Support/formStyles';
+import { resultCountMessage } from '../Risk/riskA11y';
+import useInlinePanelFocus from '../Risk/useInlinePanelFocus';
 import ImprovementAttention from './ImprovementAttention';
 import ImprovementForm from './ImprovementForm';
 import { improvementHelp } from './improvementHelp';
 import { IMPROVEMENT_STATUS_TONES, IMPROVEMENT_TYPE_TONES, actionIndicator, formatDay } from './improvementStatus';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const FILTER_LABEL = 'block text-base font-semibold text-slate-700';
 
 /**
@@ -99,9 +104,35 @@ export default function ImprovementsIndex() {
         due_date: '',
     });
 
+    // The two Registrer buttons are hidden while the form is open. Focus goes to the form (named by
+    // its heading, so the chosen type is heard before the first field) and back to the button that
+    // opened it on Avbryt (A11Y-014). A rejected save puts focus on the first invalid field (A11Y-013).
+    const createPanelRef = useRef(null);
+    const createFormRef = useRef(null);
+    const createTriggerRef = useRef('improvement-create-deviation');
+    const focusFirstError = useFocusFirstError(createFormRef);
+    useInlinePanelFocus(creating, {
+        panelRef: createPanelRef,
+        returnIds: [createTriggerRef.current, 'improvement-create-deviation', 'improvement-index-heading'],
+        initialFocus: 'panel',
+    });
+
     const startCreate = (caseType) => {
+        createTriggerRef.current = `improvement-create-${caseType}`;
         form.setData('type', caseType);
         setCreating(true);
+    };
+
+    // The number of cases found is said once when a search answers (4.1.3, A11Y-111), in the
+    // register's own words — never on first load.
+    const announceCount = (withFilter) => (page) => {
+        const total = page?.props?.cases?.length ?? 0;
+
+        announce(resultCountMessage(total, {
+            many: tr.count ?? ':count saker',
+            one: tr.count_one ?? '1 sak',
+            none: withFilter ? (tr.no_matches ?? 'Ingen saker passer søket.') : null,
+        }));
     };
 
     const submitSearch = (event) => {
@@ -111,7 +142,7 @@ export default function ImprovementsIndex() {
             type: type || undefined,
             status: status || undefined,
             area: area || undefined,
-        }, { preserveState: true, replace: true });
+        }, { preserveState: true, replace: true, onSuccess: announceCount(Boolean(search || type || status || area)) });
     };
 
     const resetSearch = () => {
@@ -119,12 +150,19 @@ export default function ImprovementsIndex() {
         setType('');
         setStatus('');
         setArea('');
-        router.get('/app/improvements', {}, { replace: true });
+        // «Nullstill» goes away with the filters it cleared; focus goes back to the search field.
+        router.get('/app/improvements', {}, {
+            replace: true,
+            onSuccess: (page) => {
+                announceCount(false)(page);
+                refocusIfLost(['improvement-search']);
+            },
+        });
     };
 
     const submitCreate = (event) => {
         event.preventDefault();
-        form.post('/app/improvements', { preserveScroll: true });
+        form.post('/app/improvements', { preserveScroll: true, onError: () => focusFirstError() });
     };
 
     const filtered = Boolean(filters.search || filters.type || filters.status || filters.area);
@@ -139,7 +177,7 @@ export default function ImprovementsIndex() {
             <div className="space-y-6">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.index_heading ?? 'Avvik og forbedringer'}</h1>
+                        <h1 id="improvement-index-heading" className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{tr.index_heading ?? 'Avvik og forbedringer'}</h1>
                         <p className="max-w-3xl text-base leading-6 text-slate-600">
                             {tr.index_subtitle ?? 'Det som ikke er som det skal, og det som kan bli bedre – med ansvarlig, frist og behandling samlet på ett sted.'}
                         </p>
@@ -151,10 +189,10 @@ export default function ImprovementsIndex() {
                         <PageHelpButton {...improvementHelp(tr, 'index')} />
                         {canCreate && ! creating && (
                             <>
-                                <button type="button" onClick={() => startCreate('deviation')} className={PRIMARY_ACTION}>
+                                <button id="improvement-create-deviation" type="button" onClick={() => startCreate('deviation')} className={PRIMARY_ACTION}>
                                     {tr.create_deviation ?? 'Registrer avvik'}
                                 </button>
-                                <button type="button" onClick={() => startCreate('improvement')} className={PRIMARY_ACTION}>
+                                <button id="improvement-create-improvement" type="button" onClick={() => startCreate('improvement')} className={PRIMARY_ACTION}>
                                     {tr.create_improvement ?? 'Registrer forbedring'}
                                 </button>
                             </>
@@ -163,10 +201,11 @@ export default function ImprovementsIndex() {
                 </header>
 
                 {creating && (
-                    <section className={CARD} aria-labelledby="improvement-create-heading">
+                    <section ref={createPanelRef} className={CARD} aria-labelledby="improvement-create-heading">
                         <h2 id="improvement-create-heading" className="mb-4 text-xl font-semibold text-slate-950">{tr.create_heading ?? 'Registrer sak'}</h2>
                         <ImprovementForm
                             form={form}
+                            formRef={createFormRef}
                             onSubmit={submitCreate}
                             onCancel={() => { setCreating(false); form.reset(); form.clearErrors(); }}
                             types={types}
@@ -272,16 +311,17 @@ export default function ImprovementsIndex() {
                                     ))}
                                 </ul>
 
-                                <div className="mt-4 hidden overflow-x-auto md:block">
+                                <ScrollRegion label={tr.index_heading ?? 'Avvik og forbedringer'} className="mt-4 hidden md:block">
                                     <table className="w-full text-base">
+                                        <caption className="sr-only">{tr.index_heading ?? 'Avvik og forbedringer'}</caption>
                                         <thead>
                                             <tr className="border-b border-slate-200 text-left text-base font-semibold text-slate-600">
-                                                <th className="pb-3 pr-4">{tr.col_type ?? 'Type'}</th>
-                                                <th className="px-4 pb-3">{tr.col_title ?? 'Tittel'}</th>
-                                                <th className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
-                                                <th className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>
-                                                <th className="px-4 pb-3">{tr.col_status ?? 'Status'}</th>
-                                                <th className="pb-3 pl-4">{tr.col_due_date ?? 'Frist'}</th>
+                                                <th scope="col" className="pb-3 pr-4">{tr.col_type ?? 'Type'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_title ?? 'Tittel'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_area ?? 'Fagområde'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_owner ?? 'Ansvarlig'}</th>
+                                                <th scope="col" className="px-4 pb-3">{tr.col_status ?? 'Status'}</th>
+                                                <th scope="col" className="pb-3 pl-4">{tr.col_due_date ?? 'Frist'}</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
@@ -290,12 +330,13 @@ export default function ImprovementsIndex() {
                                                     <td className="py-3 pr-4">
                                                         <StatusBadge tone={IMPROVEMENT_TYPE_TONES[item.type] ?? 'slate'}>{typeLabels[item.type] ?? item.type}</StatusBadge>
                                                     </td>
-                                                    <td className="px-4 py-3">
+                                                    {/* The title names the row (1.3.1). */}
+                                                    <th scope="row" className="px-4 py-3 text-left font-normal">
                                                         <Link href={item.url} className="font-semibold text-violet-700 hover:text-violet-900">{item.title}</Link>
                                                         {item.action_summary && (
                                                             <p className="mt-0.5 text-slate-600" data-testid="improvement-action-indicator">{actionIndicator(item.action_summary, tr.action_indicator)}</p>
                                                         )}
-                                                    </td>
+                                                    </th>
                                                     <td className="px-4 py-3 text-slate-700">{item.area_name}</td>
                                                     <td className="px-4 py-3 text-slate-700">
                                                         {item.owner_name ?? <span className="text-amber-800">{tr.no_owner ?? 'Mangler ansvarlig'}</span>}
@@ -308,7 +349,7 @@ export default function ImprovementsIndex() {
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
+                                </ScrollRegion>
                             </>
                         )}
                     </section>

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
+import FormField from '../../../Components/App/FormField';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
+import { useFocusFirstError, usePanelFocus } from '../../../Support/focusManagement';
+import { ERROR, INPUT, LABEL } from '../../../Support/formStyles';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
-const LABEL = 'block text-base font-semibold text-slate-700';
 
 const processLabel = (item) => (item.code ? `${item.code} · ${item.title}` : item.title);
 const activityLabel = (activity) => (activity.role ? `${activity.label} (${activity.role})` : activity.label);
@@ -25,12 +26,20 @@ function linkedChoice(option) {
  *
  * Avvik og forbedringer links a case to Kvalitet the same way and reuses this panel with its own
  * strings (tr.context) and its own `idPrefix` for element ids and test ids.
+ *
+ * Endre kobling opens in place: focus goes to the process field, and back to «Endre kobling» when the
+ * form closes (A11Y-014). The process field and the activity group carry their errors (A11Y-013).
  */
 export default function KpiContextPanel({ baseUrl, context, options, canLink, tr, idPrefix = 'kpi-context' }) {
     const tc = tr.context ?? {};
     const [editing, setEditing] = useState(false);
     const [processId, setProcessId] = useState('');
     const form = useForm({ whole_process: false, activity_keys: [] });
+    const formRef = useRef(null);
+    const editButtonRef = useRef(null);
+    const focusFirstError = useFocusFirstError(formRef);
+    usePanelFocus(editing, { panelRef: formRef, returnFocusRef: editButtonRef });
+    const activitiesErrorId = `${idPrefix}-activities-error`;
 
     const selected = options.find((option) => String(option.id) === String(processId));
 
@@ -55,7 +64,7 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
 
     const submit = (event) => {
         event.preventDefault();
-        form.put(`${baseUrl}/processes/${processId}`, { preserveScroll: true, onSuccess: close });
+        form.put(`${baseUrl}/processes/${processId}`, { preserveScroll: true, onSuccess: close, onError: focusFirstError });
     };
 
     return (
@@ -68,40 +77,39 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                     </p>
                 </div>
                 {canLink && ! editing && (
-                    <button type="button" onClick={open} className={SECONDARY_ACTION}>{tc.edit ?? 'Endre kobling'}</button>
+                    <button type="button" ref={editButtonRef} onClick={open} className={SECONDARY_ACTION}>{tc.edit ?? 'Endre kobling'}</button>
                 )}
             </div>
 
             {editing && (
-                <form onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <form ref={formRef} onSubmit={submit} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     {options.length === 0 ? (
                         <p className="text-base text-slate-700">{tc.no_options ?? 'Det finnes ingen prosesser i Kvalitet å koble til.'}</p>
                     ) : (
                         <>
-                            <div>
-                                <label htmlFor={`${idPrefix}-process`} className={LABEL}>{tc.choose_process ?? 'Prosess'}</label>
-                                <select
-                                    id={`${idPrefix}-process`}
-                                    value={processId}
-                                    onChange={(event) => choose(event.target.value)}
-                                    className={`mt-1 ${INPUT}`}
-                                >
-                                    <option value="">{tc.choose_process_placeholder ?? 'Velg en prosess …'}</option>
-                                    {options.map((option) => (
-                                        <option key={option.id} value={option.id}>{processLabel(option)}</option>
-                                    ))}
-                                </select>
-                                {form.errors.quality_process_id && (
-                                    <p className="mt-1 text-base text-rose-700">{form.errors.quality_process_id}</p>
+                            <FormField id={`${idPrefix}-process`} label={tc.choose_process ?? 'Prosess'} error={form.errors.quality_process_id}>
+                                {(field) => (
+                                    <select
+                                        {...field}
+                                        value={processId}
+                                        onChange={(event) => choose(event.target.value)}
+                                        className={INPUT}
+                                    >
+                                        <option value="">{tc.choose_process_placeholder ?? 'Velg en prosess …'}</option>
+                                        {options.map((option) => (
+                                            <option key={option.id} value={option.id}>{processLabel(option)}</option>
+                                        ))}
+                                    </select>
                                 )}
-                            </div>
+                            </FormField>
                             {selected && (
-                                <fieldset className="space-y-2">
+                                <fieldset className="space-y-2" aria-describedby={[form.errors.activity_keys ? activitiesErrorId : null, `${idPrefix}-remove-hint`].filter(Boolean).join(' ')}>
                                     <legend className={LABEL}>{tc.measures_legend ?? 'Hva måler KPI-en i denne prosessen?'}</legend>
                                     <label className="flex items-center gap-2 text-base text-slate-900">
                                         <input
                                             type="checkbox"
                                             checked={form.data.whole_process}
+                                            aria-invalid={form.errors.activity_keys ? true : undefined}
                                             onChange={(event) => form.setData('whole_process', event.target.checked)}
                                             className="h-4 w-4 rounded border-slate-300"
                                         />
@@ -112,6 +120,7 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                                             <input
                                                 type="checkbox"
                                                 checked={form.data.activity_keys.includes(activity.key)}
+                                                aria-invalid={form.errors.activity_keys ? true : undefined}
                                                 onChange={() => toggleActivity(activity.key)}
                                                 className="h-4 w-4 rounded border-slate-300"
                                             />
@@ -122,9 +131,9 @@ export default function KpiContextPanel({ baseUrl, context, options, canLink, tr
                                         <p className="text-base text-slate-600">{tc.no_activities ?? 'Prosessen har ingen aktiviteter i flyten.'}</p>
                                     )}
                                     {form.errors.activity_keys && (
-                                        <p className="text-base text-rose-700">{form.errors.activity_keys}</p>
+                                        <p id={activitiesErrorId} className={ERROR}>{form.errors.activity_keys}</p>
                                     )}
-                                    <p className="text-base text-slate-600">{tc.remove_hint ?? 'Fjern alle avkrysninger for å fjerne prosessen fra KPI-en.'}</p>
+                                    <p id={`${idPrefix}-remove-hint`} className="text-base text-slate-600">{tc.remove_hint ?? 'Fjern alle avkrysninger for å fjerne prosessen fra KPI-en.'}</p>
                                 </fieldset>
                             )}
                         </>

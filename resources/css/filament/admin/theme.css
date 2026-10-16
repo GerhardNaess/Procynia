@@ -3,3 +3,70 @@
 @source '../../../../app/Filament/**/*.php';
 @source '../../../../resources/views/filament/**/*.blade.php';
 @source '../../../../resources/views/vendor/filament/**/*.blade.php';
+
+/*
+ * WCAG 2.2 AA – Fase 6 (docs/wcag-accessibility-plan.md).
+ *
+ * The same field-border token the customer frontend uses (resources/css/app.css, A11Y-019): ≥ 3:1
+ * against white and against the dark-mode surfaces (gray-900), so the custom admin views' own inputs
+ * and selects are recognisable as fields (1.4.11). Use it as `border-field-border`.
+ */
+@theme {
+    --color-field-border: oklch(63% 0.042 257);
+}
+
+/*
+ * Filament's own small remove buttons — the × that clears a select and the × on a selected-option
+ * badge — are 16 and 20 px square, below the 24 px minimum target (2.5.8, A11Y-210). Enlarge the hit
+ * area only; the icon keeps its size. The select's clear button also has `outline: none` on focus and
+ * shows focus only by a slight colour change, so give it the panel's focus ring (2.4.7).
+ */
+.fi-select-input-value-remove-btn,
+.fi-badge-delete-btn {
+    min-width: 1.5rem;
+    min-height: 1.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fi-select-input-value-remove-btn:focus-visible,
+.fi-badge-delete-btn:focus-visible {
+    outline: 2px solid var(--primary-600);
+    outline-offset: 1px;
+    border-radius: 0.25rem;
+}
+
+.dark .fi-select-input-value-remove-btn:focus-visible,
+.dark .fi-badge-delete-btn:focus-visible {
+    outline-color: var(--primary-400);
+}
+
+/*
+ * Filament's empty-value placeholders («Intern bruker», «—» …) in tables and infolists are gray-400
+ * on white (2.6:1) and gray-500 on gray-900 in dark mode (3.7:1) — real text, so 1.4.3 applies
+ * (A11Y-211). Same for the placeholder text inside inputs. gray-600 / gray-400 give ≥ 4.5:1.
+ */
+.fi-ta-cell .fi-ta-placeholder,
+.fi-in-entry .fi-in-placeholder,
+.fi-in-placeholder {
+    color: var(--gray-600);
+}
+
+.dark .fi-ta-cell .fi-ta-placeholder,
+.dark .fi-in-entry .fi-in-placeholder,
+.dark .fi-in-placeholder {
+    color: var(--gray-400);
+}
+
+.fi-input::placeholder,
+.fi-fo-textarea textarea::placeholder,
+.fi-fo-date-time-picker input::placeholder {
+    color: var(--gray-500);
+}
+
+.dark .fi-input::placeholder,
+.dark .fi-fo-textarea textarea::placeholder,
+.dark .fi-fo-date-time-picker input::placeholder {
+    color: var(--gray-400);
+}

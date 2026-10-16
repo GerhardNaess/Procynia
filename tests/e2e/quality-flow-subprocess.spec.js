@@ -27,7 +27,7 @@ async function openFlow(page, title) {
 
     await link.first().click();
     await page.getByRole('tab', { name: 'Flyt' }).or(page.getByRole('link', { name: 'Flyt' })).first().click();
-    await expect(page.getByRole('img', { name: /Prosessflyt/ })).toBeVisible();
+    await expect(page.locator('svg[aria-label^="Prosessflyt"]')).toBeVisible();
 }
 
 test.describe('drilling into a subprocess', () => {
@@ -35,20 +35,20 @@ test.describe('drilling into a subprocess', () => {
         await openFlow(page, PARENT);
 
         // The parent's own flow, before anything is opened.
-        await expect(page.getByRole('img', { name: `Prosessflyt — ${PARENT}` })).toBeVisible();
+        await expect(page.locator(`svg[aria-label="Prosessflyt — ${PARENT}"]`)).toBeVisible();
 
         // The indicator: the node is a control, named after what it opens.
         const node = page.getByRole('button', { name: `Åpne underprosessen ${CHILD}` });
 
         await expect(node).toBeVisible();
-        await expect(page.locator('svg[role="img"]').getByText('2 steg')).toBeVisible();
+        await expect(page.locator('svg[aria-label^="Prosessflyt"]').getByText('2 steg')).toBeVisible();
 
         await node.click();
 
         // The subprocess, drawn from its own stored blueprint, in the same place on the page.
-        await expect(page.getByRole('img', { name: `Prosessflyt — ${CHILD}` })).toBeVisible();
+        await expect(page.locator(`svg[aria-label="Prosessflyt — ${CHILD}"]`)).toBeVisible();
         await expect(
-            page.getByRole('img', { name: `Prosessflyt — ${CHILD}` }).getByText('Avviket er lukket'),
+            page.locator(`svg[aria-label="Prosessflyt — ${CHILD}"]`).getByText('Avviket er lukket'),
         ).toBeVisible();
         await expect(page).toHaveURL(/subprocess=\d+/);
 
@@ -66,7 +66,7 @@ test.describe('drilling into a subprocess', () => {
         // And back, in one click, to the process we came from.
         await trail.getByRole('button', { name: `Tilbake til ${PARENT}` }).click();
 
-        await expect(page.getByRole('img', { name: `Prosessflyt — ${PARENT}` })).toBeVisible();
+        await expect(page.locator(`svg[aria-label="Prosessflyt — ${PARENT}"]`)).toBeVisible();
         await expect(page.getByRole('navigation', { name: 'Hvor du er i prosessen' })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Lagre struktur' })).toBeVisible();
     });
@@ -76,11 +76,11 @@ test.describe('drilling into a subprocess', () => {
         await openFlow(page, PARENT);
 
         await page.getByRole('button', { name: `Åpne underprosessen ${CHILD}` }).click();
-        await expect(page.getByRole('img', { name: `Prosessflyt — ${CHILD}` })).toBeVisible();
+        await expect(page.locator(`svg[aria-label="Prosessflyt — ${CHILD}"]`)).toBeVisible();
 
         await page.goBack();
 
-        await expect(page.getByRole('img', { name: `Prosessflyt — ${PARENT}` })).toBeVisible();
+        await expect(page.locator(`svg[aria-label="Prosessflyt — ${PARENT}"]`)).toBeVisible();
     });
 
     /** The step list is the flow read aloud, so it has to carry the same way in. */
@@ -89,7 +89,7 @@ test.describe('drilling into a subprocess', () => {
 
         await page.getByRole('button', { name: new RegExp(`Underprosess: ${CHILD}`) }).click();
 
-        await expect(page.getByRole('img', { name: `Prosessflyt — ${CHILD}` })).toBeVisible();
+        await expect(page.locator(`svg[aria-label="Prosessflyt — ${CHILD}"]`)).toBeVisible();
     });
 
     /** A flow with no references is untouched by any of this. */
@@ -97,7 +97,7 @@ test.describe('drilling into a subprocess', () => {
         await openFlow(page, CHILD);
 
         await expect(page.getByRole('navigation', { name: 'Hvor du er i prosessen' })).toHaveCount(0);
-        await expect(page.locator('svg[role="img"]').getByText(/steg$/)).toHaveCount(0);
+        await expect(page.locator('svg[aria-label^="Prosessflyt"]').getByText(/steg$/)).toHaveCount(0);
         await expect(page.getByRole('button', { name: /Åpne underprosessen/ })).toHaveCount(0);
     });
 });

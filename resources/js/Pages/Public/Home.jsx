@@ -65,7 +65,7 @@ function Benefit({ icon: Icon, title, body }) {
             </div>
             <div>
                 <p className="text-base font-semibold text-slate-900">{title}</p>
-                <p className="mt-1 text-base leading-7 text-slate-500">{body}</p>
+                <p className="mt-1 text-base leading-7 text-slate-600">{body}</p>
             </div>
         </div>
     );

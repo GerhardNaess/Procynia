@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -6,6 +6,9 @@ import StatusBadge from '../../../Components/App/StatusBadge';
 import WikiKnowledgeHandoffPanel from '../../../Components/App/WikiKnowledgeHandoffPanel';
 import { DESTRUCTIVE_ACTION, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import { originLine } from '../../../Support/complianceNavigation';
+import { refocusIfLost, useFocusFirstError } from '../../../Support/focusManagement';
+import { rowErrorId, trackRowAction, useRowActionError } from '../../../Support/rowActionError';
+import useInlinePanelFocus from '../Risk/useInlinePanelFocus';
 import KpiContextPanel from '../Objectives/KpiContextPanel';
 import ImprovementActions from './ImprovementActions';
 import { ImprovementAttentionNote } from './ImprovementAttention';
@@ -13,6 +16,7 @@ import ImprovementCause from './ImprovementCause';
 import ImprovementForm from './ImprovementForm';
 import ImprovementHistory from './ImprovementHistory';
 import { ImprovementCancelForm, ImprovementCloseForm, ImprovementReopenForm } from './ImprovementStatusForms';
+import { casePanelFocusCandidates } from './improvementA11y';
 import { improvementHelp } from './improvementHelp';
 import { IMPROVEMENT_STATUS_TONES, IMPROVEMENT_TYPE_TONES, formatDay, formatLongDate } from './improvementStatus';
 
@@ -47,6 +51,8 @@ export default function ImprovementShow() {
         review_origin: reviewOrigin = null,
         today = '',
         knowledge_handoff: knowledgeHandoff = null,
+        flash = {},
+        errors: pageErrors = {},
     } = usePage().props;
 
     const tr = translations?.improvements ?? {};
@@ -56,6 +62,24 @@ export default function ImprovementShow() {
     const [panel, setPanel] = useState(null);
     const [starting, setStarting] = useState(false);
     const ended = item.status === 'closed' || item.status === 'cancelled';
+    // Every panel opens in place of the buttons that open it. Focus goes into the panel — the edit form
+    // as a whole (named «Rediger», its first field is a choice), a lifecycle form at its text — and,
+    // when it closes, back to the button that opened it or to what the case offers now (A11Y-014).
+    const editPanelRef = useRef(null);
+    const editFormRef = useRef(null);
+    const statusPanelRef = useRef(null);
+    const lastPanelRef = useRef(null);
+    const focusFirstEditError = useFocusFirstError(editFormRef);
+    const statusPanelOpen = panel === 'close' || panel === 'cancel' || panel === 'reopen';
+    useInlinePanelFocus(panel === 'edit', { panelRef: editPanelRef, returnIds: casePanelFocusCandidates('edit'), initialFocus: 'panel' });
+    useInlinePanelFocus(statusPanelOpen, { panelRef: statusPanelRef, returnIds: casePanelFocusCandidates(lastPanelRef.current) });
+    // Slett sak can be refused by the server with a flash error; the refusal is shown at the button too.
+    const rowError = useRowActionError(flash?.error);
+
+    const openPanel = (name) => {
+        lastPanelRef.current = name;
+        setPanel(name);
+    };
 
     const form = useForm({
         type: item.type ?? '',
@@ -69,14 +93,21 @@ export default function ImprovementShow() {
 
     const submit = (event) => {
         event.preventDefault();
-        form.patch(`/app/improvements/${item.id}`, { preserveScroll: true, onSuccess: () => setPanel(null) });
+        form.patch(`/app/improvements/${item.id}`, { preserveScroll: true, onSuccess: () => setPanel(null), onError: () => focusFirstEditError() });
     };
 
     const start = () => {
+        // aria-disabled while starting, so the guard lives here.
+        if (starting) {
+            return;
+        }
+
         router.post(`/app/improvements/${item.id}/start`, {}, {
             preserveScroll: true,
             onStart: () => setStarting(true),
             onFinish: () => setStarting(false),
+            // «Start behandling» goes once the case is under arbeid; focus to what it offers now.
+            onSuccess: () => refocusIfLost(casePanelFocusCandidates('start')),
         });
     };
 
@@ -85,8 +116,13 @@ export default function ImprovementShow() {
             return;
         }
 
-        router.delete(`/app/improvements/${item.id}`);
+        router.delete(`/app/improvements/${item.id}`, trackRowAction('improvement-delete'));
     };
+
+    // A refused start (the case moved on meanwhile) comes back as a validation error on `status`, which
+    // nothing showed before: it is said and shown at the button (3.3.1, 4.1.3).
+    const startError = permissions.can_start ? (pageErrors.status ?? null) : null;
+    const deleteError = rowError('improvement-delete');
 
     const who = (name) => name ?? (tr.unknown_user ?? 'en tidligere bruker');
 
@@ -100,17 +136,27 @@ export default function ImprovementShow() {
                                 <StatusBadge tone={IMPROVEMENT_TYPE_TONES[item.type] ?? 'slate'}>{typeLabels[item.type] ?? item.type}</StatusBadge>
                                 <StatusBadge tone={IMPROVEMENT_STATUS_TONES[item.status] ?? 'slate'}>{statusLabels[item.status] ?? item.status}</StatusBadge>
                             </div>
-                            <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
+                            <h1 id="improvement-heading" className="break-words text-3xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <PageHelpButton {...improvementHelp(tr, 'case')} />
                             {permissions.can_edit && panel === null && (
-                                <button type="button" onClick={() => setPanel('edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
+                                <button id="improvement-edit-button" type="button" onClick={() => openPanel('edit')} className={SECONDARY_ACTION}>{tr.edit ?? 'Rediger'}</button>
                             )}
                             {permissions.can_delete && (
-                                <button type="button" onClick={destroy} className={DESTRUCTIVE_ACTION}>{tr.delete ?? 'Slett sak'}</button>
+                                <button
+                                    type="button"
+                                    onClick={destroy}
+                                    aria-describedby={deleteError ? rowErrorId('improvement-delete') : undefined}
+                                    className={DESTRUCTIVE_ACTION}
+                                >
+                                    {tr.delete ?? 'Slett sak'}
+                                </button>
                             )}
                         </div>
+                        {deleteError && (
+                            <p id={rowErrorId('improvement-delete')} className="w-full text-right text-base text-rose-700">{deleteError}</p>
+                        )}
                     </div>
 
                     <dl className="grid gap-4 sm:grid-cols-3">
@@ -174,9 +220,10 @@ export default function ImprovementShow() {
                 <ImprovementAttentionNote attention={attention} tr={tr} />
 
                 {panel === 'edit' ? (
-                    <section className={CARD} aria-label={tr.edit ?? 'Rediger'}>
+                    <section ref={editPanelRef} className={CARD} aria-label={tr.edit ?? 'Rediger'}>
                         <ImprovementForm
                             form={form}
+                            formRef={editFormRef}
                             onSubmit={submit}
                             onCancel={() => { setPanel(null); form.reset(); form.clearErrors(); }}
                             types={types}
@@ -235,24 +282,40 @@ export default function ImprovementShow() {
                     {panel === null && (permissions.can_start || permissions.can_close || permissions.can_cancel || permissions.can_reopen) && (
                         <div className="mt-4 flex flex-wrap gap-2">
                             {permissions.can_start && (
-                                <button type="button" onClick={start} disabled={starting} className={PRIMARY_ACTION}>{tr.start ?? 'Start behandling'}</button>
+                                <button
+                                    id="improvement-start-button"
+                                    type="button"
+                                    onClick={start}
+                                    aria-disabled={starting || undefined}
+                                    aria-describedby={startError ? 'improvement-start-error' : undefined}
+                                    className={PRIMARY_ACTION}
+                                >
+                                    {tr.start ?? 'Start behandling'}
+                                </button>
                             )}
                             {permissions.can_close && (
-                                <button type="button" onClick={() => setPanel('close')} className={SECONDARY_ACTION}>{tr.close ?? 'Lukk sak'}</button>
+                                <button id="improvement-close-button" type="button" onClick={() => openPanel('close')} className={SECONDARY_ACTION}>{tr.close ?? 'Lukk sak'}</button>
                             )}
                             {permissions.can_cancel && (
-                                <button type="button" onClick={() => setPanel('cancel')} className={SECONDARY_ACTION}>{tr.cancel_case ?? 'Avbryt sak'}</button>
+                                <button id="improvement-cancel-button" type="button" onClick={() => openPanel('cancel')} className={SECONDARY_ACTION}>{tr.cancel_case ?? 'Avbryt sak'}</button>
                             )}
                             {permissions.can_reopen && (
-                                <button type="button" onClick={() => setPanel('reopen')} className={SECONDARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
+                                <button id="improvement-reopen-button" type="button" onClick={() => openPanel('reopen')} className={SECONDARY_ACTION}>{tr.reopen ?? 'Gjenåpne'}</button>
                             )}
                         </div>
                     )}
+                    {startError && panel === null && (
+                        <p id="improvement-start-error" role="alert" className="mt-2 text-base text-rose-700">{startError}</p>
+                    )}
                 </section>
 
-                {panel === 'close' && <ImprovementCloseForm caseId={item.id} onDone={() => setPanel(null)} tr={tr} />}
-                {panel === 'cancel' && <ImprovementCancelForm caseId={item.id} onDone={() => setPanel(null)} tr={tr} />}
-                {panel === 'reopen' && <ImprovementReopenForm caseId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                {statusPanelOpen && (
+                    <div ref={statusPanelRef}>
+                        {panel === 'close' && <ImprovementCloseForm caseId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                        {panel === 'cancel' && <ImprovementCancelForm caseId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                        {panel === 'reopen' && <ImprovementReopenForm caseId={item.id} onDone={() => setPanel(null)} tr={tr} />}
+                    </div>
+                )}
 
                 <section className={CARD} aria-labelledby="improvement-context-facts-heading">
                     <h2 id="improvement-context-facts-heading" className="text-xl font-semibold text-slate-950">{tr.context_heading ?? 'Kontekst'}</h2>

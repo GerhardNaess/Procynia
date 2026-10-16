@@ -1,16 +1,10 @@
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import RequiredMark from '../Risk/RequiredMark';
+import { INPUT, TEXTAREA } from '../../../Support/formStyles';
 import CriticalityFields from './CriticalityFields';
+import SupplierField, { BUSY, FieldError, RequiredNote, RequiredStar, groupA11y } from './SupplierField';
 import { categoryLabel, statusLabel } from './supplierManagement';
 
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 const LABEL = 'block text-base font-semibold text-slate-700';
-const HINT = 'mt-1 text-base text-slate-600';
-const ERROR = 'mt-1 text-base text-rose-700';
-
-function FieldError({ message }) {
-    return message ? <p className={ERROR}>{message}</p> : null;
-}
 
 /**
  * The master data of a supplier, shared by Registrer leverandør and Rediger. The owner list comes
@@ -22,167 +16,146 @@ function FieldError({ message }) {
  *
  * Likewise criticality: registering asks how important the supplier is (reviewIntervals given);
  * Rediger never does. After that it changes only through Endre kritikalitet, with a begrunnelse.
+ *
+ * Every field is tied to its hint and error (A11Y-013); `formRef` is the form element the caller's
+ * useFocusFirstError looks in after a rejected save.
  */
-export default function SupplierForm({ form, onSubmit, onCancel, categories = [], ownerOptions = [], initialStatuses = null, reviewIntervals = null, tr }) {
+export default function SupplierForm({ form, onSubmit, onCancel, categories = [], ownerOptions = [], initialStatuses = null, reviewIntervals = null, formRef = null, tr }) {
     const fields = tr.fields ?? {};
     const errors = form.errors;
+    const initialStatus = groupA11y('supplier-initial-status', { error: errors.initial_status });
 
     return (
-        <form onSubmit={onSubmit} className="space-y-5">
+        <form ref={formRef} onSubmit={onSubmit} className="space-y-5">
             <div className="grid gap-5 md:grid-cols-2">
-                <div>
-                    <label htmlFor="supplier-name" className={LABEL}>{fields.name ?? 'Navn'}<RequiredMark /></label>
-                    <input
-                        id="supplier-name"
-                        type="text"
-                        required
-                        aria-required="true"
-                        maxLength={255}
-                        aria-describedby="supplier-name-hint"
-                        value={form.data.name}
-                        onChange={(event) => form.setData('name', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
-                    />
-                    <p id="supplier-name-hint" className={HINT}>{fields.name_hint ?? 'Virksomhetens navn.'}</p>
-                    <FieldError message={errors.name} />
-                </div>
-
-                <div>
-                    <label htmlFor="supplier-organization-number" className={LABEL}>{fields.organization_number ?? 'Organisasjonsnummer'}</label>
-                    <input
-                        id="supplier-organization-number"
-                        type="text"
-                        maxLength={50}
-                        aria-describedby="supplier-organization-number-hint"
-                        value={form.data.organization_number}
-                        onChange={(event) => form.setData('organization_number', event.target.value)}
-                        className={`mt-1 ${INPUT}`}
-                    />
-                    <p id="supplier-organization-number-hint" className={HINT}>
-                        {fields.organization_number_hint ?? 'Valgfritt. Samme nummer kan bare registreres én gang.'}
-                    </p>
-                    <FieldError message={errors.organization_number} />
-                </div>
-            </div>
-
-            <div>
-                <label htmlFor="supplier-category" className={LABEL}>{fields.category ?? 'Kategori'}<RequiredMark /></label>
-                <select
-                    id="supplier-category"
-                    required
-                    aria-required="true"
-                    value={form.data.category}
-                    onChange={(event) => form.setData('category', event.target.value)}
-                    className={`mt-1 ${INPUT} md:max-w-md`}
-                >
-                    <option value="">{fields.choose_category ?? 'Velg kategori'}</option>
-                    {categories.map((category) => (
-                        <option key={category} value={category}>{categoryLabel(category, tr)}</option>
-                    ))}
-                </select>
-                <FieldError message={errors.category} />
-            </div>
-
-            <div>
-                <label htmlFor="supplier-deliverable" className={LABEL}>{fields.deliverable_description ?? 'Hva leverer de til oss?'}<RequiredMark /></label>
-                <p id="supplier-deliverable-hint" className={HINT}>
-                    {fields.deliverable_description_hint ?? 'For eksempel «Drift av lønnssystem». Leverer de flere ting, beskriv alt her.'}
-                </p>
-                <textarea
-                    id="supplier-deliverable"
-                    rows={3}
-                    required
-                    aria-required="true"
-                    aria-describedby="supplier-deliverable-hint"
-                    value={form.data.deliverable_description}
-                    onChange={(event) => form.setData('deliverable_description', event.target.value)}
-                    className={`mt-1 ${INPUT}`}
-                />
-                <FieldError message={errors.deliverable_description} />
-            </div>
-
-            <div>
-                <label htmlFor="supplier-owner" className={LABEL}>{fields.owner ?? 'Intern ansvarlig'}<RequiredMark /></label>
-                <select
-                    id="supplier-owner"
-                    required
-                    aria-required="true"
-                    aria-describedby="supplier-owner-hint"
-                    value={form.data.owner_user_id}
-                    onChange={(event) => form.setData('owner_user_id', event.target.value)}
-                    className={`mt-1 ${INPUT} md:max-w-md`}
-                >
-                    <option value="">{fields.choose_owner ?? 'Velg intern ansvarlig'}</option>
-                    {ownerOptions.map((owner) => (
-                        <option key={owner.id} value={owner.id}>{owner.name}</option>
-                    ))}
-                </select>
-                <p id="supplier-owner-hint" className={HINT}>
-                    {fields.owner_hint ?? 'Personen hos dere som følger opp leverandøren. Ansvaret gir ingen ekstra tilgang.'}
-                </p>
-                <FieldError message={errors.owner_user_id} />
-            </div>
-
-            <fieldset className="space-y-3">
-                <legend className="text-base font-semibold text-slate-900">{fields.contact_heading ?? 'Kontaktperson hos leverandøren'}</legend>
-                <p className="text-base text-slate-600">{fields.contact_hint ?? 'Valgfritt. Én kontaktperson.'}</p>
-                <div className="grid gap-5 md:grid-cols-3">
-                    <div>
-                        <label htmlFor="supplier-contact-name" className={LABEL}>{fields.contact_name ?? 'Navn'}</label>
+                <SupplierField id="supplier-name" label={fields.name ?? 'Navn'} labelClassName={LABEL} hint={fields.name_hint ?? 'Virksomhetens navn.'} hintFirst={false} error={errors.name} required>
+                    {(field) => (
                         <input
-                            id="supplier-contact-name"
+                            {...field}
                             type="text"
+                            required
                             maxLength={255}
-                            value={form.data.contact_name}
-                            onChange={(event) => form.setData('contact_name', event.target.value)}
+                            value={form.data.name}
+                            onChange={(event) => form.setData('name', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        <FieldError message={errors.contact_name} />
-                    </div>
-                    <div>
-                        <label htmlFor="supplier-contact-email" className={LABEL}>{fields.contact_email ?? 'E-post'}</label>
+                    )}
+                </SupplierField>
+
+                <SupplierField
+                    id="supplier-organization-number"
+                    label={fields.organization_number ?? 'Organisasjonsnummer'}
+                    labelClassName={LABEL}
+                    hint={fields.organization_number_hint ?? 'Valgfritt. Samme nummer kan bare registreres én gang.'}
+                    hintFirst={false}
+                    error={errors.organization_number}
+                >
+                    {(field) => (
                         <input
-                            id="supplier-contact-email"
-                            type="email"
-                            maxLength={255}
-                            value={form.data.contact_email}
-                            onChange={(event) => form.setData('contact_email', event.target.value)}
-                            className={`mt-1 ${INPUT}`}
-                        />
-                        <FieldError message={errors.contact_email} />
-                    </div>
-                    <div>
-                        <label htmlFor="supplier-contact-phone" className={LABEL}>{fields.contact_phone ?? 'Telefon'}</label>
-                        <input
-                            id="supplier-contact-phone"
-                            type="tel"
+                            {...field}
+                            type="text"
                             maxLength={50}
-                            value={form.data.contact_phone}
-                            onChange={(event) => form.setData('contact_phone', event.target.value)}
+                            value={form.data.organization_number}
+                            onChange={(event) => form.setData('organization_number', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        <FieldError message={errors.contact_phone} />
-                    </div>
+                    )}
+                </SupplierField>
+            </div>
+
+            <SupplierField id="supplier-category" label={fields.category ?? 'Kategori'} labelClassName={LABEL} error={errors.category} required>
+                {(field) => (
+                    <select
+                        {...field}
+                        required
+                        value={form.data.category}
+                        onChange={(event) => form.setData('category', event.target.value)}
+                        className={`mt-1 ${INPUT} md:max-w-md`}
+                    >
+                        <option value="">{fields.choose_category ?? 'Velg kategori'}</option>
+                        {categories.map((category) => (
+                            <option key={category} value={category}>{categoryLabel(category, tr)}</option>
+                        ))}
+                    </select>
+                )}
+            </SupplierField>
+
+            <SupplierField
+                id="supplier-deliverable"
+                label={fields.deliverable_description ?? 'Hva leverer de til oss?'}
+                labelClassName={LABEL}
+                hint={fields.deliverable_description_hint ?? 'For eksempel «Drift av lønnssystem». Leverer de flere ting, beskriv alt her.'}
+                error={errors.deliverable_description}
+                required
+            >
+                {(field) => (
+                    <textarea
+                        {...field}
+                        rows={3}
+                        required
+                        value={form.data.deliverable_description}
+                        onChange={(event) => form.setData('deliverable_description', event.target.value)}
+                        className={`mt-1 ${TEXTAREA}`}
+                    />
+                )}
+            </SupplierField>
+
+            <SupplierField
+                id="supplier-owner"
+                label={fields.owner ?? 'Intern ansvarlig'}
+                labelClassName={LABEL}
+                hint={fields.owner_hint ?? 'Personen hos dere som følger opp leverandøren. Ansvaret gir ingen ekstra tilgang.'}
+                hintFirst={false}
+                error={errors.owner_user_id}
+                required
+            >
+                {(field) => (
+                    <select
+                        {...field}
+                        required
+                        value={form.data.owner_user_id}
+                        onChange={(event) => form.setData('owner_user_id', event.target.value)}
+                        className={`mt-1 ${INPUT} md:max-w-md`}
+                    >
+                        <option value="">{fields.choose_owner ?? 'Velg intern ansvarlig'}</option>
+                        {ownerOptions.map((owner) => (
+                            <option key={owner.id} value={owner.id}>{owner.name}</option>
+                        ))}
+                    </select>
+                )}
+            </SupplierField>
+
+            <fieldset className="space-y-3" aria-describedby="supplier-contact-hint">
+                <legend className="text-base font-semibold text-slate-900">{fields.contact_heading ?? 'Kontaktperson hos leverandøren'}</legend>
+                <p id="supplier-contact-hint" className="text-base text-slate-600">{fields.contact_hint ?? 'Valgfritt. Én kontaktperson.'}</p>
+                <div className="grid gap-5 md:grid-cols-3">
+                    <SupplierField id="supplier-contact-name" label={fields.contact_name ?? 'Navn'} labelClassName={LABEL} error={errors.contact_name}>
+                        {(field) => (
+                            <input {...field} type="text" maxLength={255} value={form.data.contact_name} onChange={(event) => form.setData('contact_name', event.target.value)} className={`mt-1 ${INPUT}`} />
+                        )}
+                    </SupplierField>
+                    <SupplierField id="supplier-contact-email" label={fields.contact_email ?? 'E-post'} labelClassName={LABEL} error={errors.contact_email}>
+                        {(field) => (
+                            <input {...field} type="email" maxLength={255} value={form.data.contact_email} onChange={(event) => form.setData('contact_email', event.target.value)} className={`mt-1 ${INPUT}`} />
+                        )}
+                    </SupplierField>
+                    <SupplierField id="supplier-contact-phone" label={fields.contact_phone ?? 'Telefon'} labelClassName={LABEL} error={errors.contact_phone}>
+                        {(field) => (
+                            <input {...field} type="tel" maxLength={50} value={form.data.contact_phone} onChange={(event) => form.setData('contact_phone', event.target.value)} className={`mt-1 ${INPUT}`} />
+                        )}
+                    </SupplierField>
                 </div>
             </fieldset>
 
-            <div>
-                <label htmlFor="supplier-note" className={LABEL}>{fields.note ?? 'Notat'}</label>
-                <p id="supplier-note-hint" className={HINT}>{fields.note_hint ?? 'Valgfritt.'}</p>
-                <textarea
-                    id="supplier-note"
-                    rows={3}
-                    aria-describedby="supplier-note-hint"
-                    value={form.data.note}
-                    onChange={(event) => form.setData('note', event.target.value)}
-                    className={`mt-1 ${INPUT}`}
-                />
-                <FieldError message={errors.note} />
-            </div>
+            <SupplierField id="supplier-note" label={fields.note ?? 'Notat'} labelClassName={LABEL} hint={fields.note_hint ?? 'Valgfritt.'} error={errors.note}>
+                {(field) => (
+                    <textarea {...field} rows={3} value={form.data.note} onChange={(event) => form.setData('note', event.target.value)} className={`mt-1 ${TEXTAREA}`} />
+                )}
+            </SupplierField>
 
             {initialStatuses && (
-                <fieldset className="space-y-2" data-testid="supplier-initial-status">
-                    <legend className="text-base font-semibold text-slate-700">{fields.initial_status ?? 'Er leverandøren i bruk?'}<RequiredMark /></legend>
+                <fieldset className="space-y-2" data-testid="supplier-initial-status" {...initialStatus.groupProps}>
+                    <legend className="text-base font-semibold text-slate-700">{fields.initial_status ?? 'Er leverandøren i bruk?'}<RequiredStar /></legend>
                     {initialStatuses.map((status) => (
                         <label key={status} className="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-2">
                             <input
@@ -192,6 +165,7 @@ export default function SupplierForm({ form, onSubmit, onCancel, categories = []
                                 checked={form.data.initial_status === status}
                                 onChange={() => form.setData('initial_status', status)}
                                 className="mt-1 h-5 w-5 shrink-0"
+                                {...initialStatus.optionProps}
                             />
                             <span className="min-w-0">
                                 <span className="block text-base font-semibold text-slate-900">{fields.initial_statuses?.[status] ?? statusLabel(status, tr)}</span>
@@ -199,7 +173,7 @@ export default function SupplierForm({ form, onSubmit, onCancel, categories = []
                             </span>
                         </label>
                     ))}
-                    <FieldError message={errors.initial_status} />
+                    <FieldError id={initialStatus.errorId} message={errors.initial_status} />
                 </fieldset>
             )}
 
@@ -215,13 +189,13 @@ export default function SupplierForm({ form, onSubmit, onCancel, categories = []
                 </section>
             )}
 
-            <p className="text-base text-slate-600">{tr.required_note ?? 'Felt merket med * må fylles ut.'}</p>
+            <RequiredNote tr={tr} />
 
             <div className="flex flex-wrap justify-end gap-3">
                 {onCancel && (
                     <button type="button" onClick={onCancel} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                 )}
-                <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>
+                <button type="submit" aria-disabled={form.processing || undefined} className={`${PRIMARY_ACTION} ${BUSY}`}>
                     {form.processing ? (tr.saving ?? 'Lagrer...') : (tr.save ?? 'Lagre')}
                 </button>
             </div>

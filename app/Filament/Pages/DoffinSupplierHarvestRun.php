@@ -117,7 +117,7 @@ class DoffinSupplierHarvestRun extends Page
      * Side effects:
      * None.
      */
-    public function getTitle(): string | Htmlable
+    public function getTitle(): string|Htmlable
     {
         return 'Harvest Run';
     }
@@ -240,7 +240,7 @@ class DoffinSupplierHarvestRun extends Page
                     ? $errorMessage
                     : 'The supplier harvest did not complete successfully.',
                 'badge' => 'Failed',
-                'badge_classes' => 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200',
+                'badge_classes' => 'bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 ring-1 ring-inset ring-rose-200 dark:ring-rose-500/30',
             ],
             $status === DoffinSupplierHarvestRunModel::STATUS_COMPLETED => [
                 'title' => 'Completed',
@@ -248,19 +248,19 @@ class DoffinSupplierHarvestRun extends Page
                     ? 'Supplier harvest finished successfully.'
                     : 'No notices matched the selected date range.',
                 'badge' => 'Completed',
-                'badge_classes' => 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
+                'badge_classes' => 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-200 dark:ring-emerald-500/30',
             ],
             $status === DoffinSupplierHarvestRunModel::STATUS_RUNNING && $totalItems > 0 => [
                 'title' => 'Processing notices',
                 'subtitle' => 'Harvesting suppliers from Doffin notices.',
                 'badge' => 'Running',
-                'badge_classes' => 'bg-primary-50 text-primary-700 ring-1 ring-inset ring-primary-200',
+                'badge_classes' => 'bg-primary-50 dark:bg-primary-500/10 text-primary-700 dark:text-primary-400 ring-1 ring-inset ring-primary-200 dark:ring-primary-500/30',
             ],
             default => [
                 'title' => 'Preparing notices',
                 'subtitle' => 'Building the notice list for the selected date range.',
                 'badge' => 'Preparing',
-                'badge_classes' => 'bg-gray-100 text-gray-700 ring-1 ring-inset ring-gray-200',
+                'badge_classes' => 'bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 ring-1 ring-inset ring-gray-200 dark:ring-white/10',
             ],
         };
     }
@@ -308,7 +308,7 @@ class DoffinSupplierHarvestRun extends Page
 
         if ($totalItems > 0) {
             $items[] = [
-                'message' => number_format($totalItems) . ' notices discovered',
+                'message' => number_format($totalItems).' notices discovered',
                 'time' => $this->formatTimestamp($this->runStatus['started_at'] ?? $this->runStatus['last_heartbeat_at'] ?? null),
             ];
         }
@@ -329,14 +329,14 @@ class DoffinSupplierHarvestRun extends Page
 
         if ($processedItems > 0) {
             $items[] = [
-                'message' => number_format($processedItems) . ' notices processed',
+                'message' => number_format($processedItems).' notices processed',
                 'time' => $this->formatTimestamp($this->runStatus['last_heartbeat_at'] ?? $this->runStatus['finished_at'] ?? null),
             ];
         }
 
         if ($harvestedSuppliers > 0) {
             $items[] = [
-                'message' => number_format($harvestedSuppliers) . ' suppliers harvested',
+                'message' => number_format($harvestedSuppliers).' suppliers harvested',
                 'time' => $this->formatTimestamp($this->runStatus['last_heartbeat_at'] ?? $this->runStatus['finished_at'] ?? null),
             ];
         }
@@ -357,7 +357,7 @@ class DoffinSupplierHarvestRun extends Page
 
         return collect($items)
             ->filter(fn (array $item): bool => $item['time'] !== '-')
-            ->unique(fn (array $item): string => $item['message'] . '|' . $item['time'])
+            ->unique(fn (array $item): string => $item['message'].'|'.$item['time'])
             ->values()
             ->all();
     }
@@ -453,11 +453,11 @@ class DoffinSupplierHarvestRun extends Page
         $timestamp = Carbon::parse($value);
 
         if ($timestamp->isToday()) {
-            return 'Today ' . $timestamp->format('H:i');
+            return 'Today '.$timestamp->format('H:i');
         }
 
         if ($timestamp->isYesterday()) {
-            return 'Yesterday ' . $timestamp->format('H:i');
+            return 'Yesterday '.$timestamp->format('H:i');
         }
 
         return $timestamp->format('Y-m-d H:i');

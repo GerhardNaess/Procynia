@@ -1,14 +1,18 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
+import { RequiredFieldsNote } from '../../../../Components/App/FormField';
 import StatusBadge from '../../../../Components/App/StatusBadge';
 import { PRIMARY_ACTION, SECONDARY_ACTION } from '../../../../Support/actionStyles';
-import RequiredMark from '../../Risk/RequiredMark';
+import { usePanelFocus } from '../../../../Support/focusManagement';
+import { INPUT, LABEL } from '../../../../Support/formStyles';
+import RequiredMark from '../RequiredMark';
+import FieldError from '../FieldError';
+import { fieldStateProps, radioGroupProps } from '../complianceA11y';
 import { APPLICABILITY_TONES, applicabilityLabel } from '../Library/complianceLibrary';
+import { useFocusOnRejectedSubmit } from '../useComplianceFocus';
 import { formatDateTime } from './complianceRequirement';
 
 const CARD = 'rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm';
-const LABEL = 'block text-base font-semibold text-slate-700';
-const INPUT = 'min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
 
 /**
  * Relevans for a requirement from Kravbiblioteket: Gjelder, Ikke relevant or Ikke vurdert. Kept apart
@@ -25,6 +29,12 @@ export default function RequirementApplicability({ requirementId, applicability,
     const [editing, setEditing] = useState(false);
     const form = useForm({ applicability: applicability.value, rationale: applicability.rationale ?? '' });
     const needsRationale = form.data.applicability === 'not_applicable' || (control && form.data.applicability === 'applies');
+    const formRef = useRef(null);
+    const changeRef = useRef(null);
+    // «Endre relevans» gives way to the form: focus goes into it, and back to the button when it closes.
+    usePanelFocus(editing, { panelRef: formRef, returnFocusRef: changeRef });
+    useFocusOnRejectedSubmit(form, formRef);
+    const choiceError = form.errors.applicability;
 
     const send = (event) => {
         event.preventDefault();
@@ -42,7 +52,7 @@ export default function RequirementApplicability({ requirementId, applicability,
                     <p className="max-w-3xl text-base text-slate-600">{ta.intro ?? ''}</p>
                 </div>
                 {canChange && ! editing && (
-                    <button type="button" onClick={() => setEditing(true)} className={SECONDARY_ACTION}>{ta.change ?? 'Endre relevans'}</button>
+                    <button ref={changeRef} type="button" onClick={() => setEditing(true)} className={SECONDARY_ACTION}>{ta.change ?? 'Endre relevans'}</button>
                 )}
             </div>
 
@@ -65,8 +75,8 @@ export default function RequirementApplicability({ requirementId, applicability,
             </div>
 
             {editing && (
-                <form onSubmit={send} className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid="compliance-applicability-form">
-                    <fieldset>
+                <form ref={formRef} onSubmit={send} className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4" data-testid="compliance-applicability-form">
+                    <fieldset {...radioGroupProps('compliance-applicability', choiceError, { required: true })}>
                         <legend className={LABEL}>{ta.field ?? 'Relevans'}<RequiredMark /></legend>
                         <div className="mt-2 grid gap-2 sm:grid-cols-3">
                             {applicability.options.map((value) => (
@@ -84,7 +94,7 @@ export default function RequirementApplicability({ requirementId, applicability,
                                 </label>
                             ))}
                         </div>
-                        {form.errors.applicability && <p className="mt-1 text-base text-rose-700">{form.errors.applicability}</p>}
+                        <FieldError field="compliance-applicability" message={choiceError} />
                     </fieldset>
                     <div>
                         <label htmlFor="compliance-applicability-rationale" className={LABEL}>
@@ -96,13 +106,14 @@ export default function RequirementApplicability({ requirementId, applicability,
                             rows={4}
                             required={needsRationale}
                             aria-required={needsRationale ? 'true' : undefined}
-                            aria-describedby="compliance-applicability-rationale-hint"
+                            {...fieldStateProps('compliance-applicability-rationale', form.errors.rationale, ['compliance-applicability-rationale-hint'])}
                             value={form.data.rationale}
                             onChange={(event) => form.setData('rationale', event.target.value)}
                             className={`mt-1 ${INPUT}`}
                         />
-                        {form.errors.rationale && <p className="mt-1 text-base text-rose-700">{form.errors.rationale}</p>}
+                        <FieldError field="compliance-applicability-rationale" message={form.errors.rationale} />
                     </div>
+                    <RequiredFieldsNote text={tr.required_note ?? 'Felt merket med * må fylles ut.'} className="text-base text-slate-600" />
                     <div className="flex flex-wrap justify-end gap-3">
                         <button type="button" onClick={() => { setEditing(false); form.reset(); form.clearErrors(); }} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
                         <button type="submit" disabled={form.processing} className={PRIMARY_ACTION}>{form.processing ? (tr.saving ?? 'Lagrer...') : (ta.submit ?? 'Lagre relevans')}</button>

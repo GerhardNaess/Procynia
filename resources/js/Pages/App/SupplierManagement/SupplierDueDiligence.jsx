@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import StatusBadge from '../../../Components/App/StatusBadge';
 import { DISCLOSURE_INLINE, PRIMARY_ACTION, SECONDARY_ACTION } from '../../../Support/actionStyles';
-import RequiredMark from '../Risk/RequiredMark';
+import { useFocusFirstError } from '../../../Support/focusManagement';
+import { INPUT as FIELD_INPUT, TEXTAREA } from '../../../Support/formStyles';
+import SupplierField, { BUSY, FieldError, RequiredNote, RequiredStar, groupA11y } from './SupplierField';
+import { useInlinePanelFocus } from './supplierFocus';
 import {
     DUE_DILIGENCE_CONCLUSION_TONES,
     DUE_DILIGENCE_STEPS,
@@ -27,7 +30,8 @@ const CARD = 'rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p
 const HINT = 'text-base text-slate-600';
 const ERROR = 'text-base text-rose-700';
 const LABEL = 'block text-base font-semibold text-slate-900';
-const INPUT = 'mt-1 min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none';
+const INPUT = `mt-1 ${FIELD_INPUT}`;
+const AREA_TEXT = `mt-1 ${TEXTAREA}`;
 const TERM = 'text-base font-semibold text-slate-600';
 
 /** The six areas of one assessment, each named with its level in words — never colour alone. */
@@ -55,32 +59,43 @@ function DueDiligenceForm({ supplierId, options, onDone, tr }) {
     const form = useForm(dueDiligenceFormData(options.today));
     const [intervalChosen, setIntervalChosen] = useState(false);
     const missing = dueDiligenceMissing(form.data);
+    const formRef = useRef(null);
+    const focusError = useFocusFirstError(formRef);
+    const fieldId = (field) => `due-diligence-${supplierId}-${field}`;
+    const conclusionGroup = groupA11y(fieldId('conclusion'), { hint: true, error: form.errors.conclusion });
+    const missingId = fieldId('missing');
 
     const send = (event) => {
         event.preventDefault();
-        form.post(`/app/supplier-management/${supplierId}/due-diligence-assessments`, { preserveScroll: true, onSuccess: onDone });
+
+        // The button says it cannot be used yet (aria-disabled) instead of leaving the Tab order.
+        if (form.processing || missing.length > 0) {
+            return;
+        }
+
+        form.post(`/app/supplier-management/${supplierId}/due-diligence-assessments`, { preserveScroll: true, onSuccess: onDone, onError: focusError });
     };
 
     return (
-        <form onSubmit={send} className="mt-4 min-w-0 space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="due-diligence-form">
+        <form ref={formRef} id={`due-diligence-${supplierId}-panel`} onSubmit={send} className="mt-4 min-w-0 space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="due-diligence-form">
             <div className="min-w-0">
                 <h3 className="text-lg font-semibold text-slate-950">{f.heading ?? 'Registrer aktsomhetsvurdering'}</h3>
                 <p className={HINT}>{f.intro ?? 'Vurder hvert område for seg. Velg «Ukjent» når dere ikke vet – det er ikke det samme som lav risiko.'}</p>
             </div>
 
-            <div>
-                <label htmlFor={`due-diligence-${supplierId}-mapping`} className={LABEL}>{f.supply_chain_description ?? 'Kartlegging av leverandørkjeden'}</label>
-                <p className={HINT}>{f.supply_chain_description_hint ?? 'Valgfritt. Produksjonsland, ledd og kjente underleverandører.'}</p>
-                <textarea id={`due-diligence-${supplierId}-mapping`} rows={3} value={form.data.supply_chain_description} onChange={(event) => form.setData('supply_chain_description', event.target.value)} className={INPUT} />
-                {form.errors.supply_chain_description && <p className={ERROR}>{form.errors.supply_chain_description}</p>}
-            </div>
+            <SupplierField id={fieldId('mapping')} label={f.supply_chain_description ?? 'Kartlegging av leverandørkjeden'} labelClassName={LABEL} hint={f.supply_chain_description_hint ?? 'Valgfritt. Produksjonsland, ledd og kjente underleverandører.'} hintClassName={HINT} error={form.errors.supply_chain_description} errorClassName={ERROR}>
+                {(field) => <textarea {...field} rows={3} value={form.data.supply_chain_description} onChange={(event) => form.setData('supply_chain_description', event.target.value)} className={AREA_TEXT} />}
+            </SupplierField>
 
             <fieldset className="min-w-0 space-y-3">
-                <legend className={LABEL}>{f.areas ?? 'Risiko per område'}<RequiredMark /></legend>
-                {areaRows({}, tr).map((row) => (
+                <legend className={LABEL}>{f.areas ?? 'Risiko per område'}<RequiredStar /></legend>
+                {areaRows({}, tr).map((row) => {
+                    const area = groupA11y(`due-diligence-${supplierId}-${row.area}`, { error: form.errors[row.area] });
+
+                    return (
                     <div key={row.area} className="min-w-0 rounded-lg border border-slate-200 bg-white p-3" data-testid={`due-diligence-area-${row.area}`}>
                         <p className="break-words text-base font-semibold text-slate-900" id={`due-diligence-${supplierId}-${row.area}`}>{row.label}</p>
-                        <div role="radiogroup" aria-labelledby={`due-diligence-${supplierId}-${row.area}`} className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
+                        <div role="radiogroup" aria-labelledby={`due-diligence-${supplierId}-${row.area}`} aria-required="true" {...area.groupProps} className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
                             {(options.levels ?? []).map((level) => (
                                 <label key={level} className="flex min-h-10 items-center gap-2 text-base text-slate-900">
                                     <input
@@ -90,26 +105,25 @@ function DueDiligenceForm({ supplierId, options, onDone, tr }) {
                                         checked={form.data[row.area] === level}
                                         onChange={() => form.setData(row.area, level)}
                                         className="h-5 w-5 shrink-0"
+                                        {...area.optionProps}
                                     />
                                     {levelLabel(level, tr)}
                                 </label>
                             ))}
                         </div>
-                        {form.errors[row.area] && <p className={ERROR}>{form.errors[row.area]}</p>}
+                        <FieldError id={area.errorId} message={form.errors[row.area]} className={ERROR} />
                     </div>
-                ))}
+                    );
+                })}
             </fieldset>
 
-            <div>
-                <label htmlFor={`due-diligence-${supplierId}-investigation`} className={LABEL}>{f.investigation_summary ?? 'Hva er undersøkt?'}</label>
-                <p className={HINT}>{f.investigation_summary_hint ?? 'Valgfritt. Hva som er undersøkt, og hvordan – for eksempel egenerklæring, oversikt over produksjonssteder eller revisjon.'}</p>
-                <textarea id={`due-diligence-${supplierId}-investigation`} rows={3} value={form.data.investigation_summary} onChange={(event) => form.setData('investigation_summary', event.target.value)} className={INPUT} />
-                {form.errors.investigation_summary && <p className={ERROR}>{form.errors.investigation_summary}</p>}
-            </div>
+            <SupplierField id={fieldId('investigation')} label={f.investigation_summary ?? 'Hva er undersøkt?'} labelClassName={LABEL} hint={f.investigation_summary_hint ?? 'Valgfritt. Hva som er undersøkt, og hvordan – for eksempel egenerklæring, oversikt over produksjonssteder eller revisjon.'} hintClassName={HINT} error={form.errors.investigation_summary} errorClassName={ERROR}>
+                {(field) => <textarea {...field} rows={3} value={form.data.investigation_summary} onChange={(event) => form.setData('investigation_summary', event.target.value)} className={AREA_TEXT} />}
+            </SupplierField>
 
-            <fieldset className="min-w-0">
-                <legend className={LABEL}>{f.conclusion ?? 'Konklusjon'}<RequiredMark /></legend>
-                <p className={HINT}>{f.conclusion_hint ?? 'Du velger konklusjonen. Den regnes ikke ut fra områdene.'}</p>
+            <fieldset className="min-w-0" {...conclusionGroup.groupProps}>
+                <legend className={LABEL}>{f.conclusion ?? 'Konklusjon'}<RequiredStar /></legend>
+                <p id={conclusionGroup.hintId} className={HINT}>{f.conclusion_hint ?? 'Du velger konklusjonen. Den regnes ikke ut fra områdene.'}</p>
                 <div className="mt-1 space-y-1">
                     {(options.conclusions ?? []).map((conclusion) => (
                         <label key={conclusion} className="flex min-h-10 items-center gap-3 text-base text-slate-900" data-testid={`due-diligence-conclusion-${conclusion}`}>
@@ -120,52 +134,55 @@ function DueDiligenceForm({ supplierId, options, onDone, tr }) {
                                 checked={form.data.conclusion === conclusion}
                                 onChange={() => form.setData((data) => withConclusion(data, conclusion, intervalChosen))}
                                 className="h-5 w-5 shrink-0"
+                                {...conclusionGroup.optionProps}
                             />
                             {conclusionLabel(conclusion, tr)}
                         </label>
                     ))}
                 </div>
-                {form.errors.conclusion && <p className={ERROR}>{form.errors.conclusion}</p>}
+                <FieldError id={conclusionGroup.errorId} message={form.errors.conclusion} className={ERROR} />
             </fieldset>
 
-            <div>
-                <label htmlFor={`due-diligence-${supplierId}-rationale`} className={LABEL}>{f.rationale ?? 'Begrunnelse'}<RequiredMark /></label>
-                <p className={HINT}>{f.rationale_hint ?? 'Hvorfor denne konklusjonen?'}</p>
-                <textarea id={`due-diligence-${supplierId}-rationale`} rows={4} required aria-required value={form.data.rationale} onChange={(event) => form.setData('rationale', event.target.value)} className={INPUT} />
-                {form.errors.rationale && <p className={ERROR}>{form.errors.rationale}</p>}
-            </div>
+            <SupplierField id={fieldId('rationale')} label={f.rationale ?? 'Begrunnelse'} labelClassName={LABEL} hint={f.rationale_hint ?? 'Hvorfor denne konklusjonen?'} hintClassName={HINT} error={form.errors.rationale} errorClassName={ERROR} required>
+                {(field) => <textarea {...field} rows={4} required value={form.data.rationale} onChange={(event) => form.setData('rationale', event.target.value)} className={AREA_TEXT} />}
+            </SupplierField>
 
             <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                    <label htmlFor={`due-diligence-${supplierId}-interval`} className={LABEL}>{f.review_interval_months ?? 'Ny vurdering om'}<RequiredMark /></label>
-                    <p className={HINT}>{f.review_interval_hint ?? 'Foreslått ut fra konklusjonen. Du kan endre det.'}</p>
-                    <select
-                        id={`due-diligence-${supplierId}-interval`}
-                        required
-                        value={form.data.review_interval_months}
-                        onChange={(event) => { setIntervalChosen(true); form.setData('review_interval_months', event.target.value); }}
-                        className={INPUT}
-                    >
-                        <option value="">{f.choose_interval ?? 'Velg'}</option>
-                        {(options.review_intervals ?? []).map((months) => (
-                            <option key={months} value={months}>{(f.months ?? ':count måneder').replace(':count', String(months))}</option>
-                        ))}
-                    </select>
-                    {form.errors.review_interval_months && <p className={ERROR}>{form.errors.review_interval_months}</p>}
-                </div>
-                <div>
-                    <label htmlFor={`due-diligence-${supplierId}-assessed-on`} className={LABEL}>{f.assessed_on ?? 'Vurderingsdato'}<RequiredMark /></label>
-                    <p className={HINT}>{f.assessed_on_hint ?? 'Kan ikke være fram i tid.'}</p>
-                    <input id={`due-diligence-${supplierId}-assessed-on`} type="date" required max={options.today} value={form.data.assessed_on} onChange={(event) => form.setData('assessed_on', event.target.value)} className={INPUT} />
-                    {form.errors.assessed_on && <p className={ERROR}>{form.errors.assessed_on}</p>}
-                </div>
+                <SupplierField id={fieldId('interval')} label={f.review_interval_months ?? 'Ny vurdering om'} labelClassName={LABEL} hint={f.review_interval_hint ?? 'Foreslått ut fra konklusjonen. Du kan endre det.'} hintClassName={HINT} error={form.errors.review_interval_months} errorClassName={ERROR} required>
+                    {(field) => (
+                        <select
+                            {...field}
+                            required
+                            value={form.data.review_interval_months}
+                            onChange={(event) => { setIntervalChosen(true); form.setData('review_interval_months', event.target.value); }}
+                            className={INPUT}
+                        >
+                            <option value="">{f.choose_interval ?? 'Velg'}</option>
+                            {(options.review_intervals ?? []).map((months) => (
+                                <option key={months} value={months}>{(f.months ?? ':count måneder').replace(':count', String(months))}</option>
+                            ))}
+                        </select>
+                    )}
+                </SupplierField>
+                <SupplierField id={fieldId('assessed-on')} label={f.assessed_on ?? 'Vurderingsdato'} labelClassName={LABEL} hint={f.assessed_on_hint ?? 'Kan ikke være fram i tid.'} hintClassName={HINT} error={form.errors.assessed_on} errorClassName={ERROR} required>
+                    {(field) => <input {...field} type="date" required max={options.today} value={form.data.assessed_on} onChange={(event) => form.setData('assessed_on', event.target.value)} className={INPUT} />}
+                </SupplierField>
             </div>
 
+            <RequiredNote tr={tr} />
+
             <div className="flex flex-wrap gap-2">
-                <button type="submit" disabled={form.processing || missing.length > 0} className={PRIMARY_ACTION}>{f.submit ?? 'Registrer aktsomhetsvurdering'}</button>
+                <button
+                    type="submit"
+                    aria-disabled={form.processing || missing.length > 0 || undefined}
+                    aria-describedby={missing.length > 0 ? missingId : undefined}
+                    className={`${PRIMARY_ACTION} ${BUSY}`}
+                >
+                    {f.submit ?? 'Registrer aktsomhetsvurdering'}
+                </button>
                 <button type="button" onClick={onDone} className={SECONDARY_ACTION}>{tr.cancel ?? 'Avbryt'}</button>
             </div>
-            {missing.length > 0 && <p className={HINT} data-testid="due-diligence-missing">{f.missing ?? 'Vurder alle seks områdene, og velg konklusjon og begrunnelse før du registrerer.'}</p>}
+            {missing.length > 0 && <p id={missingId} className={HINT} data-testid="due-diligence-missing">{f.missing ?? 'Vurder alle seks områdene, og velg konklusjon og begrunnelse før du registrerer.'}</p>}
         </form>
     );
 }
@@ -210,6 +227,8 @@ function HistoryEntry({ entry, formatDate, tr }) {
 export default function SupplierDueDiligence({ supplierId, data, applicable = [], onFollowUp = null, onCreateRisk = null, formatDate = (date) => date, tr }) {
     const d = tr.due_diligence ?? {};
     const [assessing, setAssessing] = useState(false);
+    // The form opens in place of its button: focus in, and back to it (A11Y-014).
+    const rememberTrigger = useInlinePanelFocus(assessing ? 'assess' : null, { panelId: `due-diligence-${supplierId}-panel`, fallbackIds: ['due-diligence-register', 'supplier-due-diligence-heading'] });
 
     if (! data) {
         return null;
@@ -223,7 +242,7 @@ export default function SupplierDueDiligence({ supplierId, data, applicable = []
     const canAct = data.permissions?.can_assess && ! assessing;
 
     return (
-        <section className={CARD} aria-labelledby="supplier-due-diligence-heading" data-testid="supplier-due-diligence">
+        <section className={CARD} aria-labelledby="supplier-due-diligence-heading" data-testid="supplier-due-diligence" onClickCapture={rememberTrigger}>
             <div className="max-w-3xl min-w-0">
                 <h2 id="supplier-due-diligence-heading" className="text-xl font-semibold text-slate-950">{d.heading ?? 'Aktsomhet og bærekraft'}</h2>
                 <p className={`mt-1 ${HINT}`}>{d.intro ?? 'En strukturert vurdering av risiko og oppfølging i leverandørkjeden. Vurderingen gjøres av en person; systemet regner ikke ut noen samlet risiko.'}</p>
@@ -304,7 +323,7 @@ export default function SupplierDueDiligence({ supplierId, data, applicable = []
 
                     {canAct && (
                         <div className="mt-3 flex flex-wrap gap-2">
-                            <button type="button" onClick={() => setAssessing(true)} className={PRIMARY_ACTION}>{d.register ?? 'Registrer aktsomhetsvurdering'}</button>
+                            <button type="button" id="due-diligence-register" data-panel-trigger="" onClick={() => setAssessing(true)} className={PRIMARY_ACTION}>{d.register ?? 'Registrer aktsomhetsvurdering'}</button>
                             {current?.conclusion === 'measures_required' && onFollowUp && (
                                 <button type="button" onClick={() => onFollowUp(current)} className={SECONDARY_ACTION} data-testid="due-diligence-follow-up">{d.follow_up ?? 'Følg opp i Avvik og forbedringer'}</button>
                             )}
