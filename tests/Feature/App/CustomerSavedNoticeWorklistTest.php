@@ -1113,6 +1113,72 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame($original['admin']->id, $savedNotice->fresh()->opportunity_owner_user_id);
     }
 
+    public function test_store_saved_notice_keeps_a_long_register_title_and_buyer_in_full(): void
+    {
+        // notices.title is text, so a Doffin/TED title longer than 255 characters is ordinary
+        // register data. Saving it used to pass validation (max:1000) and then fail the insert
+        // into a varchar(255) column as an HTTP 500.
+        $context = $this->customerAdminContext();
+        $title = str_repeat('Rammeavtale for drift og forvaltning av fagsystemer ', 18);
+        $title = trim(mb_substr($title, 0, 900));
+        $buyerName = trim(mb_substr(str_repeat('Interkommunalt innkjøpssamarbeid ', 20), 0, 600));
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices')
+            ->post('/app/notices/save', [
+                'notice_id' => '2026-1017-long-title',
+                'title' => $title,
+                'buyer_name' => $buyerName,
+                'external_url' => 'https://doffin.no/notices/2026-1017-long-title',
+                'summary' => 'Kort oppsummering',
+                'status' => 'ACTIVE',
+            ])
+            ->assertRedirect('/app/notices')
+            ->assertSessionHasNoErrors();
+
+        $record = SavedNotice::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('external_id', '2026-1017-long-title')
+            ->firstOrFail();
+
+        $this->assertSame($title, $record->title);
+        $this->assertSame($buyerName, $record->buyer_name);
+    }
+
+    public function test_store_saved_notice_rejects_overlong_text_as_validation_error_not_server_error(): void
+    {
+        $context = $this->customerAdminContext();
+
+        foreach ([
+            ['title' => str_repeat('a', 1001)],
+            ['buyer_name' => str_repeat('b', 1001)],
+            ['reference_number' => str_repeat('c', 256)],
+            ['contact_person_name' => str_repeat('d', 256)],
+        ] as $overlong) {
+            $field = array_key_first($overlong);
+
+            $this->actingAs($context['admin'])
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from('/app/notices')
+                ->post('/app/notices/save', array_merge([
+                    'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                    'title' => 'Privat forespørsel med for lang tekst',
+                    'buyer_name' => 'Advania Norge AS',
+                    'summary' => 'Manuelt registrert forespørsel',
+                ], $overlong))
+                ->assertRedirect('/app/notices')
+                ->assertSessionHasErrors($field);
+        }
+
+        $this->assertDatabaseMissing('saved_notices', [
+            'customer_id' => $context['customer']->id,
+            'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+        ]);
+    }
+
     public function test_customer_can_create_private_request_saved_notice_and_see_source_metadata(): void
     {
         $context = $this->customerAdminContext();

@@ -1313,6 +1313,7 @@ return [
         'page_help_item_status_text' => 'En aktiv profil kjører løpende mot nye kunngjøringer. Deaktivering stopper matching uten å slette reglene – du kan aktivere den igjen når som helst.',
     ],
     'watch_profile' => [
+        'owner_change_not_allowed' => 'Bare kundeadministrator eller profilens personlige eier kan endre hvem watch profile-en tilhører.',
         'resource' => 'Følgeprofiler',
         'section' => 'Følgeprofil',
         'keywords' => 'Nøkkelord',
@@ -1704,6 +1705,10 @@ return [
         'notices_deadline_rfp_submission_label' => 'Innlevering RFP',
         'notices_deadline_award_date_label' => 'Tildelingsdato',
         'notices_type_prefix' => 'Type',
+    ],
+    'go_no_go_assessment' => [
+        'case_not_assessable' => 'Go/No-go-vurderingen kan bare lagres mens saken er i Go/No-go-fasen og ikke er flyttet til Historikk.',
+        'template_inactive' => 'Vurderingsmalen er deaktivert og kan ikke brukes til nye vurderinger.',
     ],
     'notices' => [
         'card' => [

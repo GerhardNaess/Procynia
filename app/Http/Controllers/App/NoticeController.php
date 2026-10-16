@@ -883,12 +883,12 @@ class NoticeController extends Controller
         return Inertia::render('App/Notices/SavedShow', [
             'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive, $canReopenAfterNoGo),
             'goNoGoData' => $record->bid_status === SavedNotice::BID_STATUS_GO_NO_GO
-                ? $this->buildGoNoGoData($record, $customerId, $user)
+                ? $this->buildGoNoGoData($record, $customerId, $user, $canManageCase)
                 : null,
         ]);
     }
 
-    private function buildGoNoGoData(SavedNotice $record, int $customerId, User $user): array
+    private function buildGoNoGoData(SavedNotice $record, int $customerId, User $user, bool $canManageCase): array
     {
         $template = $this->goNoGoDefaultTemplateService->ensureDefaultExists($customerId);
 
@@ -943,7 +943,11 @@ class NoticeController extends Controller
                 'updated_at' => $assessment->updated_at?->toIso8601String(),
                 'answers' => $answers,
             ] : null,
-            'save_url' => route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id]),
+            // Null hides the save bar: the assessment is shown to everyone who can see the case, but
+            // only someone who may work on an active case can change it (GoNoGoAssessmentController).
+            'save_url' => $canManageCase && $record->archived_at === null
+                ? route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id])
+                : null,
         ];
     }
 

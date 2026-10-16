@@ -244,6 +244,90 @@ class CustomerUserManagementTest extends TestCase
         $this->assertTrue(Hash::check('SecretPass123!', (string) $user->password));
     }
 
+    public function test_created_user_email_is_stored_trimmed_and_lower_cased(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'Blandet Bokstav',
+            'email' => 'Blandet.Bokstav@Example.TEST',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+        ])->assertRedirect('/app/users');
+
+        $this->assertDatabaseHas('users', ['email' => 'blandet.bokstav@example.test']);
+    }
+
+    /**
+     * Uniqueness was checked against the address as typed while the lower-cased address was what got
+     * inserted, so a case variant of an existing address passed validation and failed the insert as
+     * an HTTP 500. It is now a validation error.
+     */
+    public function test_creating_a_user_with_a_case_variant_of_an_existing_email_is_a_validation_error(): void
+    {
+        $context = $this->customerAdminContext();
+
+        User::factory()->create([
+            'email' => 'eksisterende@example.test',
+            'role' => User::ROLE_USER,
+            'customer_id' => $context['customer']->id,
+        ]);
+
+        foreach (['Eksisterende@Example.test', 'EKSISTERENDE@EXAMPLE.TEST'] as $variant) {
+            $this->postWithCsrf($context['admin'], '/app/users', [
+                'name' => 'Duplikat',
+                'email' => $variant,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'password' => 'SecretPass123!',
+                'password_confirmation' => 'SecretPass123!',
+            ])->assertSessionHasErrors('email');
+        }
+
+        $this->assertSame(1, User::query()->whereRaw('lower(email) = ?', ['eksisterende@example.test'])->count());
+    }
+
+    public function test_case_variant_of_a_legacy_mixed_case_email_is_rejected(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $legacy = User::factory()->create(['role' => User::ROLE_USER, 'customer_id' => $context['customer']->id]);
+        DB::table('users')->where('id', $legacy->id)->update(['email' => 'Legacy.Person@Example.test']);
+
+        $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'Duplikat',
+            'email' => 'legacy.person@example.test',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+        ])->assertSessionHasErrors('email');
+    }
+
+    public function test_every_user_write_normalizes_the_email_and_the_database_refuses_case_variants(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $user = User::factory()->create([
+            'email' => '  Model.Path@Example.TEST ',
+            'role' => User::ROLE_USER,
+            'customer_id' => $context['customer']->id,
+        ]);
+
+        $this->assertSame('model.path@example.test', $user->fresh()->email);
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        DB::table('users')->insert([
+            'name' => 'Omgår modellen',
+            'email' => 'MODEL.PATH@example.test',
+            'password' => 'x',
+            'role' => User::ROLE_USER,
+            'customer_id' => $context['customer']->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
     public function test_customer_admin_can_create_a_user_with_a_user_service_level_when_subscription_allows_it(): void
     {
         $context = $this->customerAdminContext();

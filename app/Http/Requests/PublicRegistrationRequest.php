@@ -4,7 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Models\User;
+use App\Rules\UniqueUserEmail;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -44,7 +44,7 @@ class PublicRegistrationRequest extends FormRequest
         return [
             'company_name' => ['required', 'string', 'max:255'],
             'owner_name' => ['required', 'string', 'max:255'],
-            'owner_email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')],
+            'owner_email' => ['required', 'string', 'email', 'max:255', new UniqueUserEmail(message: __('procynia.public.registration.validation.owner_email_unique'))],
             'password' => ['required', 'string', 'min:12'],
             'language_id' => ['required', 'integer', Rule::exists(Language::class, 'id')],
             'nationality_id' => ['required', 'integer', Rule::exists(Nationality::class, 'id')],
@@ -83,7 +83,6 @@ class PublicRegistrationRequest extends FormRequest
             'owner_name.required' => __('procynia.public.registration.validation.owner_name_required'),
             'owner_email.required' => __('procynia.public.registration.validation.owner_email_required'),
             'owner_email.email' => __('procynia.public.registration.validation.owner_email_email'),
-            'owner_email.unique' => __('procynia.public.registration.validation.owner_email_unique'),
             'password.required' => __('procynia.public.registration.validation.password_required'),
             'password.min' => __('procynia.public.registration.validation.password_min'),
             'language_id.required' => __('procynia.public.registration.validation.language_required'),

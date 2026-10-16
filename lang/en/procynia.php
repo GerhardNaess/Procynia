@@ -1309,6 +1309,7 @@ return [
         'page_help_item_status_text' => 'An active profile runs continuously against new notices. Deactivating stops matching without deleting the rules — you can reactivate it at any time.',
     ],
     'watch_profile' => [
+        'owner_change_not_allowed' => 'Only a customer administrator or the profile\'s personal owner can change who the watch profile belongs to.',
         'resource' => 'Watch Profiles',
         'section' => 'Watch Profile',
         'keywords' => 'Keywords',
@@ -1700,6 +1701,10 @@ return [
         'notices_deadline_rfp_submission_label' => 'RFP submission',
         'notices_deadline_award_date_label' => 'Award date',
         'notices_type_prefix' => 'Type',
+    ],
+    'go_no_go_assessment' => [
+        'case_not_assessable' => 'The Go/No-go assessment can only be saved while the case is in the Go/No-go phase and has not been moved to History.',
+        'template_inactive' => 'The assessment template is deactivated and cannot be used for new assessments.',
     ],
     'notices' => [
         'card' => [

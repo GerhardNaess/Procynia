@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\CustomerRole;
 use App\Models\Department;
 use App\Models\User;
+use App\Rules\UniqueUserEmail;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\Billing\BillingService;
 use App\Support\CustomerContext;
@@ -124,6 +125,10 @@ class UserController extends Controller
             ]);
         }
 
+        if (is_string($request->input('email'))) {
+            $request->merge(['email' => User::normalizeEmail($request->input('email'))]);
+        }
+
         $validated = $request->validate($this->storeValidationRules($actor));
         $selectedUserLicense = $this->selectedUserLicensePrice($customer, $validated['user_license_price_id'] ?? null);
 
@@ -167,7 +172,7 @@ class UserController extends Controller
         ): void {
             $user = User::create([
                 'name' => Str::squish($validated['name']),
-                'email' => Str::lower(trim($validated['email'])),
+                'email' => $validated['email'],
                 'password' => $validated['password'],
                 'role' => User::customerRoleForBidRole($targetBidRole),
                 'bid_role' => $targetBidRole,
@@ -1239,7 +1244,7 @@ class UserController extends Controller
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')],
+            'email' => ['required', 'string', 'email', 'max:255', new UniqueUserEmail],
             'redirect_to' => ['nullable', 'string', 'max:2048'],
             'user_license_price_id' => $actor->isSystemOwner()
                 ? ['nullable', 'integer']
