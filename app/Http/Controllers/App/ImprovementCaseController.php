@@ -20,6 +20,7 @@ use App\Services\Improvements\ImprovementCaseLifecycleService;
 use App\Services\Improvements\ImprovementCaseQualityContextService;
 use App\Services\ManagementReview\ManagementReviewDecisionService;
 use App\Services\Suppliers\SupplierImprovementHandoffService;
+use App\Support\CalendarDate;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Improvements\ImprovementValidationMessages;
@@ -143,7 +144,7 @@ class ImprovementCaseController extends Controller
             'permissions' => ['can_create' => $editableAreas->isNotEmpty()],
             'area_options' => $this->areaOptions($editableAreas),
             'owner_options' => $this->access->ownerCandidates($user, $this->areaIds($editableAreas)),
-            'today' => now()->toDateString(),
+            'today' => CalendarDate::todayString(),
         ]);
     }
 
@@ -235,7 +236,7 @@ class ImprovementCaseController extends Controller
             // «Fra Ledelsens gjennomgang»: null unless a tiltak from a review is followed up in this
             // case and the person can read that review.
             'review_origin' => $this->managementReviewDecisions->provenanceFor($user, $case),
-            'today' => now()->toDateString(),
+            'today' => CalendarDate::todayString(),
         ]);
     }
 

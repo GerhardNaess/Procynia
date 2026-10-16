@@ -111,6 +111,34 @@ class SupplierAssessmentTest extends TestCase
         $this->assertSame([['2026-10-07', '2027-04-07']], array_map(fn (array $row): array => [$row['last_assessed_on'], $row['next_review_on']], $register));
     }
 
+    /**
+     * Summer time ends in Norway at 01:00 UTC on 25 October 2026. Just after midnight on either side
+     * of the change the Norwegian day is already the next one — two hours ahead before, one after — and
+     * an assessment dated that day used to be refused as «fram i tid».
+     */
+    public function test_assessed_on_up_to_today_follows_the_norwegian_day_across_the_end_of_summer_time(): void
+    {
+        ['customer' => $customer] = $this->context('grc');
+        $assessor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_ASSESS]);
+        $editor = $this->supplierUser($customer, [CustomerPermissionCatalog::SUPPLIER_EDIT]);
+        $supplier = $this->supplier($customer, $editor, 'Drift AS', Supplier::STATUS_ACTIVE, $this->classification(Supplier::CRITICALITY_IMPORTANT, 24));
+        $url = "/app/supplier-management/{$supplier->id}/assessments";
+
+        // 22:30 UTC on the 24th = 00:30 on the 25th, summer time (UTC+2).
+        Carbon::setTestNow(Carbon::parse('2026-10-24 22:30:00', 'UTC'));
+        $this->actingAs($assessor)->post($url, $this->assessmentPayload(['assessed_on' => '2026-10-26']))
+            ->assertSessionHasErrors(['assessed_on' => 'Vurderingsdatoen kan ikke være fram i tid.']);
+        $this->actingAs($assessor)->post($url, $this->assessmentPayload(['assessed_on' => '2026-10-25']))->assertSessionHasNoErrors();
+
+        // 23:30 UTC on the 25th = 00:30 on the 26th, winter time (UTC+1).
+        Carbon::setTestNow(Carbon::parse('2026-10-25 23:30:00', 'UTC'));
+        $this->actingAs($assessor)->post($url, $this->assessmentPayload(['assessed_on' => '2026-10-27']))
+            ->assertSessionHasErrors(['assessed_on' => 'Vurderingsdatoen kan ikke være fram i tid.']);
+        $this->actingAs($assessor)->post($url, $this->assessmentPayload(['assessed_on' => '2026-10-26']))->assertSessionHasNoErrors();
+
+        $this->assertEqualsCanonicalizing(['2026-10-25', '2026-10-26'], $supplier->assessments()->get()->map(fn ($row) => $row->assessed_on->toDateString())->all());
+    }
+
     public function test_assess_registers_edit_alone_does_not_only_an_active_supplier_is_assessed_and_other_customers_are_404(): void
     {
         ['customer' => $customer] = $this->context('grc');

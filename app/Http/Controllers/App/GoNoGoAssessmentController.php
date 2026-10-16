@@ -17,6 +17,9 @@ use Illuminate\Validation\ValidationException;
 
 class GoNoGoAssessmentController extends Controller
 {
+    /** A criterion's reasoning; the page shows the same limit (GoNoGoAssessment.jsx). */
+    public const COMMENT_MAX_LENGTH = 2000;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
@@ -62,7 +65,13 @@ class GoNoGoAssessmentController extends Controller
             'answers'                  => ['required', 'array'],
             'answers.*.criterion_id'   => ['required', 'integer'],
             'answers.*.selected_value' => ['nullable', 'string', 'in:lav,middels,hoy'],
-            'answers.*.comment'        => ['nullable', 'string', 'max:2000'],
+            'answers.*.comment'        => ['nullable', 'string', 'max:'.self::COMMENT_MAX_LENGTH],
+        ], [
+            // Keyed answers.{index}.comment: the page maps the index back to its criterion and
+            // shows the message under that criterion's reasoning.
+            'answers.*.comment.max'       => __('procynia.go_no_go_assessment.comment_too_long', ['max' => self::COMMENT_MAX_LENGTH]),
+            'answers.*.comment.string'    => __('procynia.go_no_go_assessment.comment_invalid'),
+            'answers.*.selected_value.in' => __('procynia.go_no_go_assessment.rating_invalid'),
         ]);
 
         // Verify template belongs to this customer

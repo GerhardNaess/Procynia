@@ -417,6 +417,34 @@ class GoNoGoAssessmentTest extends TestCase
         $this->assertDatabaseMissing('go_no_go_assessment_answers', ['criterion_id' => $criteria[1]->id]);
     }
 
+    public function test_an_overlong_reasoning_is_refused_on_its_own_criterion_and_nothing_is_saved(): void
+    {
+        $ctx = $this->systemOwnerContext();
+        [$template, $criteria] = $this->createTemplate($ctx['customer']->id, 3);
+        $notice = $this->createSavedNotice($ctx['customer']->id, 'overlong-comment');
+        $payload = $this->payload($template, $criteria);
+        $payload['answers'][0]['comment'] = 'Kort begrunnelse.';
+        $payload['answers'][2]['comment'] = str_repeat('a', 2001);
+
+        $this->actingAs($ctx['owner'])
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $payload)
+            ->assertRedirect()
+            // Keyed by the answer's place in the list, which is how the page finds the criterion.
+            ->assertSessionHasErrors(['answers.2.comment' => 'Begrunnelsen kan ha maks 2000 tegn. Kort den ned og lagre igjen.'])
+            ->assertSessionDoesntHaveErrors(['answers.0.comment', 'answers.1.comment']);
+
+        $this->assertDatabaseMissing('go_no_go_assessments', ['saved_notice_id' => $notice->id]);
+
+        // Exactly at the limit is accepted.
+        $payload['answers'][2]['comment'] = str_repeat('a', 2000);
+
+        $this->actingAs($ctx['owner'])
+            ->patch("/app/notices/saved/{$notice->id}/go-no-go-assessment", $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('go_no_go_assessment_answers', ['criterion_id' => $criteria[2]->id, 'comment' => str_repeat('a', 2000)]);
+    }
+
     /**
      * @param  list<GoNoGoAssessmentCriterion>  $criteria
      */

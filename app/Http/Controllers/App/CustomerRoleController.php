@@ -46,7 +46,7 @@ class CustomerRoleController extends Controller
             'all_business_areas' => ['sometimes', 'boolean'],
             'business_area_ids' => ['sometimes', 'array'],
             'business_area_ids.*' => ['integer'],
-        ]);
+        ], $this->nameMessages());
 
         $name = trim($validated['name']);
         $this->guardUniqueName($customerId, $name, null);
@@ -97,7 +97,7 @@ class CustomerRoleController extends Controller
             'all_business_areas' => ['sometimes', 'boolean'],
             'business_area_ids' => ['sometimes', 'present', 'array'],
             'business_area_ids.*' => ['integer'],
-        ]);
+        ], $this->nameMessages());
 
         if (array_key_exists('name', $validated)) {
             $validated['name'] = trim($validated['name']);
@@ -171,14 +171,24 @@ class CustomerRoleController extends Controller
         return [$actor, $customerId];
     }
 
+    /**
+     * The middleware trims the name and turns an empty one into null, so «required» is what answers
+     * a blank name — it carries the role's own message, not Laravel's default.
+     *
+     * @return array<string, string>
+     */
+    private function nameMessages(): array
+    {
+        return [
+            'name.required' => __('procynia.customer_env.roles.name_required'),
+            'name.string' => __('procynia.customer_env.roles.name_required'),
+            'name.max' => __('procynia.customer_env.roles.name_too_long'),
+            'description.max' => __('procynia.customer_env.roles.description_too_long'),
+        ];
+    }
+
     private function guardUniqueName(int $customerId, string $name, ?int $ignoreRoleId): void
     {
-        if ($name === '') {
-            throw ValidationException::withMessages([
-                'name' => __('procynia.customer_env.roles.name_required'),
-            ]);
-        }
-
         $query = CustomerRole::query()
             ->forCustomer($customerId)
             ->whereRaw('lower(name) = ?', [mb_strtolower($name)]);

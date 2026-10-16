@@ -109,6 +109,31 @@ class ImprovementCaseTest extends TestCase
         $this->assertSame([], $props['status_history']);
     }
 
+    /**
+     * 23:30 UTC on New Year's Eve is 00:30 on 1 January in Norway (winter time, UTC+1). A deviation
+     * that happened just after midnight was refused as «frem i tid» until 01:00, because «today» was
+     * the UTC day. The form's date limit and the rule now both use the Norwegian day.
+     */
+    public function test_occurred_at_up_to_today_means_the_norwegian_day_in_winter_time(): void
+    {
+        ['customer' => $customer] = $this->context();
+        $hr = $this->area($customer, 'HR');
+        $reporter = $this->editor($customer, $hr);
+
+        Carbon::setTestNow(Carbon::parse('2026-12-31 23:30:00', 'UTC'));
+
+        $props = $this->actingAs($reporter)->get('/app/improvements')->assertOk()->viewData('page')['props'];
+        $this->assertSame('2027-01-01', $props['today']);
+
+        $this->actingAs($reporter)->post('/app/improvements', ['occurred_at' => '2027-01-02'] + $this->payload($hr, $reporter, 'For tidlig'))
+            ->assertSessionHasErrors(['occurred_at' => 'Hendelsesdato kan ikke være frem i tid.']);
+
+        $this->actingAs($reporter)->post('/app/improvements', ['occurred_at' => '2027-01-01'] + $this->payload($hr, $reporter, 'Rett etter midnatt'))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('2027-01-01', ImprovementCase::query()->where('customer_id', $customer->id)->sole()->occurred_at->format('Y-m-d'));
+    }
+
     public function test_only_two_types_and_four_statuses_exist_in_the_model_and_the_database(): void
     {
         ['customer' => $customer] = $this->context();

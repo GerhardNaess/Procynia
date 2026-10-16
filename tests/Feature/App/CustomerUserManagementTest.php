@@ -244,6 +244,87 @@ class CustomerUserManagementTest extends TestCase
         $this->assertTrue(Hash::check('SecretPass123!', (string) $user->password));
     }
 
+    /**
+     * The form posts natively, so a refused save comes back as a fresh page. That page used to open
+     * empty: everything typed was lost. It now opens with what was entered — except the password,
+     * which is never flashed or sent back to the browser.
+     */
+    public function test_a_refused_create_reopens_the_form_with_what_was_entered_but_not_the_password(): void
+    {
+        $context = $this->customerAdminContext();
+        $department = $this->createDepartment($context['customer']->id, 'Salg');
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->from('/app/users/create')
+            ->post('/app/users', [
+                '_token' => 'test-token',
+                'name' => 'Kari Nordmann',
+                'email' => 'kari@example.test',
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'is_qa' => '1',
+                'department_ids' => [(string) $department->id],
+                'password' => 'kort',
+                'password_confirmation' => 'kort',
+            ])
+            ->assertRedirect('/app/users/create')
+            // Norwegian, with the field's name as the form shows it — not «validation.min.string».
+            ->assertSessionHasErrors(['password' => 'Passord må ha minst 8 tegn.']);
+
+        $this->assertDatabaseMissing('users', ['email' => 'kari@example.test']);
+
+        $this->actingAs($context['admin'])
+            ->get('/app/users/create')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('oldInput.name', 'Kari Nordmann')
+                ->where('oldInput.email', 'kari@example.test')
+                ->where('oldInput.is_qa', '1')
+                ->where('oldInput.department_ids', [(string) $department->id])
+                ->missing('oldInput.password')
+                ->missing('oldInput.password_confirmation')
+                ->missing('oldInput._token'));
+
+        // Only the page that answers the refusal carries it.
+        $this->actingAs($context['admin'])
+            ->get('/app/users/create')
+            ->assertInertia(fn (Assert $page) => $page->where('oldInput', null));
+    }
+
+    public function test_a_refused_edit_reopens_the_form_with_what_was_entered(): void
+    {
+        $context = $this->customerAdminContext();
+        $target = User::factory()->create([
+            'name' => 'Gammelt Navn',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->from("/app/users/{$target->id}/edit")
+            ->put("/app/users/{$target->id}", [
+                '_token' => 'test-token',
+                'name' => 'Nytt Navn',
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'password' => 'NyttPassord1',
+                'password_confirmation' => 'EtAnnetPassord1',
+            ])
+            ->assertRedirect("/app/users/{$target->id}/edit")
+            ->assertSessionHasErrors(['password' => 'Passord og bekreftelsen er ikke like.']);
+
+        $this->assertSame('Gammelt Navn', $target->fresh()->name);
+
+        $this->actingAs($context['admin'])
+            ->get("/app/users/{$target->id}/edit")
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('oldInput.name', 'Nytt Navn')
+                ->missing('oldInput.password')
+                ->missing('oldInput.password_confirmation'));
+    }
+
     public function test_created_user_email_is_stored_trimmed_and_lower_cased(): void
     {
         $context = $this->customerAdminContext();

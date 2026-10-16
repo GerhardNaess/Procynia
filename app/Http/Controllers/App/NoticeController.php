@@ -33,6 +33,7 @@ use App\Services\OpportunitySources\OpportunityStatus;
 use App\Services\SavedNoticeAccessService;
 use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
+use App\Support\LocalizedNumber;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -694,9 +695,16 @@ class NoticeController extends Controller
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
+        // «12,5» and «1 250» are how a Norwegian writes the value; read them before the numeric rule
+        // does, which knows only «12.5». Anything that does not read is left for that rule to refuse.
+        if ($request->has('contract_value_mnok')) {
+            $request->merge(['contract_value_mnok' => LocalizedNumber::normalize($request->input('contract_value_mnok'))]);
+        }
+
         $validated = $request->validate([
             'selected_supplier_name' => ['nullable', 'string', 'max:255'],
-            'contract_value_mnok' => ['nullable', 'numeric', 'min:0'],
+            // decimal(12,2): a larger value would not fit the column.
+            'contract_value_mnok' => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
             'procurement_type' => ['required', 'string', Rule::in(SavedNotice::PROCUREMENT_TYPES)],
             'follow_up_mode' => ['required', 'string', Rule::in(SavedNotice::EDITABLE_FOLLOW_UP_MODES)],
             'follow_up_offset_months' => [
@@ -711,6 +719,10 @@ class NoticeController extends Controller
                 'integer',
                 'min:1',
             ],
+        ], [
+            'contract_value_mnok.numeric' => __('procynia.notices.contract_value_invalid'),
+            'contract_value_mnok.min' => __('procynia.notices.contract_value_negative'),
+            'contract_value_mnok.max' => __('procynia.notices.contract_value_too_large'),
         ]);
 
         $followUpOffsetMonths = array_key_exists('follow_up_offset_months', $validated) && $validated['follow_up_offset_months'] !== null

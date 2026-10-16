@@ -9,6 +9,7 @@ import FormButtonRow from '../../../Components/App/FormButtonRow';
 import InfoHint from '../../../Components/App/InfoHint';
 import FormField from '../../../Components/App/FormField';
 import { useFocusFirstError } from '../../../Support/focusManagement';
+import { withOldInput } from './userFormOldInput';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -69,12 +70,14 @@ export default function UsersEdit({
     canEditBidManagerScope,
     canEditCustomerRoles = false,
     customerRoleOptions = [],
+    oldInput = null,
 }) {
     const page = usePage();
     const { translations = {} } = page.props;
     const usersFormText = translations.users_form ?? {};
     const [toggling, setToggling] = useState(false);
-    const form = useForm({
+    // After a refused save the form opens with what was entered (F6), except the password.
+    const form = useForm(withOldInput({
         name: user.name,
         bid_role: user.bid_role_value,
         is_qa: user.is_qa ?? false,
@@ -88,7 +91,12 @@ export default function UsersEdit({
         department_ids: user.department_ids ?? [],
         managed_department_ids: user.managed_department_ids ?? [],
         redirect_to: redirectTo,
-    });
+    }, oldInput, {
+        // Egne roller are only sent when they can be edited; otherwise the user's own stay.
+        arrays: ['department_ids', 'managed_department_ids', ...(canEditCustomerRoles ? ['customer_role_ids'] : [])],
+        booleans: ['is_qa', 'is_wiki_approver'],
+        numbers: ['primary_department_id'],
+    }));
 
     const isBidManager = form.data.bid_role === 'bid_manager';
     const isDepartmentScopedBidManager = isBidManager && form.data.bid_manager_scope === 'departments';
@@ -482,10 +490,16 @@ export default function UsersEdit({
                                 </div>
                             )}
 
+                            {oldInput ? (
+                                <AlertBox className="md:col-span-2">
+                                    {usersFormText.password_reenter_edit ?? 'Skrev du inn et nytt passord, må du skrive det inn på nytt. Av sikkerhetshensyn blir passord ikke tatt vare på når lagringen avvises. Resten av skjemaet er beholdt.'}
+                                </AlertBox>
+                            ) : null}
+
                             <UserField
                                 id="user-password"
                                 label="Nytt passord"
-                                hint="La feltet stå tomt hvis passordet ikke skal endres."
+                                hint={usersFormText.password_empty_hint_min ?? 'La feltet stå tomt hvis passordet ikke skal endres. Et nytt passord må ha minst 8 tegn.'}
                                 error={errors.password}
                                 span="md:col-span-1"
                             >
@@ -496,6 +510,7 @@ export default function UsersEdit({
                                         name="password"
                                         value={form.data.password}
                                         onChange={(event) => form.setData('password', event.target.value)}
+                                        minLength={8}
                                         autoComplete="new-password"
                                         className="h-11 w-full rounded-xl border border-field-border bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     />

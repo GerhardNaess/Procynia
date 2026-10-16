@@ -15,6 +15,7 @@ use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiTargetPolicy;
 use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
+use App\Support\CalendarDate;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
@@ -400,7 +401,7 @@ final class KpiPresenter
             'percent_units' => Kpi::PERCENT_UNITS,
             'growth_units' => KpiGrowth::UNITS,
             'unit_rules' => KpiUnitRules::forClient(),
-            'today' => now()->format('Y-m-d'),
+            'today' => CalendarDate::todayString(),
             'deadline' => $this->deadline($objective, now()),
             'frequencies' => Kpi::FREQUENCIES,
             'default_currency_code' => Kpi::DEFAULT_CURRENCY_CODE,

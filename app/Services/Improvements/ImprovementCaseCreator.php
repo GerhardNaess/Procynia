@@ -4,6 +4,7 @@ namespace App\Services\Improvements;
 
 use App\Models\ImprovementCase;
 use App\Models\User;
+use App\Support\CalendarDate;
 use App\Support\CustomerPermissionCatalog;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -41,7 +42,7 @@ class ImprovementCaseCreator
             'business_area_id' => ['required', 'integer'],
             'owner_user_id' => ['required', 'integer'],
             // Hendelsesdato is when something happened, so it cannot lie ahead.
-            'occurred_at' => ['nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'occurred_at' => ['nullable', 'date_format:Y-m-d', 'before_or_equal:'.CalendarDate::todayString()],
             'due_date' => ['nullable', 'date_format:Y-m-d'],
         ];
     }

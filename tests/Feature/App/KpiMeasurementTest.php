@@ -248,6 +248,25 @@ class KpiMeasurementTest extends TestCase
         }
     }
 
+    /**
+     * 22:30 UTC on 10 October is 00:30 on 11 October in Norway (summer time, UTC+2). «Today» is the
+     * Norwegian day: it was the UTC day, so the person's today was refused as a future day.
+     */
+    public function test_today_is_the_norwegian_day_after_midnight_in_norway(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-10-10 22:30:00', 'UTC'));
+        ['kpi' => $kpi, 'measurer' => $user] = $this->scenario(['frequency' => null]);
+        $url = $this->measureUrl($kpi);
+
+        $this->assertSame('2026-10-11', $this->kpiProps($kpi, $user)['measurement_form']['today']);
+
+        $this->actingAs($user)->post($url, ['measured_on' => '2026-10-12', 'value' => '99'])
+            ->assertSessionHasErrors(['measured_on' => 'Datoen kan ikke være i fremtiden.']);
+        $this->actingAs($user)->post($url, ['measured_on' => '2026-10-11', 'value' => '99'])->assertSessionHasNoErrors();
+
+        $this->assertSame('2026-10-11', KpiMeasurement::query()->where('kpi_id', $kpi->id)->sole()->period_start->format('Y-m-d'));
+    }
+
     public function test_a_kpi_without_frequency_is_measured_on_a_day_up_to_today(): void
     {
         $this->at('2026-10-10');

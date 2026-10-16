@@ -101,20 +101,21 @@ class BusinessAreaController extends Controller
     /** @return array<string, mixed> */
     private function validated(Request $request): array
     {
+        // The middleware trims the name and turns an empty one into null, so «required» is what
+        // answers a blank name — it carries the area's own message, not Laravel's default.
         return $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'name.required' => __('procynia.customer_env.roles.business_areas.name_required'),
+            'name.string' => __('procynia.customer_env.roles.business_areas.name_required'),
+            'name.max' => __('procynia.customer_env.roles.business_areas.name_too_long'),
+            'description.max' => __('procynia.customer_env.roles.business_areas.description_too_long'),
         ]);
     }
 
     private function guardUniqueName(int $customerId, string $name, ?int $ignoreId): void
     {
-        if ($name === '') {
-            throw ValidationException::withMessages([
-                'name' => __('procynia.customer_env.roles.business_areas.name_required'),
-            ]);
-        }
-
         $query = BusinessArea::query()
             ->forCustomer($customerId)
             ->whereRaw('lower(name) = ?', [mb_strtolower($name)]);

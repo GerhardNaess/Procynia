@@ -13,6 +13,7 @@ use App\Services\Objectives\KpiQualityContextService;
 use App\Services\Objectives\KpiTarget;
 use App\Services\Objectives\KpiUnitRules;
 use App\Services\Objectives\ObjectiveAccessService;
+use App\Support\CalendarDate;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Objectives\KpiPresenter;
@@ -69,7 +70,7 @@ class KpiController extends Controller
         // Measuring is its own permission, and only an active KPI under an active objective takes it.
         $canMeasure = $this->access->canMeasure($user, $objective) && $objective->isActive() && $kpi->isActive();
         $measurements = $kpi->measurements()->with(['recordedBy:id,name', 'withdrawnBy:id,name'])->get();
-        $today = now();
+        $today = CalendarDate::today();
 
         return Inertia::render('App/Objectives/KpiShow', [
             'kpi' => $this->presenter->detail($kpi, $measurements, $today),

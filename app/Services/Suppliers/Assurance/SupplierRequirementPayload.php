@@ -14,6 +14,7 @@ use App\Models\SupplierRequirementOverride;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAccessService;
 use App\Services\Suppliers\SupplierAccessService;
+use App\Support\CalendarDate;
 use App\Support\Suppliers\RequirementTemplates\RequirementTemplates;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -178,8 +179,8 @@ class SupplierRequirementPayload
                 ])->values()->all(),
             'evaluation_form' => $canEvaluate ? [
                 'statuses' => SupplierRequirementEvaluation::STATUSES,
-                'today' => $today->toDateString(),
-                'max_accepted_until' => $today->copy()->addMonthsNoOverflow(SupplierRequirementEvaluation::MAX_ACCEPTANCE_MONTHS)->toDateString(),
+                'today' => CalendarDate::todayString(),
+                'max_accepted_until' => CalendarDate::today()->addMonthsNoOverflow(SupplierRequirementEvaluation::MAX_ACCEPTANCE_MONTHS)->toDateString(),
                 // Every row of this supplier, the current ones first; an expired or replaced row may be
                 // named and says so.
                 'documents' => $documents->sortBy([

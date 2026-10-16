@@ -7,6 +7,7 @@ use App\Models\Risk;
 use App\Models\User;
 use App\Services\Risk\RiskAcceptanceService;
 use App\Services\Risk\RiskAccessService;
+use App\Support\CalendarDate;
 use App\Support\CustomerContext;
 use App\Support\CustomerPermissionCatalog;
 use App\Support\Risk\RiskValidationMessages;
@@ -35,7 +36,7 @@ class RiskAcceptanceController extends Controller
         $validated = $request->validate([
             'assessment_id' => ['required', 'integer'],
             'rationale' => ['required', 'string', 'max:5000'],
-            'valid_until' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:today'],
+            'valid_until' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:'.CalendarDate::todayString()],
         ], RiskValidationMessages::messages(), RiskValidationMessages::attributes());
 
         $this->acceptances->accept(

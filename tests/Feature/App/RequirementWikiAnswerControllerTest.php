@@ -265,6 +265,53 @@ class RequirementWikiAnswerControllerTest extends TestCase
         );
     }
 
+    /**
+     * The page reads Laravel's `errors` from a 422 and shows the message under the field; the message
+     * itself is Norwegian with the field's name, not «The answer text field must not be greater…».
+     */
+    public function test_a_refused_hand_edit_answers_with_field_errors_in_norwegian_and_keeps_the_answer(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-EDIT-422', 'Wiki answer edit refusal');
+        $document = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal levere dokumentasjon.',
+        ]);
+
+        SavedNoticeAiRequirementWikiAnswer::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
+            'answer_text' => 'Opprinnelig svar.',
+            'sources' => [],
+            'research_trace' => ['research' => ['pages' => []], 'answer' => ['answer_sections' => []]],
+            'alignment_trace' => ['sections' => [], 'coverage_status' => 'full', 'has_possible_conflict' => false, 'revision' => ['attempted' => false, 'section_keys' => []]],
+            'generated_at' => now(),
+        ]);
+
+        $url = "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer";
+
+        $this->actingAs($context['user'])
+            ->patchJson($url, ['answer_text' => str_repeat('a', 20001)])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['answer_text' => 'Svaret kan ha maks 20000 tegn.']);
+
+        $this->actingAs($context['user'])
+            ->patchJson($url, ['answer_text' => ''])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['answer_text' => 'Svaret må fylles ut.']);
+
+        $this->actingAs($context['user'])
+            ->postJson($url, ['user_answer_prompt' => str_repeat('a', 5001)])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['user_answer_prompt' => 'Instruksjonen kan ha maks 5000 tegn.']);
+
+        $this->assertSame(
+            'Opprinnelig svar.',
+            SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->firstOrFail()->answer_text,
+        );
+    }
+
     public function test_it_returns_404_for_a_requirement_belonging_to_another_customer(): void
     {
         $contextA = $this->customerAdminContext('Customer A AS');

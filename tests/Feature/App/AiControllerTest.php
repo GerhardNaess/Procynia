@@ -754,6 +754,58 @@ class AiControllerTest extends TestCase
         $response->assertSessionHasErrors(['documents.0']);
     }
 
+    /**
+     * The picker offered .doc and .xls, which nothing downstream can read, and a refused file came
+     * back as Laravel's default text. The picker now offers what is supported, and a refused file is
+     * named with what to do instead.
+     */
+    public function test_ai_case_document_upload_names_each_refused_file_and_what_is_allowed(): void
+    {
+        Storage::fake('local');
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-DOC-TYPES', 'Document type target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->post(route('app.ai.documents.store', ['savedNotice' => $savedNotice->id]), [
+                'documents' => [
+                    UploadedFile::fake()->create('gammel.doc', 8, 'application/msword'),
+                    UploadedFile::fake()->create('regneark.xls', 8, 'application/vnd.ms-excel'),
+                    UploadedFile::fake()->create('stor.pdf', 20481, 'application/pdf'),
+                ],
+            ])
+            ->assertSessionHasErrors([
+                'documents.0' => '«gammel.doc» kan ikke lastes opp. Tillatte filtyper er PDF, Word (.docx) og Excel (.xlsx). Lagre eldre .doc- og .xls-filer som .docx eller .xlsx, og prøv igjen.',
+                'documents.1' => '«regneark.xls» kan ikke lastes opp. Tillatte filtyper er PDF, Word (.docx) og Excel (.xlsx). Lagre eldre .doc- og .xls-filer som .docx eller .xlsx, og prøv igjen.',
+                'documents.2' => '«stor.pdf» er større enn 20 MB. Del opp eller komprimer dokumentet, og prøv igjen.',
+            ]);
+
+        $this->actingAs($context['user'])
+            ->post(route('app.ai.documents.store', ['savedNotice' => $savedNotice->id]), ['documents' => []])
+            ->assertSessionHasErrors(['documents' => 'Velg minst én fil å laste opp.']);
+
+        $this->assertSame(0, $savedNotice->aiDocuments()->count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_ai_case_page_and_help_text_offer_only_the_supported_file_types(): void
+    {
+        $source = (string) file_get_contents(resource_path('js/Pages/App/AI/Show.jsx'));
+
+        $this->assertStringContainsString('accept=".pdf,.docx,.xlsx"', $source);
+        $this->assertStringNotContainsString('.doc,', $source);
+        $this->assertStringNotContainsString('.xls,', $source);
+
+        foreach (['no', 'en'] as $locale) {
+            $help = (string) __('procynia.ai.allowed_file_types', [], $locale);
+            $this->assertStringNotContainsString('DOC,', $help, $locale);
+            $this->assertStringNotContainsString('XLS,', $help, $locale);
+            $this->assertStringContainsString('.docx', $help, $locale);
+            $this->assertStringContainsString('.xlsx', $help, $locale);
+        }
+    }
+
     public function test_ai_requirement_answer_basis_selection_sync_endpoint_persists_selected_ids(): void
     {
         $context = $this->customerAdminContext();
