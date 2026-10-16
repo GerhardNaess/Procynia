@@ -484,3 +484,84 @@ gjelder bare hvis rå brukertekst sendes direkte til `Markdown::parse()`. Det sk
   Filament-oppgradering må sette rettighetene tilbake før commit.
 - **Gjenstår etter runde 3:** npm-lockfila (runde 4), og den samlede regresjonen, inkludert hele E2E-pakken for admin.
 
+### Runde 4 — npm-lockfila (16.10.2026)
+
+**[Observert] Kartlegging før oppdatering** (`npm audit --json`, HEAD `aad16db3`)
+
+- Listen i §3 er fortsatt komplett: 5 sårbare pakker (2 critical, 2 high, 1 moderate) og ingen nye funn.
+- `npm audit --omit=dev` regner `browserslist`, `source-map-js` og `baseline-browser-mapping` som «prod», fordi
+  `@vitejs/plugin-react` står under `dependencies`. Alle fem kjører bare ved bygging eller i utvikling (se §3).
+
+| Pakke | Før | Etter | Advisory lukket | Kjede | Bruk |
+|---|---|---|---|---|---|
+| `shell-quote` | 1.9.0 | 1.12.0 | GHSA-pqg4-j6r4-53mv (critical) | `concurrently` | dev (`composer dev`) |
+| `concurrently` | 9.2.4 | 9.2.5 | arvet fra `shell-quote` | direkte devDependency `^9.0.1` | dev |
+| `browserslist` | 4.28.1 | 4.29.3 | GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g (high) | `autoprefixer`, `@babel/helper-compilation-targets` ← `@vitejs/plugin-react` | bygging |
+| `source-map-js` | 1.2.1 | 1.2.2 | GHSA-68fv-2mgg-jv7q (high) | `postcss`, `@tailwindcss/node` | bygging |
+| `baseline-browser-mapping` | 2.10.10 | 2.11.29 | GHSA-w5vr-8v7q-w6rv (moderate) | `browserslist` | bygging |
+
+**[Observert] Oppdatering**
+
+- **Kommando:** `npm update concurrently browserslist baseline-browser-mapping source-map-js`. `npm audit fix` og
+  `--force` er ikke brukt.
+- **`package.json` er uendret.** Alle målversjoner ligger innenfor eksisterende krav. Bare `package-lock.json`
+  er endret (36 innsettinger, 33 slettinger).
+- **Ni pakker er endret i lockfila, ingen nye og ingen fjernet.** I tillegg til de fem over har `browserslist` 4.29
+  hevet minstekravene til fire av sine egne avhengigheter, så de følger med:
+  - `caniuse-lite` 1.0.30001781 → 1.0.30001816
+  - `electron-to-chromium` 1.5.325 → 1.5.458
+  - `node-releases` 2.0.36 → 2.0.59
+  - `update-browserslist-db` 1.2.3 → 1.3.4
+- **Ingen endring** i React, Vite, Tailwind, Playwright, Inertia eller `@vitejs/plugin-react`.
+- **`@vitejs/plugin-react`** står fortsatt under `dependencies`. Å flytte den lukker ingen advisory, så det er ikke gjort her
+  (se §10 og oppfølging).
+
+**[Observert] Kontroller** (Node 22.23.2 / npm 10.9.8, som `engines` og CI)
+
+- **`npm ci --no-audit --no-fund`:** lockfila installeres rent (420 pakker), og `npm ls --depth=0` er uten feil.
+- **`npm audit`:** «found 0 vulnerabilities».
+- **`composer audit`:** «No security vulnerability advisories found».
+- **`npm run build`:** OK. Både `app` og Filament-temaet (`theme-*.css`) bygges.
+- **Byggeresultatet er byte-identisk med HEAD.** HEAD `aad16db3` ble bygd i en midlertidig worktree. Alle tre
+  assets har samme innholdshash (`app-BO0m8Zfj.css`, `theme-BCOnYrCi.css`, `app-CnsJkYjQ.js`). Browserslist 4.29
+  ga altså ingen endring i autoprefixer-utdata.
+- **`npm run test:unit`:** 2081 bestått, 0 feilet.
+- **`npm run lint:a11y`:** ingen funn.
+- **Vertsmaskinens Node:** standard-`node` er 18.15.0, og der feiler `npm run build` med «Cannot find native binding» fra
+  `@tailwindcss/oxide`. Det gjelder også før endringen. Prosjektet krever Node 22 (`engines`), og alle
+  kontrollene over er kjørt med Node 22.
+
+**[Observert] Målrettede E2E-tester** (Chromium, `localhost:8080`, nybygde assets)
+
+- `public/hot` var flyttet midlertidig til side under kjøringene og ble lagt tilbake etterpå. En kjørende Vite-dev-server
+  på 5173 ble ikke stoppet.
+- **Utvalg:** `auth` (innlogging), `app-navigation` og `a11y-navigation` (hovednavigasjon), `a11y-tenders-ai`
+  (Anbud), `wiki-navigation` og `a11y-wiki` (Enterprise Wiki), `admin` og `a11y-admin` (Filament),
+  `a11y-forms` og `validation-feedback` (skjemaer og dialoger). Kjørt med `--trace retain-on-failure`.
+- **Samlet kjøring:** 113 tester. 104 bestått, 1 feilet og 8 ikke kjørt. De 8 kjørte ikke fordi specen er
+  `describe.serial` og stoppet etter feilen.
+- **Feilen:** `a11y-wiki.spec.js:185`, «focus mode has a list too…».
+  - `getByLabel('Fokusside')` traff to elementer: `<select id="graph-focus-page">` og
+    `<ul aria-labelledby="wiki-graph-focus-depth-0">`, som har overskriften «Fokusside»
+    (`WikiGraphFocusView.jsx:298`). Det ga et brudd på Playwrights strict mode.
+- **Feilen kommer fra testen, ikke fra oppdateringen:**
+  - Byggeresultatet er byte-identisk med HEAD.
+  - `a11y-wiki.spec.js` alene ga 12 av 12 bestått to ganger.
+  - I tracen fra både den feilende og den beståtte kjøringen ble det samme klikket på «Fokuser på denne siden» utført.
+  - **[Vurdering]** Etter klikket tegnes fokuslista på nytt. Om `<ul>` med samme navn finnes i det øyeblikket
+    påstanden kjøres, avhenger av timing. Lokatoren bør avgrenses til `#graph-focus-page` eller
+    `getByRole('combobox', { name: 'Fokusside' })`. Dette er en testfeil fra WCAG Fase 5 (`641d4a1c`) og er ikke
+    rettet i denne runden.
+- **`a11y-admin.spec.js`:** 13 av 13 i den samlede kjøringen, deretter 26 av 26 med `--repeat-each=2`.
+  Modal-funnet fra runde 3 (test 8) kom ikke igjen i noen av de 39 kjøringene, så det finnes ingen axe-rapport eller trace å
+  analysere. Funnet fra runde 3 er fortsatt uforklart, se §11 runde 3.
+
+**Gjenstående risiko og oppfølging**
+
+- **npm-advisories:** ingen kjente.
+- **Ustabil E2E-test:** `a11y-wiki.spec.js:185` har en tvetydig lokator. Den bør rettes i en egen commit før den
+  samlede regresjonen, ellers kan den gi falske feil i merge-porten.
+- **Opprydding:** `@vitejs/plugin-react` bør flyttes til `devDependencies`. Da regner ikke `npm audit --omit=dev`
+  Babel-treet som produksjon. Det påvirker ikke Docker-bygget (`npm ci` uten `--omit=dev`).
+- **Vertsmaskinens Node:** lokal standard-Node er 18. Bygging og tester må kjøres med Node 22.
+- **Gjenstår etter runde 4:** den samlede regresjonen (§9) og CI-kjøring på branchen.
