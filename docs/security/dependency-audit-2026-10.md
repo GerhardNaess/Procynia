@@ -344,3 +344,81 @@ Ingen. Alle funnene kan rettes innenfor dagens versjonskrav.
   `HttpsTlsProductionConfigTest`, `AiControllerTest`, `WikiSourceControllerTest`, `WikiSourceControllerImageTest`,
   `EnterpriseWikiSourceOwnerGateTest`, `SupplierImportTest` og `AdminPanelAccessGateTest`.
 
+### Runde 2 — `league/commonmark` 2.10.0 → 2.10.3 og `laravel/framework` v13.29.0 → v13.30.1 (16.10.2026)
+
+**[Observert] Advisories og versjonsvalg**
+
+- **Lukket:** `league/commonmark` [GHSA-3q6v-r5mr-hxv8](https://github.com/advisories/GHSA-3q6v-r5mr-hxv8)
+  (PKSA-m4t9-vsgq-8khn, high 7.5, rettet i 2.10.2) og
+  [GHSA-97jj-33gv-5xf9](https://github.com/advisories/GHSA-97jj-33gv-5xf9) (PKSA-m2dq-1fhr-29b1, moderate 6.1,
+  rettet i 2.10.2). Også lukket: `laravel/framework`
+  [GHSA-jh5r-qr3c-85q8](https://github.com/advisories/GHSA-jh5r-qr3c-85q8) / CVE-2026-102279 (PKSA-d5tc-s1qs-h781,
+  low 3.1, rettet i 13.30.0).
+- **CommonMark:** 2.10.3 er siste patch i 2.10. Den inneholder begge rettelsene pluss mindre feilrettinger.
+- **Laravel:** **v13.30.1** er bevisst valgt framfor nyeste mulige.
+  - Uten `-W` velger Composer v13.35.0. Fra 13.36 kreves `laravel/prompts ^0.3.25`, som ville gitt en ekstra
+    transitiv endring.
+  - 13.31–13.35 inneholder ingen advisory-rettelser. De endrer derimot oppførsel utover denne runden:
+    - Remember-cookien og passord-hashen i sesjonen håndteres annerledes (13.31 og 13.33).
+    - Signalhåndteringen i køarbeiderne endres (13.33). Det berører lange Wiki-jobber.
+    - Morph map håndheves ved lesing av polymorfe relasjoner (13.34).
+  - Disse versjonene bør tas i en egen, planlagt oppgradering.
+- **Kommando:** `composer update "laravel/framework:v13.30.1" league/commonmark`. Lock-operasjoner: 2 oppdateringer,
+  0 nye, 0 fjernet. Ingen transitive endringer. `composer.json` er uendret.
+- **Lockfil:** `plugin-api-version` er rullet tilbake til 2.6.0, som i runde 1. `composer validate` er OK, og
+  `composer install --dry-run` gir «Nothing to install».
+- **`composer audit`:** 1 advisory i 1 pakke gjenstår, `filament/filament` (runde 3).
+
+**[Observert] Hva endringene betyr for Procynia**
+
+- **CommonMark 2.10.0 → 2.10.3:**
+  - `DisallowedRawHtml` fanger nå et tag-navn som avslutter rå HTML.
+  - Tag-navn med store bokstaver gjenkjennes som HTML.
+  - Tabellparseren skanner bare den aktuelle linja.
+  - En tabell der overskriftsraden har *færre* celler enn skillelinja, er ikke lenger en tabell (GFM-spesifikasjonen).
+  - Fotnote-lenker beholder prefikset.
+
+  Escaping er altså strammet inn, ikke svekket.
+- **Laravel 13.29 → 13.30.1:** `Mail` og `Notifications` er uendret, og `Mail/Markdown.php` er identisk.
+  - Debug-siden: vanlige tooltips har `allowHTML: false`. Bare rammeverkets Blade-escapede kildevisning bruker HTML.
+  - `SessionGuard`: remember-cookien må stemme med passord-hashen. Begge hash-formater godtas, så eksisterende
+    cookies består.
+  - `Storage::path()` normaliserer stien og stopper `../` ut av diskroten. Procynia bruker relative lagrede stier.
+  - Wildcard-validering er gjort lineær, og `*` godtar nå tomme segmenter.
+  - `request()->clamp()` faller tilbake til standardverdien for ikke-numerisk input.
+  - `Worker` sender med mer metadata i stopp-eventet.
+- **E-post rendret direkte:** `AiQuotaNotification` med `<script>` og `<img onerror>` i teksten gir escapet
+  utdata. `SubscriptionPaymentFailedNotification` rendres med riktig beløp, og `<…>` i kundenavnet escapes.
+- **Advisory-mønstrene testet:**
+  - En 20 000-linjers avsnitt uten pipe, med linjer som starter med siffer, tar 268 ms via `Markdown::parse`.
+  - Vanlige tabeller rendres som før.
+  - GFM-konvertereren escaper `<script`-mønsteret.
+- **APP_DEBUG:** `false` i `docker/production/Dockerfile` (linje 141) og `infra/main.bicep` (linje 561–562).
+
+**[Observert] Rettelse til §5 (P2):** Laravels `Markdown::parse()` uten `$encoded` bruker CommonMarks standard
+`html_input: allow`, ikke `escape`. `escape` gjelder bare interpolerte verdier i Blade-banen (`EncodedHtmlString`).
+E-postene er beskyttet fordi Blade escaper `{{ $line }}` før Markdown kjøres. Dette er uendret i 13.30.1 og
+gjelder bare hvis rå brukertekst sendes direkte til `Markdown::parse()`. Det skjer ingen steder i `app/` i dag.
+
+**[Observert] Tester og kontroller**
+
+- **2800 tester bestått (16 454 assertions), 0 feilet.** Settet består av:
+  - `tests/Unit`, inkludert `tests/Unit/Validation`.
+  - Alt fra runde 1, pluss hele `tests/Feature/Billing`.
+  - Varsel- og e-posttestene: `AiQuotaNotificationServiceTest`, `AiCreditAdjustmentServiceTest`,
+    `BidWorkflowNotificationTest`, `CustomerNotificationCenterTest`, `GovernanceAssignmentNotificationTest`,
+    `SupplierOwnerNotificationTest`, `UserNotificationDeletionTest`, `WatchInboxDigestNotificationTest`,
+    `EnterpriseWikiReviewNotificationTest`, `AdminNotificationsPageTest` og `AiCostControlAdminTest`.
+  - `CustomerUserManagementTest`.
+- **`route:cache`** fungerer (442 ruter) og er ryddet etterpå.
+- **HTTP mot kjørende app** etter omstart av PHP-FPM:
+  - `/login` og `/up` gir 200. `/app` sender til `/login`, og `/admin` til `/admin/login`. Ukjent rute gir 404.
+  - POST `/login` uten CSRF-token gir 419. Feil passord og tomme felt gir 302 med valideringsfeil levert via sesjonen.
+
+**[Vurdering] Gjenstår etter runde 2**
+
+- `filament/filament` (runde 3) og npm-lockfila (runde 4).
+- Remember-me-herdingen i 13.31–13.33 er ikke tatt med. Den er ikke knyttet til en advisory, men bør med i neste
+  planlagte Laravel-oppgradering.
+- Køarbeiderne kjører gammel vendor-kode til de startes på nytt.
+
