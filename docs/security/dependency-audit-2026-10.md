@@ -422,3 +422,65 @@ gjelder bare hvis rå brukertekst sendes direkte til `Markdown::parse()`. Det sk
   planlagte Laravel-oppgradering.
 - Køarbeiderne kjører gammel vendor-kode til de startes på nytt.
 
+### Runde 3 — `filament/*` v5.7.6 → v5.8.4 (16.10.2026)
+
+**[Observert] Advisory og versjonsvalg**
+
+- **Lukket:** [GHSA-7m6h-rg42-m449](https://github.com/advisories/GHSA-7m6h-rg42-m449) / CVE-2026-104181
+  (PKSA-cnr1-6g7k-bp3d, moderate 5.4). App-basert MFA ba ikke om passord på nytt. Berørt er `>= 5.0.0, < 5.8.2`.
+- **Første sikre versjon er 5.8.3.** `composer audit` oppgir `<5.8.2`, men GitHub-advisoryen og endringsloggen
+  viser at rettelsen kom i 5.8.3 («Add password checks to MFA actions», #20522).
+- **Valgt v5.8.4:** 5.8.3 pluss én feilretting for sammenleggbare seksjoner (#20532), og siste patch i 5.8.
+  5.9 og 5.10 er nye minor-versjoner og hører ikke hjemme i en sikkerhetsrunde.
+- **Ingen andre åpne advisories:** Packagist viser ingen andre advisories for `filament/*` som gjelder 5.7.6 eller
+  nyere. Livewire-advisoryen CVE-2026-81887 gjelder `<= 4.3.3`, og 4.4.2 er installert.
+- **Kompatibilitet:** Filament 5.8.4 krever `livewire/livewire ^4.1` og ingen bestemt Laravel-versjon. Laravel
+  v13.30.1 og Livewire v4.4.2 beholdes.
+- **Kommando:** `composer update "filament/*:v5.8.4"`. Lock-operasjoner: 10 oppdateringer (`actions`, `filament`,
+  `forms`, `infolists`, `notifications`, `query-builder`, `schemas`, `support`, `tables`, `widgets`), 0 nye,
+  0 fjernet. Ingen pakker utenfor Filament er endret, og `composer.json` er uendret.
+- **Lockfil:** `plugin-api-version` er rullet tilbake til 2.6.0, som i runde 1 og 2.
+
+**[Observert] Genererte assets** (`filament:upgrade` kjøres automatisk av `post-autoload-dump`)
+
+- **15 sporede filer under `public/js/filament/` og `public/css/filament/` har nytt innhold.** I tillegg er
+  `public/fonts/filament/filament/inter/index.css` oppdatert.
+- **Alle 23 endrede eller nye filer (16 endrede og 7 nye fonter) er byte-identiske med `vendor/filament/*/dist`** i 5.8.4. Ingenting er håndredigert.
+- **Sju nye Inter-fonter** (`inter-*-wght-normal-*.woff2`) er lagt til, og `index.css` peker på dem.
+  - De sju gamle fontfilene er fortsatt sporet, men brukes ikke lenger noe sted.
+  - De er beholdt for å unngå manuelle endringer i genererte assets. Se oppfølging.
+- **Filrettigheter:** Containeren skrev filene med 755. Rettighetene er satt tilbake til 644, så diffen bare
+  inneholder innhold.
+- **Admin-temaet** (`resources/css/filament/admin/theme.css`) importerer Filaments CSS fra vendor og bygges av Vite.
+  - `public/build` er ignorert av git, så det er ingen byggeartefakter i commiten.
+  - Et testbygg til en midlertidig mappe lykkes og inneholder 5.8-rettelsene (`scrollbar-gutter`).
+  - WCAG-tokenet `field-border` er beholdt.
+  - Produksjonsbildet bygger temaet i `npm run build`.
+
+**[Observert] Tester og kontroller**
+
+- **PHP: 2655 bestått (15 698 assertions), 0 feilet.** Settet består av:
+  - Hele `tests/Feature/Filament`, 34 filer. Alle Livewire-testene i prosjektet ligger der.
+  - `CustomerFrontendAccessTest`, `tests/Feature/Security`, `tests/Feature/Auth` og `tests/Unit`.
+- **E2E `admin.spec.js`:** 4 av 4 bestått.
+- **E2E `a11y-admin.spec.js`, første kjøring:** én feil i test 8 (axe-funn i en Filament-modal), og tre tester
+  kjørte ikke. Kjøringen gikk parallelt med hele PHP-testpakken, med maskinen under full last.
+- **E2E `a11y-admin.spec.js`, deretter:** hele specen bestått (13 av 13), test 8 alene bestått, og test 8 bestått
+  5 av 5 med `--repeat-each=5`.
+- **[Vurdering]** Feilen skyldtes lasten, ikke Filament 5.8.4. Innholdet i axe-funnet ble ikke tatt vare på.
+- **Midlertidig røyktest i nettleser** (fjernet etterpå, ikke committet):
+  - Alle 41 admin-sider uten ruteparametere gir 200, med panelnavigasjon og uten JavaScript-feil eller 5xx.
+  - Brukertabellen sorteres og søkes, og filterpanelet åpnes.
+  - Et tomt opprettingsskjema stoppes av påkrevd-felt-validering, og siden forlates ikke.
+- **`composer audit`:** «No security vulnerability advisories found».
+- **`composer validate`:** OK.
+- **`composer install --dry-run`:** «Nothing to install, update or remove».
+
+**Oppfølging**
+
+- **Ubrukte fonter:** Sju gamle `inter-*.woff2` i `public/fonts/filament/filament/inter/` brukes ikke lenger og kan
+  fjernes i en egen ryddecommit.
+- **Asset-rettigheter:** Når `filament:upgrade` kjøres i containeren, skrives assets med 755. Neste
+  Filament-oppgradering må sette rettighetene tilbake før commit.
+- **Gjenstår etter runde 3:** npm-lockfila (runde 4), og den samlede regresjonen, inkludert hele E2E-pakken for admin.
+
